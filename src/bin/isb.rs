@@ -331,6 +331,14 @@ enum PortCmd {
     },
     /// Remove proxy devices by name.
     Rm { name: String, devices: Vec<String> },
+    /// Print one property of a proxy device (default: its listen address).
+    Get {
+        name: String,
+        device: String,
+        /// Property to print (listen, connect, bind, ...).
+        #[arg(default_value = "listen")]
+        key: String,
+    },
     /// List proxy devices.
     Ls {
         name: String,
@@ -872,6 +880,18 @@ fn port(ctx: &Ctx, p: PortCmd) -> Result<u8> {
             }
             let listen = Sandbox::get(&c, &name)?.add_port(&ps)?;
             println!("{listen}");
+        }
+        PortCmd::Get { name, device, key } => {
+            let info = Sandbox::get(&c, &name)?.info()?;
+            let dev = info
+                .devices
+                .get(&device)
+                .filter(|p| p.get("type").map(String::as_str) == Some("proxy"))
+                .ok_or_else(|| Error::NotFound(format!("proxy device {device} on {name}")))?;
+            let v = dev
+                .get(&key)
+                .ok_or_else(|| Error::NotFound(format!("property {key} of {name}/{device}")))?;
+            println!("{v}");
         }
         PortCmd::Rm { name, devices } => {
             let sb = Sandbox::get(&c, &name)?;

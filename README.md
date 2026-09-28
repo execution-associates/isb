@@ -76,7 +76,8 @@ isb inspect NAME [--json]
 isb exec NAME|SERVICE [-u USER] [-w DIR] [-e K=V] [-l] [-t|-T] [-n] [--timeout D] -- ARGV...
 isb volume create|ls|inspect|rm
 isb port add NAME SPEC [--name DEV] [--search N]   prints the listen address in use
-isb port rm NAME DEV... | isb port ls NAME
+isb port get NAME DEV [KEY]                prints one property, default: listen
+isb port rm NAME DEV... | isb port ls NAME [--json]
 isb device ls|rm NAME ...
 isb prune --label KEY --missing-path [-y]  delete sandboxes whose label is a vanished host path
 isb schema                                 JSON Schema of the YAML format

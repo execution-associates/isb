@@ -810,6 +810,8 @@ sandboxes:
     volumes:
       /home/dev/web: {{ bind: ./web, device: web }}
       /home/dev/.cache/t: {{ named: {vol}, owner: dev }}
+    ports:
+      - {{ name: http, listen: "tcp:127.0.0.1:${{ISB_T_PORT}}", connect: "tcp:127.0.0.1:8000", search: 20 }}
     ready: [running, default_route, {{user_exists: dev}}, {{path_writable: /home/dev/web}}]
     exec:
       user: dev
@@ -820,6 +822,7 @@ sandboxes:
     )
     .unwrap();
     let bin = isb_bin();
+    let port = free_port().to_string();
     let run = |args: &[&str]| {
         let out = Command::new(&bin)
             .arg("-f")
@@ -828,6 +831,7 @@ sandboxes:
             .env("ISB_T_NAME", &name)
             .env("ISB_T_IMAGE", image())
             .env("ISB_T_WEB", &web)
+            .env("ISB_T_PORT", &port)
             .stdin(Stdio::null())
             .output()
             .unwrap();
@@ -841,8 +845,25 @@ sandboxes:
     let (code, out, err) = run(&["plan", "--exit-code"]);
     assert_eq!(code, Some(2), "{out}{err}");
     assert!(out.contains("+ create"), "{out}");
-    let (code, _, err) = run(&["up"]);
+    // `up` prints the settled address of a searched port, both when it adds
+    // the device and when it finds it already in place.
+    let want = format!("web http tcp:127.0.0.1:{port}\n");
+    let (code, out, err) = run(&["up"]);
     assert_eq!(code, Some(0), "{err}");
+    assert_eq!(out, want);
+    let (code, out, err) = run(&["up"]);
+    assert_eq!(code, Some(0), "{err}");
+    assert_eq!(out, want);
+    let (code, out, _) = run(&["port", "get", &name, "http"]);
+    assert_eq!((code, out), (Some(0), format!("tcp:127.0.0.1:{port}\n")));
+    let (code, out, _) = run(&["port", "get", &name, "http", "connect"]);
+    assert_eq!((code, out.as_str()), (Some(0), "tcp:127.0.0.1:8000\n"));
+    let (code, _, _) = run(&["port", "get", &name, "nope"]);
+    assert_eq!(code, Some(1));
+    let (code, out, _) = run(&["port", "ls", &name, "--json"]);
+    assert_eq!(code, Some(0));
+    let ports: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(ports["http"]["listen"], format!("tcp:127.0.0.1:{port}"));
     let (code, out, err) = run(&["plan", "--exit-code"]);
     assert_eq!(code, Some(0), "{out}{err}");
     assert!(out.contains("up to date"), "{out}");

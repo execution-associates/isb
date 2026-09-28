@@ -633,7 +633,7 @@ Compose (take service names; all services when none are given):
 
 | Verb | Does |
 |---|---|
-| `up [SVC...] [--prune-devices] [--no-ready] [--json]` | Create or reconcile. |
+| `up [SVC...] [--prune-devices] [--no-ready] [--json]` | Create or reconcile. For every port with `search`, prints `SERVICE DEVICE LISTEN` on stdout with the listen address in use, whether `up` added the device or found it already correct. With `--json`, each report's `ports` object maps device to that address. |
 | `plan [SVC...] [--prune-devices] [--json] [--exit-code]` | Show what `up` would change. |
 | `down [SVC...] [--volumes]` | Delete the sandboxes (running ones are stopped). With `--volumes` and no service list, also delete the file's non-external named volumes: every one a sandbox mounts, in the pool `up` used (mount `pool`, else top-level `pool`, else that sandbox's `storage` pool), plus declared top-level ones no sandbox mounts (in their `pool`, `auto` meaning the host default). A volume still in use is kept with a message. With a service list, `--volumes` is ignored with a message. |
 | `config [--services]` | Print the resolved file. |
@@ -649,7 +649,7 @@ Instances (take instance names):
 | `start`, `stop [-f] [-t 30s]`, `restart` | Lifecycle. `start` and `restart` wait for `running` only, not the file's `ready` checks. |
 | `rm [-f] NAME...` | Delete (`-f` stops a running one first). Aliases `remove`, `delete`. |
 | `ls [-l KEY[=VALUE]...] [--json]` | List, filtered by labels (`user.isb.*` keys are not labels). |
-| `port add NAME SPEC [--name N] [--search N]`, `port rm NAME DEV...`, `port ls NAME` | Proxy devices on an existing sandbox. `add` leaves a correct device alone and prints the listen address. On a VM the VM rules apply: `nat: "true"` is added and `bind=guest` is refused. |
+| `port add NAME SPEC [--name N] [--search N]`, `port rm NAME DEV...`, `port get NAME DEV [KEY]`, `port ls NAME [--json]` | Proxy devices on an existing sandbox. `add` leaves a correct device alone and prints the listen address. `get` prints one property (default `listen`) as plain text, and fails if the device or property is missing. `ls --json` prints an object keyed by device name, each value the device's properties as strings: `{"vite": {"type": "proxy", "bind": "host", "listen": "tcp:100.1.2.3:5176", "connect": "tcp:127.0.0.1:5173"}}`. On a VM the VM rules apply: `nat: "true"` is added and `bind=guest` is refused. |
 | `device ls NAME`, `device rm NAME DEV...` | Instance-local devices (`root` cannot be removed). |
 | `volume create\|ls\|inspect\|rm` | Named volumes (`--pool`, `-c k=v`). `rm` is refused while in use. |
 | `prune --label KEY --missing-path [-y] [--json]` | Delete instances whose `KEY` label is an absolute host path that no longer exists. Dry run without `-y`. |

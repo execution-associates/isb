@@ -893,7 +893,22 @@ pub fn ensure(
         },
     )?;
     let plan = plan_desired(client, desired, opts.diff)?;
-    let out = apply(client, desired, &plan, report)?;
+    let mut out = apply(client, desired, &plan, report)?;
+    // Report the settled listen address of every searched port, whether this
+    // call added it or found it already correct somewhere in its range.
+    if desired.devices.values().any(|d| d.search.is_some()) {
+        if let Some(inst) = client.get_opt(&inst_path(&desired.name))? {
+            let actual = Actual::from_api(&inst);
+            for (dev, d) in &desired.devices {
+                if d.search.is_none() {
+                    continue;
+                }
+                if let Some(listen) = actual.devices.get(dev).and_then(|p| p.get("listen")) {
+                    out.ports.insert(dev.clone(), listen.clone());
+                }
+            }
+        }
+    }
     if !out.restart_needed.is_empty() {
         report(&format!(
             "{}: {} changed; takes effect after `isb restart {}`",
