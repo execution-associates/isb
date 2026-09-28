@@ -390,7 +390,7 @@ Each probe command is capped at 20 s.
 
 A stopped instance does not get ready by waiting. While any check has not
 passed, isb also looks at the instance: once it has been neither Running nor
-Starting for 30 s, isb starts it once more (incus sometimes fails to complete a
+Starting for 30 s, isb starts it once more (incus 7.0.1 sometimes fails to complete a
 guest-initiated reboot, which is common on a VM's first boot with cloud-init).
 If it stops again for 30 s, or the start fails, readiness fails at once with
 "stopped while getting ready" instead of at the deadline. The extra start
@@ -578,12 +578,11 @@ For a VM:
 - `idmap` other than `auto` or `none` is an error; `auto` is a no-op.
 - `ports` must be `bind: host`; `bind: guest` is an error. Each proxy gets
   `nat: "true"` automatically, since incus proxies into a VM only in NAT mode.
-  NAT mode needs a static IP on the VM's NIC, for example:
-
-  ```yaml
-  raw_devices:
-    eth0: {type: nic, network: incusbr0, ipv4.address: 10.0.0.50}
-  ```
+  With incus 7.0.1 or later, `connect: tcp:0.0.0.0:PORT` lets incus find the
+  VM's address itself. Older incus needs a static IP on the VM's NIC
+  (`raw_devices: {eth0: {type: nic, network: incusbr0, ipv4.address: ...}}`)
+  and that address in `connect`. A NAT listen on host `127.0.0.1` does not
+  work (`route_localnet` is off on the bridge).
 
 - NAT forwarding is DNAT and does not pass through a host firewall such as
   ufw. Listen on the specific address you mean to expose (a tailnet IP, say),

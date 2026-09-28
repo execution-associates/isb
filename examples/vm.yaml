@@ -40,15 +40,13 @@ sandboxes:
     ready_timeout: 5m
 
     # Publishing a VM port on the host. incus proxies into a VM only in NAT
-    # mode (isb sets nat: "true"), which needs a fixed address on the VM's NIC,
-    # and `bind: guest` is not available for VMs. Listen on a specific host
-    # address you mean to expose (a tailnet IP, say), never 0.0.0.0: NAT
-    # forwarding is DNAT and does not pass through a host firewall like ufw.
+    # mode (isb sets nat: "true"), and `bind: guest` is not available for VMs.
+    # With connect on 0.0.0.0, incus (7.0.1+) finds the VM's address itself.
+    # Listen on a specific host address you mean to expose (a tailnet IP, say),
+    # never 0.0.0.0: NAT forwarding is DNAT and does not pass through a host
+    # firewall like ufw. Host 127.0.0.1 does not work as a NAT listen address.
     #
     # ports:
     #   - name: web
     #     listen: "tcp:${PUBLISH_IP}:8080"
-    #     connect: "tcp:${VM_IP}:80"
-    #
-    # and under raw_devices above:
-    #   eth0: { type: nic, network: incusbr0, ipv4.address: "${VM_IP}" }
+    #     connect: "tcp:0.0.0.0:80"

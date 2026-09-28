@@ -771,10 +771,10 @@ pub fn wait_ready(
             }
             // An instance that stopped (crashed, powered off) will not get ready
             // by waiting. A reboot (common on a VM's first boot) passes through
-            // Stopped briefly, so only a sustained stop counts. incus sometimes
-            // fails to complete a guest-initiated reboot (its stop hook errors
-            // out and the instance stays Stopped), so start it once more before
-            // failing fast instead of at the deadline.
+            // Stopped briefly, so only a sustained stop counts. incus 7.0.1 sometimes
+            // fails to complete a guest-initiated reboot (two concurrent onStop
+            // hooks; fixed upstream in lxc/incus#3997), leaving it Stopped, so
+            // start it once more before failing fast instead of at the deadline.
             if let Ok(Some(a)) = get_actual(client, name) {
                 if a.running() || a.status.eq_ignore_ascii_case("starting") {
                     stopped_since = None;
