@@ -188,7 +188,8 @@ pub struct SandboxSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ready: Option<Vec<ReadyCheck>>,
 
-    /// Deadline for all readiness checks together, e.g. `60s` (default `60s`).
+    /// Deadline for all readiness checks together, e.g. `90s`. Default: `60s`
+    /// for a container, `300s` for a VM.
     #[serde(
         default,
         deserialize_with = "flex::opt_string",
