@@ -1,0 +1,121 @@
+name: SDK (TypeScript)
+
+# The TypeScript SDK in sdk/typescript: typecheck, lint and unit tests against
+# a cargo-built isb on every PR and push to main. On v* tags, also build the
+# npm packages (the SDK and the two platform packages carrying the static musl
+# binary) and upload the packed tarballs as artifacts. Nothing is published.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+defaults:
+  run:
+    working-directory: sdk/typescript
+
+jobs:
+  check:
+    name: typecheck, lint, unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: build isb
+        working-directory: .
+        run: cargo build --locked
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run lint
+      # Integration tests need incusd and skip themselves without ISB_INTEGRATION=1.
+      - run: bun test
+        env:
+          ISB_BIN: ${{ github.workspace }}/target/debug/isb
+      - name: build and pack (dry run)
+        run: bun run build && bun pm pack --dry-run
+
+  binaries:
+    name: isb ${{ matrix.target }}
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: check
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+            npm: linux-x64
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+            npm: linux-arm64
+    steps:
+      - uses: actions/checkout@v4
+      - name: tag matches Cargo.toml and package.json versions
+        working-directory: .
+        run: |
+          want="v$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          [ "$GITHUB_REF_NAME" = "$want" ] || { echo "tag $GITHUB_REF_NAME != Cargo.toml $want"; exit 1; }
+          for p in sdk/typescript/package.json sdk/typescript/npm/*/package.json; do
+            v="v$(grep -m1 '"version"' "$p" | cut -d'"' -f4)"
+            [ "$v" = "$want" ] || { echo "$p is $v, want $want"; exit 1; }
+          done
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+        working-directory: .
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+        working-directory: .
+      - name: check the binary is static and runs
+        working-directory: .
+        run: |
+          bin=target/${{ matrix.target }}/release/isb
+          file "$bin"
+          file "$bin" | grep -qE 'statically linked|static-pie linked'
+          "$bin" --version
+          "$bin" rpc </dev/null | grep -q '"protocol":1'
+      - uses: oven-sh/setup-bun@v2
+      - name: pack the platform package
+        run: |
+          dir=npm/${{ matrix.npm }}
+          install -m 0755 ../../target/${{ matrix.target }}/release/isb "$dir/bin/isb"
+          cp LICENSE "$dir/"
+          mkdir -p "$RUNNER_TEMP/npm"
+          (cd "$dir" && bun pm pack --destination "$RUNNER_TEMP/npm")
+          tar -tvzf "$RUNNER_TEMP"/npm/*.tgz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-${{ matrix.npm }}
+          path: ${{ runner.temp }}/npm/*.tgz
+          if-no-files-found: error
+
+  sdk-package:
+    name: pack @execution-associates/isb
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: pack
+        run: |
+          mkdir -p "$RUNNER_TEMP/npm"
+          bun pm pack --destination "$RUNNER_TEMP/npm"
+          tar -tzf "$RUNNER_TEMP"/npm/*.tgz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-sdk
+          path: ${{ runner.temp }}/npm/*.tgz
+          if-no-files-found: error
