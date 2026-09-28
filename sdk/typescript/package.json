@@ -1,0 +1,64 @@
+{
+  "name": "@execution-associates/isb",
+  "version": "0.1.1",
+  "description": "TypeScript SDK for isb: declarative incus sandboxes (containers and VMs)",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/execution-associates/isb.git",
+    "directory": "sdk/typescript"
+  },
+  "homepage": "https://github.com/execution-associates/isb/tree/main/sdk/typescript#readme",
+  "keywords": [
+    "incus",
+    "sandbox",
+    "container",
+    "vm",
+    "lxc"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "bun": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "bun": ">=1.1",
+    "node": ">=20"
+  },
+  "os": [
+    "linux"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && bun build src/index.ts --outdir dist --target node --format esm && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src test scripts",
+    "format": "biome format --write src test scripts",
+    "test": "bun test",
+    "gen-types": "bun scripts/gen-types.ts",
+    "prepack": "bun run build"
+  },
+  "optionalDependencies": {
+    "@execution-associates/isb-linux-arm64": "0.1.1",
+    "@execution-associates/isb-linux-x64": "0.1.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.0",
+    "@types/bun": "^1.2.0",
+    "@types/node": "^22.0.0",
+    "json-schema-to-typescript": "^15.0.0",
+    "typescript": "^5.9.0"
+  }
+}

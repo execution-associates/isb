@@ -149,6 +149,8 @@ enum Cmd {
     },
     /// Print the JSON Schema of the compose file format.
     Schema,
+    /// Serve the SDK protocol (line-delimited JSON) on stdin/stdout.
+    Rpc,
     /// Create or reconcile the compose file's sandboxes.
     Up {
         #[command(flatten)]
@@ -407,6 +409,7 @@ impl Ctx {
             files: self.global.files.clone(),
             env_files: self.global.env_files.clone(),
             project_name: self.global.project_name.clone(),
+            ..Default::default()
         })
     }
 
@@ -584,6 +587,10 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
                     items.len()
                 );
             }
+            Ok(0)
+        }
+        Cmd::Rpc => {
+            isb::rpc::serve(std::io::stdin().lock(), std::io::stdout(), ctx.client(None))?;
             Ok(0)
         }
         Cmd::Schema => {
@@ -969,83 +976,30 @@ fn up(
     json: bool,
 ) -> Result<u8> {
     let p = ctx.load()?;
-    let c = ctx.client(p.file.project.as_deref());
     let opts = EnsureOptions {
         diff: DiffOptions { prune_devices },
         wait_ready: !no_ready,
         ..Default::default()
     };
-    let mut reports = Vec::new();
     let mut rep = ctx.report();
-    for s in p.select(&services)? {
-        let d = sandbox::resolve(&c, p.service(&s)?, &p.file.volumes, &p.base_dir)?;
-        let r = sandbox::ensure(&c, &d, opts, &mut rep)?;
-        if !json && r.applied.iter().all(|a| !a.is_change()) {
-            rep(&format!("{}: up to date", d.name));
-        }
-        for (dev, listen) in &r.ports {
-            if !json {
+    let reports = compose::up(&ctx.client(None), &p, &services, opts, &mut rep)?;
+    if json {
+        let r: Vec<_> = reports.iter().map(|(_, r)| r).collect();
+        print_json(&r);
+    } else {
+        for (s, r) in &reports {
+            for (dev, listen) in &r.ports {
                 println!("{s} {dev} {listen}");
             }
         }
-        reports.push(r);
-    }
-    if json {
-        print_json(&reports);
     }
     Ok(0)
 }
 
 fn down(ctx: &Ctx, services: Vec<String>, volumes: bool) -> Result<u8> {
     let p = ctx.load()?;
-    let c = ctx.client(p.file.project.as_deref());
     let mut rep = ctx.report();
-    for s in p.select(&services)? {
-        let name = p.service(&s)?.name.clone().unwrap_or_default();
-        match Sandbox::remove(&c, &name, true) {
-            Ok(()) => rep(&format!("{name}: deleted")),
-            Err(e) if e.is_not_found() => rep(&format!("{name}: not present")),
-            Err(e) => return Err(e),
-        }
-    }
-    if volumes {
-        if !services.is_empty() {
-            rep(
-                "--volumes ignored: volumes are shared by the file, remove them with a full `down --volumes`",
-            );
-        } else {
-            // The pools `up` used: resolve each sandbox's mounts the same way.
-            let facts = sandbox::host_facts(&c)?;
-            let mut seen = std::collections::BTreeSet::new();
-            for spec in p.file.sandboxes.values() {
-                let pool = facts.pick_pool(spec.storage.as_deref())?;
-                for v in spec.volumes.values() {
-                    let Some(vname) = &v.named else { continue };
-                    let def = p.file.volumes.get(vname);
-                    if v.external || def.is_some_and(|d| d.external) {
-                        continue;
-                    }
-                    let vpool = match v.pool.as_deref().or(def.and_then(|d| d.pool.as_deref())) {
-                        Some(x) if x != "auto" => x.to_string(),
-                        _ => pool.clone(),
-                    };
-                    seen.insert((vpool, vname.clone()));
-                }
-            }
-            for (vname, def) in &p.file.volumes {
-                if !def.external && !seen.iter().any(|(_, n)| n == vname) {
-                    seen.insert((facts.pick_pool(def.pool.as_deref())?, vname.clone()));
-                }
-            }
-            for (pool, vname) in seen {
-                match isb::volume::remove(&c, &pool, &vname) {
-                    Ok(()) => rep(&format!("volume {vname}: deleted")),
-                    Err(e) if e.is_not_found() => {}
-                    Err(e) => rep(&format!("volume {vname}: kept ({e})")),
-                }
-            }
-        }
-    }
+    compose::down(&ctx.client(None), &p, &services, volumes, &mut rep)?;
     Ok(0)
 }
 
@@ -1057,16 +1011,12 @@ fn plan(
     exit_code: bool,
 ) -> Result<u8> {
     let p = ctx.load()?;
-    let c = ctx.client(p.file.project.as_deref());
-    let mut plans = Vec::new();
-    for s in p.select(&services)? {
-        let d = sandbox::resolve(&c, p.service(&s)?, &p.file.volumes, &p.base_dir)?;
-        plans.push(sandbox::plan_desired(
-            &c,
-            &d,
-            DiffOptions { prune_devices },
-        )?);
-    }
+    let plans = compose::plan(
+        &ctx.client(None),
+        &p,
+        &services,
+        DiffOptions { prune_devices },
+    )?;
     let changes = plans.iter().any(|p| !p.is_noop());
     if json {
         print_json(&plans);

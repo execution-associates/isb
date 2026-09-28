@@ -75,6 +75,8 @@ pub struct LoadOptions {
     pub env_files: Vec<PathBuf>,
     /// Overrides the project name.
     pub project_name: Option<String>,
+    /// Variables for interpolation that win over the environment and env files.
+    pub vars: BTreeMap<String, String>,
 }
 
 /// Find the default compose file in `dir`, if any.
@@ -111,7 +113,13 @@ pub fn load(opts: &LoadOptions) -> Result<Project> {
             dotenv.insert(k, v);
         }
     }
-    let lookup = move |k: &str| std::env::var(k).ok().or_else(|| dotenv.get(k).cloned());
+    let vars = opts.vars.clone();
+    let lookup = move |k: &str| {
+        vars.get(k)
+            .cloned()
+            .or_else(|| std::env::var(k).ok())
+            .or_else(|| dotenv.get(k).cloned())
+    };
     let mut docs = Vec::new();
     for f in &files {
         let text = std::fs::read_to_string(f).map_err(|e| Error::Parse {
@@ -189,6 +197,121 @@ pub fn load_docs(
         base_dir: base.to_path_buf(),
         files,
     })
+}
+
+/// A client for the project's incus project (`project:` in the file), unless
+/// `client` was already pointed elsewhere explicitly.
+pub fn client_for(client: &crate::Client, project: &Project) -> crate::Client {
+    match (&project.file.project, client.project_name()) {
+        (Some(p), "default") => client.clone().project(p),
+        _ => client.clone(),
+    }
+}
+
+/// `isb up`: ensure each selected service (all when `services` is empty).
+/// Returns (service, report) pairs in order.
+pub fn up(
+    client: &crate::Client,
+    project: &Project,
+    services: &[String],
+    opts: crate::EnsureOptions,
+    report: &mut dyn FnMut(&str),
+) -> Result<Vec<(String, crate::ApplyReport)>> {
+    let c = client_for(client, project);
+    let mut out = Vec::new();
+    for s in project.select(services)? {
+        let d = crate::sandbox::resolve(
+            &c,
+            project.service(&s)?,
+            &project.file.volumes,
+            &project.base_dir,
+        )?;
+        let r = crate::sandbox::ensure(&c, &d, opts, report)?;
+        if r.applied.iter().all(|a| !a.is_change()) {
+            report(&format!("{}: up to date", d.name));
+        }
+        out.push((s, r));
+    }
+    Ok(out)
+}
+
+/// `isb plan`: what `up` would change, per selected service.
+pub fn plan(
+    client: &crate::Client,
+    project: &Project,
+    services: &[String],
+    diff: crate::DiffOptions,
+) -> Result<Vec<crate::SandboxPlan>> {
+    let c = client_for(client, project);
+    let mut plans = Vec::new();
+    for s in project.select(services)? {
+        let d = crate::sandbox::resolve(
+            &c,
+            project.service(&s)?,
+            &project.file.volumes,
+            &project.base_dir,
+        )?;
+        plans.push(crate::sandbox::plan_desired(&c, &d, diff)?);
+    }
+    Ok(plans)
+}
+
+/// `isb down`: delete the selected sandboxes; with `volumes` (and no service
+/// subset), also the file's non-external named volumes, resolved to the pools
+/// `up` used. In-use volumes are kept and reported.
+pub fn down(
+    client: &crate::Client,
+    project: &Project,
+    services: &[String],
+    volumes: bool,
+    report: &mut dyn FnMut(&str),
+) -> Result<()> {
+    let c = client_for(client, project);
+    for s in project.select(services)? {
+        let name = project.service(&s)?.name.clone().unwrap_or_default();
+        match crate::Sandbox::remove(&c, &name, true) {
+            Ok(()) => report(&format!("{name}: deleted")),
+            Err(e) if e.is_not_found() => report(&format!("{name}: not present")),
+            Err(e) => return Err(e),
+        }
+    }
+    if !volumes {
+        return Ok(());
+    }
+    if !services.is_empty() {
+        report("volumes kept: they are shared by the file; remove them with a full down");
+        return Ok(());
+    }
+    let facts = crate::sandbox::host_facts(&c)?;
+    let mut seen = std::collections::BTreeSet::new();
+    for spec in project.file.sandboxes.values() {
+        let pool = facts.pick_pool(spec.storage.as_deref())?;
+        for v in spec.volumes.values() {
+            let Some(vname) = &v.named else { continue };
+            let def = project.file.volumes.get(vname);
+            if v.external || def.is_some_and(|d| d.external) {
+                continue;
+            }
+            let vpool = match v.pool.as_deref().or(def.and_then(|d| d.pool.as_deref())) {
+                Some(x) if x != "auto" => x.to_string(),
+                _ => pool.clone(),
+            };
+            seen.insert((vpool, vname.clone()));
+        }
+    }
+    for (vname, def) in &project.file.volumes {
+        if !def.external && !seen.iter().any(|(_, n)| n == vname) {
+            seen.insert((facts.pick_pool(def.pool.as_deref())?, vname.clone()));
+        }
+    }
+    for (pool, vname) in seen {
+        match crate::volume::remove(&c, &pool, &vname) {
+            Ok(()) => report(&format!("volume {vname}: deleted")),
+            Err(e) if e.is_not_found() => {}
+            Err(e) => report(&format!("volume {vname}: kept ({e})")),
+        }
+    }
+    Ok(())
 }
 
 /// Lowercase, `[a-z0-9-]`, squeezed, trimmed; starts with a letter.

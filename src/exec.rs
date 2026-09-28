@@ -301,7 +301,65 @@ pub struct ExecStream {
     tty: bool,
 }
 
+/// A cloneable handle for driving a running command (stdin, signals, window
+/// size) from other threads while one thread reads its output.
+#[derive(Clone)]
+pub struct ExecController {
+    control: Arc<Mutex<Option<Ws>>>,
+    stdin_tx: Option<Sender<Option<Vec<u8>>>>,
+    tty: bool,
+}
+
+impl ExecController {
+    /// Write to stdin (only with [`Stdin::Piped`]).
+    pub fn write_stdin(&self, data: &[u8]) -> Result<()> {
+        match &self.stdin_tx {
+            Some(tx) => tx
+                .send(Some(data.to_vec()))
+                .map_err(|_| Error::WebSocket("stdin is closed".into())),
+            None => Err(Error::invalid("stdin is not piped")),
+        }
+    }
+
+    /// Send EOF on stdin (only with [`Stdin::Piped`]). Later writes fail.
+    pub fn close_stdin(&self) -> Result<()> {
+        match &self.stdin_tx {
+            Some(tx) => {
+                let _ = tx.send(None);
+                Ok(())
+            }
+            None => Err(Error::invalid("stdin is not piped")),
+        }
+    }
+
+    pub fn signal(&self, signal: i32) -> Result<()> {
+        send_control(
+            &self.control,
+            json!({"command": "signal", "signal": signal}),
+        )
+    }
+
+    pub fn resize(&self, width: u16, height: u16) -> Result<()> {
+        if !self.tty {
+            return Ok(());
+        }
+        send_control(
+            &self.control,
+            json!({"command": "window-resize", "args": {"width": width.to_string(), "height": height.to_string()}}),
+        )
+    }
+}
+
 impl ExecStream {
+    /// A handle for stdin, signals and resizes usable from other threads.
+    pub fn controller(&self) -> ExecController {
+        ExecController {
+            control: self.control.clone(),
+            stdin_tx: self.stdin_tx.clone(),
+            tty: self.tty,
+        }
+    }
+
     /// Next chunk of output, blocking. `None` once all output has been read.
     pub fn next_event(&mut self) -> Option<ExecEvent> {
         self.events.recv().ok()

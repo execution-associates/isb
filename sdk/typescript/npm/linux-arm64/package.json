@@ -1,0 +1,15 @@
+{
+  "name": "@execution-associates/isb-linux-arm64",
+  "version": "0.1.1",
+  "description": "The static isb binary for Linux arm64 (aarch64-unknown-linux-musl), used by @execution-associates/isb",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/execution-associates/isb.git",
+    "directory": "sdk/typescript/npm/linux-arm64"
+  },
+  "os": ["linux"],
+  "cpu": ["arm64"],
+  "files": ["bin/isb", "LICENSE", "README.md"],
+  "preferUnplugged": true
+}

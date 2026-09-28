@@ -1,0 +1,135 @@
+name: Python SDK
+
+# Lint, type check and test sdk/python on every PR and push to main. On a v*
+# tag, build the sdist, the pure wheel and platform wheels that bundle the
+# static musl isb binary (built the same way as release.yml), and upload them
+# as workflow artifacts. Nothing is published to PyPI.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "sdk/python/**"
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/sdk-python.yml"
+  pull_request:
+    paths:
+      - "sdk/python/**"
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/sdk-python.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+defaults:
+  run:
+    working-directory: sdk/python
+
+jobs:
+  check:
+    name: lint, types, unit tests (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: build isb
+        working-directory: .
+        run: cargo build --locked --bin isb
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --locked --group dev
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - name: generated types are current
+        run: ISB_BIN="$GITHUB_WORKSPACE/target/debug/isb" uv run python scripts/gen_types.py --check
+      # Stdlib unittest, no install needed. Integration tests skip themselves
+      # unless ISB_INTEGRATION=1 (they need incusd).
+      - name: unit tests
+        run: ISB_BIN="$GITHUB_WORKSPACE/target/debug/isb" PYTHONPATH=src uv run python -m unittest discover -s tests -v
+
+  sdist:
+    name: sdist and pure wheel
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: tag matches the SDK version
+        run: |
+          want="v$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)"
+          [ "$GITHUB_REF_NAME" = "$want" ] || { echo "tag $GITHUB_REF_NAME != sdk/python $want"; exit 1; }
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build --out-dir dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-sdist
+          path: sdk/python/dist/*
+          if-no-files-found: error
+
+  wheels:
+    name: wheel ${{ matrix.target }}
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: check
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+            plat: manylinux_2_17_x86_64.musllinux_1_2_x86_64
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+            plat: manylinux_2_17_aarch64.musllinux_1_2_aarch64
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: build static isb
+        working-directory: .
+        run: |
+          cargo build --release --locked --target ${{ matrix.target }}
+          bin=target/${{ matrix.target }}/release/isb
+          file "$bin" | grep -qE 'statically linked|static-pie linked'
+          "$bin" --version
+      - uses: astral-sh/setup-uv@v6
+      - name: build platform wheel
+        env:
+          ISB_WHEEL_BINARY: ${{ github.workspace }}/target/${{ matrix.target }}/release/isb
+          ISB_WHEEL_PLAT: ${{ matrix.plat }}
+        run: uv build --wheel --out-dir dist
+      - name: the bundled binary runs from an installed wheel
+        run: |
+          uv venv /tmp/wheel-venv
+          uv pip install --python /tmp/wheel-venv/bin/python dist/*.whl
+          env -u ISB_BIN /tmp/wheel-venv/bin/python -c '
+          import asyncio, isb
+          print(isb.find_binary())
+          async def main():
+              async with isb.Client(socket="/nonexistent") as c:
+                  print(await c.version())
+          asyncio.run(main())
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-wheel-${{ matrix.target }}
+          path: sdk/python/dist/*.whl
+          if-no-files-found: error

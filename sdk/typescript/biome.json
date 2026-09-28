@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "files": { "includes": ["src/**", "test/**", "scripts/**", "!src/spec.ts"] },
+  "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 100 },
+  "linter": { "rules": { "recommended": true } },
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "overrides": [
+    {
+      "includes": ["test/**"],
+      "linter": { "rules": { "suspicious": { "noTemplateCurlyInString": "off" } } }
+    }
+  ]
+}
