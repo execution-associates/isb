@@ -44,7 +44,12 @@ const sb = await Sandbox.connectOrCreate({
     "/home/dev/src": Volume.bind("/srv/src", { device: "src" }),
     "/home/dev/.cache": Volume.named("dev-cache", { owner: "dev" }),
   },
-  ports: [PortBinding.host("tcp:127.0.0.1:5173", "tcp:127.0.0.1:5173", { search: 20 })],
+  ports: [
+    PortBinding.host("tcp:127.0.0.1:5173", "tcp:127.0.0.1:5173", {
+      name: "vite",
+      search: 20,
+    }),
+  ],
   ready: ["running", "default_route", { user_exists: "dev" }],
   exec: { user: "dev", cwd: "/home/dev/src" },
 });
@@ -55,13 +60,17 @@ const out = await sb.exec("printf", ["[%s]", "a b"]);
 console.log(out.exitCode, out.stdoutText); // 0 "[a b]"
 
 // Streaming output, piped stdin, signals.
-const p = await sb.execStream(["sh", "-c", "cat; echo done >&2"], { stdin: "piped" });
-await p.write("hello\n");
-await p.closeStdin();
-for await (const ev of p) {
-  process.stdout.write(`${ev.kind}: ${new TextDecoder().decode(ev.data)}`);
+const proc = await sb.execStream(["sh", "-c", "cat; echo done >&2"], {
+  stdin: "piped",
+});
+await proc.write("hello\n");
+await proc.closeStdin();
+
+const decoder = new TextDecoder();
+for await (const event of proc) {
+  process.stdout.write(`${event.kind}: ${decoder.decode(event.data)}`);
 }
-console.log("exit", await p.wait());
+console.log("exit code:", await proc.wait());
 
 await sb.remove({ force: true });
 ```
@@ -71,13 +80,25 @@ A compose file:
 ```ts
 import { Project } from "@execution-associates/isb";
 
-const proj = await Project.load({ files: ["isb.yaml"], vars: { WORKTREE: process.cwd() } });
-console.log(proj.name, proj.services);
-for (const plan of await proj.plan()) console.log(plan.name, plan.actions);
-const reports = await proj.up({ onProgress: (line) => console.error(line) });
-const web = proj.sandbox("web"); // uses the service's exec defaults
+const project = await Project.load({
+  files: ["isb.yaml"],
+  vars: { WORKTREE: process.cwd() },
+});
+console.log(project.name, project.services);
+
+for (const plan of await project.plan()) {
+  console.log(plan.name, plan.actions);
+}
+
+const reports = await project.up({
+  onProgress: (line) => console.error(line),
+});
+
+// A sandbox from the project carries its service's exec defaults.
+const web = project.sandbox("web");
 await web.exec(["bun", "install"]);
-await proj.down();
+
+await project.down();
 ```
 
 ## API
@@ -136,7 +157,17 @@ the spec's `exec` defaults (sent with every exec) and its `ready` and
 ### exec
 
 ```ts
-sb.exec(cmd, args?, { cwd?, user?, env?, login?, timeout?, stdin?, tty?, width?, height? })
+sb.exec(cmd, args?, {
+  cwd?,
+  user?,
+  env?,
+  login?,
+  timeout?,
+  stdin?,
+  tty?,
+  width?,
+  height?,
+})
 ```
 
 `cmd` is the program with `args` as its arguments, or a whole argv array.
