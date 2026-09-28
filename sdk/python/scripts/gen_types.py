@@ -36,10 +36,6 @@ from typing import Literal, Mapping, Optional, Sequence, TypedDict, Union
 SPEC_FIELDS_EXCLUDE = ("name", "image")
 
 
-# Values the server accepts that the schema does not list.
-EXTRA_LITERALS = {"InstanceType": ['"vm"']}
-
-
 def first_paragraph(desc: str | None) -> list[str]:
     lines: list[str] = []
     for line in (desc or "").strip().splitlines():
@@ -163,8 +159,6 @@ class Gen:
                 self.typeddict(name, s)
             else:
                 t, deps = self.type_of(s, name)
-                if name in EXTRA_LITERALS and t.startswith("Literal["):
-                    t = t[:-1] + ", " + ", ".join(EXTRA_LITERALS[name]) + "]"
                 if t != name:
                     self.aliases[name] = (t, deps)
         spec = self.defs["SandboxSpec"]

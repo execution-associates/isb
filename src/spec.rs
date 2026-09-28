@@ -63,7 +63,7 @@ pub struct NamedVolumeSpec {
 }
 
 /// Instance type.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum InstanceType {
     /// A system container (lxc): shares the host kernel, near-zero overhead,
@@ -74,6 +74,38 @@ pub enum InstanceType {
     /// agent in the guest for exec. `vm` is accepted as shorthand.
     #[serde(alias = "vm")]
     VirtualMachine,
+}
+
+// Written by hand because schemars ignores `#[serde(alias)]`: the derived schema
+// would list only `container` and `virtual-machine`, and editors and the SDKs'
+// generated types would then reject `vm`, which isb accepts.
+impl JsonSchema for InstanceType {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "InstanceType".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "Instance type.",
+            "oneOf": [
+                {
+                    "type": "string",
+                    "const": "container",
+                    "description": "A system container (lxc): shares the host kernel, near-zero overhead, idmapped bind mounts, proxies in both directions."
+                },
+                {
+                    "type": "string",
+                    "const": "virtual-machine",
+                    "description": "A virtual machine (qemu): its own kernel. Needs a VM image and the incus agent in the guest for exec."
+                },
+                {
+                    "type": "string",
+                    "const": "vm",
+                    "description": "Shorthand for virtual-machine."
+                }
+            ]
+        })
+    }
 }
 
 impl InstanceType {
@@ -804,5 +836,27 @@ mod tests {
     fn schema_generates() {
         let s = compose_schema();
         assert!(s.to_string().contains("sandboxes"));
+    }
+
+    #[test]
+    fn schema_lists_every_instance_type_serde_accepts() {
+        let s = compose_schema();
+        let consts: Vec<String> = s["$defs"]["InstanceType"]["oneOf"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v["const"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(consts, ["container", "virtual-machine", "vm"]);
+        // Every value the schema lists must parse, and nothing else.
+        for c in &consts {
+            serde_json::from_value::<InstanceType>(serde_json::json!(c)).unwrap();
+        }
+        assert!(serde_json::from_value::<InstanceType>(serde_json::json!("lxc")).is_err());
+        assert!(
+            s["$defs"]["SandboxSpec"]["properties"]["type"]
+                .to_string()
+                .contains("InstanceType")
+        );
     }
 }

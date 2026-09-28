@@ -79,7 +79,7 @@ export type ReadyCheck =
  * This interface was referenced by `ComposeFile`'s JSON-Schema
  * via the `definition` "InstanceType".
  */
-export type InstanceType = "container" | "virtual-machine";
+export type InstanceType = "container" | "virtual-machine" | "vm";
 
 /**
  * A compose-style file: named volumes plus any number of sandboxes.
