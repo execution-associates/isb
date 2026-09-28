@@ -22,6 +22,16 @@ sandboxes:
       - { name: vite, bind: host, listen: "tcp:${IP}:5173", connect: "tcp:127.0.0.1:5173", search: 50 }
     ready: [running, default_route, { user_exists: dev }]
     exec: { user: dev, cwd: /home/dev/src }
+
+  # The same, as a virtual machine: its own kernel instead of the host's.
+  worker:
+    type: vm
+    image: images:debian/13/cloud
+    cpus: 4
+    memory: 4GiB
+    volumes:
+      /srv/data: { bind: ./data }
+    ready: [running, agent, default_route]
 ```
 
 ```console
@@ -30,35 +40,6 @@ $ isb up                    # create, or change only what differs
 $ isb exec web -- bun install
 $ isb down
 ```
-
-## Why
-
-isb is a fresh implementation inspired by
-[incus-sandbox-sdk](https://github.com/zoid-archive/incus-sandbox-sdk), which
-shells out to the `incus` CLI. That approach was the wrong shape for long-lived
-dev containers:
-
-- **Every request has a deadline.** A CLI client that hangs (one `incus init`
-  sat about 11 minutes with no matching server operation) cannot be bounded from
-  outside. isb sets a socket timeout on every request and waits on every
-  mutation as a server operation, so a stall is reported as the step that
-  stalled (`create instance web stalled: operation ... still running after
-  600s`). A create that stalls is cleaned up only if this call created it (a
-  token in `user.isb.create-token`), then retried once.
-- **Config before first boot.** The instance is created in one request with its
-  config and devices, so every mount, volume, label and idmap exists before the
-  first boot.
-- **A correct device is never touched.** Re-adding a disk device remounts it,
-  which silently kills inotify watches a running dev server holds (Vite keeps
-  answering 200 while HMR goes quiet). `isb up` compares each device and patches
-  only mismatches, under deterministic names. The integration tests hold a live
-  inotify watch across a no-op `up` to prove it.
-- **exec that behaves.** argv is passed as a list, never joined into `sh -c`.
-  Output streams as produced, with no default timeout. stdin is forwarded and
-  closed properly: a command that does not read stdin returns at once even when
-  isb's own stdin is a pipe that never reaches EOF. TTY when stdin and stdout are
-  terminals, signals forwarded, exit code propagated.
-- **No JavaScript on the host.**
 
 ## Install
 
@@ -87,7 +68,7 @@ means membership in `incus-admin`. That access is root-equivalent on the host.
 ## CLI
 
 ```text
-isb create NAME -i IMAGE [--cpus N] [-m MEM] [-v SRC:GUEST[:ro,owner=U]] [-p [IP:]HOST:GUEST]
+isb create NAME -i IMAGE [--vm] [--cpus N] [-m MEM] [-v SRC:GUEST[:ro,owner=U]] [-p [IP:]HOST:GUEST]
                          [-l k=v] [-e K=V] [--idmap auto] [--ready CHECK] [--ensure]
 isb start|stop|restart|rm NAME...
 isb ls [--label k[=v]] [--json]            list, filtered by label
@@ -95,7 +76,8 @@ isb inspect NAME [--json]
 isb exec NAME|SERVICE [-u USER] [-w DIR] [-e K=V] [-l] [-t|-T] [-n] [--timeout D] -- ARGV...
 isb volume create|ls|inspect|rm
 isb port add NAME SPEC [--name DEV] [--search N]   prints the listen address in use
-isb port rm NAME DEV... | isb port ls NAME
+isb port get NAME DEV [KEY]                prints one property, default: listen
+isb port rm NAME DEV... | isb port ls NAME [--json]
 isb device ls|rm NAME ...
 isb prune --label KEY --missing-path [-y]  delete sandboxes whose label is a vanished host path
 isb schema                                 JSON Schema of the YAML format
@@ -114,6 +96,12 @@ does not exist, incusd is unreachable) it exits 125.
 
 `prune` is a dry run unless given `-y`, and never touches a sandbox without the
 label or whose path still exists.
+
+A sandbox is a container unless it says `type: vm` (or `isb create --vm`).
+VMs need a VM image (`images:debian/13/cloud`, `images:ubuntu/24.04/cloud`, or a
+local one), boot in tens of seconds rather than one or two, and wait for the
+incus agent before `exec` works. See [examples/vm.yaml](examples/vm.yaml) and
+"Containers vs virtual machines" in the spec for what differs.
 
 The YAML format is documented field by field in [docs/spec.md](docs/spec.md).
 [examples/lasso-dev.yaml](examples/lasso-dev.yaml) is a complete real-world
@@ -150,43 +138,12 @@ fn main() -> isb::Result<()> {
 }
 ```
 
-Names follow microsandbox where the semantics match: `Sandbox::create`,
-`connect_or_create` (which reconciles), `get`, `list_with`, `remove`, `exec`,
-`exec_stream`, `attach`, `start`, `stop`, `Volume::bind`, `Volume::named` with
-`NamedVolumeMode`, `PortBinding`. isb extensions: readiness checks, reverse
-(`bind: guest`) port bindings, idmap, storage pools, `raw_config` /
-`raw_devices`, plan/apply (`isb::sandbox::{resolve, plan_desired, ensure}`), and
-compose loading (`isb::compose::load`).
-
-## Not supported, by design
-
-Some microsandbox features have no safe incus equivalent, and isb adds no
-field that approximates them:
-
-- Destination-bound secrets (a secret substituted only on connections to one
-  host). Never put a secret in `env`: that is plain instance config, readable by
-  anyone who can read the instance.
-- Domain-based egress rules.
-- Full-memory snapshots.
-
-## Dependencies
-
-Kept few and well known. Each one earns its place:
-
-| Crate | Why |
-|---|---|
-| `serde`, `serde_json` | The incus REST API is JSON; the spec model is serde. |
-| `serde_yaml_ng` | The compose format. A maintained fork of `serde_yaml` (which is archived); chosen over `serde_yml`, which has soundness advisories. |
-| `schemars` | Generates the JSON Schema (`isb schema`) from the same types, so docs, validation and code cannot drift. |
-| `thiserror` | Error type boilerplate. |
-| `clap` | The CLI. |
-| `tungstenite` (no TLS features) | incus exec streams stdio over websockets. Used synchronously over the unix socket. |
-| `httparse` | Parses HTTP responses for the small built-in HTTP/1.1 client (already a `tungstenite` dependency). Avoids pulling in an async runtime and a full HTTP stack. |
-| `rustix` | flock, termios (raw mode, window size), poll, isatty. Safe wrappers instead of `unsafe` libc calls. |
-| `signal-hook` | Forwarding SIGINT/SIGTERM/SIGHUP/SIGWINCH to the command. |
-| `tempfile` (dev only) | Tests. |
-
-CI runs `cargo deny` (advisories, licenses, bans, sources) and `cargo audit`.
+The main entry points: `Sandbox::create`, `Sandbox::connect_or_create` (creates
+or reconciles), `get`, `list_with`, `remove`, `start`, `stop`, `exec`,
+`exec_stream`, `attach`, `add_port`; `Volume::bind` / `Volume::named` and
+`PortBinding::host` / `PortBinding::guest` to build specs; plan/apply via
+`isb::sandbox::{resolve, plan_desired, ensure}`; compose files via
+`isb::compose::load`.
 
 ## Development
 
@@ -204,5 +161,4 @@ host.
 
 ## License
 
-Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
-[MIT license](LICENSE-MIT) at your option.
+[MIT](LICENSE)
