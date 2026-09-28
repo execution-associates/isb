@@ -1,0 +1,42 @@
+[package]
+name = "isb"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Declarative incus sandboxes: a library, a CLI and a compose-style YAML spec that talk to incusd over its unix socket"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/execution-associates/isb"
+homepage = "https://github.com/execution-associates/isb"
+documentation = "https://docs.rs/isb"
+readme = "README.md"
+keywords = ["incus", "sandbox", "containers", "lxc", "compose"]
+categories = ["command-line-utilities", "virtualization", "development-tools"]
+exclude = ["NOTES.md", ".github/", "target/"]
+
+[lib]
+name = "isb"
+path = "src/lib.rs"
+
+[[bin]]
+name = "isb"
+path = "src/bin/isb.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+schemars = "1"
+thiserror = "2"
+clap = { version = "4", features = ["derive", "env"] }
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+httparse = "1"
+rustix = { version = "1", features = ["fs", "termios", "process", "stdio", "event"] }
+signal-hook = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = "debuginfo"
