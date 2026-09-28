@@ -65,7 +65,7 @@ control connection when it exits, and incus kills them.
 | `not_ready` | a readiness check did not pass in time, or the instance stopped | `sandbox`, `check`, `detail`, `waited_secs` |
 | `exec_timeout` | an exec with `timeout` ran past it and was killed | `timeout_secs` |
 | `invalid` | bad params, spec or argument | |
-| `interpolation` | `${VAR}` could not be resolved | |
+| `interpolation` | `${VAR}` could not be resolved (inside a compose file this arrives as `parse`, naming the file) | |
 | `parse` | a compose file could not be read or parsed | `path` |
 | `websocket`, `protocol`, `io`, `json` | lower-level failures; `protocol` also means unknown method | |
 | `bad_request` | the line was not a request | |
@@ -153,7 +153,10 @@ request's `id`:
 | `exec.signal` | `exec`, `signal` (number, e.g. 15) | |
 | `exec.resize` | `exec`, `width`, `height` | tty only |
 
-They fail with `not_found` once the exec has finished.
+They may be sent right behind the `sandbox.exec` request, without waiting for
+anything: calls that arrive before the command has started are queued and
+applied in order once it runs. They fail with `not_found` only when no exec
+with that id is running (it finished, or never existed).
 
 ### Volumes
 

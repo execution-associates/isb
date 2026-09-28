@@ -60,7 +60,7 @@ pub enum Error {
     #[error("exec {argv} timed out after {timeout:?} (killed)")]
     ExecTimeout { argv: String, timeout: Duration },
 
-    #[error("sandbox {0} not found")]
+    #[error("{0} not found")]
     NotFound(String),
 
     #[error("sandbox {0} already exists")]

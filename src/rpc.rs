@@ -39,10 +39,26 @@ pub const PROTOCOL: u32 = 1;
 
 type Out = Arc<Mutex<Box<dyn Write + Send>>>;
 
+/// A control call received for an exec that has not started yet.
+enum Queued {
+    Write(Vec<u8>),
+    CloseStdin,
+    Signal(i32),
+    Resize(u16, u16),
+}
+
+/// An exec is registered as `Pending` the moment its request is read, before
+/// it reaches incusd, so control calls sent right behind it are queued rather
+/// than lost; they are replayed in order once it runs.
+enum ExecSlot {
+    Pending(Vec<Queued>),
+    Running(ExecController),
+}
+
 struct Server {
     out: Out,
     client: Client,
-    execs: Mutex<HashMap<String, ExecController>>,
+    execs: Mutex<HashMap<String, ExecSlot>>,
 }
 
 #[derive(Deserialize)]
@@ -79,6 +95,13 @@ pub fn serve<R: BufRead, W: Write + Send + 'static>(
                 continue;
             }
         };
+        if req.method == "sandbox.exec" {
+            server
+                .execs
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(exec_key(&req.id), ExecSlot::Pending(Vec::new()));
+        }
         // Stream control must never queue behind the stream it controls.
         if req.method.starts_with("exec.") {
             server.clone().handle(req);
@@ -223,27 +246,32 @@ impl Server {
                 sandbox::wait_ready(&self.client(&a.project), &a.name, &checks, t, &a.exec)?;
                 Ok(Value::Null)
             }
-            "sandbox.exec" => self.exec(id, p),
+            "sandbox.exec" => {
+                let r = self.exec(id, p);
+                if r.is_err() {
+                    self.execs
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .remove(&exec_key(id));
+                }
+                r
+            }
             "exec.write" => {
                 let a: ExecWriteParams = params(p)?;
                 let data = b64_decode(&a.data)?;
-                self.controller(&a.exec)?.write_stdin(&data)?;
-                Ok(Value::Null)
+                self.control(&a.exec, Queued::Write(data))
             }
             "exec.close_stdin" => {
                 let a: ExecRef = params(p)?;
-                self.controller(&a.exec)?.close_stdin()?;
-                Ok(Value::Null)
+                self.control(&a.exec, Queued::CloseStdin)
             }
             "exec.signal" => {
                 let a: ExecSignalParams = params(p)?;
-                self.controller(&a.exec)?.signal(a.signal)?;
-                Ok(Value::Null)
+                self.control(&a.exec, Queued::Signal(a.signal))
             }
             "exec.resize" => {
                 let a: ExecResizeParams = params(p)?;
-                self.controller(&a.exec)?.resize(a.width, a.height)?;
-                Ok(Value::Null)
+                self.control(&a.exec, Queued::Resize(a.width, a.height))
             }
             "sandbox.add_port" => {
                 let a: AddPortParams = params(p)?;
@@ -360,14 +388,23 @@ impl Server {
         }
     }
 
-    fn controller(&self, exec: &Value) -> Result<ExecController> {
+    /// Apply a control call to a running exec, or queue it for a pending one.
+    fn control(&self, exec: &Value, op: Queued) -> Result<Value> {
         let key = exec_key(exec);
-        self.execs
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .get(&key)
-            .cloned()
-            .ok_or_else(|| Error::NotFound(format!("running exec {key}")))
+        let mut execs = self.execs.lock().unwrap_or_else(|p| p.into_inner());
+        match execs.get_mut(&key) {
+            Some(ExecSlot::Pending(q)) => {
+                q.push(op);
+                Ok(Value::Null)
+            }
+            Some(ExecSlot::Running(c)) => {
+                let c = c.clone();
+                drop(execs);
+                apply_op(&c, op)?;
+                Ok(Value::Null)
+            }
+            None => Err(Error::NotFound(format!("running exec {key}"))),
+        }
     }
 
     fn exec(&self, id: &Value, p: &Value) -> Result<Value> {
@@ -399,13 +436,31 @@ impl Server {
             timeout,
             stdin: stdin.clone(),
         };
-        let req = exec::build_request(&c, &a.name, &a.argv, &a.defaults, &opts)?;
-        let mut stream = exec::start_with_timeout(&c, &a.name, req, stdin, timeout)?;
         let key = exec_key(id);
-        self.execs
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(key.clone(), stream.controller());
+        let started = exec::build_request(&c, &a.name, &a.argv, &a.defaults, &opts)
+            .and_then(|req| exec::start_with_timeout(&c, &a.name, req, stdin, timeout));
+        let mut stream = match started {
+            Ok(s) => s,
+            Err(e) => {
+                self.execs
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .remove(&key);
+                return Err(e);
+            }
+        };
+        // Replay what arrived while it was starting, then go live. Holding the
+        // lock across both keeps later calls behind the replayed ones.
+        {
+            let ctl = stream.controller();
+            let mut execs = self.execs.lock().unwrap_or_else(|p| p.into_inner());
+            if let Some(ExecSlot::Pending(q)) = execs.remove(&key) {
+                for op in q {
+                    let _ = apply_op(&ctl, op);
+                }
+            }
+            execs.insert(key.clone(), ExecSlot::Running(ctl));
+        }
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         while let Some(ev) = stream.next_event() {
@@ -429,6 +484,15 @@ impl Server {
                 json!({"exit_code": code, "stdout": b64_encode(&stdout), "stderr": b64_encode(&stderr)}),
             )
         }
+    }
+}
+
+fn apply_op(c: &ExecController, op: Queued) -> Result<()> {
+    match op {
+        Queued::Write(d) => c.write_stdin(&d),
+        Queued::CloseStdin => c.close_stdin(),
+        Queued::Signal(s) => c.signal(s),
+        Queued::Resize(w, h) => c.resize(w, h),
     }
 }
 

@@ -1015,7 +1015,7 @@ impl Sandbox {
     /// Handle on an existing sandbox.
     pub fn get(client: &Client, name: &str) -> Result<Sandbox> {
         if get_actual(client, name)?.is_none() {
-            return Err(Error::NotFound(name.into()));
+            return Err(Error::NotFound(format!("sandbox {name}")));
         }
         Ok(Sandbox {
             client: client.clone(),
@@ -1046,7 +1046,7 @@ impl Sandbox {
     /// Delete a sandbox. A running one needs `force` (it is stopped first).
     pub fn remove(client: &Client, name: &str, force: bool) -> Result<()> {
         let Some(a) = get_actual(client, name)? else {
-            return Err(Error::NotFound(name.into()));
+            return Err(Error::NotFound(format!("sandbox {name}")));
         };
         if a.running() && !force {
             return Err(Error::invalid(format!(
@@ -1074,7 +1074,7 @@ impl Sandbox {
         let v = self
             .client
             .get_opt(&inst_path(&self.name))?
-            .ok_or_else(|| Error::NotFound(self.name.clone()))?;
+            .ok_or_else(|| Error::NotFound(format!("sandbox {}", self.name)))?;
         Ok(SandboxInfo::from_api(&v))
     }
 

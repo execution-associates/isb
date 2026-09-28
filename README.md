@@ -145,6 +145,31 @@ or reconciles), `get`, `list_with`, `remove`, `start`, `stop`, `exec`,
 `isb::sandbox::{resolve, plan_desired, ensure}`; compose files via
 `isb::compose::load`.
 
+## Python and TypeScript
+
+The SDKs live in this repository and drive the same engine through `isb rpc`, a
+line-delimited JSON protocol on the binary's stdin/stdout
+([docs/rpc.md](docs/rpc.md)). Any other language can use that protocol too.
+
+- Python: [sdk/python](sdk/python), `pip install isb`
+- TypeScript (Bun): [sdk/typescript](sdk/typescript), `@execution-associates/isb`
+
+```python
+from isb import Sandbox
+
+sb = await Sandbox.create("web", image="dev-base", cpus=2)
+out = await sb.exec("uname", ["-a"])
+print(out.stdout_text)
+```
+
+```ts
+import { Sandbox } from "@execution-associates/isb";
+
+const sb = await Sandbox.create({ name: "web", image: "dev-base", cpus: 2 });
+const out = await sb.exec("uname", ["-a"]);
+console.log(out.stdoutText);
+```
+
 ## Development
 
 ```sh

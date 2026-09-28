@@ -11,7 +11,7 @@ documentation = "https://docs.rs/isb"
 readme = "README.md"
 keywords = ["incus", "sandbox", "containers", "lxc", "compose"]
 categories = ["command-line-utilities", "virtualization", "development-tools"]
-exclude = ["NOTES.md", ".github/", "target/"]
+exclude = ["NOTES.md", ".github/", "target/", "sdk/"]
 
 [lib]
 name = "isb"
