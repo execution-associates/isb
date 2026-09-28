@@ -58,6 +58,6 @@ export function findIsb(explicit?: string): string {
   throw new Error(
     "isb binary not found: pass isbBin, set ISB_BIN, " +
       (pkg ? `install ${pkg}, ` : "") +
-      "or put isb (0.1.1 or later, with `isb rpc`) on PATH",
+      "or put isb (0.2.0 or later, with `isb rpc`) on PATH",
   );
 }
