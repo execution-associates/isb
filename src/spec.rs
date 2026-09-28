@@ -541,7 +541,7 @@ impl ExecDefaults {
 }
 
 // ----------------------------------------------------------------------------
-// Builder API (mirrors microsandbox naming where the semantics match).
+// Builder API.
 // ----------------------------------------------------------------------------
 
 /// Mount builders: `Volume::bind(host)`, `Volume::named(name)`.

@@ -3,7 +3,7 @@
 //! - Volume: `SRC:GUEST[:opt,...]`. `SRC` starting with `/`, `.` or `~` is a
 //!   host path (bind); anything else is a named volume. Options: `ro`,
 //!   `owner=USER`, `device=NAME`, `pool=POOL`, `external`.
-//! - Port (msb style, host listens): `[IP:]HOSTPORT:GUESTPORT[/udp]`, guest side
+//! - Port (host listens): `[IP:]HOSTPORT:GUESTPORT[/udp]`, guest side
 //!   on 127.0.0.1. Or the full form `listen=tcp:..,connect=tcp:..[,bind=guest]
 //!   [,name=N][,search=N]`.
 //! - Ready: `running`, `default_route`, `user_exists=USER`, `path_writable=PATH`,

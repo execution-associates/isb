@@ -1,0 +1,54 @@
+# A virtual machine sandbox.
+#
+#   isb -f examples/vm.yaml up          # boots the VM, waits for its agent
+#   isb -f examples/vm.yaml exec worker -- uname -a
+#   isb -f examples/vm.yaml down --volumes
+#
+# `type: vm` is the only thing that makes this a VM instead of a container.
+# What changes with it:
+#   - the image must be a VM image (`images:<distro>/<release>/cloud` from the
+#     linuxcontainers remote, or a local VM image: VM_IMAGE=my-image)
+#   - it boots its own kernel: tens of seconds instead of one or two, and the
+#     first boot of a cloud image usually reboots once (isb waits it out)
+#   - `exec` goes through the incus agent in the guest, hence `agent` in ready
+#   - host folders are shared over virtiofs: edits made on the host do not
+#     reach inotify watchers in the VM, so watchers there need polling
+#   - `privileged` and `idmap` are container-only and refused here
+
+name: vm-example
+
+volumes:
+  worker-data: {}
+
+sandboxes:
+  worker:
+    type: vm
+    image: "${VM_IMAGE:-images:debian/13/cloud}"
+    cpus: 2
+    memory: 2GiB
+    labels:
+      example: vm
+    volumes:
+      # A host folder, read-only in the guest.
+      /srv/src: { bind: "${SRC:-.}", readonly: true }
+      # A named volume that outlives the VM.
+      /var/lib/worker: { named: worker-data }
+    raw_devices:
+      # Grow the root disk (the image default is small).
+      root: { size: 20GiB }
+    ready: [running, agent, default_route]
+    ready_timeout: 5m
+
+    # Publishing a VM port on the host. incus proxies into a VM only in NAT
+    # mode (isb sets nat: "true"), which needs a fixed address on the VM's NIC,
+    # and `bind: guest` is not available for VMs. Listen on a specific host
+    # address you mean to expose (a tailnet IP, say), never 0.0.0.0: NAT
+    # forwarding is DNAT and does not pass through a host firewall like ufw.
+    #
+    # ports:
+    #   - name: web
+    #     listen: "tcp:${PUBLISH_IP}:8080"
+    #     connect: "tcp:${VM_IP}:80"
+    #
+    # and under raw_devices above:
+    #   eth0: { type: nic, network: incusbr0, ipv4.address: "${VM_IP}" }

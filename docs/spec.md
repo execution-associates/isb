@@ -582,9 +582,12 @@ For a VM:
 
   ```yaml
   raw_devices:
-    eth0: {type: nic, network: incusbr0, name: eth0, ipv4.address: 10.0.0.50}
+    eth0: {type: nic, network: incusbr0, ipv4.address: 10.0.0.50}
   ```
 
+- NAT forwarding is DNAT and does not pass through a host firewall such as
+  ufw. Listen on the specific address you mean to expose (a tailnet IP, say),
+  never `0.0.0.0` on a host with a public interface.
 - Host bind mounts are shared over virtiofs, where inotify events for host-side
   edits are not delivered. File watchers inside the VM (dev servers, test
   watchers) need polling.
@@ -594,18 +597,6 @@ For a VM:
   `ready`.
 
 `isb port add` on an existing VM applies the same rules.
-
-## Unsupported by design
-
-Some microsandbox features cannot be done safely with incus, and isb adds no
-fields that approximate them:
-
-- **Destination-bound secrets** (a secret substituted only on traffic to a given
-  host). incus has no such mechanism. Do not put secrets in `env` or
-  `exec.env` instead: `env` is plain instance config readable by anyone who can
-  read the instance, and isb will never fall back to it.
-- **Domain-based egress rules.** incus network ACLs match addresses, not names.
-- **Full-memory snapshots** of a running sandbox.
 
 ## CLI shorthands
 
