@@ -1,0 +1,973 @@
+//! Integration tests against a real incusd.
+//!
+//! Gated: they run only with `ISB_INTEGRATION=1`, since the incus socket is
+//! root-equivalent. Every instance and volume they create is named `isb-test-*`
+//! and removed afterwards, pass or fail; nothing else is touched.
+//!
+//! `ISB_TEST_IMAGE` picks the image (default `dev-base`: a local image with a
+//! `dev` user at uid 1000, python3 and getent). `ISB_BIN` points at the `isb`
+//! binary for the CLI tests (default: the one cargo built).
+
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpListener;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{Duration, Instant};
+
+use isb::plan::DiffOptions;
+use isb::sandbox::{self, EnsureOptions, LabelFilter};
+use isb::spec::{IdmapMode, IdmapSpec};
+use isb::{
+    Client, Error, ExecEvent, ExecOptions, PortBinding, ReadyCheck, Sandbox, SandboxSpec, Stdin,
+    Timeouts, Volume,
+};
+
+fn enabled() -> bool {
+    if std::env::var("ISB_INTEGRATION").as_deref() == Ok("1") {
+        return true;
+    }
+    eprintln!("skipped: set ISB_INTEGRATION=1 to run against incusd");
+    false
+}
+
+fn image() -> String {
+    std::env::var("ISB_TEST_IMAGE").unwrap_or_else(|_| "dev-base".into())
+}
+
+static SEQ: AtomicU32 = AtomicU32::new(0);
+
+/// A unique `isb-test-*` name.
+fn test_name(what: &str) -> String {
+    format!(
+        "isb-test-{}-{}-{what}",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::SeqCst)
+    )
+}
+
+/// Deletes the instances and volumes it tracks when dropped.
+struct Cleanup {
+    client: Client,
+    instances: Vec<String>,
+    volumes: Vec<(String, String)>,
+}
+
+impl Cleanup {
+    fn new(client: &Client) -> Self {
+        Cleanup {
+            client: client.clone(),
+            instances: vec![],
+            volumes: vec![],
+        }
+    }
+    fn instance(&mut self, n: &str) {
+        assert!(n.starts_with("isb-test-"));
+        self.instances.push(n.into());
+    }
+    fn volume(&mut self, pool: &str, n: &str) {
+        assert!(n.starts_with("isb-test-"));
+        self.volumes.push((pool.into(), n.into()));
+    }
+}
+
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        for n in &self.instances {
+            match Sandbox::remove(&self.client, n, true) {
+                Ok(()) => {}
+                Err(e) if e.is_not_found() => {}
+                Err(e) => eprintln!("cleanup: {n}: {e}"),
+            }
+        }
+        for (p, n) in &self.volumes {
+            match isb::volume::remove(&self.client, p, n) {
+                Ok(()) => {}
+                Err(e) if e.is_not_found() => {}
+                Err(e) => eprintln!("cleanup: volume {n}: {e}"),
+            }
+        }
+    }
+}
+
+fn tempdir() -> tempfile::TempDir {
+    let d = tempfile::Builder::new()
+        .prefix("isb-test-")
+        .tempdir()
+        .unwrap();
+    // incusd (root) resolves the bind source; the guest's dev user writes to it.
+    std::fs::set_permissions(
+        d.path(),
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .unwrap();
+    d
+}
+
+fn base_spec(name: &str) -> SandboxSpec {
+    SandboxSpec::new(name, image())
+        .cpus(2)
+        .memory("1GiB")
+        .idmap(IdmapSpec::Mode(IdmapMode::Auto))
+        .label("isb-test", "1")
+}
+
+fn free_port() -> u16 {
+    TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+fn isb_bin() -> PathBuf {
+    std::env::var_os("ISB_BIN")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_isb")))
+}
+
+const WATCHER: &str = r#"
+import ctypes, os, struct, sys
+libc = ctypes.CDLL(None, use_errno=True)
+fd = libc.inotify_init()
+if libc.inotify_add_watch(fd, sys.argv[1].encode(), 0x100 | 0x8) < 0:
+    sys.exit("inotify_add_watch failed")
+print("ready", flush=True)
+while True:
+    buf = os.read(fd, 4096)
+    i = 0
+    while i < len(buf):
+        _wd, _mask, _cookie, ln = struct.unpack_from("iIII", buf, i)
+        name = buf[i + 16:i + 16 + ln].rstrip(b"\0").decode()
+        print("event " + name, flush=True)
+        if name == "stop":
+            sys.exit(0)
+        i += 16 + ln
+"#;
+
+fn wait_for(watch: &mut isb::ExecStream, needle: &str, lines: &mut String) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !lines.contains(needle) {
+        assert!(Instant::now() < deadline, "no {needle:?} in {lines:?}");
+        match watch.next_event() {
+            Some(ExecEvent::Stdout(b)) => lines.push_str(&String::from_utf8_lossy(&b)),
+            Some(ExecEvent::Stderr(b)) => eprint!("{}", String::from_utf8_lossy(&b)),
+            None => panic!("watcher ended: {lines:?}"),
+        }
+    }
+}
+
+/// Create, readiness, a no-op ensure that provably does not remount (a live
+/// inotify watch keeps working), then drift that is repaired.
+#[test]
+fn create_ready_and_noop_ensure_keeps_watches() {
+    if !enabled() {
+        return;
+    }
+    let client = Client::new();
+    let mut cleanup = Cleanup::new(&client);
+    let name = test_name("ensure");
+    cleanup.instance(&name);
+    let web = tempdir();
+    let spec = base_spec(&name)
+        .volume(
+            "/mnt/web",
+            Volume::bind(web.path().to_str().unwrap()).device("web"),
+        )
+        .exec_user("dev")
+        .ready(vec![
+            ReadyCheck::Running,
+            ReadyCheck::DefaultRoute,
+            ReadyCheck::UserExists("dev".into()),
+            ReadyCheck::PathWritable("/mnt/web".into()),
+        ]);
+
+    let sb = Sandbox::create(&client, &spec).expect("create");
+    assert!(sb.info().unwrap().status.eq_ignore_ascii_case("running"));
+    assert!(matches!(
+        Sandbox::create(&client, &spec),
+        Err(Error::AlreadyExists(_))
+    ));
+
+    // The bind mount is writable by dev (idmap: auto did its job on this host).
+    let out = sb
+        .exec(["sh", "-c", "echo hi > /mnt/web/from-guest && id -u"])
+        .unwrap();
+    assert_eq!(out.exit_code, 0, "{}", out.stderr_text());
+    assert_eq!(out.stdout_text().trim(), "1000");
+    assert_eq!(
+        std::fs::read_to_string(web.path().join("from-guest")).unwrap(),
+        "hi\n"
+    );
+
+    // Hold an inotify watch on the mount, as a dev server would.
+    let mut watch = sb
+        .exec_stream(
+            ["python3", "-c", WATCHER, "/mnt/web"],
+            ExecOptions::default(),
+        )
+        .unwrap();
+    let mut lines = String::new();
+    wait_for(&mut watch, "ready", &mut lines);
+
+    // Ensure again: nothing to do, and nothing done.
+    let d = sandbox::resolve(
+        &client,
+        &spec,
+        &Default::default(),
+        std::path::Path::new("/"),
+    )
+    .unwrap();
+    let plan = sandbox::plan_desired(&client, &d, DiffOptions::default()).unwrap();
+    assert!(plan.is_noop(), "{:?}", plan.actions);
+    let report = sandbox::ensure(&client, &d, EnsureOptions::default(), &mut |l| {
+        eprintln!("{l}")
+    })
+    .unwrap();
+    assert!(!report.created);
+    assert!(
+        report.applied.iter().all(|a| !a.is_change()),
+        "{:?}",
+        report.applied
+    );
+
+    // The watch still sees host-side changes: the mount was not touched.
+    std::fs::write(web.path().join("after-ensure"), "x").unwrap();
+    wait_for(&mut watch, "event after-ensure", &mut lines);
+    std::fs::write(web.path().join("stop"), "x").unwrap();
+    assert_eq!(watch.wait().unwrap(), 0);
+
+    // Drift: a changed limit is patched, the device still left alone.
+    sb.exec(["true"]).unwrap();
+    let spec2 = spec.clone().cpus(3);
+    let d2 = sandbox::resolve(
+        &client,
+        &spec2,
+        &Default::default(),
+        std::path::Path::new("/"),
+    )
+    .unwrap();
+    let plan = sandbox::plan_desired(&client, &d2, DiffOptions::default()).unwrap();
+    assert_eq!(plan.actions.len(), 1, "{:?}", plan.actions);
+    sandbox::ensure(&client, &d2, EnsureOptions::default(), &mut |_| {}).unwrap();
+    assert_eq!(sb.info().unwrap().config["limits.cpu"], "3");
+    assert!(
+        sandbox::plan_desired(&client, &d2, DiffOptions::default())
+            .unwrap()
+            .is_noop()
+    );
+
+    // A stopped sandbox is started by ensure.
+    sb.stop(true, Duration::from_secs(5)).unwrap();
+    sandbox::ensure(&client, &d2, EnsureOptions::default(), &mut |_| {}).unwrap();
+    assert!(sb.info().unwrap().status.eq_ignore_ascii_case("running"));
+}
+
+/// Streaming, exit codes, argv fidelity, users, tty and stdin handling.
+#[test]
+fn exec_semantics() {
+    if !enabled() {
+        return;
+    }
+    let client = Client::new();
+    let mut cleanup = Cleanup::new(&client);
+    let name = test_name("exec");
+    cleanup.instance(&name);
+    let sb = Sandbox::create(&client, &base_spec(&name)).expect("create");
+
+    // Exit codes propagate, stdout and stderr stay separate.
+    let out = sb
+        .exec(["sh", "-c", "echo out; echo err >&2; exit 7"])
+        .unwrap();
+    assert_eq!(out.exit_code, 7);
+    assert_eq!(out.stdout_text(), "out\n");
+    assert_eq!(out.stderr_text(), "err\n");
+
+    // argv is never joined into a shell string.
+    let out = sb
+        .exec(["printf", "[%s]", "a b", "$HOME", "\"q\"", ";id"])
+        .unwrap();
+    assert_eq!(out.stdout_text(), "[a b][$HOME][\"q\"][;id]");
+
+    // Output is streamed as produced, not buffered until exit.
+    let started = Instant::now();
+    let mut s = sb
+        .exec_stream(
+            ["sh", "-c", "echo first; sleep 3; echo second"],
+            ExecOptions::default(),
+        )
+        .unwrap();
+    match s.next_event() {
+        Some(ExecEvent::Stdout(b)) => assert_eq!(b, b"first\n"),
+        other => panic!("{other:?}"),
+    }
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "first chunk took {:?}",
+        started.elapsed()
+    );
+    assert_eq!(s.wait().unwrap(), 0);
+    assert!(started.elapsed() >= Duration::from_secs(3));
+
+    // Users, cwd, env.
+    let out = sb
+        .exec_with(
+            ["sh", "-c", "id -u; pwd; echo $HOME $FOO"],
+            ExecOptions::default()
+                .user("dev")
+                .cwd("/tmp")
+                .env("FOO", "bar"),
+        )
+        .unwrap();
+    assert_eq!(out.stdout_text(), "1000\n/tmp\n/home/dev bar\n");
+    let out = sb
+        .exec_with(
+            ["sh", "-c", "echo $0"],
+            ExecOptions::default().user("dev").login(true),
+        )
+        .unwrap();
+    assert_eq!(out.exit_code, 0, "{}", out.stderr_text());
+
+    // tty vs no tty.
+    let out = sb.exec(["tty"]).unwrap();
+    assert_ne!(out.exit_code, 0);
+    let out = sb
+        .exec_with(
+            ["sh", "-c", "tty; stty size"],
+            ExecOptions::default().tty(true),
+        )
+        .unwrap();
+    assert_eq!(out.exit_code, 0);
+    assert!(
+        out.stdout_text().contains("/dev/pts/"),
+        "{:?}",
+        out.stdout_text()
+    );
+    assert!(
+        out.stdout_text().contains("24 80"),
+        "{:?}",
+        out.stdout_text()
+    );
+
+    // stdin: closed by default (cat returns at once), bytes, piped.
+    let t = Instant::now();
+    let out = sb.exec(["cat"]).unwrap();
+    assert_eq!((out.exit_code, out.stdout.len()), (0, 0));
+    assert!(t.elapsed() < Duration::from_secs(5));
+    let out = sb
+        .exec_with(
+            ["wc", "-c"],
+            ExecOptions::default().stdin(Stdin::Bytes(vec![b'x'; 200_000])),
+        )
+        .unwrap();
+    assert_eq!(out.stdout_text().trim(), "200000");
+    let mut s = sb
+        .exec_stream(["cat"], ExecOptions::default().stdin(Stdin::Piped))
+        .unwrap();
+    s.write_stdin(b"one ").unwrap();
+    s.write_stdin(b"two").unwrap();
+    s.close_stdin();
+    let out = s.collect_output().unwrap();
+    assert_eq!(out.stdout_text(), "one two");
+
+    // Signals and timeouts.
+    let s = sb
+        .exec_stream(
+            ["sh", "-c", "trap 'exit 42' TERM; sleep 30 & wait"],
+            ExecOptions::default(),
+        )
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+    s.signal(15).unwrap();
+    assert_eq!(s.wait().unwrap(), 42);
+    let t = Instant::now();
+    let r = sb.exec_with(
+        ["sleep", "30"],
+        ExecOptions::default().timeout(Duration::from_secs(1)),
+    );
+    assert!(matches!(r, Err(Error::ExecTimeout { .. })), "{r:?}");
+    assert!(t.elapsed() < Duration::from_secs(15));
+
+    // No default timeout: a command quiet for longer than the socket timeout is fine.
+    let out = sb.exec(["sh", "-c", "sleep 35; echo done"]).unwrap();
+    assert_eq!(out.stdout_text(), "done\n");
+}
+
+/// The CLI: exit codes, a never-EOF inherited stdin, forwarded stdin, SIGINT.
+#[test]
+fn cli_exec() {
+    if !enabled() {
+        return;
+    }
+    let client = Client::new();
+    let mut cleanup = Cleanup::new(&client);
+    let name = test_name("cli");
+    cleanup.instance(&name);
+    Sandbox::create(&client, &base_spec(&name)).expect("create");
+    let bin = isb_bin();
+
+    let st = Command::new(&bin)
+        .args(["exec", &name, "--", "sh", "-c", "exit 3"])
+        .stdin(Stdio::null())
+        .status()
+        .unwrap();
+    assert_eq!(st.code(), Some(3));
+
+    // A stdin pipe that never reaches EOF (the parent keeps it open and never
+    // writes) must not hang a command that does not read it.
+    let t = Instant::now();
+    let mut child = Command::new(&bin)
+        .args(["exec", "-T", &name, "--", "echo", "fine"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let _keep_stdin_open = child.stdin.take();
+    let mut out = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut out)
+        .unwrap();
+    let st = child.wait().unwrap();
+    assert_eq!((st.code(), out.as_str()), (Some(0), "fine\n"));
+    assert!(
+        t.elapsed() < Duration::from_secs(10),
+        "took {:?}",
+        t.elapsed()
+    );
+
+    // Forwarded stdin reaches the command, and EOF closes it.
+    let mut child = Command::new(&bin)
+        .args(["exec", &name, "--", "tr", "a-z", "A-Z"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(b"hello").unwrap();
+    let mut out = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut out)
+        .unwrap();
+    assert_eq!(out, "HELLO");
+    assert!(child.wait().unwrap().success());
+
+    // SIGINT to isb reaches the command.
+    let mut child = Command::new(&bin)
+        .args(["exec", &name, "--", "sleep", "60"])
+        .stdin(Stdio::null())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_secs(2));
+    rustix::process::kill_process(
+        rustix::process::Pid::from_child(&child),
+        rustix::process::Signal::INT,
+    )
+    .unwrap();
+    let t = Instant::now();
+    let st = child.wait().unwrap();
+    assert_eq!(st.code(), Some(130));
+    assert!(t.elapsed() < Duration::from_secs(10));
+
+    // A tty, when stdin and stdout are terminals (via script(1), if present).
+    if Command::new("script").arg("--version").output().is_ok() {
+        let out = Command::new("script")
+            .args([
+                "-qec",
+                &format!("{} exec {name} -- sh -c 'tty; exit 4'", bin.display()),
+                "/dev/null",
+            ])
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(String::from_utf8_lossy(&out.stdout).contains("/dev/pts/"));
+        assert_eq!(out.status.code(), Some(4));
+    }
+}
+
+/// A named volume with an owner, and both proxy directions.
+#[test]
+fn named_volume_owner_and_proxies() {
+    if !enabled() {
+        return;
+    }
+    let client = Client::new();
+    let mut cleanup = Cleanup::new(&client);
+    let name = test_name("vol");
+    let vol = test_name("vol");
+    cleanup.instance(&name);
+    let pool = sandbox::host_facts(&client)
+        .unwrap()
+        .pick_pool(None)
+        .unwrap();
+    cleanup.volume(&pool, &vol);
+
+    // Host service the guest will reach through a bind=guest proxy.
+    let host_srv = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host_port = host_srv.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for s in host_srv.incoming().take(5) {
+            let mut s = s.unwrap();
+            eprintln!("host service: connection from {:?}", s.peer_addr());
+            let _ = s.write_all(b"hello from host\n");
+            let _ = s.shutdown(std::net::Shutdown::Write);
+            let mut sink = Vec::new();
+            let _ = s.read_to_end(&mut sink);
+        }
+    });
+    let publish = free_port();
+
+    let spec = base_spec(&name)
+        .volume(
+            "/home/dev/.cache/isbtest/data",
+            Volume::named(&vol).owner("dev").device("data"),
+        )
+        .port(
+            PortBinding::guest("tcp:127.0.0.1:9000", format!("tcp:127.0.0.1:{host_port}"))
+                .name("backend"),
+        )
+        .port(
+            PortBinding::host(format!("tcp:127.0.0.1:{publish}"), "tcp:127.0.0.1:8000").name("web"),
+        )
+        .ready(vec![ReadyCheck::Running, ReadyCheck::DefaultRoute]);
+    let sb = Sandbox::connect_or_create(&client, &spec).expect("create");
+    assert!(isb::volume::get(&client, &pool, &vol).unwrap().is_some());
+
+    // The mount point and the parents it conjured belong to dev; home did not change.
+    let out = sb
+        .exec([
+            "stat",
+            "-c",
+            "%U %n",
+            "/home/dev/.cache/isbtest/data",
+            "/home/dev/.cache/isbtest",
+            "/home/dev",
+        ])
+        .unwrap();
+    assert_eq!(
+        out.stdout_text(),
+        "dev /home/dev/.cache/isbtest/data\ndev /home/dev/.cache/isbtest\ndev /home/dev\n"
+    );
+    let out = sb
+        .exec_with(
+            ["touch", "/home/dev/.cache/isbtest/data/x"],
+            ExecOptions::default().user("dev"),
+        )
+        .unwrap();
+    assert_eq!(out.exit_code, 0, "{}", out.stderr_text());
+
+    // bind=guest: guest 127.0.0.1:9000 -> host.
+    let out = sb
+        .exec(["python3", "-c", "import socket; s=socket.create_connection(('127.0.0.1', 9000), 5); print(s.recv(100).decode(), end='')"])
+        .unwrap();
+    assert_eq!(
+        out.stdout_text(),
+        "hello from host\n",
+        "stderr: {}",
+        out.stderr_text()
+    );
+
+    // bind=host: host 127.0.0.1:<publish> -> guest 8000.
+    let mut srv = sb
+        .exec_stream(
+            ["python3", "-c", "import socket; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(('127.0.0.1', 8000)); s.listen(1); print('listening', flush=True); c,_=s.accept(); c.sendall(b'hello from guest\\n'); c.close()"],
+            ExecOptions::default(),
+        )
+        .unwrap();
+    assert!(matches!(srv.next_event(), Some(ExecEvent::Stdout(b)) if b.starts_with(b"listening")));
+    let mut conn = std::net::TcpStream::connect(("127.0.0.1", publish)).unwrap();
+    conn.set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    let mut got = String::new();
+    BufReader::new(&mut conn).read_line(&mut got).unwrap();
+    assert_eq!(got, "hello from guest\n");
+    assert_eq!(srv.wait().unwrap(), 0);
+
+    // Port search steps past a taken host port, and a re-add is a no-op.
+    let taken = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = taken.local_addr().unwrap().port();
+    let listen = sb
+        .add_port(
+            &PortBinding::host(format!("tcp:127.0.0.1:{base}"), "tcp:127.0.0.1:8001")
+                .name("searched")
+                .search(20),
+        )
+        .unwrap();
+    assert_ne!(listen, format!("tcp:127.0.0.1:{base}"));
+    let again = sb
+        .add_port(
+            &PortBinding::host(format!("tcp:127.0.0.1:{base}"), "tcp:127.0.0.1:8001")
+                .name("searched")
+                .search(20),
+        )
+        .unwrap();
+    assert_eq!(listen, again);
+    assert!(sb.remove_device("searched").unwrap());
+    assert!(!sb.remove_device("searched").unwrap());
+
+    // The volume outlives the sandbox and is refused for deletion while used.
+    assert!(isb::volume::remove(&client, &pool, &vol).is_err());
+}
+
+/// Labels, list filters, and prune (dry run, then -y), on isb-test-* only.
+#[test]
+fn labels_and_prune() {
+    if !enabled() {
+        return;
+    }
+    let client = Client::new();
+    let mut cleanup = Cleanup::new(&client);
+    let keep_dir = tempdir();
+    let gone_dir = tempdir();
+    let label = format!("isb-test.path-{}", std::process::id());
+    let keep = test_name("keep");
+    let gone = test_name("gone");
+    cleanup.instance(&keep);
+    cleanup.instance(&gone);
+    Sandbox::create(
+        &client,
+        &base_spec(&keep).label(&label, keep_dir.path().to_str().unwrap()),
+    )
+    .unwrap();
+    Sandbox::create(
+        &client,
+        &base_spec(&gone).label(&label, gone_dir.path().to_str().unwrap()),
+    )
+    .unwrap();
+
+    let by_key = Sandbox::list_with(&client, &[LabelFilter::parse(&label)]).unwrap();
+    let mut names: Vec<&str> = by_key.iter().map(|i| i.name.as_str()).collect();
+    names.sort();
+    let mut want = vec![gone.as_str(), keep.as_str()];
+    want.sort();
+    assert_eq!(names, want);
+    let by_val = Sandbox::list_with(
+        &client,
+        &[LabelFilter::parse(&format!(
+            "{label}={}",
+            keep_dir.path().display()
+        ))],
+    )
+    .unwrap();
+    assert_eq!(by_val.len(), 1);
+    assert_eq!(by_val[0].name, keep);
+
+    let gone_path = gone_dir.path().to_path_buf();
+    drop(gone_dir);
+    assert!(!gone_path.exists());
+
+    // Through the CLI: dry run by default.
+    let bin = isb_bin();
+    let out = Command::new(&bin)
+        .args(["prune", "--label", &label, "--missing-path", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let items: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["name"], gone.as_str());
+    assert_eq!(items[0]["deleted"], false);
+    assert!(Sandbox::get(&client, &gone).is_ok());
+
+    let out = Command::new(&bin)
+        .args(["prune", "--label", &label, "--missing-path", "-y"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(Sandbox::get(&client, &gone).is_err());
+    assert!(Sandbox::get(&client, &keep).is_ok());
+
+    // `ls --label` through the CLI.
+    let out = Command::new(&bin)
+        .args(["ls", "--label", &label, "--json"])
+        .output()
+        .unwrap();
+    let items: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["labels"]["isb-test"], "1");
+}
+
+/// The stuck-operation paths: a wait deadline names the step, a create that
+/// outlives its deadline is reported and kept once it settles, and cleanup never
+/// deletes an instance this call did not create.
+#[test]
+fn stuck_operation_paths() {
+    if !enabled() {
+        return;
+    }
+    let client = Client::new();
+    let mut cleanup = Cleanup::new(&client);
+
+    // Deadline on a running operation.
+    let name = test_name("stuck");
+    cleanup.instance(&name);
+    let sb = Sandbox::create(&client, &base_spec(&name)).unwrap();
+    let op = client
+        .start_operation(
+            "POST",
+            &format!("/1.0/instances/{name}/exec"),
+            Some(&serde_json::json!({"command": ["sleep", "5"], "wait-for-websocket": false, "record-output": false, "interactive": false})),
+        )
+        .unwrap();
+    let t = Instant::now();
+    match client.wait_operation(&op, "probe step", Duration::from_millis(1500)) {
+        Err(Error::OperationTimeout {
+            step, cancelled, ..
+        }) => {
+            assert_eq!(step, "probe step");
+            assert!(!cancelled, "exec operations are not cancellable");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(t.elapsed() < Duration::from_secs(4), "{:?}", t.elapsed());
+    client
+        .wait_operation(&op, "probe", Duration::from_secs(20))
+        .unwrap();
+
+    // A create past its deadline: reported as stalled, then kept once it settles.
+    let late = test_name("late");
+    cleanup.instance(&late);
+    let slow = Client::new().timeouts(Timeouts {
+        create: Duration::ZERO,
+        settle: Duration::from_secs(120),
+        ..Timeouts::default()
+    });
+    let mut lines = Vec::new();
+    Sandbox::create_with(
+        &slow,
+        &base_spec(&late),
+        &Default::default(),
+        EnsureOptions::default(),
+        &mut |l| lines.push(l.to_string()),
+    )
+    .unwrap();
+    let all = lines.join("\n");
+    assert!(
+        all.contains(&format!("create instance {late} stalled")),
+        "{all}"
+    );
+    assert!(all.contains("finished late"), "{all}");
+    assert!(sandbox::cleanup_half_created(&client, &late, "not-our-token", &mut |_| {}).is_err());
+
+    // Cleanup refuses an instance with someone else's token (or none)...
+    let r = sandbox::cleanup_half_created(&client, &name, "another-callers-token", &mut |_| {});
+    assert!(matches!(r, Err(Error::AlreadyExists(_))), "{r:?}");
+    assert!(sb.info().is_ok());
+    // ...and deletes one carrying its own.
+    let token = sb.info().unwrap().config[sandbox::CREATE_TOKEN_KEY].clone();
+    sandbox::cleanup_half_created(&client, &name, &token, &mut |_| {}).unwrap();
+    assert!(Sandbox::get(&client, &name).is_err());
+}
+
+/// Compose: up, plan, exec a service, down, through the CLI.
+#[test]
+fn compose_cli() {
+    if !enabled() {
+        return;
+    }
+    let client = Client::new();
+    let mut cleanup = Cleanup::new(&client);
+    let dir = tempdir();
+    let web = dir.path().join("web");
+    std::fs::create_dir(&web).unwrap();
+    let name = test_name("compose");
+    let vol = test_name("cvol");
+    cleanup.instance(&name);
+    let pool = sandbox::host_facts(&client)
+        .unwrap()
+        .pick_pool(None)
+        .unwrap();
+    cleanup.volume(&pool, &vol);
+    let file = dir.path().join("isb.yaml");
+    std::fs::write(
+        &file,
+        format!(
+            r#"
+x-limits: &limits
+  cpus: 2
+  memory: 1GiB
+volumes:
+  {vol}: {{}}
+sandboxes:
+  web:
+    <<: *limits
+    name: "${{ISB_T_NAME}}"
+    image: "${{ISB_T_IMAGE:-dev-base}}"
+    idmap: auto
+    labels: {{ isb-test: "1", isb-test.web: "${{ISB_T_WEB}}" }}
+    volumes:
+      /home/dev/web: {{ bind: ./web, device: web }}
+      /home/dev/.cache/t: {{ named: {vol}, owner: dev }}
+    ready: [running, default_route, {{user_exists: dev}}, {{path_writable: /home/dev/web}}]
+    exec:
+      user: dev
+      cwd: /home/dev/web
+      env: {{ GREETING: hello }}
+"#
+        ),
+    )
+    .unwrap();
+    let bin = isb_bin();
+    let run = |args: &[&str]| {
+        let out = Command::new(&bin)
+            .arg("-f")
+            .arg(&file)
+            .args(args)
+            .env("ISB_T_NAME", &name)
+            .env("ISB_T_IMAGE", image())
+            .env("ISB_T_WEB", &web)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        (
+            out.status.code(),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    };
+
+    let (code, out, err) = run(&["plan", "--exit-code"]);
+    assert_eq!(code, Some(2), "{out}{err}");
+    assert!(out.contains("+ create"), "{out}");
+    let (code, _, err) = run(&["up"]);
+    assert_eq!(code, Some(0), "{err}");
+    let (code, out, err) = run(&["plan", "--exit-code"]);
+    assert_eq!(code, Some(0), "{out}{err}");
+    assert!(out.contains("up to date"), "{out}");
+    let (code, out, _) = run(&["plan", "--json"]);
+    assert_eq!(code, Some(0));
+    let plans: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+    assert_eq!(plans[0]["name"], name.as_str());
+
+    // exec by service name uses the service's exec defaults.
+    let (code, out, err) = run(&[
+        "exec",
+        "web",
+        "--",
+        "sh",
+        "-c",
+        "id -un; pwd; echo $GREETING > f; echo $GREETING",
+    ]);
+    assert_eq!(code, Some(0), "{err}");
+    assert_eq!(out, "dev\n/home/dev/web\nhello\n");
+    assert_eq!(std::fs::read_to_string(web.join("f")).unwrap(), "hello\n");
+
+    let (code, out, _) = run(&["ps", "--json"]);
+    assert_eq!(code, Some(0));
+    assert!(out.contains("\"service\": \"web\""), "{out}");
+    let (code, out, _) = run(&["config"]);
+    assert_eq!(code, Some(0));
+    assert!(out.contains(&name), "{out}");
+
+    let (code, _, err) = run(&["down", "--volumes"]);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(Sandbox::get(&client, &name).is_err());
+    assert!(isb::volume::get(&client, &pool, &vol).unwrap().is_none());
+}
+
+/// A virtual machine: the other first-class instance type. Boots, waits for the
+/// agent, execs, and shares a host path over virtiofs.
+#[test]
+fn virtual_machine() {
+    if !enabled() {
+        return;
+    }
+    let client = Client::new();
+    let vm_image = std::env::var("ISB_TEST_VM_IMAGE").unwrap_or_else(|_| "deb13-cloud-vm".into());
+    if client
+        .server_info()
+        .map(|i| !i.to_string().contains("qemu"))
+        .unwrap_or(true)
+    {
+        eprintln!("skipped: incusd has no qemu driver");
+        return;
+    }
+    let mut cleanup = Cleanup::new(&client);
+    let name = test_name("vm");
+    cleanup.instance(&name);
+    let share = tempdir();
+    std::fs::write(share.path().join("from-host"), "hello vm\n").unwrap();
+    let mut spec = SandboxSpec::new(&name, &vm_image)
+        .cpus(2)
+        .memory("1GiB")
+        .label("isb-test", "1")
+        .volume(
+            "/mnt/share",
+            Volume::bind(share.path().to_str().unwrap()).device("share"),
+        )
+        .ready_timeout("240s");
+    spec.instance_type = isb::InstanceType::VirtualMachine;
+
+    let t = Instant::now();
+    let sb = match Sandbox::create(&client, &spec) {
+        Err(Error::Invalid(m)) if m.contains("not found locally") => {
+            eprintln!("skipped: no local VM image {vm_image}");
+            return;
+        }
+        Err(e) => {
+            // Evidence for a VM that did not come up: its console and state.
+            for args in [vec!["console", &name, "--show-log"], vec!["info", &name]] {
+                if let Ok(o) = Command::new("incus").args(&args).output() {
+                    let t = String::from_utf8_lossy(&o.stdout);
+                    let tail: Vec<&str> = t.lines().rev().take(40).collect();
+                    eprintln!(
+                        "--- incus {}:\n{}",
+                        args[0],
+                        tail.into_iter().rev().collect::<Vec<_>>().join("\n")
+                    );
+                }
+            }
+            panic!("create vm: {e:?}");
+        }
+        Ok(sb) => sb,
+    };
+    eprintln!("vm ready in {:?}", t.elapsed());
+    let info = sb.info().unwrap();
+    assert_eq!(info.instance_type, "virtual-machine");
+
+    // Its own kernel, exec over the agent, exit codes.
+    let out = sb
+        .exec(["sh", "-c", "cat /mnt/share/from-host; exit 3"])
+        .unwrap();
+    assert_eq!(out.exit_code, 3);
+    assert_eq!(out.stdout_text(), "hello vm\n", "{}", out.stderr_text());
+    let out = sb
+        .exec(["sh", "-c", "echo back > /mnt/share/from-vm"])
+        .unwrap();
+    assert_eq!(out.exit_code, 0, "{}", out.stderr_text());
+    assert_eq!(
+        std::fs::read_to_string(share.path().join("from-vm")).unwrap(),
+        "back\n"
+    );
+    let out = sb
+        .exec_with(["tty"], ExecOptions::default().tty(true))
+        .unwrap();
+    assert!(
+        out.stdout_text().contains("/dev/pts/"),
+        "{:?}",
+        out.stdout_text()
+    );
+
+    // A no-op ensure on a VM changes nothing either.
+    let d = sandbox::resolve(
+        &client,
+        &spec,
+        &Default::default(),
+        std::path::Path::new("/"),
+    )
+    .unwrap();
+    let plan = sandbox::plan_desired(&client, &d, DiffOptions::default()).unwrap();
+    assert!(plan.is_noop(), "{:?}", plan.actions);
+}

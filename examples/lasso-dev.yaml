@@ -1,0 +1,84 @@
+# lasso's per-worktree frontend dev container, as isb compose.
+#
+# Mirrors lasso's scripts/container.sh (container_ensure, container_mount,
+# container_bun_cache, container_run_in). The dev-server half
+# (scripts/container-dev-web.sh) is the overlay in lasso-dev-web.yaml.
+#
+# One container per worktree. lasso computes the name (dev-lasso-<slug>-<hash of
+# the src/web path>) and the paths, and passes them in:
+#
+#   export LASSO_DEV_CONTAINER=dev-lasso-my-branch-1a2b3c4d
+#   export LASSO_WORKTREE=/home/me/.lasso/worktrees/lasso/my-branch
+#   export LASSO_WEB=$LASSO_WORKTREE/src/web        # symlinks resolved (pwd -P)
+#
+#   isb -f examples/lasso-dev.yaml up               # container_ensure
+#   isb -f examples/lasso-dev.yaml exec web -- bun run lint
+#   isb -f examples/lasso-dev.yaml exec web -- bash -c 'bun install && bun run build'
+#
+# What container_ensure did, and where it lives here:
+#   - image must exist locally, else fail early     -> isb checks before creating
+#   - flock per container around ensure             -> isb takes $XDG_RUNTIME_DIR/isb/<project>/<name>.lock
+#   - storage pool: incus-zfs, else default, else first; LASSO_DEV_STORAGE wins
+#                                                    -> storage: auto (below)
+#   - init -> add devices -> start, so every mount exists before first boot
+#                                                    -> one create request with config + devices
+#   - raw.idmap "both 1000 1000" only where needed  -> idmap: auto
+#   - `web` disk: re-added only when wrong (a remount kills Vite's inotify
+#     watches)                                       -> reconcile never touches a correct device
+#   - $HOME/... translated via /etc/workspace/guest-home inside a workspace box
+#                                                    -> automatic in isb (or ISB_HOST_PATH_MAP)
+#   - shared bun cache volume, created if missing, chowned to dev with the
+#     parents the mount conjured                     -> named volume with owner: dev
+#   - wait for a default route after first start    -> ready: [..., default_route]
+#   - start it if stopped                           -> up starts a stopped instance
+#   - `sudo -u dev -H bash -lc 'eval "$(mise activate bash --shims)" && cd DIR && CMD'`
+#                                                    -> exec: user/cwd/env below
+#
+# Opting out of the shared bun cache (LASSO_DEV_BUN_CACHE= in container.sh):
+# a mount cannot be switched off by a variable, so use an overlay file that
+# drops it, or keep a second copy of this file without it.
+
+name: lasso-dev
+
+volumes:
+  # Shared by every dev container: content-addressed and written
+  # tmp-then-rename, so sharing is safe for correctness.
+  lasso-bun-cache: {}
+
+sandboxes:
+  web:
+    name: "${LASSO_DEV_CONTAINER:?set LASSO_DEV_CONTAINER (lasso computes it from the src/web path)}"
+    image: "${LASSO_DEV_IMAGE:-dev-base}"
+    storage: "${LASSO_DEV_STORAGE:-auto}"
+    cpus: 8          # caps, not reservations
+    memory: 8GiB
+    privileged: false
+    idmap: auto
+    labels:
+      # `dev:prune` and titan's weekly lasso-prune key on this label:
+      #   isb prune --label lasso.worktree --missing-path [-y]
+      lasso.worktree: "${LASSO_WORKTREE:?set LASSO_WORKTREE}"
+      lasso.web: "${LASSO_WEB:?set LASSO_WEB}"
+    volumes:
+      # Only src/web is mounted, never the repo root: a postinstall script that
+      # could reach .git could drop a hook, and main auto-pushes.
+      /home/dev/repo/src/web:
+        bind: "${LASSO_WEB}"
+        device: web
+      /home/dev/.bun/install/cache:
+        named: lasso-bun-cache
+        device: bun-cache
+        owner: dev
+    ready:
+      - running
+      - default_route          # the first task is always `bun install`
+      - user_exists: dev
+      - path_writable: /home/dev/repo/src/web
+    ready_timeout: 60s
+    exec:
+      user: dev
+      cwd: /home/dev/repo/src/web
+      env:
+        # Equivalent of `mise activate bash --shims`: the toolchain (node, bun,
+        # uv) on PATH without a login shell.
+        PATH: /home/dev/.local/share/mise/shims:/home/dev/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
