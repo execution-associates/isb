@@ -14,7 +14,7 @@ package starts it, sends requests and maps the answers to Python types.
 ## Install
 
 ```sh
-pip install isb
+pip install isb-sdk
 ```
 
 Platform wheels (x86_64 and aarch64 Linux) bundle a static isb binary at
@@ -57,7 +57,14 @@ async def main() -> None:
                 "/home/dev/src": Volume.bind("./src", device="src"),
                 "/home/dev/.cache": Volume.named("dev-cache", owner="dev"),
             },
-            ports=[PortBinding.host("tcp:127.0.0.1:5173", "tcp:127.0.0.1:5173", name="vite", search=20)],
+            ports=[
+                PortBinding.host(
+                    "tcp:127.0.0.1:5173",
+                    "tcp:127.0.0.1:5173",
+                    name="vite",
+                    search=20,
+                ),
+            ],
             ready=["running", "default_route", {"user_exists": "dev"}],
             exec={"user": "dev", "cwd": "/home/dev/src"},
             on_progress=print,
@@ -69,10 +76,12 @@ async def main() -> None:
         assert out.stdout_text == "[a b][$HOME]"
 
         # Streaming output, as it is produced.
-        async with await sb.exec_stream(["sh", "-c", "for i in 1 2 3; do echo $i; sleep 1; done"]) as p:
-            async for ev in p:
-                print(ev.kind, ev.text, end="")
-            print("exit", await p.wait())
+        script = "for i in 1 2 3; do echo $i; sleep 1; done"
+        proc = await sb.exec_stream(["sh", "-c", script])
+        async with proc:
+            async for event in proc:
+                print(event.kind, event.text, end="")
+            print("exit code:", await proc.wait())
 
         await sb.remove(force=True)
 
@@ -84,12 +93,17 @@ asyncio.run(main())
 
 ```python
 project = await isb.Project.load("isb.yaml", vars={"WORKTREE": "/srv/wt"})
+
 for plan in await project.plan():
     print(plan.name, plan.status, plan.actions)
+
 for service, report in await project.up(on_progress=print):
     print(service, report.created, report.ports)
-web = project.sandbox("web")  # carries the service's exec defaults
+
+# A sandbox from the project carries its service's exec defaults.
+web = project.sandbox("web")
 await web.exec(["bun", "install"])
+
 await project.down(volumes=True)
 ```
 
@@ -148,8 +162,18 @@ per-call arguments override them.
 ### Exec
 
 ```python
-out = await sb.exec(cmd, args=None, *, cwd=None, user=None, env=None, login=None,
-                    timeout=None, stdin=None, tty=False)
+out = await sb.exec(
+    cmd,
+    args=None,
+    *,
+    cwd=None,
+    user=None,
+    env=None,
+    login=None,
+    timeout=None,
+    stdin=None,
+    tty=False,
+)
 ```
 
 `cmd` is a program plus `args`, or a full argv list. Returns

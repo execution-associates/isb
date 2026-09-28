@@ -6,22 +6,27 @@ binary.
 
 ```yaml
 # isb.yaml
-volumes:
-  bun-cache: {}
 sandboxes:
   web:
     image: dev-base
     cpus: 8
     memory: 8GiB
     idmap: auto
-    labels: { app.worktree: "${WORKTREE}" }
+    labels:
+      app.worktree: "${WORKTREE}"
     volumes:
       /home/dev/src: { bind: ./src, device: src }
       /home/dev/.bun/install/cache: { named: bun-cache, owner: dev }
     ports:
-      - { name: vite, bind: host, listen: "tcp:${IP}:5173", connect: "tcp:127.0.0.1:5173", search: 50 }
+      - name: vite
+        bind: host
+        listen: "tcp:${IP}:5173"
+        connect: "tcp:127.0.0.1:5173"
+        search: 50
     ready: [running, default_route, { user_exists: dev }]
-    exec: { user: dev, cwd: /home/dev/src }
+    exec:
+      user: dev
+      cwd: /home/dev/src
 
   # The same, as a virtual machine: its own kernel instead of the host's.
   worker:
@@ -32,6 +37,9 @@ sandboxes:
     volumes:
       /srv/data: { bind: ./data }
     ready: [running, agent, default_route]
+
+volumes:
+  bun-cache: {}
 ```
 
 ```console
@@ -151,23 +159,147 @@ The SDKs live in this repository and drive the same engine through `isb rpc`, a
 line-delimited JSON protocol on the binary's stdin/stdout
 ([docs/rpc.md](docs/rpc.md)). Any other language can use that protocol too.
 
-- Python: [sdk/python](sdk/python), `pip install isb`
-- TypeScript (Bun): [sdk/typescript](sdk/typescript), `@execution-associates/isb`
+- Python: [sdk/python](sdk/python), `pip install isb-sdk` (imported as `isb`)
+- TypeScript (Bun): [sdk/typescript](sdk/typescript), `bun add @execution-associates/isb`
+
+Both are async, have no runtime dependencies, and ship the static isb binary
+for x86_64 and aarch64 Linux, so nothing else needs installing.
+
+### Python
 
 ```python
-from isb import Sandbox
+import asyncio
 
-sb = await Sandbox.create("web", image="dev-base", cpus=2)
-out = await sb.exec("uname", ["-a"])
-print(out.stdout_text)
+from isb import PortBinding, Project, Sandbox, Volume
+
+
+async def main() -> None:
+    # Create the sandbox, or change only what differs if it already exists.
+    sb = await Sandbox.connect_or_create(
+        "web",
+        image="dev-base",
+        cpus=2,
+        memory="2GiB",
+        idmap="auto",
+        labels={"app": "web"},
+        volumes={
+            "/home/dev/src": Volume.bind("./src", device="src"),
+            "/home/dev/.cache": Volume.named("web-cache", owner="dev"),
+        },
+        ports=[
+            PortBinding.host(
+                "tcp:127.0.0.1:5173",
+                "tcp:127.0.0.1:5173",
+                name="vite",
+                search=20,
+            ),
+        ],
+        ready=["running", "default_route", {"user_exists": "dev"}],
+        exec={"user": "dev", "cwd": "/home/dev/src"},
+    )
+
+    # Run a command and collect its output. argv is passed as a list and is
+    # never joined into a shell string.
+    out = await sb.exec("uname", ["-a"])
+    print(out.exit_code, out.stdout_text)
+
+    # Stream output as it is produced, feeding stdin as you go.
+    proc = await sb.exec_stream(
+        ["sh", "-c", "cat; echo done >&2"],
+        stdin="piped",
+    )
+    async with proc:
+        await proc.write(b"hello\n")
+        await proc.close_stdin()
+        async for event in proc:
+            print(event.kind, event.text, end="")
+        print("exit code:", await proc.wait())
+
+    # Find sandboxes by label, then clean up.
+    for info in await Sandbox.list_with(labels={"app": "web"}):
+        print(info.name, info.status)
+    await sb.remove(force=True)
+
+    # Or drive a compose file, like `isb up` / `isb down`.
+    project = await Project.load(
+        "isb.yaml",
+        vars={"WORKTREE": "/srv/wt", "IP": "127.0.0.1"},
+    )
+    for service, report in await project.up(on_progress=print):
+        print(service, report.created, report.ports)
+    await project.sandbox("web").exec(["ls", "-la"])
+    await project.down(volumes=True)
+
+
+asyncio.run(main())
 ```
 
-```ts
-import { Sandbox } from "@execution-associates/isb";
+### TypeScript
 
-const sb = await Sandbox.create({ name: "web", image: "dev-base", cpus: 2 });
+```ts
+import {
+  PortBinding,
+  Project,
+  Sandbox,
+  Volume,
+} from "@execution-associates/isb";
+
+// Create the sandbox, or change only what differs if it already exists.
+const sb = await Sandbox.connectOrCreate({
+  name: "web",
+  image: "dev-base",
+  cpus: 2,
+  memory: "2GiB",
+  idmap: "auto",
+  labels: { app: "web" },
+  volumes: {
+    "/home/dev/src": Volume.bind("./src", { device: "src" }),
+    "/home/dev/.cache": Volume.named("web-cache", { owner: "dev" }),
+  },
+  ports: [
+    PortBinding.host("tcp:127.0.0.1:5173", "tcp:127.0.0.1:5173", {
+      name: "vite",
+      search: 20,
+    }),
+  ],
+  ready: ["running", "default_route", { user_exists: "dev" }],
+  exec: { user: "dev", cwd: "/home/dev/src" },
+});
+
+// Run a command and collect its output. argv is passed as a list and is
+// never joined into a shell string.
 const out = await sb.exec("uname", ["-a"]);
-console.log(out.stdoutText);
+console.log(out.exitCode, out.stdoutText);
+
+// Stream output as it is produced, feeding stdin as you go.
+const proc = await sb.execStream(["sh", "-c", "cat; echo done >&2"], {
+  stdin: "piped",
+});
+await proc.write("hello\n");
+await proc.closeStdin();
+
+const decoder = new TextDecoder();
+for await (const event of proc) {
+  process.stdout.write(`${event.kind}: ${decoder.decode(event.data)}`);
+}
+console.log("exit code:", await proc.wait());
+
+// Find sandboxes by label, then clean up.
+for (const info of await Sandbox.listWith({ labels: { app: "web" } })) {
+  console.log(info.name, info.status);
+}
+await sb.remove({ force: true });
+
+// Or drive a compose file, like `isb up` / `isb down`.
+const project = await Project.load({
+  files: ["isb.yaml"],
+  vars: { WORKTREE: "/srv/wt", IP: "127.0.0.1" },
+});
+for (const { service, report } of await project.up()) {
+  console.log(service, report.created, report.ports);
+}
+await project.sandbox("web").exec(["ls", "-la"]);
+await project.down({ volumes: true });
 ```
 
 ## Development
