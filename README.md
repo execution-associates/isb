@@ -43,23 +43,23 @@ $ isb down
 
 ## Install
 
-isb is not on crates.io yet.
+Prebuilt static binaries for x86_64 and aarch64 Linux are attached to each
+[GitHub release](https://github.com/execution-associates/isb/releases).
 
 ```sh
-# From git
-cargo install --git https://github.com/execution-associates/isb
+# Prebuilt binary, no compiling
+mise use -g github:execution-associates/isb
 
-# From a checkout
-cargo install --path .
-
-# With mise (git source until it is published)
-mise use -g "cargo:https://github.com/execution-associates/isb@branch:main"
-# After publishing to crates.io:
+# From crates.io (builds from source)
+cargo install isb
 mise use -g cargo:isb
+
+# The library
+cargo add isb
 ```
 
-Building runs build scripts and proc macros from dependencies. Build inside a
-sandbox if that matters to you (see [Development](#development)).
+Building from source runs build scripts and proc macros from dependencies.
+Build inside a sandbox if that matters to you (see [Development](#development)).
 
 isb needs access to the incus socket (`$INCUS_SOCKET`, else
 `$INCUS_DIR/unix.socket`, else `/var/lib/incus/unix.socket`), which usually
