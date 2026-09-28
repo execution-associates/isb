@@ -414,7 +414,9 @@ ready: [running, default_route, {user_exists: dev}, {path_writable: /home/dev/sr
 
 ### `ready_timeout`
 
-Duration, default `60s`. One deadline for all checks together, measured from the
+Duration, default `60s` for a container and `300s` for a VM (a container is
+usable about a second after Running; a VM boots a kernel and its agent, 50 to
+90 s under nested virtualization). One deadline for all checks together, measured from the
 start of the first. Not stored in incus.
 
 ### `exec`

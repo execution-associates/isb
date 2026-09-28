@@ -577,6 +577,10 @@ pub fn resolve(
 
     let ready_timeout = match &spec.ready_timeout {
         Some(s) => parse_duration(s).map_err(|e| Error::invalid(format!("{name}: {e}")))?,
+        // A container is usable about a second after Running; a VM boots a
+        // kernel and its agent (50-90s under nested virtualization, plus the
+        // reboot a cloud image does on first boot).
+        None if vm => Duration::from_secs(300),
         None => Duration::from_secs(60),
     };
 
@@ -1563,6 +1567,7 @@ mod tests {
         // idmap: auto is a no-op for a VM; the default readiness waits for the agent.
         assert!(!d.config.contains_key("raw.idmap"));
         assert_eq!(d.ready, vec![ReadyCheck::Running, ReadyCheck::Agent]);
+        assert_eq!(d.ready_timeout, Duration::from_secs(300));
         let s2 = s
             .clone()
             .port(PortBinding::host("tcp:0.0.0.0:80", "tcp:10.0.0.2:80"));
