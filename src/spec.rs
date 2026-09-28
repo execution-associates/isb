@@ -108,8 +108,8 @@ pub struct SandboxSpec {
     /// shared into a VM over virtiofs, where inotify from host edits is not
     /// delivered, so file watchers inside the VM need polling. Proxies into a
     /// VM must be `bind: host`, and incus runs them in NAT mode (`nat: true`,
-    /// set automatically), which needs a static IP on the VM's NIC; `bind:
-    /// guest` is not available for VMs.
+    /// set automatically; with incus 7.0.1+ `connect: tcp:0.0.0.0:PORT` finds
+    /// the VM's address); `bind: guest` is not available for VMs.
     #[serde(default, rename = "type", skip_serializing_if = "is_default")]
     pub instance_type: InstanceType,
 
