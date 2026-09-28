@@ -102,8 +102,10 @@ impl Error {
 
     /// True for an incusd conflict (the object already exists).
     pub fn is_conflict(&self) -> bool {
-        matches!(self, Error::Api { status: 409, .. } | Error::AlreadyExists(_))
-            || matches!(self, Error::Api { message, .. } if message.contains("already exists"))
+        matches!(
+            self,
+            Error::Api { status: 409, .. } | Error::AlreadyExists(_)
+        ) || matches!(self, Error::Api { message, .. } if message.contains("already exists"))
     }
 
     /// True when the error is a deadline, either on a request or an operation.

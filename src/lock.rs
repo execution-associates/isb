@@ -21,7 +21,9 @@ fn lock_dir(project: &str) -> PathBuf {
     let base = std::env::var_os("XDG_RUNTIME_DIR")
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::temp_dir().join(format!("isb-{}", rustix::process::getuid().as_raw())));
+        .unwrap_or_else(|| {
+            std::env::temp_dir().join(format!("isb-{}", rustix::process::getuid().as_raw()))
+        });
     base.join("isb").join(project)
 }
 

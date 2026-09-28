@@ -29,9 +29,8 @@ pub fn interpolate(s: &str, lookup: &dyn Fn(&str) -> Option<String>) -> Result<S
                 i += 2;
             }
             Some('{') => {
-                let end = find_close(&chars, i + 2).ok_or_else(|| {
-                    Error::Interpolation(format!("unterminated ${{ in {s:?}"))
-                })?;
+                let end = find_close(&chars, i + 2)
+                    .ok_or_else(|| Error::Interpolation(format!("unterminated ${{ in {s:?}")))?;
                 let inner: String = chars[i + 2..end].iter().collect();
                 out.push_str(&expand_braced(&inner, lookup)?);
                 i = end + 1;

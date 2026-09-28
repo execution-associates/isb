@@ -229,7 +229,8 @@ impl Client {
         body: Option<&Value>,
         timeout: Duration,
     ) -> Result<Reply> {
-        self.request_etag(method, path, body, None, timeout).map(|(r, _)| r)
+        self.request_etag(method, path, body, None, timeout)
+            .map(|(r, _)| r)
     }
 
     /// Like [`Client::request`], optionally sending `If-Match`, and returning the
@@ -404,10 +405,17 @@ impl Client {
 
     /// Start an operation without waiting for it; returns its path
     /// (`/1.0/operations/<id>`). Low-level: most callers want the sandbox API.
-    pub fn start_operation(&self, method: &str, path: &str, body: Option<&Value>) -> Result<String> {
+    pub fn start_operation(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+    ) -> Result<String> {
         match self.request(method, path, body, self.timeouts.request)? {
             Reply::Async { operation, .. } => Ok(operation),
-            Reply::Sync(_) => Err(Error::Protocol(format!("{method} {path} did not start an operation"))),
+            Reply::Sync(_) => Err(Error::Protocol(format!(
+                "{method} {path} did not start an operation"
+            ))),
         }
     }
 
@@ -430,16 +438,18 @@ impl Client {
         operation: &str,
         secret: &str,
     ) -> Result<tungstenite::WebSocket<UnixStream>> {
-        let path =
-            self.with_project(&format!("{operation}/websocket?secret={}", encode_query(secret)));
+        let path = self.with_project(&format!(
+            "{operation}/websocket?secret={}",
+            encode_query(secret)
+        ));
         let stream = self.connect(self.timeouts.request)?;
         let url = format!("ws://incus{path}");
-        let (ws, _resp) = tungstenite::client::client(url.as_str(), stream).map_err(|e| {
-            Error::WebSocket(format!("handshake for {operation}: {e}"))
-        })?;
+        let (ws, _resp) = tungstenite::client::client(url.as_str(), stream)
+            .map_err(|e| Error::WebSocket(format!("handshake for {operation}: {e}")))?;
         // Exec output has no default timeout: a quiet process is not a stuck one.
         ws.get_ref().set_read_timeout(None)?;
-        ws.get_ref().set_write_timeout(Some(self.timeouts.request))?;
+        ws.get_ref()
+            .set_write_timeout(Some(self.timeouts.request))?;
         Ok(ws)
     }
 }
@@ -508,7 +518,11 @@ fn complete_response(buf: &[u8]) -> Result<Option<RawResponse>> {
     }
     let body = &buf[head_len..];
     if chunked {
-        return Ok(decode_chunked(body).map(|b| RawResponse { status, body: b, etag }));
+        return Ok(decode_chunked(body).map(|b| RawResponse {
+            status,
+            body: b,
+            etag,
+        }));
     }
     match content_length {
         Some(n) if body.len() >= n => Ok(Some(RawResponse {

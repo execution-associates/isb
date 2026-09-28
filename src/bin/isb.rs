@@ -225,7 +225,8 @@ struct CreateArgs {
     /// `[IP:]HOST:GUEST[/udp]`, or `listen=..,connect=..[,bind=guest][,name=][,search=]`.
     #[arg(short, long = "port")]
     ports: Vec<String>,
-    /// Readiness check (repeatable): running, default_route, user_exists=U, path_writable=P.
+    /// Readiness check (repeatable): running, default_route, user_exists=U,
+    /// path_writable=P, command=ARG,ARG.
     #[arg(long)]
     ready: Vec<String>,
     #[arg(long)]
@@ -506,7 +507,12 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
             if json {
                 print_json(&list);
             } else {
-                let mut rows = vec![vec!["NAME".into(), "STATUS".into(), "TYPE".into(), "LABELS".into()]];
+                let mut rows = vec![vec![
+                    "NAME".into(),
+                    "STATUS".into(),
+                    "TYPE".into(),
+                    "LABELS".into(),
+                ]];
                 for i in &list {
                     rows.push(vec![
                         i.name.clone(),
@@ -557,11 +563,7 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
             let c = ctx.client(None);
             let mut rep = ctx.report();
             let mut say = |l: &str| {
-                if json {
-                    rep(l)
-                } else {
-                    println!("{l}")
-                }
+                if json { rep(l) } else { println!("{l}") }
             };
             let items = sandbox::prune_missing_path(&c, &label, !yes, &mut say)?;
             if json {
@@ -569,7 +571,10 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
             } else if items.is_empty() {
                 println!("nothing to prune");
             } else if !yes {
-                println!("dry run; re-run with -y to delete ({} sandbox(es))", items.len());
+                println!(
+                    "dry run; re-run with -y to delete ({} sandbox(es))",
+                    items.len()
+                );
             }
             Ok(0)
         }
@@ -584,7 +589,9 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
             json,
             ..
         } => up(ctx, services, prune_devices, no_ready, json),
-        Cmd::Down { services, volumes, .. } => down(ctx, services, volumes),
+        Cmd::Down {
+            services, volumes, ..
+        } => down(ctx, services, volumes),
         Cmd::Plan {
             services,
             prune_devices,
@@ -641,7 +648,12 @@ fn create(ctx: &Ctx, a: CreateArgs) -> Result<u8> {
         spec.ports.push(shorthand::port(p)?);
     }
     if !a.ready.is_empty() {
-        spec.ready = Some(a.ready.iter().map(|r| shorthand::ready(r)).collect::<Result<_>>()?);
+        spec.ready = Some(
+            a.ready
+                .iter()
+                .map(|r| shorthand::ready(r))
+                .collect::<Result<_>>()?,
+        );
     }
     spec.ready_timeout = a.ready_timeout;
     if !a.profiles.is_empty() {
@@ -649,14 +661,14 @@ fn create(ctx: &Ctx, a: CreateArgs) -> Result<u8> {
     }
     let c = ctx.client(None);
     let mut rep = ctx.report();
+    let opts = EnsureOptions {
+        wait_ready: !a.no_ready,
+        ..Default::default()
+    };
     if a.ensure {
-        let opts = EnsureOptions {
-            wait_ready: !a.no_ready,
-            ..Default::default()
-        };
         Sandbox::connect_or_create_with(&c, &spec, &Default::default(), opts, &mut rep)?;
     } else {
-        Sandbox::create_with(&c, &spec, &Default::default(), &mut rep)?;
+        Sandbox::create_with(&c, &spec, &Default::default(), opts, &mut rep)?;
     }
     Ok(0)
 }
@@ -691,7 +703,9 @@ fn ps(ctx: &Ctx, services: Vec<String>, json: bool) -> Result<u8> {
         }
         None => {
             if !services.is_empty() {
-                return Err(Error::Invalid("no compose file; `isb ps` without one lists running sandboxes".into()));
+                return Err(Error::Invalid(
+                    "no compose file; `isb ps` without one lists running sandboxes".into(),
+                ));
             }
             for i in Sandbox::list(&ctx.client(None))? {
                 if i.status.eq_ignore_ascii_case("running") {
@@ -767,7 +781,11 @@ fn exec(ctx: &Ctx, a: ExecArgs) -> Result<u8> {
         width,
         height,
         timeout: a.timeout,
-        stdin: if a.no_stdin { Stdin::Null } else { Stdin::Inherit },
+        stdin: if a.no_stdin {
+            Stdin::Null
+        } else {
+            Stdin::Inherit
+        },
     };
     match sb.attach(a.argv, opts) {
         Ok(code) => Ok(code.clamp(0, 255) as u8),
@@ -781,11 +799,14 @@ fn exec(ctx: &Ctx, a: ExecArgs) -> Result<u8> {
 
 fn volume(ctx: &Ctx, v: VolumeCmd) -> Result<u8> {
     let c = ctx.client(None);
-    let pool = |p: Option<String>| -> Result<String> {
-        sandbox::host_facts(&c)?.pick_pool(p.as_deref())
-    };
+    let pool =
+        |p: Option<String>| -> Result<String> { sandbox::host_facts(&c)?.pick_pool(p.as_deref()) };
     match v {
-        VolumeCmd::Create { name, pool: p, config } => {
+        VolumeCmd::Create {
+            name,
+            pool: p,
+            config,
+        } => {
             let pool = pool(p)?;
             let mut cfg = BTreeMap::new();
             for kv in &config {
@@ -870,7 +891,12 @@ fn port(ctx: &Ctx, p: PortCmd) -> Result<u8> {
             if json {
                 print_json(&ports);
             } else {
-                let mut t = vec![vec!["DEVICE".into(), "BIND".into(), "LISTEN".into(), "CONNECT".into()]];
+                let mut t = vec![vec![
+                    "DEVICE".into(),
+                    "BIND".into(),
+                    "LISTEN".into(),
+                    "CONNECT".into(),
+                ]];
                 for (n, p) in ports {
                     let g = |k: &str| p.get(k).cloned().unwrap_or_default();
                     t.push(vec![n.clone(), g("bind"), g("listen"), g("connect")]);
@@ -915,7 +941,13 @@ fn device(ctx: &Ctx, d: DeviceCmd) -> Result<u8> {
     Ok(0)
 }
 
-fn up(ctx: &Ctx, services: Vec<String>, prune_devices: bool, no_ready: bool, json: bool) -> Result<u8> {
+fn up(
+    ctx: &Ctx,
+    services: Vec<String>,
+    prune_devices: bool,
+    no_ready: bool,
+    json: bool,
+) -> Result<u8> {
     let p = ctx.load()?;
     let c = ctx.client(p.file.project.as_deref());
     let opts = EnsureOptions {
@@ -957,29 +989,63 @@ fn down(ctx: &Ctx, services: Vec<String>, volumes: bool) -> Result<u8> {
         }
     }
     if volumes {
-        let facts = sandbox::host_facts(&c)?;
-        for (vname, def) in &p.file.volumes {
-            if def.external {
-                continue;
+        if !services.is_empty() {
+            rep(
+                "--volumes ignored: volumes are shared by the file, remove them with a full `down --volumes`",
+            );
+        } else {
+            // The pools `up` used: resolve each sandbox's mounts the same way.
+            let facts = sandbox::host_facts(&c)?;
+            let mut seen = std::collections::BTreeSet::new();
+            for spec in p.file.sandboxes.values() {
+                let pool = facts.pick_pool(spec.storage.as_deref())?;
+                for v in spec.volumes.values() {
+                    let Some(vname) = &v.named else { continue };
+                    let def = p.file.volumes.get(vname);
+                    if v.external || def.is_some_and(|d| d.external) {
+                        continue;
+                    }
+                    let vpool = match v.pool.as_deref().or(def.and_then(|d| d.pool.as_deref())) {
+                        Some(x) if x != "auto" => x.to_string(),
+                        _ => pool.clone(),
+                    };
+                    seen.insert((vpool, vname.clone()));
+                }
             }
-            let pool = facts.pick_pool(def.pool.as_deref())?;
-            match isb::volume::remove(&c, &pool, vname) {
-                Ok(()) => rep(&format!("volume {vname}: deleted")),
-                Err(e) if e.is_not_found() => {}
-                Err(e) => rep(&format!("volume {vname}: kept ({e})")),
+            for (vname, def) in &p.file.volumes {
+                if !def.external && !seen.iter().any(|(_, n)| n == vname) {
+                    seen.insert((facts.pick_pool(def.pool.as_deref())?, vname.clone()));
+                }
+            }
+            for (pool, vname) in seen {
+                match isb::volume::remove(&c, &pool, &vname) {
+                    Ok(()) => rep(&format!("volume {vname}: deleted")),
+                    Err(e) if e.is_not_found() => {}
+                    Err(e) => rep(&format!("volume {vname}: kept ({e})")),
+                }
             }
         }
     }
     Ok(0)
 }
 
-fn plan(ctx: &Ctx, services: Vec<String>, prune_devices: bool, json: bool, exit_code: bool) -> Result<u8> {
+fn plan(
+    ctx: &Ctx,
+    services: Vec<String>,
+    prune_devices: bool,
+    json: bool,
+    exit_code: bool,
+) -> Result<u8> {
     let p = ctx.load()?;
     let c = ctx.client(p.file.project.as_deref());
     let mut plans = Vec::new();
     for s in p.select(&services)? {
         let d = sandbox::resolve(&c, p.service(&s)?, &p.file.volumes, &p.base_dir)?;
-        plans.push(sandbox::plan_desired(&c, &d, DiffOptions { prune_devices })?);
+        plans.push(sandbox::plan_desired(
+            &c,
+            &d,
+            DiffOptions { prune_devices },
+        )?);
     }
     let changes = plans.iter().any(|p| !p.is_noop());
     if json {
@@ -1016,7 +1082,8 @@ mod tests {
         assert_eq!(c.cmd.files().unwrap().files, vec![PathBuf::from("b.yaml")]);
         let c = Cli::try_parse_from(["isb", "rm", "-f", "x"]).unwrap();
         assert!(matches!(c.cmd, Cmd::Rm { force: true, .. }));
-        let c = Cli::try_parse_from(["isb", "exec", "-f", "c.yaml", "web", "--", "ls", "-la"]).unwrap();
+        let c =
+            Cli::try_parse_from(["isb", "exec", "-f", "c.yaml", "web", "--", "ls", "-la"]).unwrap();
         match c.cmd {
             Cmd::Exec(a) => assert_eq!(a.argv, vec!["ls", "-la"]),
             _ => unreachable!(),

@@ -1,0 +1,41 @@
+# Overlay for lasso's `mise run dev` (scripts/container-dev-web.sh): the two
+# proxy devices that wire Vite in the container to the backend on the host.
+#
+#   export LASSO_BACKEND_PORT=8190      # where the Go backend listens on the host
+#   export LASSO_LISTEN_IP=100.x.y.z    # tailnet IP to publish Vite on
+#
+#   # refuse a second dev session in this worktree (a live process, not a device)
+#   isb -f examples/lasso-dev.yaml exec -n web -- pgrep -f 'bun run dev' && exit 1
+#
+#   isb -f examples/lasso-dev.yaml -f examples/lasso-dev-web.yaml up
+#   #   prints "web vite tcp:<ip>:<port>" when it had to add the vite device
+#   isb port ls "$LASSO_DEV_CONTAINER" --json   # the listen address actually in use
+#   trap 'isb port rm "$LASSO_DEV_CONTAINER" backend vite' EXIT INT TERM
+#   isb -f examples/lasso-dev.yaml exec web -- bun install
+#   isb -f examples/lasso-dev.yaml exec web -- env LASSO_BACKEND=http://127.0.0.1:8190 \
+#       bun run dev --host 127.0.0.1 --port 5173 --strictPort
+#
+# Differences from the shell version:
+#   - No cleanup-before-add. A `vite` device left behind by a killed run that
+#     still listens inside its search range counts as correct and is kept (it
+#     is this worktree's own container), and a stale `backend` pointing at an
+#     old port is replaced because it differs.
+#   - The free-port scan and the add are one step: isb probes the host port,
+#     then adds the device, and moves to the next port if either fails.
+
+sandboxes:
+  web:
+    ports:
+      # container 127.0.0.1:8190 -> host 127.0.0.1:<backend port>. The backend
+      # stays on host loopback, never exposed on the incus bridge.
+      - name: backend
+        bind: guest
+        listen: tcp:127.0.0.1:8190
+        connect: "tcp:127.0.0.1:${LASSO_BACKEND_PORT:?set LASSO_BACKEND_PORT}"
+      # host <tailnet ip>:<first free port from 5173> -> container 127.0.0.1:5173.
+      # Vite binds loopback inside the container, so nothing else is published.
+      - name: vite
+        bind: host
+        listen: "tcp:${LASSO_LISTEN_IP:?set LASSO_LISTEN_IP}:5173"
+        connect: tcp:127.0.0.1:5173
+        search: 50

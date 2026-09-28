@@ -50,7 +50,10 @@ impl HostFacts {
         if let Ok(m) = std::env::var("ISB_HOST_PATH_MAP") {
             if let Some((a, b)) = m.split_once('=') {
                 if !a.is_empty() && !b.is_empty() {
-                    return Some((a.trim_end_matches('/').into(), b.trim_end_matches('/').into()));
+                    return Some((
+                        a.trim_end_matches('/').into(),
+                        b.trim_end_matches('/').into(),
+                    ));
                 }
             }
             return None;
@@ -68,7 +71,7 @@ impl HostFacts {
     pub fn translate(&self, path: &str) -> String {
         if let Some((from, to)) = &self.path_map {
             if let Some(rest) = path.strip_prefix(from.as_str()) {
-                if rest.starts_with('/') {
+                if rest.is_empty() || rest.starts_with('/') {
                     return format!("{to}{rest}");
                 }
             }
@@ -202,10 +205,10 @@ pub struct Desired {
     #[serde(skip)]
     pub ready_timeout: Duration,
     pub exec: ExecDefaults,
-    /// `raw.idmap` was computed by `idmap: auto` (an absent value is then a
-    /// decision, not an omission).
+    /// The idmap mode when the spec set one (not for `{raw: ...}`): an absent
+    /// `raw.idmap` is then a decision, not an omission.
     #[serde(skip)]
-    pub idmap_auto: bool,
+    pub idmap_mode: Option<crate::spec::IdmapMode>,
 }
 
 /// Named-volume definitions available to a sandbox (from a compose file's
@@ -244,7 +247,11 @@ pub fn device_name_for_path(guest: &str) -> String {
     if s.len() <= 48 {
         return s;
     }
-    format!("{}-{:08x}", s[s.len() - 39..].trim_start_matches('-'), fnv32(guest))
+    format!(
+        "{}-{:08x}",
+        s[s.len() - 39..].trim_start_matches('-'),
+        fnv32(guest)
+    )
 }
 
 fn fnv32(s: &str) -> u32 {
@@ -268,7 +275,7 @@ pub fn split_addr(addr: &str) -> Option<(&str, &str, u16)> {
 
 fn default_port_name(bind: PortBind, listen: &str) -> String {
     match split_addr(listen) {
-        Some((proto, _, port)) if proto == "tcp" => format!("port-{}-{port}", bind.as_str()),
+        Some(("tcp", _, port)) => format!("port-{}-{port}", bind.as_str()),
         Some((proto, _, port)) => format!("port-{}-{proto}-{port}", bind.as_str()),
         None => format!("port-{}-{}", bind.as_str(), device_name_for_path(listen)),
     }
@@ -311,9 +318,36 @@ pub fn resolve(
         .clone()
         .ok_or_else(|| Error::invalid("sandbox name is required"))?;
     validate_instance_name(&name)?;
-    let image = ImageSource::parse(&spec.image)
-        .map_err(|e| Error::invalid(format!("{name}: {e}")))?;
+    let image =
+        ImageSource::parse(&spec.image).map_err(|e| Error::invalid(format!("{name}: {e}")))?;
     let pool = host.pick_pool(spec.storage.as_deref())?;
+    let vm = spec.instance_type == InstanceType::VirtualMachine;
+    if vm {
+        if spec.privileged.is_some() {
+            return Err(Error::invalid(format!(
+                "{name}: privileged is container-only"
+            )));
+        }
+        if let Some(i) = &spec.idmap {
+            if !matches!(
+                i,
+                crate::spec::IdmapSpec::Mode(
+                    crate::spec::IdmapMode::Auto | crate::spec::IdmapMode::None
+                )
+            ) {
+                return Err(Error::invalid(format!(
+                    "{name}: idmap is container-only (VM shares go over virtiofs)"
+                )));
+            }
+        }
+        for p in &spec.ports {
+            if p.bind == PortBind::Guest {
+                return Err(Error::invalid(format!(
+                    "{name}: incus VMs only support bind: host proxies (in NAT mode)"
+                )));
+            }
+        }
+    }
 
     let mut config = Props::new();
     if let Some(c) = &spec.cpus {
@@ -325,9 +359,13 @@ pub fn resolve(
     if let Some(p) = spec.privileged {
         config.insert("security.privileged".into(), p.to_string());
     }
-    let mut idmap_auto = false;
-    if let Some(i) = &spec.idmap {
-        idmap_auto = !matches!(i, crate::spec::IdmapSpec::Raw(_));
+    let mut idmap_mode = None;
+    if let Some(i) = spec.idmap.as_ref().filter(|_| !vm) {
+        idmap_mode = match i {
+            crate::spec::IdmapSpec::Mode(m) => Some(*m),
+            crate::spec::IdmapSpec::Map(m) => Some(m.mode),
+            crate::spec::IdmapSpec::Raw(_) => None,
+        };
         if let Some(v) = idmap::resolve(i, &host.subids) {
             config.insert("raw.idmap".into(), v);
         }
@@ -441,10 +479,23 @@ pub fn resolve(
         if v.readonly {
             props.insert("readonly".into(), "true".into());
         }
+        for k in v.options.keys() {
+            if matches!(k.as_str(), "type" | "path" | "source" | "pool" | "readonly") {
+                return Err(Error::invalid(format!(
+                    "{name}: {guest}: options.{k} would override a core property; use the field instead"
+                )));
+            }
+        }
         for (k, val) in &v.options {
             props.insert(k.clone(), val.clone());
         }
-        add_dev(dname, DesiredDevice { props, search: None })?;
+        add_dev(
+            dname,
+            DesiredDevice {
+                props,
+                search: None,
+            },
+        )?;
     }
 
     for p in &spec.ports {
@@ -478,7 +529,16 @@ pub fn resolve(
             ("listen".into(), p.listen.clone()),
             ("connect".into(), p.connect.clone()),
         ]);
+        if vm {
+            // incus proxies into a VM only in NAT mode.
+            props.insert("nat".into(), "true".into());
+        }
         for (k, val) in &p.options {
+            if matches!(k.as_str(), "type" | "bind" | "listen" | "connect") {
+                return Err(Error::invalid(format!(
+                    "{name}: port options.{k} would override a core property; use the field instead"
+                )));
+            }
             props.insert(k.clone(), val.clone());
         }
         add_dev(
@@ -490,7 +550,13 @@ pub fn resolve(
         )?;
     }
 
+    let mut root_extra = Props::new();
     for (dname, props) in &spec.raw_devices {
+        if dname == "root" {
+            // Tune the root disk (size, ...): merged over the generated one below.
+            root_extra.extend(props.clone());
+            continue;
+        }
         if !props.contains_key("type") {
             return Err(Error::invalid(format!(
                 "{name}: raw device {dname:?} needs a type"
@@ -503,6 +569,10 @@ pub fn resolve(
                 search: None,
             },
         )?;
+    }
+
+    if let Some(root) = devices.get_mut("root") {
+        root.props.extend(root_extra);
     }
 
     let ready_timeout = match &spec.ready_timeout {
@@ -523,10 +593,16 @@ pub fn resolve(
         devices,
         volumes,
         owners,
-        ready: spec.ready.clone().unwrap_or_else(|| vec![ReadyCheck::Running]),
+        ready: spec.ready.clone().unwrap_or_else(|| {
+            if vm {
+                vec![ReadyCheck::Running, ReadyCheck::Agent]
+            } else {
+                vec![ReadyCheck::Running]
+            }
+        }),
         ready_timeout,
         exec: spec.exec.clone(),
-        idmap_auto,
+        idmap_mode,
     })
 }
 
@@ -693,7 +769,11 @@ impl std::fmt::Display for Action {
                 f,
                 "~ config {key}: {} -> {to}{}",
                 from.as_deref().unwrap_or("(unset)"),
-                if *restart { " (takes effect on restart)" } else { "" }
+                if *restart {
+                    " (takes effect on restart)"
+                } else {
+                    ""
+                }
             ),
             Action::AddDevice { device, props: p } => write!(f, "+ device {device}: {}", props(p)),
             Action::ReplaceDevice {
@@ -899,13 +979,19 @@ pub fn diff(
             });
         }
     }
-    if desired.idmap_auto
-        && !desired.config.contains_key("raw.idmap")
-        && actual.config.contains_key("raw.idmap")
-    {
-        actions.push(Action::Note {
-            message: "raw.idmap is set but not needed on this host; left as is".into(),
-        });
+    if !desired.config.contains_key("raw.idmap") && actual.config.contains_key("raw.idmap") {
+        let why = match desired.idmap_mode {
+            Some(crate::spec::IdmapMode::Auto) => Some("not needed on this host"),
+            Some(crate::spec::IdmapMode::None) => Some("the spec says idmap: none"),
+            _ => None,
+        };
+        if let Some(why) = why {
+            actions.push(Action::Note {
+                message: format!(
+                    "raw.idmap is set but {why}; isb never removes config keys, unset it by hand"
+                ),
+            });
+        }
     }
 
     let mut new_devices: Vec<String> = Vec::new();
@@ -917,7 +1003,15 @@ pub fn diff(
         }
         if let Some(have) = actual.devices.get(name) {
             claimed.insert(name.clone());
-            if !device_matches(want, have) {
+            if !device_matches(want, have) && want.search.is_some() {
+                // Out of its range or otherwise wrong: drop it and search again,
+                // rather than replacing it at a port that may be taken.
+                actions.push(Action::RemoveDevice {
+                    device: name.clone(),
+                    props: have.clone(),
+                });
+                deferred_ports.push(name.clone());
+            } else if !device_matches(want, have) {
                 actions.push(Action::ReplaceDevice {
                     device: name.clone(),
                     replaces: name.clone(),
@@ -937,11 +1031,9 @@ pub fn diff(
                 && p.get("type").map(String::as_str) == Some("disk")
                 && normalize(p).get("path") == normalize(&want.props).get("path")
         };
-        if let Some((other, have)) = actual
-            .devices
-            .iter()
-            .find(|(n, p)| *n != "root" && !desired.devices.contains_key(*n) && device_matches(want, p))
-        {
+        if let Some((other, have)) = actual.devices.iter().find(|(n, p)| {
+            *n != "root" && !desired.devices.contains_key(*n) && device_matches(want, p)
+        }) {
             claimed.insert(other.clone());
             actions.push(Action::Note {
                 message: format!("device {name} already present as {other}; left as is"),
@@ -1096,7 +1188,13 @@ mod tests {
     fn resolves_lasso_shape() {
         let t = tmp();
         let web = t.path().to_str().unwrap();
-        let d = resolve(&lasso_spec(web), &VolumeDefs::new(), &host(), Path::new("/")).unwrap();
+        let d = resolve(
+            &lasso_spec(web),
+            &VolumeDefs::new(),
+            &host(),
+            Path::new("/"),
+        )
+        .unwrap();
         assert_eq!(d.pool, "default");
         assert_eq!(d.config["limits.cpu"], "8");
         assert_eq!(d.config["limits.memory"], "8GiB");
@@ -1206,7 +1304,11 @@ mod tests {
             .get_mut("web")
             .unwrap()
             .insert("source".into(), format!("{src}/"));
-        assert!(diff(&d, Some(&a), &[], DiffOptions::default()).unwrap().is_noop());
+        assert!(
+            diff(&d, Some(&a), &[], DiffOptions::default())
+                .unwrap()
+                .is_noop()
+        );
     }
 
     #[test]
@@ -1342,7 +1444,15 @@ mod tests {
         );
         let p = diff(&d, Some(&a), &[], DiffOptions::default()).unwrap();
         assert!(p.is_noop());
-        let p = diff(&d, Some(&a), &[], DiffOptions { prune_devices: true }).unwrap();
+        let p = diff(
+            &d,
+            Some(&a),
+            &[],
+            DiffOptions {
+                prune_devices: true,
+            },
+        )
+        .unwrap();
         assert_eq!(p.actions.len(), 1);
         assert!(matches!(&p.actions[0], Action::RemoveDevice { device, .. } if device == "extra"));
     }
@@ -1357,11 +1467,22 @@ mod tests {
         );
         let d = resolve(&spec, &VolumeDefs::new(), &host(), Path::new("/")).unwrap();
         let mut a = actual_from(&d);
-        a.devices.get_mut("vite").unwrap().insert("listen".into(), "tcp:100.1.2.3:5190".into());
-        assert!(diff(&d, Some(&a), &[], DiffOptions::default()).unwrap().is_noop());
-        a.devices.get_mut("vite").unwrap().insert("listen".into(), "tcp:100.1.2.3:5300".into());
+        a.devices
+            .get_mut("vite")
+            .unwrap()
+            .insert("listen".into(), "tcp:100.1.2.3:5190".into());
+        assert!(
+            diff(&d, Some(&a), &[], DiffOptions::default())
+                .unwrap()
+                .is_noop()
+        );
+        a.devices
+            .get_mut("vite")
+            .unwrap()
+            .insert("listen".into(), "tcp:100.1.2.3:5300".into());
         let p = diff(&d, Some(&a), &[], DiffOptions::default()).unwrap();
-        assert!(matches!(&p.actions[0], Action::ReplaceDevice { .. }));
+        assert!(matches!(&p.actions[0], Action::RemoveDevice { device, .. } if device == "vite"));
+        assert!(matches!(&p.actions[1], Action::AddPort { search: 50, .. }));
         // Missing: deferred until after start so the search runs against live binds.
         a.devices.remove("vite");
         let p = diff(&d, Some(&a), &[], DiffOptions::default()).unwrap();
@@ -1379,8 +1500,14 @@ mod tests {
     fn both_port_directions() {
         let t = tmp();
         let spec = lasso_spec(t.path().to_str().unwrap())
-            .port(PortBinding::guest("tcp:127.0.0.1:8190", "tcp:127.0.0.1:8191"))
-            .port(PortBinding::host("tcp:127.0.0.1:5173", "tcp:127.0.0.1:5173"));
+            .port(PortBinding::guest(
+                "tcp:127.0.0.1:8190",
+                "tcp:127.0.0.1:8191",
+            ))
+            .port(PortBinding::host(
+                "tcp:127.0.0.1:5173",
+                "tcp:127.0.0.1:5173",
+            ));
         let d = resolve(&spec, &VolumeDefs::new(), &host(), Path::new("/")).unwrap();
         assert_eq!(d.devices["port-guest-8190"].props["bind"], "guest");
         assert_eq!(d.devices["port-host-5173"].props["bind"], "host");
@@ -1396,7 +1523,9 @@ mod tests {
         assert!(r(&s).is_err());
         let s = base.clone().volume("rel/path", Volume::bind("/"));
         assert!(r(&s).is_err());
-        let s = base.clone().volume("/x", Volume::bind("/definitely/not/here"));
+        let s = base
+            .clone()
+            .volume("/x", Volume::bind("/definitely/not/here"));
         assert!(r(&s).unwrap_err().to_string().contains("does not exist"));
         let s = base.clone().volume("/x", Volume::bind("/").owner("dev"));
         assert!(r(&s).is_err());
@@ -1404,12 +1533,50 @@ mod tests {
         v.named = Some("n".into());
         let s = base.clone().volume("/x", v);
         assert!(r(&s).is_err());
-        let s = base.clone().port(PortBinding::guest("tcp:1.2.3.4:1", "tcp:1.2.3.4:2").search(3));
+        let s = base
+            .clone()
+            .port(PortBinding::guest("tcp:1.2.3.4:1", "tcp:1.2.3.4:2").search(3));
         assert!(r(&s).is_err());
-        let s = base.clone().port(PortBinding::host("1.2.3.4:1", "tcp:1.2.3.4:2"));
+        let s = base
+            .clone()
+            .port(PortBinding::host("1.2.3.4:1", "tcp:1.2.3.4:2"));
         assert!(r(&s).is_err());
+        let s = base
+            .clone()
+            .volume("/y", Volume::bind("/").option("source", "/etc"));
+        assert!(r(&s).unwrap_err().to_string().contains("core property"));
         let s = base.clone().volume("/y", Volume::bind("/").device("web"));
         assert!(r(&s).unwrap_err().to_string().contains("used twice"));
+    }
+
+    #[test]
+    fn vm_rules() {
+        use crate::spec::InstanceType;
+        let t = tmp();
+        let r = |s: &SandboxSpec| resolve(s, &VolumeDefs::new(), &host(), Path::new("/"));
+        let mut s = lasso_spec(t.path().to_str().unwrap());
+        s.instance_type = InstanceType::VirtualMachine;
+        // privileged and explicit idmap are container-only.
+        assert!(r(&s).unwrap_err().to_string().contains("container-only"));
+        s.privileged = None;
+        let d = r(&s).unwrap();
+        // idmap: auto is a no-op for a VM; the default readiness waits for the agent.
+        assert!(!d.config.contains_key("raw.idmap"));
+        assert_eq!(d.ready, vec![ReadyCheck::Running, ReadyCheck::Agent]);
+        let s2 = s
+            .clone()
+            .port(PortBinding::host("tcp:0.0.0.0:80", "tcp:10.0.0.2:80"));
+        assert_eq!(r(&s2).unwrap().devices["port-host-80"].props["nat"], "true");
+        let s3 = s
+            .clone()
+            .port(PortBinding::guest("tcp:127.0.0.1:1", "tcp:127.0.0.1:2"));
+        assert!(r(&s3).is_err());
+        s.idmap = Some(IdmapSpec::Mode(IdmapMode::Always));
+        assert!(r(&s).is_err());
+        // `vm` is accepted as shorthand in YAML.
+        let f: crate::spec::ComposeFile =
+            serde_yaml_ng::from_str("sandboxes:\n  a: {image: x, type: vm}\n").unwrap();
+        assert_eq!(f.sandboxes["a"].instance_type, InstanceType::VirtualMachine);
     }
 
     #[test]
@@ -1439,13 +1606,17 @@ mod tests {
         let mut h = host();
         h.path_map = Some(("/home/u".into(), "/srv/box/home".into()));
         assert_eq!(h.translate("/home/u/src/web"), "/srv/box/home/src/web");
+        assert_eq!(h.translate("/home/u"), "/srv/box/home");
         assert_eq!(h.translate("/home/user2/x"), "/home/user2/x");
         assert_eq!(h.translate("/elsewhere"), "/elsewhere");
     }
 
     #[test]
     fn device_names_are_deterministic() {
-        assert_eq!(device_name_for_path("/home/dev/.bun/install/cache"), "home-dev-bun-install-cache");
+        assert_eq!(
+            device_name_for_path("/home/dev/.bun/install/cache"),
+            "home-dev-bun-install-cache"
+        );
         let long = "/a/very/long/path/that/goes/on/and/on/and/on/forever/and/ever/amen";
         let n = device_name_for_path(long);
         assert!(n.len() <= 48, "{n}");
@@ -1456,7 +1627,10 @@ mod tests {
     #[test]
     fn image_sources() {
         let i = ImageSource::parse("images:debian/12").unwrap();
-        assert_eq!(i.server.as_deref(), Some("https://images.linuxcontainers.org"));
+        assert_eq!(
+            i.server.as_deref(),
+            Some("https://images.linuxcontainers.org")
+        );
         assert_eq!(i.alias, "debian/12");
         let i = ImageSource::parse("dev-base").unwrap();
         assert!(i.server.is_none());

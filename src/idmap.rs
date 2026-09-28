@@ -139,7 +139,10 @@ mod tests {
 
     #[test]
     fn explicit_modes() {
-        assert_eq!(resolve(&IdmapSpec::Mode(IdmapMode::None), &host(TITAN)), None);
+        assert_eq!(
+            resolve(&IdmapSpec::Mode(IdmapMode::None), &host(TITAN)),
+            None
+        );
         assert_eq!(
             resolve(&IdmapSpec::Mode(IdmapMode::Always), &host(BOX)).as_deref(),
             Some("both 1000 1000")

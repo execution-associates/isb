@@ -49,6 +49,8 @@ impl SandboxInfo {
             .config
             .iter()
             .filter_map(|(k, v)| k.strip_prefix("user.").map(|k| (k.to_string(), v.clone())))
+            // isb's own bookkeeping (user.isb.create-token) is not a label.
+            .filter(|(k, _): &(String, String)| !k.starts_with("isb."))
             .collect();
         SandboxInfo {
             name: v.get("name").and_then(Value::as_str).unwrap_or("").into(),
@@ -73,11 +75,13 @@ impl SandboxInfo {
 
     /// Whether this instance matches every filter.
     pub fn matches(&self, filters: &[LabelFilter]) -> bool {
-        filters.iter().all(|f| match (&f.value, self.labels.get(&f.key)) {
-            (_, None) => false,
-            (None, Some(_)) => true,
-            (Some(want), Some(have)) => want == have,
-        })
+        filters
+            .iter()
+            .all(|f| match (&f.value, self.labels.get(&f.key)) {
+                (_, None) => false,
+                (None, Some(_)) => true,
+                (Some(want), Some(have)) => want == have,
+            })
     }
 }
 
@@ -171,7 +175,9 @@ pub fn resolve(
 }
 
 fn get_actual(client: &Client, name: &str) -> Result<Option<Actual>> {
-    Ok(client.get_opt(&inst_path(name))?.map(|v| Actual::from_api(&v)))
+    Ok(client
+        .get_opt(&inst_path(name))?
+        .map(|v| Actual::from_api(&v)))
 }
 
 fn volume_exists(client: &Client, pool: &str, name: &str) -> Result<bool> {
@@ -191,7 +197,10 @@ fn local_image(client: &Client, alias: &str) -> Result<Option<String>> {
     }
     if alias.len() >= 12 && alias.chars().all(|c| c.is_ascii_hexdigit()) {
         if let Some(i) = client.get_opt(&format!("/1.0/images/{}", encode_segment(alias)))? {
-            return Ok(i.get("fingerprint").and_then(Value::as_str).map(String::from));
+            return Ok(i
+                .get("fingerprint")
+                .and_then(Value::as_str)
+                .map(String::from));
         }
     }
     Ok(None)
@@ -200,7 +209,10 @@ fn local_image(client: &Client, alias: &str) -> Result<Option<String>> {
 /// Compute the plan for one resolved sandbox.
 pub fn plan_desired(client: &Client, desired: &Desired, opts: DiffOptions) -> Result<SandboxPlan> {
     let actual = get_actual(client, &desired.name)?;
-    if actual.is_none() && desired.image.server.is_none() && local_image(client, &desired.image.alias)?.is_none() {
+    if actual.is_none()
+        && desired.image.server.is_none()
+        && local_image(client, &desired.image.alias)?.is_none()
+    {
         return Err(Error::invalid(format!(
             "image {:?} not found locally (see `incus image list`)",
             desired.image.alias
@@ -212,7 +224,27 @@ pub fn plan_desired(client: &Client, desired: &Desired, opts: DiffOptions) -> Re
             missing.push((v.pool.clone(), v.name.clone()));
         }
     }
-    plan::diff(desired, actual.as_ref(), &missing, opts)
+    let mut plan = plan::diff(desired, actual.as_ref(), &missing, opts)?;
+    // The image is fixed at creation; say so when the local image has moved on
+    // (e.g. dev-base was republished), so a recreate is a visible choice.
+    if let (Some(a), None) = (&actual, &desired.image.server) {
+        if let (Some(built), Some(now)) = (
+            a.config.get("volatile.base_image"),
+            local_image(client, &desired.image.alias)?,
+        ) {
+            if *built != now {
+                plan.actions.push(Action::Note {
+                    message: format!(
+                        "image {} is now {} but this instance was built from {}; recreate to pick it up",
+                        desired.image.alias,
+                        &now[..12.min(now.len())],
+                        &built[..12.min(built.len())]
+                    ),
+                });
+            }
+        }
+    }
+    Ok(plan)
 }
 
 fn random_token() -> String {
@@ -278,7 +310,9 @@ pub fn apply(
                 config,
             } => {
                 report(&format!("{name}: creating volume {volume} on {pool}"));
-                retry_once(report, || crate::volume::ensure(client, pool, volume, config).map(|_| ()))?;
+                retry_once(report, || {
+                    crate::volume::ensure(client, pool, volume, config).map(|_| ())
+                })?;
             }
             Action::CreateInstance { .. } => {
                 report(&format!("{name}: creating from {}", desired.image.spec));
@@ -299,6 +333,16 @@ pub fn apply(
                 out.ports.insert(device.clone(), listen);
             }
             Action::FixOwner { path, owner } => {
+                if desired.instance_type == crate::spec::InstanceType::VirtualMachine {
+                    // In-guest work needs the VM's agent, which starts after boot.
+                    wait_ready(
+                        client,
+                        name,
+                        &[ReadyCheck::Agent],
+                        desired.ready_timeout,
+                        &desired.exec,
+                    )?;
+                }
                 report(&format!("{name}: chown {owner} {path}"));
                 fix_owner(client, name, path, owner)?;
             }
@@ -325,32 +369,37 @@ fn flush_updates(
     }
     let actions: Vec<Action> = pending.iter().map(|a| (*a).clone()).collect();
     retry_once(report, || {
-        update_instance(client, name, &format!("update {name}"), &mut |config, devices| {
-            for a in &actions {
-                match a {
-                    Action::SetConfig { key, to, .. } => {
-                        config.insert(key.clone(), json!(to));
+        update_instance(
+            client,
+            name,
+            &format!("update {name}"),
+            &mut |config, devices| {
+                for a in &actions {
+                    match a {
+                        Action::SetConfig { key, to, .. } => {
+                            config.insert(key.clone(), json!(to));
+                        }
+                        Action::AddDevice { device, props } => {
+                            devices.insert(device.clone(), json!(props));
+                        }
+                        Action::ReplaceDevice {
+                            device,
+                            replaces,
+                            to,
+                            ..
+                        } => {
+                            devices.remove(replaces);
+                            devices.insert(device.clone(), json!(to));
+                        }
+                        Action::RemoveDevice { device, .. } => {
+                            devices.remove(device);
+                        }
+                        _ => {}
                     }
-                    Action::AddDevice { device, props } => {
-                        devices.insert(device.clone(), json!(props));
-                    }
-                    Action::ReplaceDevice {
-                        device,
-                        replaces,
-                        to,
-                        ..
-                    } => {
-                        devices.remove(replaces);
-                        devices.insert(device.clone(), json!(to));
-                    }
-                    Action::RemoveDevice { device, .. } => {
-                        devices.remove(device);
-                    }
-                    _ => {}
                 }
-            }
-            Ok(())
-        })
+                Ok(())
+            },
+        )
     })?;
     for a in pending.drain(..) {
         if let Action::SetConfig {
@@ -397,7 +446,14 @@ fn update_instance(
             "stateful": inst.get("stateful"),
             "description": inst.get("description"),
         });
-        match client.mutate_if_match("PUT", &path, &body, etag.as_deref(), step, client.timeouts.other) {
+        match client.mutate_if_match(
+            "PUT",
+            &path,
+            &body,
+            etag.as_deref(),
+            step,
+            client.timeouts.other,
+        ) {
             Err(Error::Api { status: 412, .. }) if attempt < 4 => continue,
             r => return r.map(|_| ()),
         }
@@ -435,14 +491,23 @@ fn create_instance(client: &Client, desired: &Desired, report: &mut dyn FnMut(&s
             "devices": devices,
             "profiles": desired.profiles,
         });
-        match client.mutate("POST", "/1.0/instances", Some(&body), &step, client.timeouts.create) {
+        match client.mutate(
+            "POST",
+            "/1.0/instances",
+            Some(&body),
+            &step,
+            client.timeouts.create,
+        ) {
             Ok(_) => return Ok(()),
             Err(e) if e.is_timeout() => {
                 report(&format!("{e}"));
                 if let Error::OperationTimeout { operation, .. } = &e {
                     // Most create operations cannot be cancelled. Let it settle so
                     // the cleanup sees what it actually did.
-                    if client.wait_operation(operation, &step, client.timeouts.settle).is_ok() {
+                    if client
+                        .wait_operation(operation, &step, client.timeouts.settle)
+                        .is_ok()
+                    {
                         report(&format!("{step}: finished late; keeping it"));
                         return Ok(());
                     }
@@ -474,7 +539,12 @@ fn create_instance(client: &Client, desired: &Desired, report: &mut dyn FnMut(&s
 /// `user.isb.create-token`, i.e. only if the call holding that token created it.
 /// Anything else (another owner's instance, one created by hand) is refused with
 /// [`Error::AlreadyExists`] and left alone. Missing is fine.
-pub fn cleanup_half_created(client: &Client, name: &str, token: &str, report: &mut dyn FnMut(&str)) -> Result<()> {
+pub fn cleanup_half_created(
+    client: &Client,
+    name: &str,
+    token: &str,
+    report: &mut dyn FnMut(&str),
+) -> Result<()> {
     let Some(inst) = client.get_opt(&inst_path(name))? else {
         return Ok(());
     };
@@ -525,16 +595,32 @@ fn force_delete(client: &Client, name: &str) -> Result<()> {
             let _ = stop_instance(client, name, true, Duration::from_secs(5));
         }
     }
-    match client.mutate(
-        "DELETE",
-        &inst_path(name),
-        None,
-        &format!("delete {name}"),
-        client.timeouts.other,
-    ) {
-        Ok(_) => Ok(()),
-        Err(e) if e.is_not_found() => Ok(()),
-        Err(e) => Err(e),
+    // An instance mid-transition (rebooting, stopping) refuses deletion for a
+    // moment; retry for a bounded while before giving up.
+    let started = Instant::now();
+    loop {
+        let r = client.mutate(
+            "DELETE",
+            &inst_path(name),
+            None,
+            &format!("delete {name}"),
+            client.timeouts.other,
+        );
+        match r {
+            Ok(_) => return Ok(()),
+            Err(e) if e.is_not_found() => return Ok(()),
+            Err(e) if e.is_timeout() || started.elapsed() >= Duration::from_secs(60) => {
+                return Err(e);
+            }
+            Err(_) => {
+                std::thread::sleep(Duration::from_secs(2));
+                if let Ok(Some(a)) = get_actual(client, name) {
+                    if a.running() {
+                        let _ = stop_instance(client, name, true, Duration::from_secs(5));
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -570,19 +656,28 @@ fn add_port_searching(
         let addr = format!("{proto}:{host}:{p}");
         let mut dev = props.clone();
         dev.insert("listen".into(), addr.clone());
-        let r = update_instance(client, name, &format!("add port {device}"), &mut |_, devices| {
-            devices.insert(device.to_string(), json!(dev));
-            Ok(())
-        });
+        let r = update_instance(
+            client,
+            name,
+            &format!("add port {device}"),
+            &mut |_, devices| {
+                devices.insert(device.to_string(), json!(dev));
+                Ok(())
+            },
+        );
         match r {
             Ok(()) => return Ok(addr),
-            Err(e @ Error::Api { .. }) | Err(e @ Error::OperationFailed { .. }) => last_err = Some(e),
+            Err(e @ Error::Api { .. }) | Err(e @ Error::OperationFailed { .. }) => {
+                last_err = Some(e)
+            }
             Err(e) => return Err(e),
         }
     }
     Err(Error::invalid(format!(
         "{name}: no free port for {device} in {proto}:{host}:{port}-{last}{}",
-        last_err.map(|e| format!(" (last error: {e})")).unwrap_or_default()
+        last_err
+            .map(|e| format!(" (last error: {e})"))
+            .unwrap_or_default()
     )))
 }
 
@@ -604,6 +699,7 @@ fi
 chown "$uid:$group" "$path"
 # Parents the mount conjured are root-owned; fix those inside the user's home
 # only, and stop at the first one that is not root's.
+[ -n "$home" ] && [ "$home" != / ] || exit 0
 case "$path" in
   "$home"/*)
     d="$(dirname "$path")"
@@ -643,7 +739,9 @@ pub fn has_default_route(route_v4: &str, route_v6: &str) -> bool {
         let f: Vec<&str> = l.split_whitespace().collect();
         f.len() > 3
             && f[1] == "00000000"
-            && u32::from_str_radix(f[3], 16).map(|fl| fl & 1 == 1).unwrap_or(false)
+            && u32::from_str_radix(f[3], 16)
+                .map(|fl| fl & 1 == 1)
+                .unwrap_or(false)
     });
     let v6 = route_v6.lines().any(|l| {
         let f: Vec<&str> = l.split_whitespace().collect();
@@ -661,13 +759,53 @@ pub fn wait_ready(
     exec_defaults: &ExecDefaults,
 ) -> Result<()> {
     let started = Instant::now();
+    let mut restarted = false;
     for check in checks {
         let mut last;
+        let mut stopped_since: Option<Instant> = None;
         loop {
             match run_check(client, name, check, exec_defaults) {
                 Ok(true) => break,
                 Ok(false) => last = "not yet".into(),
-                Err(e) => last = e.to_string(),
+                Err(e) => {
+                    last = e.to_string();
+                    // An instance that stopped (crashed, powered off) will not get
+                    // ready by waiting: say so now instead of at the deadline.
+                    // A reboot (common on a VM's first boot) passes through
+                    // Stopped briefly, so only a sustained stop counts. incus
+                    // sometimes fails to complete a guest-initiated reboot (its
+                    // stop hook errors out and the instance stays Stopped), so
+                    // start it once more before giving up.
+                    if let Ok(Some(a)) = get_actual(client, name) {
+                        if a.running() || a.status.eq_ignore_ascii_case("starting") {
+                            stopped_since = None;
+                        } else if stopped_since.get_or_insert_with(Instant::now).elapsed()
+                            >= Duration::from_secs(30)
+                        {
+                            if !restarted {
+                                restarted = true;
+                                stopped_since = None;
+                                if start_instance(client, name).is_ok() {
+                                    continue;
+                                }
+                            }
+                            return Err(Error::NotReady {
+                                sandbox: name.into(),
+                                check: check.to_string(),
+                                detail: format!(
+                                    "instance is {} (it stopped while getting ready{}; see `incus info --show-log {name}`)",
+                                    a.status,
+                                    if restarted {
+                                        " and again after a restart"
+                                    } else {
+                                        ""
+                                    }
+                                ),
+                                waited: started.elapsed(),
+                            });
+                        }
+                    }
+                }
             }
             if started.elapsed() >= timeout {
                 return Err(Error::NotReady {
@@ -683,13 +821,26 @@ pub fn wait_ready(
     Ok(())
 }
 
-fn run_check(client: &Client, name: &str, check: &ReadyCheck, defaults: &ExecDefaults) -> Result<bool> {
+fn run_check(
+    client: &Client,
+    name: &str,
+    check: &ReadyCheck,
+    defaults: &ExecDefaults,
+) -> Result<bool> {
     let cap = |argv: &[&str]| -> Result<ExecOutput> {
         let argv: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
-        exec::run_captured(client, name, &argv, &exec::Request::default(), Stdin::Null, Some(Duration::from_secs(20)))
+        exec::run_captured(
+            client,
+            name,
+            &argv,
+            &exec::Request::default(),
+            Stdin::Null,
+            Some(Duration::from_secs(20)),
+        )
     };
     Ok(match check {
         ReadyCheck::Running => get_actual(client, name)?.is_some_and(|a| a.running()),
+        ReadyCheck::Agent => cap(&["true"])?.success(),
         ReadyCheck::DefaultRoute => {
             let v4 = cap(&["cat", "/proc/net/route"])?;
             let v6 = cap(&["cat", "/proc/net/ipv6_route"]).unwrap_or_default();
@@ -708,9 +859,15 @@ fn run_check(client: &Client, name: &str, check: &ReadyCheck, defaults: &ExecDef
                 },
                 &ExecOptions::default(),
             )?;
-            exec::start_with_timeout(client, name, req, Stdin::Null, Some(Duration::from_secs(20)))?
-                .collect_output()?
-                .success()
+            exec::start_with_timeout(
+                client,
+                name,
+                req,
+                Stdin::Null,
+                Some(Duration::from_secs(20)),
+            )?
+            .collect_output()?
+            .success()
         }
         ReadyCheck::Command(argv) => {
             let argv: Vec<&str> = argv.iter().map(String::as_str).collect();
@@ -726,13 +883,18 @@ pub fn ensure(
     opts: EnsureOptions,
     report: Reporter<'_>,
 ) -> Result<ApplyReport> {
-    let _lock = NameLock::acquire(client.project_name(), &desired.name, opts.lock_wait, &mut |p| {
-        report(&format!(
-            "{}: waiting for another isb holding {}",
-            desired.name,
-            p.display()
-        ))
-    })?;
+    let _lock = NameLock::acquire(
+        client.project_name(),
+        &desired.name,
+        opts.lock_wait,
+        &mut |p| {
+            report(&format!(
+                "{}: waiting for another isb holding {}",
+                desired.name,
+                p.display()
+            ))
+        },
+    )?;
     let plan = plan_desired(client, desired, opts.diff)?;
     let out = apply(client, desired, &plan, report)?;
     if !out.restart_needed.is_empty() {
@@ -744,7 +906,13 @@ pub fn ensure(
         ));
     }
     if opts.wait_ready {
-        wait_ready(client, &desired.name, &desired.ready, desired.ready_timeout, &desired.exec)?;
+        wait_ready(
+            client,
+            &desired.name,
+            &desired.ready,
+            desired.ready_timeout,
+            &desired.exec,
+        )?;
     }
     Ok(out)
 }
@@ -773,31 +941,51 @@ impl Sandbox {
     /// Create and start a new sandbox; fails if it already exists. Relative bind
     /// paths resolve against the current directory.
     pub fn create(client: &Client, spec: &SandboxSpec) -> Result<Sandbox> {
-        Self::create_with(client, spec, &VolumeDefs::new(), &mut |_| {})
+        Self::create_with(
+            client,
+            spec,
+            &VolumeDefs::new(),
+            EnsureOptions::default(),
+            &mut |_| {},
+        )
     }
 
     pub fn create_with(
         client: &Client,
         spec: &SandboxSpec,
         defs: &VolumeDefs,
+        opts: EnsureOptions,
         report: Reporter<'_>,
     ) -> Result<Sandbox> {
         let d = resolve(client, spec, defs, &std::env::current_dir()?)?;
-        let _lock = NameLock::acquire(client.project_name(), &d.name, Duration::from_secs(900), &mut |_| {})?;
+        let _lock = NameLock::acquire(
+            client.project_name(),
+            &d.name,
+            Duration::from_secs(900),
+            &mut |_| {},
+        )?;
         if get_actual(client, &d.name)?.is_some() {
             return Err(Error::AlreadyExists(d.name.clone()));
         }
-        let plan = plan_desired(client, &d, DiffOptions::default())?;
+        let plan = plan_desired(client, &d, opts.diff)?;
         apply(client, &d, &plan, report)?;
-        wait_ready(client, &d.name, &d.ready, d.ready_timeout, &d.exec)?;
+        if opts.wait_ready {
+            wait_ready(client, &d.name, &d.ready, d.ready_timeout, &d.exec)?;
+        }
         Ok(Self::from_desired(client, &d))
     }
 
     /// Reconcile a sandbox to `spec`, creating it if needed: only what differs is
     /// changed, and a correct device is never touched.
     pub fn connect_or_create(client: &Client, spec: &SandboxSpec) -> Result<Sandbox> {
-        Self::connect_or_create_with(client, spec, &VolumeDefs::new(), EnsureOptions::default(), &mut |_| {})
-            .map(|(s, _)| s)
+        Self::connect_or_create_with(
+            client,
+            spec,
+            &VolumeDefs::new(),
+            EnsureOptions::default(),
+            &mut |_| {},
+        )
+        .map(|(s, _)| s)
     }
 
     pub fn connect_or_create_with(
@@ -886,7 +1074,12 @@ impl Sandbox {
         if self.info()?.status.eq_ignore_ascii_case("running") {
             return Ok(());
         }
-        let _lock = NameLock::acquire(self.client.project_name(), &self.name, Duration::from_secs(900), &mut |_| {})?;
+        let _lock = NameLock::acquire(
+            self.client.project_name(),
+            &self.name,
+            Duration::from_secs(900),
+            &mut |_| {},
+        )?;
         retry_once(&mut |_| {}, || start_instance(&self.client, &self.name))?;
         self.wait_ready()
     }
@@ -907,7 +1100,13 @@ impl Sandbox {
 
     /// Run this handle's readiness checks.
     pub fn wait_ready(&self) -> Result<()> {
-        wait_ready(&self.client, &self.name, &self.ready, self.ready_timeout, &self.exec_defaults)
+        wait_ready(
+            &self.client,
+            &self.name,
+            &self.ready,
+            self.ready_timeout,
+            &self.exec_defaults,
+        )
     }
 
     /// Run a command and capture its output. `argv[0]` is the program; nothing is
@@ -936,7 +1135,13 @@ impl Sandbox {
     {
         let argv: Vec<String> = argv.into_iter().map(Into::into).collect();
         let req = exec::build_request(&self.client, &self.name, &argv, &self.exec_defaults, &opts)?;
-        exec::start_with_timeout(&self.client, &self.name, req, opts.stdin.clone(), opts.timeout)
+        exec::start_with_timeout(
+            &self.client,
+            &self.name,
+            req,
+            opts.stdin.clone(),
+            opts.timeout,
+        )
     }
 
     /// Run attached to this process's stdio (and terminal, with `opts.tty`),
@@ -948,7 +1153,13 @@ impl Sandbox {
     {
         let argv: Vec<String> = argv.into_iter().map(Into::into).collect();
         let req = exec::build_request(&self.client, &self.name, &argv, &self.exec_defaults, &opts)?;
-        exec::attach(&self.client, &self.name, req, opts.stdin.clone(), opts.timeout)
+        exec::attach(
+            &self.client,
+            &self.name,
+            req,
+            opts.stdin.clone(),
+            opts.timeout,
+        )
     }
 
     /// Add (or correct) a proxy device. Host-bound ports with `search` step past
@@ -971,7 +1182,12 @@ impl Sandbox {
             .iter()
             .find(|(k, _)| k.as_str() != "root")
             .expect("one port");
-        let _lock = NameLock::acquire(self.client.project_name(), &self.name, Duration::from_secs(900), &mut |_| {})?;
+        let _lock = NameLock::acquire(
+            self.client.project_name(),
+            &self.name,
+            Duration::from_secs(900),
+            &mut |_| {},
+        )?;
         let info = self.info()?;
         if let Some(have) = info.devices.get(dname) {
             if plan::device_matches(want, have) {
@@ -983,10 +1199,15 @@ impl Sandbox {
             Some(n) => add_port_searching(&self.client, &self.name, dname, &want.props, n),
             None => {
                 let props = want.props.clone();
-                update_instance(&self.client, &self.name, &format!("add port {dname}"), &mut |_, devices| {
-                    devices.insert(dname.clone(), json!(props));
-                    Ok(())
-                })?;
+                update_instance(
+                    &self.client,
+                    &self.name,
+                    &format!("add port {dname}"),
+                    &mut |_, devices| {
+                        devices.insert(dname.clone(), json!(props));
+                        Ok(())
+                    },
+                )?;
                 Ok(want.props["listen"].clone())
             }
         }
@@ -994,7 +1215,12 @@ impl Sandbox {
 
     /// Remove an instance-local device. `Ok(false)` if it was not there.
     pub fn remove_device(&self, device: &str) -> Result<bool> {
-        let _lock = NameLock::acquire(self.client.project_name(), &self.name, Duration::from_secs(900), &mut |_| {})?;
+        let _lock = NameLock::acquire(
+            self.client.project_name(),
+            &self.name,
+            Duration::from_secs(900),
+            &mut |_| {},
+        )?;
         self.remove_device_unlocked(device)
     }
 
@@ -1003,10 +1229,15 @@ impl Sandbox {
             return Err(Error::invalid("refusing to remove the root disk"));
         }
         let mut found = false;
-        update_instance(&self.client, &self.name, &format!("remove device {device}"), &mut |_, devices| {
-            found = devices.remove(device).is_some();
-            Ok(())
-        })?;
+        update_instance(
+            &self.client,
+            &self.name,
+            &format!("remove device {device}"),
+            &mut |_, devices| {
+                found = devices.remove(device).is_some();
+                Ok(())
+            },
+        )?;
         Ok(found)
     }
 }
@@ -1030,12 +1261,17 @@ pub fn prune_missing_path(
 ) -> Result<Vec<PruneItem>> {
     let mut out = Vec::new();
     for i in Sandbox::list_with(client, &[LabelFilter::parse(label)])? {
-        let Some(path) = i.labels.get(label) else { continue };
+        let Some(path) = i.labels.get(label) else {
+            continue;
+        };
         if path.is_empty() || !path.starts_with('/') || Path::new(path).exists() {
             continue;
         }
         if dry_run {
-            report(&format!("would delete {}  ({label}={path} is gone)", i.name));
+            report(&format!(
+                "would delete {}  ({label}={path} is gone)",
+                i.name
+            ));
         } else {
             report(&format!("deleting {}  ({label}={path} is gone)", i.name));
             force_delete(client, &i.name)?;
@@ -1067,7 +1303,8 @@ mod tests {
 
     #[test]
     fn label_filters() {
-        let mut i = SandboxInfo::from_api(&json!({"name": "a", "config": {"user.k": "v", "user.p": "/x"}}));
+        let mut i =
+            SandboxInfo::from_api(&json!({"name": "a", "config": {"user.k": "v", "user.p": "/x"}}));
         assert!(i.matches(&[LabelFilter::parse("k")]));
         assert!(i.matches(&[LabelFilter::parse("k=v")]));
         assert!(!i.matches(&[LabelFilter::parse("k=w")]));

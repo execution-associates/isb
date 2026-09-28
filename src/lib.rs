@@ -50,7 +50,8 @@ pub use exec::{ExecEvent, ExecOptions, ExecOutput, ExecStream, Stdin};
 pub use flex::parse_duration;
 pub use plan::{Action, DiffOptions, SandboxPlan};
 pub use sandbox::{ApplyReport, EnsureOptions, LabelFilter, Sandbox, SandboxInfo};
-pub use spec::{InstanceType, IdmapMap, IdmapRaw,
-    ComposeFile, ExecDefaults, IdmapMode, IdmapSpec, NamedVolumeMode, NamedVolumeSpec,
-    PortBind, PortBinding, PortSpec, ReadyCheck, SandboxSpec, Volume, VolumeSpec,
+pub use spec::{
+    ComposeFile, ExecDefaults, IdmapMap, IdmapMode, IdmapRaw, IdmapSpec, InstanceType,
+    NamedVolumeMode, NamedVolumeSpec, PortBind, PortBinding, PortSpec, ReadyCheck, SandboxSpec,
+    Volume, VolumeSpec,
 };

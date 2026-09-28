@@ -23,20 +23,35 @@ impl VolumeInfo {
         VolumeInfo {
             name: v.get("name").and_then(Value::as_str).unwrap_or("").into(),
             pool: pool.into(),
-            content_type: v.get("content_type").and_then(Value::as_str).unwrap_or("").into(),
+            content_type: v
+                .get("content_type")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .into(),
             config: v
                 .get("config")
                 .and_then(Value::as_object)
                 .map(|m| {
                     m.iter()
-                        .map(|(k, v)| (k.clone(), v.as_str().map(String::from).unwrap_or_else(|| v.to_string())))
+                        .map(|(k, v)| {
+                            (
+                                k.clone(),
+                                v.as_str()
+                                    .map(String::from)
+                                    .unwrap_or_else(|| v.to_string()),
+                            )
+                        })
                         .collect()
                 })
                 .unwrap_or_default(),
             used_by: v
                 .get("used_by")
                 .and_then(Value::as_array)
-                .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default(),
         }
     }
@@ -75,7 +90,8 @@ pub fn ensure(client: &Client, pool: &str, name: &str, config: &Props) -> Result
     if get(client, pool, name)?.is_some() {
         return Ok(false);
     }
-    let body = json!({"name": name, "type": "custom", "content_type": "filesystem", "config": config});
+    let body =
+        json!({"name": name, "type": "custom", "content_type": "filesystem", "config": config});
     match client.mutate(
         "POST",
         &format!("/1.0/storage-pools/{}/volumes/custom", encode_segment(pool)),
@@ -102,6 +118,12 @@ pub fn remove(client: &Client, pool: &str, name: &str) -> Result<()> {
         )));
     }
     client
-        .mutate("DELETE", &vol_path(pool, name), None, &format!("delete volume {name}"), client.timeouts.other)
+        .mutate(
+            "DELETE",
+            &vol_path(pool, name),
+            None,
+            &format!("delete volume {name}"),
+            client.timeouts.other,
+        )
         .map(|_| ())
 }

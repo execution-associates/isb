@@ -31,7 +31,12 @@ impl Project {
             Error::invalid(format!(
                 "no sandbox {service:?} in {} (have: {})",
                 self.files_display(),
-                self.file.sandboxes.keys().cloned().collect::<Vec<_>>().join(", ")
+                self.file
+                    .sandboxes
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ))
         })
     }
@@ -250,16 +255,24 @@ mod tests {
             .enumerate()
             .map(|(i, d)| (PathBuf::from(format!("f{i}.yaml")), d.to_string()))
             .collect();
-        load_docs(&docs, Path::new("/tmp/My Project"), None, &|k| env.get(k).cloned())
+        load_docs(&docs, Path::new("/tmp/My Project"), None, &|k| {
+            env.get(k).cloned()
+        })
     }
 
     #[test]
     fn defaults_names_from_project() {
         let p = load_with(&["sandboxes:\n  web: {image: dev-base}\n"], &[]).unwrap();
         assert_eq!(p.name, "my-project");
-        assert_eq!(p.file.sandboxes["web"].name.as_deref(), Some("my-project-web"));
+        assert_eq!(
+            p.file.sandboxes["web"].name.as_deref(),
+            Some("my-project-web")
+        );
         let p = load_with(&["name: lasso\nsandboxes:\n  Web_1: {image: x}\n"], &[]).unwrap();
-        assert_eq!(p.file.sandboxes["Web_1"].name.as_deref(), Some("lasso-web-1"));
+        assert_eq!(
+            p.file.sandboxes["Web_1"].name.as_deref(),
+            Some("lasso-web-1")
+        );
     }
 
     #[test]

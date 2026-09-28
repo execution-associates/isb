@@ -49,7 +49,7 @@ pub fn volume(s: &str) -> Result<(String, VolumeSpec)> {
                 Some(("pool", p)) => v.pool = Some(p.into()),
                 _ => {
                     return Err(Error::invalid(format!(
-                        "volume {s:?}: unknown option {o:?} (ro, owner=, device=, pool=, external)"
+                        "volume {s:?}: unknown option {o:?} (ro, rw, owner=, device=, pool=, external)"
                     )));
                 }
             }
@@ -79,7 +79,11 @@ pub fn port(s: &str) -> Result<PortSpec> {
                     p.bind = match v.as_str() {
                         "host" => PortBind::Host,
                         "guest" => PortBind::Guest,
-                        _ => return Err(Error::invalid(format!("port {s:?}: bind is host or guest"))),
+                        _ => {
+                            return Err(Error::invalid(format!(
+                                "port {s:?}: bind is host or guest"
+                            )));
+                        }
                     }
                 }
                 "name" => p.name = Some(v),
@@ -88,19 +92,32 @@ pub fn port(s: &str) -> Result<PortSpec> {
                         Error::invalid(format!("port {s:?}: search must be a number"))
                     })?)
                 }
+                // incus proxy options; anything else is almost certainly a typo.
+                "nat" | "proxy_protocol" | "security.uid" | "security.gid" | "uid" | "gid"
+                | "mode" => {
+                    p.options.insert(k, v);
+                }
                 other => {
-                    p.options.insert(other.to_string(), v);
+                    return Err(Error::invalid(format!(
+                        "port {s:?}: unknown key {other:?} (listen, connect, bind, name, search, nat, proxy_protocol, uid, gid, mode, security.uid, security.gid)"
+                    )));
                 }
             }
         }
         if !(have.0 && have.1) {
-            return Err(Error::invalid(format!("port {s:?}: needs listen= and connect=")));
+            return Err(Error::invalid(format!(
+                "port {s:?}: needs listen= and connect="
+            )));
         }
         return Ok(p);
     }
     let (body, proto) = match s.rsplit_once('/') {
         Some((b, p)) if p == "tcp" || p == "udp" => (b, p),
-        Some(_) => return Err(Error::invalid(format!("port {s:?}: protocol is tcp or udp"))),
+        Some(_) => {
+            return Err(Error::invalid(format!(
+                "port {s:?}: protocol is tcp or udp"
+            )));
+        }
         None => (s, "tcp"),
     };
     let parts: Vec<&str> = body.rsplitn(3, ':').collect();
@@ -130,12 +147,13 @@ pub fn ready(s: &str) -> Result<ReadyCheck> {
     Ok(match s.split_once('=') {
         None if s == "running" => ReadyCheck::Running,
         None if s == "default_route" => ReadyCheck::DefaultRoute,
+        None if s == "agent" => ReadyCheck::Agent,
         Some(("user_exists", u)) => ReadyCheck::UserExists(u.into()),
         Some(("path_writable", p)) => ReadyCheck::PathWritable(p.into()),
         Some(("command", c)) => ReadyCheck::Command(c.split(',').map(String::from).collect()),
         _ => {
             return Err(Error::invalid(format!(
-                "ready {s:?}: running, default_route, user_exists=USER, path_writable=PATH or command=ARG,ARG"
+                "ready {s:?}: running, agent, default_route, user_exists=USER, path_writable=PATH or command=ARG,ARG"
             )));
         }
     })
@@ -168,7 +186,9 @@ mod tests {
         assert_eq!(p.connect, "tcp:127.0.0.1:80");
         let p = port("100.1.2.3:5173:5173/udp").unwrap();
         assert_eq!(p.listen, "udp:100.1.2.3:5173");
-        let p = port("bind=guest,listen=tcp:127.0.0.1:8190,connect=tcp:127.0.0.1:9000,name=backend").unwrap();
+        let p =
+            port("bind=guest,listen=tcp:127.0.0.1:8190,connect=tcp:127.0.0.1:9000,name=backend")
+                .unwrap();
         assert_eq!(p.bind, PortBind::Guest);
         assert_eq!(p.name.as_deref(), Some("backend"));
         let p = port("listen=tcp:1.2.3.4:5173,connect=tcp:127.0.0.1:5173,search=50").unwrap();
@@ -177,12 +197,16 @@ mod tests {
         assert!(port("a:b").is_err());
         assert!(port("listen=tcp:1.2.3.4:1").is_err());
         assert!(port("1:2/sctp").is_err());
+        assert!(port("listen=tcp:1.2.3.4:1,connect=tcp:1.2.3.4:2,serach=5").is_err());
     }
 
     #[test]
     fn readies() {
         assert_eq!(ready("running").unwrap(), ReadyCheck::Running);
-        assert_eq!(ready("user_exists=dev").unwrap(), ReadyCheck::UserExists("dev".into()));
+        assert_eq!(
+            ready("user_exists=dev").unwrap(),
+            ReadyCheck::UserExists("dev".into())
+        );
         assert_eq!(
             ready("command=test,-d,/tmp").unwrap(),
             ReadyCheck::Command(vec!["test".into(), "-d".into(), "/tmp".into()])

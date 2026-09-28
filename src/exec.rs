@@ -326,7 +326,10 @@ impl ExecStream {
 
     /// Send a signal to the command (e.g. 2 for SIGINT, 15 for SIGTERM).
     pub fn signal(&self, signal: i32) -> Result<()> {
-        send_control(&self.control, json!({"command": "signal", "signal": signal}))
+        send_control(
+            &self.control,
+            json!({"command": "signal", "signal": signal}),
+        )
     }
 
     /// Resize the pseudo-terminal (tty mode only).
@@ -451,13 +454,16 @@ pub(crate) fn start_with_timeout(
         body["height"] = json!(req.height.unwrap_or(24));
     }
     let path = format!("/1.0/instances/{}/exec", encode_segment(instance));
-    let (operation, meta) = match client.request("POST", &path, Some(&body), client.timeouts.request)? {
-        Reply::Async {
-            operation,
-            metadata,
-        } => (operation, metadata),
-        Reply::Sync(_) => return Err(Error::Protocol("exec did not return an operation".into())),
-    };
+    let (operation, meta) =
+        match client.request("POST", &path, Some(&body), client.timeouts.request)? {
+            Reply::Async {
+                operation,
+                metadata,
+            } => (operation, metadata),
+            Reply::Sync(_) => {
+                return Err(Error::Protocol("exec did not return an operation".into()));
+            }
+        };
     let fds = meta
         .pointer("/metadata/fds")
         .and_then(Value::as_object)
@@ -500,7 +506,8 @@ pub(crate) fn start_with_timeout(
         // One bidirectional socket. Reads poll with a short timeout so the writer
         // can take the lock between them.
         let ws = client.websocket(&operation, &secret("0")?)?;
-        ws.get_ref().set_read_timeout(Some(Duration::from_millis(20)))?;
+        ws.get_ref()
+            .set_read_timeout(Some(Duration::from_millis(20)))?;
         let ws = Arc::new(Mutex::new(ws));
         let reader_ws = ws.clone();
         let tx2 = tx.clone();
@@ -558,7 +565,9 @@ pub(crate) fn start_with_timeout(
             loop {
                 match in_rx.recv() {
                     Ok(Some(chunk)) => {
-                        if stop2.load(Ordering::SeqCst) || ws_in.send(Message::binary(chunk)).is_err() {
+                        if stop2.load(Ordering::SeqCst)
+                            || ws_in.send(Message::binary(chunk)).is_err()
+                        {
                             return;
                         }
                     }
@@ -710,7 +719,13 @@ pub(crate) fn run_captured(
 
 /// Run attached to this process's terminal: stdio forwarded, raw mode and window
 /// size in tty mode, signals forwarded. Returns the exit code.
-pub(crate) fn attach(client: &Client, instance: &str, req: Request, stdin: Stdin, timeout: Option<Duration>) -> Result<i32> {
+pub(crate) fn attach(
+    client: &Client,
+    instance: &str,
+    req: Request,
+    stdin: Stdin,
+    timeout: Option<Duration>,
+) -> Result<i32> {
     use signal_hook::consts::signal::*;
     let tty = req.tty;
     let _raw = if tty { RawMode::enable() } else { None };

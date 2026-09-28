@@ -44,7 +44,12 @@ pub struct NamedVolumeSpec {
     pub pool: Option<String>,
 
     /// Volume config keys (e.g. `size: 10GiB`), applied only at creation.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "flex::string_map",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    #[schemars(with = "BTreeMap<String, flex::Scalar>")]
     pub config: BTreeMap<String, String>,
 
     /// The volume must already exist; isb never creates it.
@@ -61,8 +66,13 @@ pub struct NamedVolumeSpec {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum InstanceType {
+    /// A system container (lxc): shares the host kernel, near-zero overhead,
+    /// idmapped bind mounts, proxies in both directions.
     #[default]
     Container,
+    /// A virtual machine (qemu): its own kernel. Needs a VM image and the incus
+    /// agent in the guest for exec. `vm` is accepted as shorthand.
+    #[serde(alias = "vm")]
     VirtualMachine,
 }
 
@@ -90,7 +100,16 @@ pub struct SandboxSpec {
     #[serde(default)]
     pub image: String,
 
-    /// `container` (default) or `virtual-machine`. Fixed at creation.
+    /// `container` (default) or `virtual-machine` (`vm`). Fixed at creation.
+    ///
+    /// A VM is a stronger boundary (its own kernel) at the cost of boot time
+    /// and memory. Container-only settings are refused for a VM: `privileged`,
+    /// and any explicit `idmap` (`idmap: auto` is a no-op there). Host paths are
+    /// shared into a VM over virtiofs, where inotify from host edits is not
+    /// delivered, so file watchers inside the VM need polling. Proxies into a
+    /// VM must be `bind: host`, and incus runs them in NAT mode (`nat: true`,
+    /// set automatically), which needs a static IP on the VM's NIC; `bind:
+    /// guest` is not available for VMs.
     #[serde(default, rename = "type", skip_serializing_if = "is_default")]
     pub instance_type: InstanceType,
 
@@ -137,13 +156,23 @@ pub struct SandboxSpec {
 
     /// Labels, stored as `user.<key>` config keys. Used by `isb ls --label` and
     /// `isb prune`. isb never removes a label it was not told about.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "flex::string_map",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    #[schemars(with = "BTreeMap<String, flex::Scalar>")]
     pub labels: BTreeMap<String, String>,
 
     /// Instance environment (`environment.<KEY>`), seen by every exec. Not for
     /// secrets: it is plain instance config, readable by anyone who can read the
     /// instance.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "flex::string_map",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    #[schemars(with = "BTreeMap<String, flex::Scalar>")]
     pub env: BTreeMap<String, String>,
 
     /// Mounts, keyed by the absolute path inside the guest.
@@ -154,7 +183,8 @@ pub struct SandboxSpec {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ports: Vec<PortSpec>,
 
-    /// Readiness checks, run in order after every start/ensure. Default: `[running]`.
+    /// Readiness checks, run in order after every start/ensure. Default:
+    /// `[running]` for a container, `[running, agent]` for a VM.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ready: Option<Vec<ReadyCheck>>,
 
@@ -172,11 +202,21 @@ pub struct SandboxSpec {
     pub exec: ExecDefaults,
 
     /// Extra instance config keys, set verbatim (escape hatch).
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "flex::string_map",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    #[schemars(with = "BTreeMap<String, flex::Scalar>")]
     pub raw_config: BTreeMap<String, String>,
 
     /// Extra devices, set verbatim (escape hatch). Keys are device names.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "flex::string_map_map",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    #[schemars(with = "BTreeMap<String, BTreeMap<String, flex::Scalar>>")]
     pub raw_devices: BTreeMap<String, BTreeMap<String, String>>,
 }
 
@@ -283,7 +323,12 @@ pub struct VolumeSpec {
     /// Named volumes only: chown the mount point to this guest user (`dev`,
     /// `dev:dev` or `1000:1000`) after it is attached, plus any root-owned
     /// parents inside that user's home that the mount conjured.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "flex::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "Option<flex::IntOrString>")]
     pub owner: Option<String>,
 
     /// Device name. Default: derived from the guest path. Set it to adopt an
@@ -292,7 +337,12 @@ pub struct VolumeSpec {
     pub device: Option<String>,
 
     /// Extra disk device properties (`shift`, `propagation`, ...), verbatim.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "flex::string_map",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    #[schemars(with = "BTreeMap<String, flex::Scalar>")]
     pub options: BTreeMap<String, String>,
 }
 
@@ -346,7 +396,12 @@ pub struct PortSpec {
     pub search: Option<u16>,
 
     /// Extra proxy device properties (`nat`, `proxy_protocol`, ...), verbatim.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "flex::string_map",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    #[schemars(with = "BTreeMap<String, flex::Scalar>")]
     pub options: BTreeMap<String, String>,
 }
 
@@ -357,6 +412,8 @@ pub struct PortSpec {
 pub enum ReadyCheck {
     /// The instance reports Running.
     Running,
+    /// The incus agent answers exec (VMs; always true for a container once running).
+    Agent,
     /// The guest has a default route (IPv4 or IPv6).
     DefaultRoute,
     /// `getent passwd <user>` succeeds in the guest.
@@ -375,28 +432,7 @@ enum ReadyRepr {
     Name(String),
     UserExists { user_exists: String },
     PathWritable { path_writable: String },
-    Command { command: Vec<Scalar> },
-}
-
-/// A YAML scalar read as a string (`[true]` is the argv `["true"]`).
-#[derive(Serialize, Deserialize)]
-#[serde(untagged)]
-enum Scalar {
-    S(String),
-    B(bool),
-    I(i64),
-    F(f64),
-}
-
-impl Scalar {
-    fn into_string(self) -> String {
-        match self {
-            Scalar::S(s) => s,
-            Scalar::B(b) => b.to_string(),
-            Scalar::I(i) => i.to_string(),
-            Scalar::F(f) => f.to_string(),
-        }
-    }
+    Command { command: Vec<flex::Scalar> },
 }
 
 impl Serialize for ReadyCheck {
@@ -404,6 +440,7 @@ impl Serialize for ReadyCheck {
         match self {
             ReadyCheck::Running => ReadyRepr::Name("running".into()),
             ReadyCheck::DefaultRoute => ReadyRepr::Name("default_route".into()),
+            ReadyCheck::Agent => ReadyRepr::Name("agent".into()),
             ReadyCheck::UserExists(u) => ReadyRepr::UserExists {
                 user_exists: u.clone(),
             },
@@ -411,7 +448,7 @@ impl Serialize for ReadyCheck {
                 path_writable: p.clone(),
             },
             ReadyCheck::Command(c) => ReadyRepr::Command {
-                command: c.iter().cloned().map(Scalar::S).collect(),
+                command: c.iter().cloned().map(flex::Scalar::String).collect(),
             },
         }
         .serialize(s)
@@ -423,23 +460,24 @@ impl<'de> Deserialize<'de> for ReadyCheck {
         use serde::de::Error as _;
         let r = ReadyRepr::deserialize(d).map_err(|_| {
             D::Error::custom(
-                "expected running, default_route, {user_exists: USER}, {path_writable: PATH} or {command: [ARGV...]}",
+                "expected running, agent, default_route, {user_exists: USER}, {path_writable: PATH} or {command: [ARGV...]}",
             )
         })?;
         Ok(match r {
             ReadyRepr::Name(n) => match n.as_str() {
                 "running" => ReadyCheck::Running,
                 "default_route" => ReadyCheck::DefaultRoute,
+                "agent" => ReadyCheck::Agent,
                 other => {
                     return Err(D::Error::custom(format!(
-                        "unknown readiness check {other:?} (running, default_route, user_exists, path_writable, command)"
+                        "unknown readiness check {other:?} (running, agent, default_route, user_exists, path_writable, command)"
                     )));
                 }
             },
             ReadyRepr::UserExists { user_exists } => ReadyCheck::UserExists(user_exists),
             ReadyRepr::PathWritable { path_writable } => ReadyCheck::PathWritable(path_writable),
             ReadyRepr::Command { command } => {
-                ReadyCheck::Command(command.into_iter().map(Scalar::into_string).collect())
+                ReadyCheck::Command(command.into_iter().map(flex::Scalar::into_string).collect())
             }
         })
     }
@@ -450,6 +488,7 @@ impl std::fmt::Display for ReadyCheck {
         match self {
             ReadyCheck::Running => write!(f, "running"),
             ReadyCheck::DefaultRoute => write!(f, "default_route"),
+            ReadyCheck::Agent => write!(f, "agent"),
             ReadyCheck::UserExists(u) => write!(f, "user_exists({u})"),
             ReadyCheck::PathWritable(p) => write!(f, "path_writable({p})"),
             ReadyCheck::Command(c) => write!(f, "command({})", c.join(" ")),
@@ -463,7 +502,12 @@ impl std::fmt::Display for ReadyCheck {
 pub struct ExecDefaults {
     /// Guest user: a name (`dev`), `uid`, or `uid:gid`. Names are resolved in the
     /// guest, and set HOME/USER/LOGNAME unless given in env.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "flex::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "Option<flex::IntOrString>")]
     pub user: Option<String>,
 
     /// Working directory in the guest.
@@ -471,7 +515,12 @@ pub struct ExecDefaults {
     pub cwd: Option<String>,
 
     /// Environment for exec (merged over the instance `env`).
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "flex::string_map",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    #[schemars(with = "BTreeMap<String, flex::Scalar>")]
     pub env: BTreeMap<String, String>,
 
     /// Run argv through the user's login shell (`$SHELL -l -c 'exec "$@"'`), so
@@ -700,12 +749,29 @@ mod tests {
     }
 
     #[test]
+    fn scalar_values_in_string_maps() {
+        let f = parse(
+            "sandboxes:\n  web:\n    image: x\n    env: {DEBUG: 1, ON: true}\n    raw_config: {security.nesting: true}\n    raw_devices: {gpu: {type: gpu, id: 0}}\n    exec: {user: 1000}\n",
+        )
+        .unwrap();
+        let w = &f.sandboxes["web"];
+        assert_eq!(w.env["DEBUG"], "1");
+        assert_eq!(w.env["ON"], "true");
+        assert_eq!(w.raw_config["security.nesting"], "true");
+        assert_eq!(w.raw_devices["gpu"]["id"], "0");
+        assert_eq!(w.exec.user.as_deref(), Some("1000"));
+    }
+
+    #[test]
     fn idmap_forms() {
         let f = parse(
             "sandboxes:\n  a: {image: x, idmap: auto}\n  b: {image: x, idmap: {raw: 'both 1 1'}}\n  c: {image: x, idmap: {mode: always, host_uid: 1001}}\n",
         )
         .unwrap();
-        assert_eq!(f.sandboxes["a"].idmap, Some(IdmapSpec::Mode(IdmapMode::Auto)));
+        assert_eq!(
+            f.sandboxes["a"].idmap,
+            Some(IdmapSpec::Mode(IdmapMode::Auto))
+        );
         assert!(matches!(f.sandboxes["b"].idmap, Some(IdmapSpec::Raw(_))));
         match &f.sandboxes["c"].idmap {
             Some(IdmapSpec::Map(m)) => {
@@ -726,7 +792,11 @@ mod tests {
         let r = f.sandboxes["a"].ready.as_ref().unwrap();
         assert_eq!(r.len(), 5);
         assert_eq!(r[4], ReadyCheck::Command(vec!["true".into()]));
-        assert!(parse("sandboxes:\n  a: {image: x, ready: [bogus]}\n").unwrap_err().contains("bogus"));
+        assert!(
+            parse("sandboxes:\n  a: {image: x, ready: [bogus]}\n")
+                .unwrap_err()
+                .contains("bogus")
+        );
     }
 
     #[test]

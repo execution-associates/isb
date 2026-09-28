@@ -64,6 +64,52 @@ pub(crate) fn opt_u16<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u16>, D:
         .map_err(|_| D::Error::custom(format!("{n} is out of range (max 65535)")))
 }
 
+/// A scalar (string, number or boolean) read as a string.
+#[derive(serde::Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+#[allow(dead_code)]
+pub(crate) enum Scalar {
+    String(String),
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+}
+
+impl Scalar {
+    pub(crate) fn into_string(self) -> String {
+        match self {
+            Scalar::String(s) => s,
+            Scalar::Bool(b) => b.to_string(),
+            Scalar::Int(i) => i.to_string(),
+            Scalar::Float(f) => f.to_string(),
+        }
+    }
+}
+
+/// A string map whose values may be written as unquoted scalars
+/// (`env: {DEBUG: 1}`, `raw_config: {security.nesting: true}`).
+pub(crate) fn string_map<'de, D: Deserializer<'de>>(
+    d: D,
+) -> Result<std::collections::BTreeMap<String, String>, D::Error> {
+    let m = std::collections::BTreeMap::<String, Scalar>::deserialize(d)?;
+    Ok(m.into_iter().map(|(k, v)| (k, v.into_string())).collect())
+}
+
+pub(crate) fn string_map_map<'de, D: Deserializer<'de>>(
+    d: D,
+) -> Result<std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>, D::Error>
+{
+    let m = std::collections::BTreeMap::<String, std::collections::BTreeMap<String, Scalar>>::deserialize(d)?;
+    Ok(m.into_iter()
+        .map(|(k, v)| {
+            (
+                k,
+                v.into_iter().map(|(a, b)| (a, b.into_string())).collect(),
+            )
+        })
+        .collect())
+}
+
 /// Parse `90`, `90s`, `5m`, `1h`, `1500ms` into a duration.
 pub fn parse_duration(s: &str) -> Result<std::time::Duration, String> {
     let s = s.trim();
@@ -95,7 +141,10 @@ mod tests {
         assert_eq!(parse_duration("90s").unwrap(), Duration::from_secs(90));
         assert_eq!(parse_duration("5m").unwrap(), Duration::from_secs(300));
         assert_eq!(parse_duration("1h").unwrap(), Duration::from_secs(3600));
-        assert_eq!(parse_duration("1500ms").unwrap(), Duration::from_millis(1500));
+        assert_eq!(
+            parse_duration("1500ms").unwrap(),
+            Duration::from_millis(1500)
+        );
         assert!(parse_duration("5 parsecs").is_err());
     }
 
