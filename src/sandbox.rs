@@ -767,44 +767,41 @@ pub fn wait_ready(
             match run_check(client, name, check, exec_defaults) {
                 Ok(true) => break,
                 Ok(false) => last = "not yet".into(),
-                Err(e) => {
-                    last = e.to_string();
-                    // An instance that stopped (crashed, powered off) will not get
-                    // ready by waiting: say so now instead of at the deadline.
-                    // A reboot (common on a VM's first boot) passes through
-                    // Stopped briefly, so only a sustained stop counts. incus
-                    // sometimes fails to complete a guest-initiated reboot (its
-                    // stop hook errors out and the instance stays Stopped), so
-                    // start it once more before giving up.
-                    if let Ok(Some(a)) = get_actual(client, name) {
-                        if a.running() || a.status.eq_ignore_ascii_case("starting") {
-                            stopped_since = None;
-                        } else if stopped_since.get_or_insert_with(Instant::now).elapsed()
-                            >= Duration::from_secs(30)
-                        {
-                            if !restarted {
-                                restarted = true;
-                                stopped_since = None;
-                                if start_instance(client, name).is_ok() {
-                                    continue;
-                                }
-                            }
-                            return Err(Error::NotReady {
-                                sandbox: name.into(),
-                                check: check.to_string(),
-                                detail: format!(
-                                    "instance is {} (it stopped while getting ready{}; see `incus info --show-log {name}`)",
-                                    a.status,
-                                    if restarted {
-                                        " and again after a restart"
-                                    } else {
-                                        ""
-                                    }
-                                ),
-                                waited: started.elapsed(),
-                            });
+                Err(e) => last = e.to_string(),
+            }
+            // An instance that stopped (crashed, powered off) will not get ready
+            // by waiting. A reboot (common on a VM's first boot) passes through
+            // Stopped briefly, so only a sustained stop counts. incus sometimes
+            // fails to complete a guest-initiated reboot (its stop hook errors
+            // out and the instance stays Stopped), so start it once more before
+            // failing fast instead of at the deadline.
+            if let Ok(Some(a)) = get_actual(client, name) {
+                if a.running() || a.status.eq_ignore_ascii_case("starting") {
+                    stopped_since = None;
+                } else if stopped_since.get_or_insert_with(Instant::now).elapsed()
+                    >= Duration::from_secs(30)
+                {
+                    if !restarted {
+                        restarted = true;
+                        stopped_since = None;
+                        if start_instance(client, name).is_ok() {
+                            continue;
                         }
                     }
+                    return Err(Error::NotReady {
+                        sandbox: name.into(),
+                        check: check.to_string(),
+                        detail: format!(
+                            "instance is {} (it stopped while getting ready{}; see `incus info --show-log {name}`)",
+                            a.status,
+                            if restarted {
+                                ", and a restart did not stick"
+                            } else {
+                                ""
+                            }
+                        ),
+                        waited: started.elapsed(),
+                    });
                 }
             }
             if started.elapsed() >= timeout {
@@ -1166,9 +1163,16 @@ impl Sandbox {
     /// taken ports. Returns the listen address in use. A correct device is left
     /// untouched.
     pub fn add_port(&self, port: &PortSpec) -> Result<String> {
+        // Same rules as the spec path: a VM gets NAT mode and no bind=guest.
+        let instance_type = if self.info()?.instance_type == "virtual-machine" {
+            crate::spec::InstanceType::VirtualMachine
+        } else {
+            crate::spec::InstanceType::Container
+        };
         let spec = SandboxSpec {
             name: Some(self.name.clone()),
             image: "unused".into(),
+            instance_type,
             ports: vec![port.clone()],
             ..Default::default()
         };

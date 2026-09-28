@@ -32,7 +32,7 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
       - name: package (publish dry run, never uploads)
-        run: cargo package --locked --allow-dirty
+        run: cargo package --locked --allow-dirty --target-dir "$RUNNER_TEMP/package"
 
   msrv:
     name: MSRV 1.85
