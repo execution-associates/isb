@@ -50,6 +50,27 @@ $ isb exec web -- bun install
 $ isb down
 ```
 
+### Variables
+
+`${WORKTREE}` and `${IP}` above are filled in from the environment when the
+file is loaded, the way docker compose does it:
+
+```console
+$ WORKTREE=$PWD IP=100.64.0.7 isb up
+$ isb --env-file dev.env up       # KEY=VALUE lines; the environment wins
+```
+
+- `${VAR:-default}` uses `default` when `VAR` is unset or empty.
+- `${VAR:?message}` fails with `message` when it is.
+- A plain `${VAR}` that is unset is an error, never an empty string: an empty
+  bind path or label would be worse than a clear failure.
+- `$$` is a literal `$`.
+- The Python and TypeScript SDKs take a `vars` map that wins over both
+  (`Project.load("isb.yaml", vars={"IP": "100.64.0.7"})`).
+
+Run `isb config` to see the file with every variable filled in. The full
+syntax is in [docs/spec.md](docs/spec.md#interpolation).
+
 ## Install
 
 Prebuilt static binaries for x86_64 and aarch64 Linux are attached to each
