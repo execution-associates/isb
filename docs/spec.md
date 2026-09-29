@@ -474,6 +474,19 @@ exec:
   login: false
 ```
 
+### `command`
+
+The sandbox's main command, as argv (no shell): `[bun, run, dev]`. A
+foreground `isb up` runs it once the sandbox is ready, with the service's
+`exec` defaults, and streams its output prefixed with `<service> | `. When
+every service's command has exited, `up` stops the sandboxes and exits with the
+first non-zero status (0 if all succeeded). Ignored by `isb up -d`. Client-side
+only, so changing it is never drift.
+
+```yaml
+command: [sh, -c, "bun install && exec bun run dev"]
+```
+
 ### `raw_config`
 
 Map of string to string, set verbatim as instance config. Applied after every
@@ -649,13 +662,39 @@ Compose (take service names; all services when none are given):
 
 | Verb | Does |
 |---|---|
-| `up [SVC...] [--prune-devices] [--no-ready] [--json]` | Create or reconcile. For every port with `search`, prints `SERVICE DEVICE LISTEN` on stdout with the listen address in use, whether `up` added the device or found it already correct. With `--json`, each report's `ports` object maps device to that address. |
+| `up [SVC...] [-d] [--no-log-prefix] [-t D] [--prune-devices] [--no-ready] [--json]` | Create or reconcile. For every port with `search`, prints `SERVICE DEVICE LISTEN` on stdout with the listen address in use, whether `up` added the device or found it already correct. With `--json`, each report's `ports` object maps device to that address. Then, like `docker compose up`, stays in the foreground (see [Foreground `up`](#foreground-up)); `-d` returns instead and leaves the sandboxes running. |
 | `plan [SVC...] [--prune-devices] [--json] [--exit-code]` | Show what `up` would change. |
 | `down [SVC...] [--volumes]` | Delete the sandboxes (running ones are stopped). With `--volumes` and no service list, also delete the file's non-external named volumes: every one a sandbox mounts, in the pool `up` used (mount `pool`, else top-level `pool`, else that sandbox's `storage` pool), plus declared top-level ones no sandbox mounts (in their `pool`, `auto` meaning the host default). A volume still in use is kept with a message. With a service list, `--volumes` is ignored with a message. |
 | `config [--services]` | Print the resolved file. |
 | `ps [SVC...] [--json]` | Status per service; without a compose file, running instances. |
 | `exec TARGET [-u USER] [-w CWD] [-e K=V] [-l] [-t\|-T] [-n] [--timeout D] -- ARGV...` | Run argv (no shell). `TARGET` is a service if a compose file defines it, else an instance. TTY when stdin is a terminal. Exit code is the command's, or 125 if isb itself failed. |
 | `inspect NAME [--json]` | One sandbox, by service or instance name. |
+
+### Foreground `up`
+
+Without `-d`, `up` holds the sandboxes after creating or reconciling them. It
+runs each service's `command` and streams its output (`--no-log-prefix` drops
+the `<service> | ` prefix), then stops the selected sandboxes when the first of
+these happens:
+
+| Event | Exit code |
+|---|---|
+| every `command` has exited (never, when no service has one) | first non-zero status, else 0 |
+| SIGINT, SIGTERM or SIGHUP | 128 + signal (130 for Ctrl-C) |
+| a process that started isb exits | 129 |
+| stdout is closed (the reader of the pipe went away) | 141 |
+
+The third is the one signals cannot give. A closed terminal, or an agent whose
+background task ends with the agent, does not always signal its descendants,
+which used to leave a sandbox and its published ports running with nobody
+attached. isb records its ancestors (below pid 1) at startup and checks them
+every second, so it goes when whatever started it goes. That includes a
+wrapper script that backgrounds `isb up` and exits: use `-d` for that.
+
+Stopping is a clean shutdown bounded by `-t` (default `10s`), then a kill; a
+second Ctrl-C kills at once. Sandboxes are stopped, not deleted, as with
+`docker compose up`: the next `up` starts them again with their state intact,
+and `isb down` deletes them.
 
 Instances (take instance names):
 
@@ -741,6 +780,6 @@ Then:
 ```
 isb config                 # check interpolation and merging
 isb plan                   # see what would change
-isb up                     # create or reconcile, then wait for readiness
+isb up -d                  # create or reconcile, wait for readiness, return
 isb exec web -- bun install
 ```

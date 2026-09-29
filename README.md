@@ -25,12 +25,25 @@ sandboxes:
       - { listen: 8000, connect: 8000 }   # reachable on the host's localhost
     ready: [running, default_route]
     exec: { user: ubuntu, cwd: /home/ubuntu/site }
+    command: [python3, -u, -m, http.server, 8000]
 ```
 
 ```console
-$ isb up                                         # create it, or fix only what drifted
-$ isb exec web -- python3 -m http.server 8000    # serves ./site at localhost:8000
-$ isb down                                       # gone, host untouched
+$ isb up                  # create it (or fix only what drifted), then run `command`
+web | Serving HTTP on 0.0.0.0 port 8000 (http://0.0.0.0:8000/) ...
+^C                        # stops the sandbox; the next `isb up` starts it again
+$ isb down                # delete it, host untouched
+```
+
+Like `docker compose up`, `isb up` stays in the foreground: it streams each
+service's `command` with a `<service> | ` prefix and stops the sandboxes when
+the commands exit, on Ctrl-C, or when whatever started isb goes away. Scripts
+that want the sandbox up and then carry on use `-d`:
+
+```console
+$ isb up -d                                 # create or reconcile, wait until ready, return
+$ isb exec web -- python3 -m unittest       # runs with the service's exec defaults
+$ isb down
 ```
 
 ## Why incus
@@ -70,6 +83,10 @@ incus has the machinery. isb makes it declarative and dependable:
   string. Output streams as it is produced. Exit codes, stdin, a real terminal
   when you have one, and Ctrl-C all work, and a command that does not read stdin
   never waits for it.
+- **Nothing left running by accident.** A foreground `isb up` notices when the
+  process that started it exits, even when no signal arrives (an agent's
+  background task, a closed terminal), and stops its sandboxes. A dev server
+  never outlives the session that wanted it.
 - **Ready means ready.** Wait for the network, a user, a writable path or your
   own check before the first command, not just for "running".
 - **Made for many sandboxes at once.** Labels to find them, `prune` to delete
@@ -82,7 +99,8 @@ incus has the machinery. isb makes it declarative and dependable:
 
 - **AI agents and untrusted code.** Give each agent or task its own machine with
   one project directory mounted, instead of your whole home directory and its
-  credentials.
+  credentials. An agent that runs `isb up` as a background task gets its dev
+  server stopped when the agent goes away.
 - **A dev environment per branch.** One sandbox per git worktree, each with its
   own dependencies and dev server, side by side. lasso runs its frontend
   tooling this way ([examples/lasso-dev.yaml](examples/lasso-dev.yaml)).

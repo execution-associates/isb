@@ -151,11 +151,23 @@ enum Cmd {
     Schema,
     /// Serve the SDK protocol (line-delimited JSON) on stdin/stdout.
     Rpc,
-    /// Create or reconcile the compose file's sandboxes.
+    /// Create or reconcile the compose file's sandboxes, then hold them in the
+    /// foreground: run each `command`, stream its output, and stop the
+    /// sandboxes when the commands exit, on Ctrl-C, or when the process that
+    /// started isb goes away. `-d` returns once they are up instead.
     Up {
         #[command(flatten)]
         f: Files,
         services: Vec<String>,
+        /// Detached: return once the sandboxes are up and leave them running.
+        #[arg(short, long)]
+        detach: bool,
+        /// Don't prefix command output with the service name.
+        #[arg(long)]
+        no_log_prefix: bool,
+        /// Clean-shutdown timeout when stopping, before the sandbox is killed.
+        #[arg(short, long, value_parser = dur, default_value = "10s")]
+        timeout: Duration,
         /// Remove instance-local devices not in the spec.
         #[arg(long)]
         prune_devices: bool,
@@ -599,11 +611,25 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         }
         Cmd::Up {
             services,
+            detach,
+            no_log_prefix,
+            timeout,
             prune_devices,
             no_ready,
             json,
             ..
-        } => up(ctx, services, prune_devices, no_ready, json),
+        } => up(
+            ctx,
+            services,
+            UpFlags {
+                detach,
+                no_log_prefix,
+                timeout,
+                prune_devices,
+                no_ready,
+                json,
+            },
+        ),
         Cmd::Down {
             services, volumes, ..
         } => down(ctx, services, volumes),
@@ -968,32 +994,55 @@ fn device(ctx: &Ctx, d: DeviceCmd) -> Result<u8> {
     Ok(0)
 }
 
-fn up(
-    ctx: &Ctx,
-    services: Vec<String>,
+struct UpFlags {
+    detach: bool,
+    no_log_prefix: bool,
+    timeout: Duration,
     prune_devices: bool,
     no_ready: bool,
     json: bool,
-) -> Result<u8> {
+}
+
+fn up(ctx: &Ctx, services: Vec<String>, flags: UpFlags) -> Result<u8> {
     let p = ctx.load()?;
     let opts = EnsureOptions {
-        diff: DiffOptions { prune_devices },
-        wait_ready: !no_ready,
+        diff: DiffOptions {
+            prune_devices: flags.prune_devices,
+        },
+        wait_ready: !flags.no_ready,
         ..Default::default()
     };
     let mut rep = ctx.report();
-    let reports = compose::up(&ctx.client(None), &p, &services, opts, &mut rep)?;
-    if json {
-        let r: Vec<_> = reports.iter().map(|(_, r)| r).collect();
+    let ups = compose::up_handles(&ctx.client(None), &p, &services, opts, &mut rep)?;
+    if flags.json {
+        let r: Vec<_> = ups.iter().map(|(_, r, _)| r).collect();
         print_json(&r);
     } else {
-        for (s, r) in &reports {
+        for (s, r, _) in &ups {
             for (dev, listen) in &r.ports {
                 println!("{s} {dev} {listen}");
             }
         }
     }
-    Ok(0)
+    if flags.detach {
+        return Ok(0);
+    }
+    let held = ups
+        .into_iter()
+        .map(|(s, _, sandbox)| {
+            Ok(isb::foreground::Service {
+                command: p.service(&s)?.command.clone(),
+                name: s,
+                sandbox,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let fg = isb::foreground::Options {
+        log_prefix: !flags.no_log_prefix,
+        stop_timeout: flags.timeout,
+        ..Default::default()
+    };
+    isb::foreground::run(&held, fg, &mut rep)
 }
 
 fn down(ctx: &Ctx, services: Vec<String>, volumes: bool) -> Result<u8> {

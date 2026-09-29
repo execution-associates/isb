@@ -1,6 +1,6 @@
 # A virtual machine sandbox.
 #
-#   isb -f examples/vm.yaml up          # boots the VM, waits for its agent
+#   isb -f examples/vm.yaml up -d       # boots the VM, waits for its agent, returns
 #   isb -f examples/vm.yaml exec worker -- uname -a
 #   isb -f examples/vm.yaml down --volumes
 #

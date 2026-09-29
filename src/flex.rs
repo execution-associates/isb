@@ -103,6 +103,15 @@ pub(crate) fn string_map<'de, D: Deserializer<'de>>(
     Ok(m.into_iter().map(|(k, v)| (k, v.into_string())).collect())
 }
 
+/// An argv whose items may be written as unquoted scalars
+/// (`command: [python3, -m, http.server, 8000]`).
+pub(crate) fn opt_string_vec<'de, D: Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Vec<String>>, D::Error> {
+    let v = Vec::<Scalar>::deserialize(d)?;
+    Ok(Some(v.into_iter().map(Scalar::into_string).collect()))
+}
+
 pub(crate) fn string_map_map<'de, D: Deserializer<'de>>(
     d: D,
 ) -> Result<std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>, D::Error>

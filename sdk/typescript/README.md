@@ -87,6 +87,8 @@ for (const plan of await project.plan()) {
   console.log(plan.name, plan.actions);
 }
 
+// Like `isb up -d`: resolves once the sandboxes are ready. A service's
+// `command` is for the foreground CLI `isb up` and is not run here.
 const reports = await project.up({
   onProgress: (line) => console.error(line),
 });
