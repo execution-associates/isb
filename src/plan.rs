@@ -273,6 +273,69 @@ pub fn split_addr(addr: &str) -> Option<(&str, &str, u16)> {
     Some((proto, host, port.parse().ok()?))
 }
 
+/// Expand a proxy address to incus' `proto:host:port` form.
+///
+/// Accepts `5173`, `HOST:5173`, `5173/udp`, `tcp:5173`, and full
+/// `tcp:HOST:PORT` / `udp:HOST:PORT` / `unix:PATH`. The protocol defaults to
+/// tcp and the host to `default_host`. IPv6 hosts go in brackets
+/// (`[::1]:5173`). The port may be a range or list as incus allows
+/// (`8000-8010`, `80,443`).
+pub fn normalize_addr(addr: &str, default_host: &str) -> std::result::Result<String, String> {
+    let a = addr.trim();
+    if a.is_empty() {
+        return Err("empty address".into());
+    }
+    if let Some(path) = a.strip_prefix("unix:") {
+        if path.is_empty() {
+            return Err(format!("{addr:?}: unix: needs a path"));
+        }
+        return Ok(a.to_string());
+    }
+    let (proto, rest) = match a.split_once(':') {
+        Some((p @ ("tcp" | "udp"), rest)) => (p, rest),
+        _ => match a.rsplit_once('/') {
+            Some((rest, p @ ("tcp" | "udp"))) => (p, rest),
+            Some((_, other)) if !other.contains(':') => {
+                return Err(format!("{addr:?}: unknown protocol {other:?} (tcp or udp)"));
+            }
+            _ => ("tcp", a),
+        },
+    };
+    let (host, port) = if rest.starts_with('[') {
+        let end = rest
+            .find(']')
+            .ok_or_else(|| format!("{addr:?}: unclosed [ in IPv6 host"))?;
+        let port = rest[end + 1..]
+            .strip_prefix(':')
+            .ok_or_else(|| format!("{addr:?}: expected [IPv6]:PORT"))?;
+        (&rest[..=end], port)
+    } else {
+        match rest.rsplit_once(':') {
+            Some((h, _)) if h.contains(':') => {
+                return Err(format!(
+                    "{addr:?}: put an IPv6 host in brackets, e.g. [::1]:5173"
+                ));
+            }
+            Some((h, p)) => (h, p),
+            None => (default_host, rest),
+        }
+    };
+    if host.is_empty() {
+        return Err(format!("{addr:?}: empty host"));
+    }
+    let valid_port = !port.is_empty()
+        && port.split(',').all(|part| {
+            let mut ends = part.splitn(2, '-');
+            ends.all(|n| n.parse::<u16>().is_ok_and(|n| n > 0))
+        });
+    if !valid_port {
+        return Err(format!(
+            "{addr:?}: expected PORT, HOST:PORT or PROTO:HOST:PORT (e.g. 5173, 0.0.0.0:5173, udp:5353)"
+        ));
+    }
+    Ok(format!("{proto}:{host}:{port}"))
+}
+
 fn default_port_name(bind: PortBind, listen: &str) -> String {
     match split_addr(listen) {
         Some(("tcp", _, port)) => format!("port-{}-{port}", bind.as_str()),
@@ -499,35 +562,35 @@ pub fn resolve(
     }
 
     for p in &spec.ports {
-        for (what, addr) in [("listen", &p.listen), ("connect", &p.connect)] {
-            let proto = addr.split(':').next().unwrap_or("");
-            if !matches!(proto, "tcp" | "udp" | "unix") || !addr.contains(':') {
-                return Err(Error::invalid(format!(
-                    "{name}: port {what} {addr:?} must look like tcp:IP:PORT, udp:IP:PORT or unix:PATH"
-                )));
-            }
-        }
+        // Docker-style shorthand: the protocol defaults to tcp and the host to
+        // 127.0.0.1. A VM's connect side defaults to 0.0.0.0 instead, which is
+        // how incus' NAT mode finds the VM's own address.
+        let connect_host = if vm { "0.0.0.0" } else { "127.0.0.1" };
+        let listen = normalize_addr(&p.listen, "127.0.0.1")
+            .map_err(|e| Error::invalid(format!("{name}: port listen: {e}")))?;
+        let connect = normalize_addr(&p.connect, connect_host)
+            .map_err(|e| Error::invalid(format!("{name}: port connect: {e}")))?;
         if p.search.is_some() {
             if p.bind != PortBind::Host {
                 return Err(Error::invalid(format!(
                     "{name}: port search only applies to bind: host"
                 )));
             }
-            if split_addr(&p.listen).is_none() {
+            if split_addr(&listen).is_none() {
                 return Err(Error::invalid(format!(
-                    "{name}: port search needs a tcp:/udp: listen address"
+                    "{name}: port search needs a single tcp or udp listen port"
                 )));
             }
         }
         let dname = p
             .name
             .clone()
-            .unwrap_or_else(|| default_port_name(p.bind, &p.listen));
+            .unwrap_or_else(|| default_port_name(p.bind, &listen));
         let mut props = Props::from([
             ("type".into(), "proxy".into()),
             ("bind".into(), p.bind.as_str().into()),
-            ("listen".into(), p.listen.clone()),
-            ("connect".into(), p.connect.clone()),
+            ("listen".into(), listen),
+            ("connect".into(), connect),
         ]);
         if vm {
             // incus proxies into a VM only in NAT mode.
@@ -1501,6 +1564,69 @@ mod tests {
     }
 
     #[test]
+    fn port_shorthand() {
+        let n = |a: &str| normalize_addr(a, "127.0.0.1");
+        assert_eq!(n("5173").unwrap(), "tcp:127.0.0.1:5173");
+        assert_eq!(n("0.0.0.0:5173").unwrap(), "tcp:0.0.0.0:5173");
+        assert_eq!(n("5353/udp").unwrap(), "udp:127.0.0.1:5353");
+        assert_eq!(n("10.0.0.1:5353/udp").unwrap(), "udp:10.0.0.1:5353");
+        assert_eq!(n("tcp:5173").unwrap(), "tcp:127.0.0.1:5173");
+        assert_eq!(n("udp:5353").unwrap(), "udp:127.0.0.1:5353");
+        assert_eq!(n("tcp:100.1.2.3:5173").unwrap(), "tcp:100.1.2.3:5173");
+        assert_eq!(n("[::1]:5173").unwrap(), "tcp:[::1]:5173");
+        assert_eq!(n("tcp:[::1]:5173").unwrap(), "tcp:[::1]:5173");
+        assert_eq!(n("8000-8010").unwrap(), "tcp:127.0.0.1:8000-8010");
+        assert_eq!(n("80,443").unwrap(), "tcp:127.0.0.1:80,443");
+        assert_eq!(n("unix:/run/x.sock").unwrap(), "unix:/run/x.sock");
+        assert_eq!(normalize_addr("80", "0.0.0.0").unwrap(), "tcp:0.0.0.0:80");
+        for bad in [
+            "",
+            "abc",
+            "0",
+            "70000",
+            "::1:80",
+            "5173/sctp",
+            "unix:",
+            ":80",
+            "tcp:",
+            "[::1]80",
+        ] {
+            assert!(n(bad).is_err(), "{bad:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn shorthand_ports_match_existing_full_form_devices() {
+        let t = tmp();
+        let spec = lasso_spec(t.path().to_str().unwrap())
+            .port(PortBinding::host("5173", "5173").name("vite"))
+            .port(PortBinding::guest("8190", "tcp:127.0.0.1:9000").name("backend"));
+        let d = resolve(&spec, &VolumeDefs::new(), &host(), Path::new("/")).unwrap();
+        assert_eq!(d.devices["vite"].props["listen"], "tcp:127.0.0.1:5173");
+        assert_eq!(d.devices["vite"].props["connect"], "tcp:127.0.0.1:5173");
+        assert_eq!(d.devices["backend"].props["listen"], "tcp:127.0.0.1:8190");
+        let a = actual_from(&d);
+        assert!(
+            diff(&d, Some(&a), &[], DiffOptions::default())
+                .unwrap()
+                .is_noop()
+        );
+        // A VM's connect side defaults to 0.0.0.0 (incus NAT finds the VM).
+        let mut vm = spec.clone();
+        vm.instance_type = crate::spec::InstanceType::VirtualMachine;
+        vm.privileged = None;
+        vm.idmap = None;
+        vm.ports.retain(|p| p.bind == PortBind::Host);
+        let d = resolve(&vm, &VolumeDefs::new(), &host(), Path::new("/")).unwrap();
+        assert_eq!(d.devices["vite"].props["connect"], "tcp:0.0.0.0:5173");
+        // Default names use the expanded address.
+        let spec =
+            lasso_spec(t.path().to_str().unwrap()).port(PortBinding::host("5353/udp", "53/udp"));
+        let d = resolve(&spec, &VolumeDefs::new(), &host(), Path::new("/")).unwrap();
+        assert!(d.devices.contains_key("port-host-udp-5353"));
+    }
+
+    #[test]
     fn both_port_directions() {
         let t = tmp();
         let spec = lasso_spec(t.path().to_str().unwrap())
@@ -1543,7 +1669,7 @@ mod tests {
         assert!(r(&s).is_err());
         let s = base
             .clone()
-            .port(PortBinding::host("1.2.3.4:1", "tcp:1.2.3.4:2"));
+            .port(PortBinding::host("1.2.3.4:x", "tcp:1.2.3.4:2"));
         assert!(r(&s).is_err());
         let s = base
             .clone()

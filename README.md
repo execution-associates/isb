@@ -1,8 +1,9 @@
 # isb
 
-Declarative incus sandboxes: a Rust library, a CLI, and a compose-style YAML
-format. isb talks to incusd over its unix socket, never through the `incus`
-binary.
+Declarative incus sandboxes, containers or VMs: describe them in a
+compose-style YAML file or in code, and isb creates them, then changes only what
+differs on every run. It is a Rust library and a CLI, with Python and TypeScript
+SDKs. It needs a running incus daemon, but not the `incus` command-line client.
 
 ```yaml
 # isb.yaml
@@ -20,8 +21,8 @@ sandboxes:
     ports:
       - name: vite
         bind: host
-        listen: "tcp:${IP}:5173"
-        connect: "tcp:127.0.0.1:5173"
+        listen: "${IP}:5173"
+        connect: 5173
         search: 50
     ready: [running, default_route, { user_exists: dev }]
     exec:
@@ -130,8 +131,8 @@ fn main() -> isb::Result<()> {
         .label("app", "web")
         .volume("/home/dev/src", Volume::bind("/srv/src").device("src"))
         .volume("/home/dev/.cache", Volume::named("dev-cache").owner("dev"))
-        .port(PortBinding::host("tcp:127.0.0.1:5173", "tcp:127.0.0.1:5173"))
-        .port(PortBinding::guest("tcp:127.0.0.1:8190", "tcp:127.0.0.1:8080"))
+        .port(PortBinding::host("5173", "5173"))
+        .port(PortBinding::guest("8190", "8080"))
         .ready(vec![ReadyCheck::Running, ReadyCheck::DefaultRoute]);
 
     let sb = Sandbox::connect_or_create(&client, &spec)?; // reconciles
@@ -187,12 +188,7 @@ async def main() -> None:
             "/home/dev/.cache": Volume.named("web-cache", owner="dev"),
         },
         ports=[
-            PortBinding.host(
-                "tcp:127.0.0.1:5173",
-                "tcp:127.0.0.1:5173",
-                name="vite",
-                search=20,
-            ),
+            PortBinding.host("5173", "5173", name="vite", search=20),
         ],
         ready=["running", "default_route", {"user_exists": "dev"}],
         exec={"user": "dev", "cwd": "/home/dev/src"},
@@ -257,10 +253,7 @@ const sb = await Sandbox.connectOrCreate({
     "/home/dev/.cache": Volume.named("web-cache", { owner: "dev" }),
   },
   ports: [
-    PortBinding.host("tcp:127.0.0.1:5173", "tcp:127.0.0.1:5173", {
-      name: "vite",
-      search: 20,
-    }),
+    PortBinding.host("5173", "5173", { name: "vite", search: 20 }),
   ],
   ready: ["running", "default_route", { user_exists: "dev" }],
   exec: { user: "dev", cwd: "/home/dev/src" },

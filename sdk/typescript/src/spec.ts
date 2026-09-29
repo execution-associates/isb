@@ -257,14 +257,8 @@ export interface IdmapRaw {
  */
 export interface PortSpec {
   bind?: PortBind;
-  /**
-   * Connect address, `tcp:IP:PORT` (or `udp:`/`unix:`).
-   */
-  connect: string;
-  /**
-   * Listen address, `tcp:IP:PORT` (or `udp:`/`unix:`).
-   */
-  listen: string;
+  connect: IntOrString;
+  listen: IntOrString;
   /**
    * Device name. Default: `port-<bind>-<listen port>`.
    */

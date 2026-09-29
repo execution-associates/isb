@@ -78,16 +78,20 @@ class PortBinding:
 
     @staticmethod
     def host(
-        listen: str,
-        connect: str,
+        listen: Union[str, int],
+        connect: Union[str, int],
         *,
         name: Optional[str] = None,
         search: Optional[int] = None,
         options: Optional[Mapping[str, Scalar]] = None,
     ) -> PortSpec:
         """Listen on the host, connect in the guest (publish a guest port).
-        `search`: if the listen port is taken, try up to this many ports past it."""
-        p: PortSpec = {"bind": "host", "listen": listen, "connect": connect}
+
+        Addresses take Docker-style shorthand: `5173`, `"0.0.0.0:5173"`,
+        `"5353/udp"`, or the full `"tcp:HOST:PORT"`; the protocol defaults to tcp
+        and the host to 127.0.0.1. `search`: if the listen port is taken, try up
+        to this many ports past it."""
+        p: PortSpec = {"bind": "host", "listen": str(listen), "connect": str(connect)}
         if name is not None:
             p["name"] = name
         if search is not None:
@@ -98,14 +102,16 @@ class PortBinding:
 
     @staticmethod
     def guest(
-        listen: str,
-        connect: str,
+        listen: Union[str, int],
+        connect: Union[str, int],
         *,
         name: Optional[str] = None,
         options: Optional[Mapping[str, Scalar]] = None,
     ) -> PortSpec:
-        """Listen in the guest, connect on the host (reach a host service)."""
-        p: PortSpec = {"bind": "guest", "listen": listen, "connect": connect}
+        """Listen in the guest, connect on the host (reach a host service).
+
+        Addresses take the same shorthand as `host()`."""
+        p: PortSpec = {"bind": "guest", "listen": str(listen), "connect": str(connect)}
         if name is not None:
             p["name"] = name
         if options:

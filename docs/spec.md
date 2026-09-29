@@ -346,12 +346,27 @@ List of proxy devices, in either direction.
 |---|---|---|---|
 | `name` | string | derived | Device name. |
 | `bind` | `host` or `guest` | `host` | `host`: listen on the host, connect in the guest (publish a guest port). `guest`: listen in the guest, connect on the host (reach a host service). |
-| `listen` | string | required | `tcp:IP:PORT`, `udp:IP:PORT` or `unix:PATH`. |
-| `connect` | string | required | Same forms. |
+| `listen` | string | required | An address (see below). |
+| `connect` | string | required | An address (see below). |
 | `search` | integer | none | Host-bound TCP/UDP only: step past a taken listen port, up to this many more. |
 | `options` | map of string | `{}` | Extra proxy properties (`nat`, `proxy_protocol`, ...), verbatim. |
 
-IPv6 addresses go in brackets (`tcp:[::1]:8080`). Becomes
+**Addresses.** Docker-style shorthand works; the protocol defaults to `tcp` and
+the host to `127.0.0.1`:
+
+| Written | Means |
+|---|---|
+| `5173` | `tcp:127.0.0.1:5173` |
+| `0.0.0.0:5173` | `tcp:0.0.0.0:5173` |
+| `5353/udp` | `udp:127.0.0.1:5353` |
+| `tcp:5173`, `udp:5353` | `tcp:127.0.0.1:5173`, `udp:127.0.0.1:5353` |
+| `tcp:HOST:PORT`, `udp:HOST:PORT`, `unix:PATH` | as written |
+
+On a VM, `connect` defaults to host `0.0.0.0` instead, which lets incus' NAT mode
+find the VM's address. IPv6 hosts go in brackets (`[::1]:8080`). The port may be
+a range or a list, as incus allows (`8000-8010`, `80,443`). isb stores the full
+form, so `5173` in the spec matches an existing device written as
+`tcp:127.0.0.1:5173`, and reconcile leaves it alone. Becomes
 `{type: proxy, bind, listen, connect, ...options}`; on a VM, `nat: "true"` is
 added before `options`. An option named `type`, `bind`, `listen` or `connect` is
 an error ("would override a core property"). Reconciled per the device rules. On
@@ -376,8 +391,8 @@ that may be taken.
 
 ```yaml
 ports:
-  - {name: vite, listen: "tcp:${IP}:5173", connect: tcp:127.0.0.1:5173, search: 50}
-  - {name: backend, bind: guest, listen: tcp:127.0.0.1:8190, connect: tcp:127.0.0.1:8080}
+  - {name: vite, listen: "${IP}:5173", connect: 5173, search: 50}
+  - {name: backend, bind: guest, listen: 8190, connect: 8080}
 ```
 
 ### `ready`

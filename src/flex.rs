@@ -44,6 +44,14 @@ pub(crate) fn opt_bool<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, 
     bool(d).map(Some)
 }
 
+/// A required string that may be written as a number (`connect: 5173`).
+pub(crate) fn string<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    Ok(match IntOrString::deserialize(d)? {
+        IntOrString::Int(n) => n.to_string(),
+        IntOrString::String(s) => s,
+    })
+}
+
 pub(crate) fn opt_string<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     Ok(Some(match IntOrString::deserialize(d)? {
         IntOrString::Int(n) => n.to_string(),
