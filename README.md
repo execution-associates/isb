@@ -141,7 +141,7 @@ the dev server's port forwards.
 
 ## Library
 
-```rust,no_run
+```rust
 use isb::{Client, ExecOptions, PortBinding, ReadyCheck, Sandbox, SandboxSpec, Volume};
 
 fn main() -> isb::Result<()> {
