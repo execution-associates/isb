@@ -1,0 +1,47 @@
+# isb CLI reference
+
+```sh
+isb --help            # every command
+isb COMMAND --help    # one command's flags
+```
+
+```text
+isb create NAME -i IMAGE [--vm] [--cpus N] [-m MEM] [-v SRC:GUEST[:ro,owner=U]] [-p [IP:]HOST:GUEST]
+                         [-l k=v] [-e K=V] [--idmap auto] [--ready CHECK] [--ensure]
+isb start|stop|restart|rm NAME...
+isb ls [--label k[=v]] [--json]            list, filtered by label
+isb inspect NAME [--json]
+isb exec NAME|SERVICE [-u USER] [-w DIR] [-e K=V] [-l] [-t|-T] [-n] [--timeout D] -- ARGV...
+isb volume create|ls|inspect|rm
+isb port add NAME SPEC [--name DEV] [--search N]   prints the listen address in use
+isb port get NAME DEV [KEY]                prints one property, default: listen
+isb port rm NAME DEV... | isb port ls NAME [--json]
+isb device ls|rm NAME ...
+isb prune --label KEY --missing-path [-y]  delete sandboxes whose label is a vanished host path
+isb schema                                 JSON Schema of the YAML format
+
+# compose (-f FILE, repeatable; default ./isb.yaml)
+isb up [SERVICE...] [--prune-devices] [--no-ready] [--json]
+isb plan [SERVICE...] [--json] [--exit-code]
+isb down [SERVICE...] [--volumes]
+isb ps [SERVICE...] [--json]
+isb exec SERVICE -- ARGV...
+isb config
+```
+
+**Exit codes.** `isb exec` exits with the command's own status. If isb itself
+fails (the sandbox does not exist, incusd is unreachable) it exits 125. `isb plan
+--exit-code` exits 2 when there are changes. Everything else exits 0 on success
+and 1 on error.
+
+**`prune`** is a dry run unless given `-y`, and never touches a sandbox without
+the label, or one whose path still exists.
+
+**Compose files** are found as `./isb.yaml` (or `isb.yml`) unless `-f FILE` is
+given; several `-f` files merge in order. See
+[spec.md](spec.md#files-and-validation).
+
+**Global flags:** `--socket PATH` (default `$INCUS_SOCKET`, else
+`$INCUS_DIR/unix.socket`, else `/var/lib/incus/unix.socket`), `--project NAME`
+(incus project), `-f FILE` (compose file, repeatable), `-P NAME` (compose
+project name), `--env-file FILE`, `--create-timeout DURATION`, `-q`.
