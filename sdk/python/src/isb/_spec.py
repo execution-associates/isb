@@ -58,10 +58,13 @@ class NamedVolumeSpec(TypedDict, total=False):
 
 
 class _PortSpecRequired(TypedDict):
-    #: Connect address, `tcp:IP:PORT` (or `udp:`/`unix:`).
-    connect: str
-    #: Listen address, `tcp:IP:PORT` (or `udp:`/`unix:`).
-    listen: str
+    #: Connect address, same forms as `listen`. The host defaults to 127.0.0.1
+    #: (0.0.0.0 for a VM, which lets incus find the VM's address).
+    connect: IntOrString
+    #: Listen address: `5173`, `HOST:5173`, `5173/udp`, or the full
+    #: `tcp:HOST:PORT` / `udp:HOST:PORT` / `unix:PATH`. The protocol defaults
+    #: to tcp and the host to 127.0.0.1.
+    listen: IntOrString
 
 
 class PortSpec(_PortSpecRequired, total=False):

@@ -45,10 +45,7 @@ const sb = await Sandbox.connectOrCreate({
     "/home/dev/.cache": Volume.named("dev-cache", { owner: "dev" }),
   },
   ports: [
-    PortBinding.host("tcp:127.0.0.1:5173", "tcp:127.0.0.1:5173", {
-      name: "vite",
-      search: 20,
-    }),
+    PortBinding.host("5173", "5173", { name: "vite", search: 20 }),
   ],
   ready: ["running", "default_route", { user_exists: "dev" }],
   exec: { user: "dev", cwd: "/home/dev/src" },

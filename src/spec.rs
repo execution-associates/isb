@@ -411,10 +411,17 @@ pub struct PortSpec {
     #[serde(default)]
     pub bind: PortBind,
 
-    /// Listen address, `tcp:IP:PORT` (or `udp:`/`unix:`).
+    /// Listen address: `5173`, `HOST:5173`, `5173/udp`, or the full
+    /// `tcp:HOST:PORT` / `udp:HOST:PORT` / `unix:PATH`. The protocol defaults
+    /// to tcp and the host to 127.0.0.1.
+    #[serde(deserialize_with = "flex::string")]
+    #[schemars(with = "flex::IntOrString")]
     pub listen: String,
 
-    /// Connect address, `tcp:IP:PORT` (or `udp:`/`unix:`).
+    /// Connect address, same forms as `listen`. The host defaults to 127.0.0.1
+    /// (0.0.0.0 for a VM, which lets incus find the VM's address).
+    #[serde(deserialize_with = "flex::string")]
+    #[schemars(with = "flex::IntOrString")]
     pub connect: String,
 
     /// Host-bound TCP/UDP only: if the listen port is taken, try the next one, up
@@ -793,6 +800,18 @@ mod tests {
         assert_eq!(w.raw_config["security.nesting"], "true");
         assert_eq!(w.raw_devices["gpu"]["id"], "0");
         assert_eq!(w.exec.user.as_deref(), Some("1000"));
+    }
+
+    #[test]
+    fn port_numbers_parse_as_addresses() {
+        let f = parse(
+            "sandboxes:\n  web:\n    image: x\n    ports:\n      - {listen: \"${IP}:5173\", connect: 5173}\n      - {bind: guest, listen: 8190, connect: \"8080\"}\n",
+        )
+        .unwrap();
+        let p = &f.sandboxes["web"].ports;
+        assert_eq!(p[0].connect, "5173");
+        assert_eq!(p[1].listen, "8190");
+        assert_eq!(p[1].connect, "8080");
     }
 
     #[test]

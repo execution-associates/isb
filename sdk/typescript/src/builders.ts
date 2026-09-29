@@ -72,11 +72,11 @@ export interface HostPortOptions extends PortOptions {
 
 function port(
   bind: "host" | "guest",
-  listen: string,
-  connect: string,
+  listen: string | number,
+  connect: string | number,
   o: HostPortOptions,
 ): PortSpec {
-  const p: PortSpec = { bind, listen, connect };
+  const p: PortSpec = { bind, listen: String(listen), connect: String(connect) };
   if (o.name !== undefined) p.name = o.name;
   if (o.search !== undefined) p.search = o.search;
   if (o.options !== undefined) p.options = { ...o.options };
@@ -84,12 +84,17 @@ function port(
 }
 
 export const PortBinding = {
-  /** Listen on the host, connect in the guest (publish a guest port). */
-  host(listen: string, connect: string, opts: HostPortOptions = {}): PortSpec {
+  /**
+   * Listen on the host, connect in the guest (publish a guest port).
+   * Addresses take Docker-style shorthand: `5173`, `"0.0.0.0:5173"`,
+   * `"5353/udp"`, or the full `"tcp:HOST:PORT"`; the protocol defaults to tcp
+   * and the host to 127.0.0.1.
+   */
+  host(listen: string | number, connect: string | number, opts: HostPortOptions = {}): PortSpec {
     return port("host", listen, connect, opts);
   },
   /** Listen in the guest, connect on the host (reach a host service). */
-  guest(listen: string, connect: string, opts: PortOptions = {}): PortSpec {
+  guest(listen: string | number, connect: string | number, opts: PortOptions = {}): PortSpec {
     return port("guest", listen, connect, opts);
   },
 };
