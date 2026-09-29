@@ -220,6 +220,9 @@ filled in.
 - [docs/cli.md](docs/cli.md): every command and flag
 - [docs/rpc.md](docs/rpc.md): the protocol the SDKs speak, for other languages
 - [examples/](examples): a real per-worktree dev setup, and a VM
+- [SKILL.md](SKILL.md): an agent skill for isb. Put it in your agent's skills
+  directory (for Claude Code, `~/.claude/skills/isb/SKILL.md`) and agents will
+  use isb correctly
 
 ## Development
 
