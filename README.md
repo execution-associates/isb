@@ -25,7 +25,7 @@ sandboxes:
       - { listen: 8000, connect: 8000 }   # reachable on the host's localhost
     ready: [running, default_route]
     exec: { user: ubuntu, cwd: /home/ubuntu/site }
-    command: [python3, -u, -m, http.server, "8000"]
+    command: [python3, -u, -m, http.server, 8000]
 ```
 
 ```console

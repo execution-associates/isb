@@ -2,17 +2,17 @@
 // Field names are exactly those of the compose YAML (docs/spec.md).
 
 /**
- * This interface was referenced by `ComposeFile`'s JSON-Schema
- * via the `definition` "IntOrString".
- */
-export type IntOrString = number | string;
-/**
  * A scalar (string, number or boolean) read as a string.
  *
  * This interface was referenced by `ComposeFile`'s JSON-Schema
  * via the `definition` "Scalar".
  */
 export type Scalar = string | boolean | number;
+/**
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "IntOrString".
+ */
+export type IntOrString = number | string;
 /**
  * This interface was referenced by `ComposeFile`'s JSON-Schema
  * via the `definition` "BoolOrString".
@@ -122,7 +122,7 @@ export interface SandboxSpec {
    * is joined into a shell string. Never part of the instance, so changing
    * it is not drift.
    */
-  command?: string[] | null;
+  command?: Scalar[] | null;
   /**
    * CPU limit (`limits.cpu`): a count like `8` or a set like `0-3`.
    */

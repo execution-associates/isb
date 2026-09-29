@@ -112,7 +112,7 @@ class SandboxSpec(TypedDict, total=False):
     #: `up` stops the sandbox when every command has exited. argv form: nothing
     #: is joined into a shell string. Never part of the instance, so changing
     #: it is not drift.
-    command: Optional[Sequence[str]]
+    command: Optional[Sequence[Scalar]]
     #: CPU limit (`limits.cpu`): a count like `8` or a set like `0-3`.
     cpus: Optional[IntOrString]
     #: Instance environment (`environment.<KEY>`), seen by every exec. Not for
@@ -207,7 +207,7 @@ class SandboxSpecFields(TypedDict, total=False):
     #: `up` stops the sandbox when every command has exited. argv form: nothing
     #: is joined into a shell string. Never part of the instance, so changing
     #: it is not drift.
-    command: Optional[Sequence[str]]
+    command: Optional[Sequence[Scalar]]
     #: CPU limit (`limits.cpu`): a count like `8` or a set like `0-3`.
     cpus: Optional[IntOrString]
     #: Instance environment (`environment.<KEY>`), seen by every exec. Not for

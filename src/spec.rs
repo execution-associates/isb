@@ -239,7 +239,12 @@ pub struct SandboxSpec {
     /// `up` stops the sandbox when every command has exited. argv form: nothing
     /// is joined into a shell string. Never part of the instance, so changing
     /// it is not drift.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "flex::opt_string_vec",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "Option<Vec<flex::Scalar>>")]
     pub command: Option<Vec<String>>,
 
     /// Extra instance config keys, set verbatim (escape hatch).
@@ -856,6 +861,18 @@ mod tests {
             parse("sandboxes:\n  a: {image: x, ready: [bogus]}\n")
                 .unwrap_err()
                 .contains("bogus")
+        );
+    }
+
+    #[test]
+    fn command_items_may_be_unquoted_scalars() {
+        let f = parse(
+            "sandboxes:\n  a:\n    image: x\n    command: [python3, -m, http.server, 8000, true, 1.5]\n",
+        )
+        .unwrap();
+        assert_eq!(
+            f.sandboxes["a"].command.as_deref().unwrap(),
+            ["python3", "-m", "http.server", "8000", "true", "1.5"]
         );
     }
 
