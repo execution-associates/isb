@@ -848,10 +848,10 @@ sandboxes:
     // `up` prints the settled address of a searched port, both when it adds
     // the device and when it finds it already in place.
     let want = format!("web http tcp:127.0.0.1:{port}\n");
-    let (code, out, err) = run(&["up"]);
+    let (code, out, err) = run(&["up", "-d"]);
     assert_eq!(code, Some(0), "{err}");
     assert_eq!(out, want);
-    let (code, out, err) = run(&["up"]);
+    let (code, out, err) = run(&["up", "-d"]);
     assert_eq!(code, Some(0), "{err}");
     assert_eq!(out, want);
     let (code, out, _) = run(&["port", "get", &name, "http"]);
@@ -896,6 +896,75 @@ sandboxes:
     assert_eq!(code, Some(0), "{err}");
     assert!(Sandbox::get(&client, &name).is_err());
     assert!(isb::volume::get(&client, &pool, &vol).unwrap().is_none());
+}
+
+/// Foreground `up`: the command's output is streamed and its exit code passed
+/// through, and the sandbox is stopped when the command exits or when the
+/// process that started isb dies without signalling it.
+#[test]
+fn compose_foreground() {
+    if !enabled() {
+        return;
+    }
+    let client = Client::new();
+    let name = test_name("fg");
+    let mut cleanup = Cleanup::new(&client);
+    cleanup.instance(&name);
+    let dir = tempdir();
+    let file = dir.path().join("isb.yaml");
+    let write = |cmd: &str| {
+        std::fs::write(
+            &file,
+            format!(
+                "sandboxes:\n  web:\n    name: {name}\n    image: {}\n    command: [sh, -c, {cmd:?}]\n",
+                image()
+            ),
+        )
+        .unwrap()
+    };
+    let status = |c: &Client| Sandbox::get(c, &name).unwrap().info().unwrap().status;
+
+    write("echo hi; exit 3");
+    let out = Command::new(isb_bin())
+        .args(["-q", "-f"])
+        .arg(&file)
+        .arg("up")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(3));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "web | hi\n");
+    assert_eq!(status(&client), "Stopped");
+
+    // The parent is SIGKILLed, so isb gets no signal: only the watchdog can
+    // notice.
+    write("echo hi; sleep 600");
+    let log = dir.path().join("up.log");
+    let mut parent = Command::new("sh")
+        .arg("-c")
+        .arg(r#""$1" -f "$2" up >"$3" 2>&1 & exec sleep 600"#)
+        .arg("sh")
+        .arg(isb_bin())
+        .arg(&file)
+        .arg(&log)
+        .stdin(Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(120);
+    while !std::fs::read_to_string(&log)
+        .unwrap_or_default()
+        .contains("web | hi")
+    {
+        assert!(Instant::now() < deadline, "command never ran");
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    parent.kill().unwrap();
+    parent.wait().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while status(&client) != "Stopped" {
+        assert!(Instant::now() < deadline, "sandbox still running");
+        std::thread::sleep(Duration::from_millis(500));
+    }
 }
 
 /// A virtual machine: the other first-class instance type. Boots, waits for the

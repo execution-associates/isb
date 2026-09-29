@@ -61,7 +61,9 @@ sandboxes:
 
 ```sh
 isb plan                 # what would change (--exit-code: 2 if anything)
-isb up                   # create or reconcile; waits for `ready`
+isb up                   # create or reconcile, wait for `ready`, then hold in the
+                         # foreground: runs `command`, stops the sandbox on exit
+isb up -d                # same, but return and leave it running
 isb exec web -- ls -la   # runs with the service's exec defaults
 isb ps                   # status of the file's sandboxes
 isb config               # the file with every ${VAR} filled in
@@ -135,6 +137,11 @@ and `Project.load("isb.yaml")` with `up()`, `plan()` and `down()`.
 
 ## Things that surprise people
 
+- **`isb up` blocks, like `docker compose up`.** It holds the sandboxes until
+  their `command`s exit, Ctrl-C, or whatever started isb exits, then stops them.
+  A script that runs `isb up` and then `isb exec` needs `isb up -d`. An agent
+  that wants a dev server to die with it should run plain `isb up` as a
+  background task: no signal is needed for it to notice the agent is gone.
 - **`isb up` never deletes what it was not told about.** Config keys and devices
   added by hand or by another tool stay put; `--prune-devices` removes unknown
   devices. Removing a field from the spec does not unset it on the instance.

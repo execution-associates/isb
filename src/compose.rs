@@ -217,6 +217,21 @@ pub fn up(
     opts: crate::EnsureOptions,
     report: &mut dyn FnMut(&str),
 ) -> Result<Vec<(String, crate::ApplyReport)>> {
+    Ok(up_handles(client, project, services, opts, report)?
+        .into_iter()
+        .map(|(s, r, _)| (s, r))
+        .collect())
+}
+
+/// [`up`], also returning a handle on each sandbox (with its exec defaults),
+/// for running its `command`.
+pub fn up_handles(
+    client: &crate::Client,
+    project: &Project,
+    services: &[String],
+    opts: crate::EnsureOptions,
+    report: &mut dyn FnMut(&str),
+) -> Result<Vec<(String, crate::ApplyReport, crate::Sandbox)>> {
     let c = client_for(client, project);
     let mut out = Vec::new();
     for s in project.select(services)? {
@@ -230,7 +245,7 @@ pub fn up(
         if r.applied.iter().all(|a| !a.is_change()) {
             report(&format!("{}: up to date", d.name));
         }
-        out.push((s, r));
+        out.push((s, r, crate::Sandbox::from_desired(&c, &d)));
     }
     Ok(out)
 }

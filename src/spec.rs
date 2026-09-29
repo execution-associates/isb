@@ -234,6 +234,14 @@ pub struct SandboxSpec {
     #[serde(default, skip_serializing_if = "ExecDefaults::is_empty")]
     pub exec: ExecDefaults,
 
+    /// The sandbox's main command, run by a foreground `isb up` once the
+    /// sandbox is ready, with the `exec` defaults. Its output is streamed, and
+    /// `up` stops the sandbox when every command has exited. argv form: nothing
+    /// is joined into a shell string. Never part of the instance, so changing
+    /// it is not drift.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<Vec<String>>,
+
     /// Extra instance config keys, set verbatim (escape hatch).
     #[serde(
         default,

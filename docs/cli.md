@@ -21,7 +21,7 @@ isb prune --label KEY --missing-path [-y]  delete sandboxes whose label is a van
 isb schema                                 JSON Schema of the YAML format
 
 # compose (-f FILE, repeatable; default ./isb.yaml)
-isb up [SERVICE...] [--prune-devices] [--no-ready] [--json]
+isb up [SERVICE...] [-d] [--no-log-prefix] [-t D] [--prune-devices] [--no-ready] [--json]
 isb plan [SERVICE...] [--json] [--exit-code]
 isb down [SERVICE...] [--volumes]
 isb ps [SERVICE...] [--json]
@@ -29,7 +29,15 @@ isb exec SERVICE -- ARGV...
 isb config
 ```
 
-**Exit codes.** `isb exec` exits with the command's own status. If isb itself
+**`up` runs in the foreground**, like `docker compose up`: it runs each
+service's `command`, streams its output, and stops the sandboxes when the
+commands exit, on Ctrl-C, or when the process that started isb goes away. `-d`
+returns once they are up. See
+[spec.md](spec.md#foreground-up).
+
+**Exit codes.** `isb exec` exits with the command's own status. A foreground
+`isb up` exits with the first failing command's status, 128+N on signal N, or
+129 when the process that started it went away. If isb itself
 fails (the sandbox does not exist, incusd is unreachable) it exits 125. `isb plan
 --exit-code` exits 2 when there are changes. Everything else exits 0 on success
 and 1 on error.

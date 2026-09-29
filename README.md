@@ -28,7 +28,7 @@ sandboxes:
 ```
 
 ```console
-$ isb up                                         # create it, or fix only what drifted
+$ isb up -d                                      # create it, or fix only what drifted
 $ isb exec web -- python3 -m http.server 8000    # serves ./site at localhost:8000
 $ isb down                                       # gone, host untouched
 ```

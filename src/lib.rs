@@ -34,6 +34,7 @@ pub mod compose;
 pub mod error;
 pub mod exec;
 mod flex;
+pub mod foreground;
 pub mod idmap;
 pub mod interp;
 pub mod lock;

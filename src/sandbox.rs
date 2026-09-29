@@ -940,7 +940,7 @@ pub struct Sandbox {
 }
 
 impl Sandbox {
-    fn from_desired(client: &Client, d: &Desired) -> Sandbox {
+    pub(crate) fn from_desired(client: &Client, d: &Desired) -> Sandbox {
         Sandbox {
             client: client.clone(),
             name: d.name.clone(),
