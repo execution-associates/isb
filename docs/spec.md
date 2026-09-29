@@ -481,7 +481,8 @@ foreground `isb up` runs it once the sandbox is ready, with the service's
 `exec` defaults, and streams its output prefixed with `<service> | `. When
 every service's command has exited, `up` stops the sandboxes and exits with the
 first non-zero status (0 if all succeeded). Ignored by `isb up -d`. Client-side
-only, so changing it is never drift.
+only, so changing it is never drift. Every item is a string, so quote numbers:
+`[python3, -m, http.server, "8000"]`.
 
 ```yaml
 command: [sh, -c, "bun install && exec bun run dev"]

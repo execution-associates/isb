@@ -11,7 +11,7 @@
 #   export LASSO_WORKTREE=/home/me/.lasso/worktrees/lasso/my-branch
 #   export LASSO_WEB=$LASSO_WORKTREE/src/web        # symlinks resolved (pwd -P)
 #
-#   isb -f examples/lasso-dev.yaml up               # container_ensure
+#   isb -f examples/lasso-dev.yaml up -d            # container_ensure (returns once ready)
 #   isb -f examples/lasso-dev.yaml exec web -- bun run lint
 #   isb -f examples/lasso-dev.yaml exec web -- bash -c 'bun install && bun run build'
 #

@@ -7,13 +7,15 @@
 #   # refuse a second dev session in this worktree (a live process, not a device)
 #   isb -f examples/lasso-dev.yaml exec -n web -- pgrep -f 'bun run dev' && exit 1
 #
-#   isb -f examples/lasso-dev.yaml -f examples/lasso-dev-web.yaml up
-#   #   prints "web vite tcp:<ip>:<port>" when it had to add the vite device
-#   isb port ls "$LASSO_DEV_CONTAINER" --json   # the listen address actually in use
 #   trap 'isb port rm "$LASSO_DEV_CONTAINER" backend vite' EXIT INT TERM
-#   isb -f examples/lasso-dev.yaml exec web -- bun install
-#   isb -f examples/lasso-dev.yaml exec web -- env LASSO_BACKEND=http://127.0.0.1:8190 \
-#       bun run dev --host 127.0.0.1 --port 5173 --strictPort
+#   isb -f examples/lasso-dev.yaml -f examples/lasso-dev-web.yaml up
+#
+# `up` prints "web vite tcp:<ip>:<port>" when it had to add the vite device
+# (`isb port get "$LASSO_DEV_CONTAINER" vite` prints it any time), then runs
+# `command` below in the foreground, streaming Vite's output as "web | ...".
+# Ctrl-C, or the caller going away (a closed terminal, an agent whose background
+# task ended), stops the container, so Vite and its tailnet port never outlive
+# the session. The next `up` starts the container again.
 #
 # Differences from the shell version:
 #   - No cleanup-before-add. A `vite` device left behind by a killed run that
@@ -39,3 +41,13 @@ sandboxes:
         listen: "tcp:${LASSO_LISTEN_IP:?set LASSO_LISTEN_IP}:5173"
         connect: tcp:127.0.0.1:5173
         search: 50
+    # What the foreground `up` runs once the container is ready, with the exec
+    # defaults from lasso-dev.yaml (user dev, cwd src/web, mise shims on PATH).
+    # The backend proxy above makes the host backend 127.0.0.1:8190 in here.
+    command:
+      - sh
+      - -c
+      - >-
+        bun install &&
+        exec env LASSO_BACKEND=http://127.0.0.1:8190
+        bun run dev --host 127.0.0.1 --port 5173 --strictPort

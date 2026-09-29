@@ -92,6 +92,8 @@ project = await isb.Project.load("isb.yaml", vars={"WORKTREE": "/srv/wt"})
 for plan in await project.plan():
     print(plan.name, plan.status, plan.actions)
 
+# Like `isb up -d`: returns once the sandboxes are ready. A service's
+# `command` is for the foreground CLI `isb up` and is not run here.
 for service, report in await project.up(on_progress=print):
     print(service, report.created, report.ports)
 
