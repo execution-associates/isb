@@ -15,7 +15,7 @@ A thin asyncio client of `isb rpc` (docs/rpc.md). Zero runtime dependencies.
 """
 
 from . import volumes
-from ._builders import NamedVolumeMode, PortBinding, Volume
+from ._builders import PortBinding, Volume
 from ._client import PROTOCOL, Client, EventHandler, default_client, find_binary, set_default_client
 from ._errors import (
     AlreadyExistsError,
@@ -33,17 +33,32 @@ from ._errors import (
 from ._project import Project
 from ._sandbox import ExecProcess, ProgressCallback, Sandbox, prune
 from ._spec import (
+    Command,
     ComposeFile,
-    ExecDefaults,
+    ExecSpec,
     IdmapSpec,
+    MapOrList,
     NamedVolumeSpec,
+    PortMapping,
     PortSpec,
+    ProxyPort,
     ReadyCheck,
     SandboxSpec,
     SandboxSpecFields,
+    VolumeMount,
     VolumeSpec,
 )
-from ._types import Action, ApplyReport, ExecEvent, ExecOutput, Plan, PruneResult, SandboxInfo, VolumeInfo
+from ._types import (
+    Action,
+    ApplyReport,
+    ExecDefaults,
+    ExecEvent,
+    ExecOutput,
+    Plan,
+    PruneResult,
+    SandboxInfo,
+    VolumeInfo,
+)
 from ._util import Duration
 from .volumes import Volumes
 
@@ -57,6 +72,7 @@ __all__ = [
     "ApplyReport",
     "BinaryNotFoundError",
     "Client",
+    "Command",
     "ComposeFile",
     "ConnectError",
     "Duration",
@@ -65,21 +81,24 @@ __all__ = [
     "ExecEvent",
     "ExecOutput",
     "ExecProcess",
+    "ExecSpec",
     "IdmapSpec",
     "InvalidError",
     "IsbError",
     "IsbTimeoutError",
-    "NamedVolumeMode",
+    "MapOrList",
     "NamedVolumeSpec",
     "NotFoundError",
     "NotReadyError",
     "Plan",
     "PortBinding",
+    "PortMapping",
     "PortSpec",
     "ProcessError",
     "ProgressCallback",
     "Project",
     "ProtocolError",
+    "ProxyPort",
     "PruneResult",
     "ReadyCheck",
     "Sandbox",
@@ -88,6 +107,7 @@ __all__ = [
     "SandboxSpecFields",
     "Volume",
     "VolumeInfo",
+    "VolumeMount",
     "VolumeSpec",
     "Volumes",
     "__version__",

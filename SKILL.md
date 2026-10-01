@@ -134,7 +134,7 @@ from isb import Sandbox, Volume
 sb = await Sandbox.connect_or_create(
     "task1",
     image="images:ubuntu/24.04",
-    volumes={"/work": Volume.bind("./repo")},
+    volumes=[Volume.bind("./repo", "/work")],
     labels={"owner": "me"},
 )
 out = await sb.exec("make", ["test"], cwd="/work")
@@ -148,9 +148,9 @@ TypeScript (`bun add @execution-associates/isb`):
 import { Sandbox, Volume } from "@execution-associates/isb";
 
 const sb = await Sandbox.connectOrCreate({
-  name: "task1",
+  container_name: "task1",
   image: "images:ubuntu/24.04",
-  volumes: { "/work": Volume.bind("./repo") },
+  volumes: [Volume.bind("./repo", "/work")],
 });
 const out = await sb.exec("make", ["test"], { cwd: "/work" });
 console.log(out.exitCode, out.stdoutText);

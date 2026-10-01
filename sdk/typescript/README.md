@@ -35,20 +35,24 @@ isb needs access to the incus socket, which is root-equivalent on the host.
 import { PortBinding, Sandbox, Volume } from "@execution-associates/isb";
 
 const sb = await Sandbox.connectOrCreate({
-  name: "dev-web",
+  container_name: "dev-web",
   image: "dev-base",
   cpus: 4,
-  memory: "8GiB",
+  mem_limit: "8g",
   labels: { app: "web" },
-  volumes: {
-    "/home/dev/src": Volume.bind("/srv/src", { device: "src" }),
-    "/home/dev/.cache": Volume.named("dev-cache", { owner: "dev" }),
-  },
+  environment: { NODE_ENV: "development" },
+  volumes: [
+    Volume.bind("/srv/src", "/home/dev/src", { device: "src" }),
+    Volume.named("dev-cache", "/home/dev/.cache", { owner: "dev" }),
+    "/srv/ref:/home/dev/ref:ro", // the short form works too
+  ],
   ports: [
-    PortBinding.host("5173", "5173", { name: "vite", search: 20 }),
+    PortBinding.publish("5173-5193", 5173, { name: "vite" }), // first free port
+    "127.0.0.1:8080:80",
   ],
   ready: ["running", "default_route", { user_exists: "dev" }],
-  exec: { user: "dev", cwd: "/home/dev/src" },
+  user: "dev",
+  working_dir: "/home/dev/src",
 });
 console.log(sb.lastReport?.ports); // device name -> listen address in use
 
@@ -138,20 +142,25 @@ Static:
 | `Sandbox.listWith({ labels })`, `Sandbox.list()` | `SandboxInfo[]`; labels as `{ key: "value", other: null }` or `["key=value", "other"]` |
 | `Sandbox.remove(name, { force? })` | delete; a running one needs `force` |
 
-`spec` is a `SandboxSpec` (the `sandboxes.<service>` object of the compose
-format) with `name` and `image` required. `baseDir` anchors relative bind paths
-(default: the subprocess's working directory). `volumes` holds named-volume
-definitions, like a compose file's top-level `volumes:`. `onProgress` receives
+`spec` is a `SandboxSpec` (the `services.<service>` object of the compose
+format) with `container_name` (the instance name) and `image` required.
+`baseDir` anchors relative bind paths (default: the subprocess's working
+directory). `volumes` holds named-volume definitions, like a compose file's
+top-level `volumes:`: a mount's `source` names a definition's key, and the
+incus volume is that definition's `name`, else the key itself (a mount with no
+definition uses its `source` as the incus volume name). `onProgress` receives
 lines such as `web: creating from dev-base`.
 
 Instance: `info()`, `labels()`, `start()`, `stop({ force?, timeout? })`,
 `restart()`, `waitReady({ ready?, readyTimeout? })`, `remove({ force? })`,
-`addPort(port)` (returns the listen address in use), `removeDevice(name)`
+`addPort(port)` (a `ports` entry; returns the listen address in use), `removeDevice(name)`
 (returns whether it was there), `exec(...)`, `execStream(...)`.
 
 A Sandbox made by `create`, `connectOrCreate` or `project.sandbox()` remembers
-the spec's `exec` defaults (sent with every exec) and its `ready` and
+the spec's exec defaults, `user`, `working_dir`, `exec.env` and `exec.login`
+(sent with every exec, as `sb.execDefaults`), and its `ready` and
 `ready_timeout` (used by `waitReady()` when not given). One from `get` has none.
+`execDefaultsOf(spec)` computes the same defaults.
 
 ### exec
 
@@ -193,22 +202,35 @@ With `tty: true` all output arrives as stdout.
 
 ### Builders
 
-They return plain spec objects.
+They return plain entries of a service's `volumes` and `ports` lists, in the
+long form; the short strings (`"./src:/home/dev/src:ro"`, `"8080:80"`) can be
+mixed in freely.
 
-- `Volume.bind(hostPath, { readonly?, device?, options? })`
-- `Volume.named(name, { mode?, owner?, readonly?, pool?, device?, options? })`;
-  `mode: NamedVolumeMode.Existing` sets `external: true` (the volume must exist),
-  `NamedVolumeMode.EnsureExists` (default) creates it if missing.
-- `PortBinding.host(listen, connect, { name?, search?, options? })`: listen on
-  the host, connect in the guest.
+- `Volume.bind(hostPath, target, { readOnly?, device?, options? })`:
+  `{type: "bind", source, target, ...}`.
+- `Volume.named(name, target, { external?, owner?, readOnly?, pool?, device?, options? })`:
+  `{type: "volume", source, target, ...}`, created if missing unless
+  `external: true` (the volume must exist).
+- `PortBinding.publish(published, target, { hostIp?, protocol?, name?, options? })`:
+  docker's long port form. `hostIp` defaults to 127.0.0.1. A `published` range
+  (`"5173-5223"`) with a single `target` takes the first free port in it.
+- `PortBinding.host(listen, connect, { name?, search?, options? })`: an incus
+  proxy listening on the host and connecting in the guest, with incus
+  addresses (`5173`, `"0.0.0.0:5173"`, `"5353/udp"`, `"tcp:HOST:PORT"`).
+  `search: N` returns a `publish` entry with the range `listen`..`listen+N`
+  instead, and throws a `TypeError` when the addresses cannot be written that
+  way (a port range, a unix socket, a connect host other than the default).
 - `PortBinding.guest(listen, connect, { name?, options? })`: listen in the
   guest, connect on the host.
 
 ### Project (compose)
 
 `Project.load({ files?, envFiles?, projectName?, vars?, client? })` loads,
-interpolates and merges compose files without touching incus. `vars` win over
-the environment of the isb subprocess and the env files. The project has
+interpolates and merges compose files without touching incus. Without `files`
+it reads `isb.yaml` (or `isb.yml`) in the subprocess's working directory, plus
+`isb.override.yaml` (or `.yml`) next to it; without `envFiles`, `.env` next to
+the first file if present. `vars` win over the environment of the isb
+subprocess and the env files. The project has
 `name`, `baseDir`, `files`, `file` (the resolved `ComposeFile`) and `services`.
 
 - `up({ services?, pruneDevices?, waitReady?, onProgress? })`: `[{ service, report }]`
@@ -226,11 +248,13 @@ the environment of the isb subprocess and the env files. The project has
 
 ### Types
 
-The spec types (`SandboxSpec`, `VolumeSpec`, `PortSpec`, `ReadyCheck`,
-`ExecDefaults`, `IdmapSpec`, `NamedVolumeSpec`, `ComposeFile`, ...) are
-generated from `isb schema` into `src/spec.ts`. Results are `SandboxInfo`,
+The spec types (`SandboxSpec`, `VolumeSpec` = string | `VolumeMount`,
+`PortSpec` = string | `PortMapping` | `ProxyPort`, `MapOrList`, `Command`,
+`ExecSpec`, `ReadyCheck`, `IdmapSpec`, `NamedVolumeSpec`, `ComposeFile`, ...)
+are generated from `isb schema` into `src/spec.ts`. Results are `SandboxInfo`,
 `ApplyReport`, `Plan` (with the `Action` union, tagged by `action`),
-`VolumeInfo`, `PruneItem`. Result field names are as isb sends them
+`VolumeInfo`, `PruneItem`; `ExecDefaults` is the exec-defaults shape the rpc
+methods take. Result field names are as isb sends them
 (snake_case).
 
 ## Errors

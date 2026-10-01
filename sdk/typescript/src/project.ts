@@ -6,9 +6,12 @@ import type { ComposeFile, SandboxSpec } from "./spec.js";
 import type { Plan, ServiceReport } from "./types.js";
 
 export interface LoadOptions extends CallOptions {
-  /** Compose files, merged in order. Default: `isb.yaml` / `isb.yml` in the server's cwd. */
+  /**
+   * Compose files, merged in order. Default: `isb.yaml` / `isb.yml` in the
+   * server's cwd, plus `isb.override.yaml` / `isb.override.yml` next to it.
+   */
   files?: string[];
-  /** dotenv files for `${VAR}` interpolation. */
+  /** dotenv files for `${VAR}` interpolation. Default: `.env` next to the first file, if present. */
   envFiles?: string[];
   /** Overrides the file's `name`. */
   projectName?: string;
@@ -47,13 +50,13 @@ interface LoadResult {
 /** A loaded compose file (`isb up/plan/down` over rpc). */
 export class Project {
   readonly client: Client;
-  /** Project name (sandbox names default to `<name>-<service>`). */
+  /** Project name (sandbox names default to `<name>-<service>`, volumes to `<name>_<key>`). */
   readonly name: string;
   /** Directory relative bind paths resolve against. */
   readonly baseDir: string;
   /** The files that were merged. */
   readonly files: string[];
-  /** The resolved file: interpolated, merged, every sandbox named. */
+  /** The resolved file: interpolated, merged, every service's `container_name` set. */
   readonly file: ComposeFile;
   readonly #load: Record<string, unknown>;
 
@@ -84,12 +87,12 @@ export class Project {
 
   /** Service names, in file order. */
   get services(): string[] {
-    return Object.keys(this.file.sandboxes ?? {});
+    return Object.keys(this.file.services ?? {});
   }
 
   /** The resolved spec of one service. */
   spec(service: string): SandboxSpec {
-    const s = this.file.sandboxes?.[service];
+    const s = this.file.services?.[service];
     if (!s) throw new NotFoundError("not_found", `no service ${service} in project ${this.name}`);
     return s;
   }
@@ -97,7 +100,7 @@ export class Project {
   /** A handle on a service's sandbox, with that service's exec defaults. */
   sandbox(service: string): Sandbox {
     const s = this.spec(service);
-    return Sandbox.fromSpec(s, this.client, s.name as string);
+    return Sandbox.fromSpec(s, this.client, s.container_name as string);
   }
 
   #params(extra: Record<string, unknown>): Record<string, unknown> {

@@ -8,25 +8,24 @@ from __future__ import annotations
 from typing import Literal, Mapping, Optional, Sequence, TypedDict, Union
 
 BoolOrString = Union[bool, str]
+Scalar = Union[str, bool, int, float]
+Command = Union[str, Sequence[Scalar]]
 IdmapMode = Literal["auto", "none", "always"]
 InstanceType = Literal["container", "virtual-machine", "vm"]
 IntOrString = Union[int, str]
+MapOrList = Union[Mapping[str, Scalar], Sequence[str]]
+MountType = Literal["bind", "volume"]
 PortBind = Literal["host", "guest"]
-Scalar = Union[str, bool, int, float]
 
 
-class ExecDefaults(TypedDict, total=False):
-    """Defaults for exec into a sandbox. Per-call options override them."""
-    #: Working directory in the guest.
-    cwd: Optional[str]
-    #: Environment for exec (merged over the instance `env`).
-    env: Mapping[str, Scalar]
+class ExecSpec(TypedDict, total=False):
+    """The `exec:` block of a service: exec defaults with no docker equivalent."""
+    #: Environment for exec only (merged over `environment`, never stored in
+    #: the instance).
+    env: MapOrList
     #: Run argv through the user's login shell (`$SHELL -l -c 'exec "$@"'`), so
     #: profile scripts run. argv is still passed as separate arguments.
     login: BoolOrString
-    #: Guest user: a name (`dev`), `uid`, or `uid:gid`. Names are resolved in the
-    #: guest, and set HOME/USER/LOGNAME unless given in env.
-    user: Optional[IntOrString]
 
 
 class IdmapMap(TypedDict, total=False):
@@ -52,12 +51,35 @@ class NamedVolumeSpec(TypedDict, total=False):
     config: Mapping[str, Scalar]
     #: The volume must already exist; isb never creates it.
     external: BoolOrString
+    #: The incus volume name. Default: `<project>_<key>`, or the key itself
+    #: for an `external` volume.
+    name: Optional[str]
     #: Storage pool. `auto` (default) means the same pool the sandbox uses
     #: (`storage`), resolved the same way.
     pool: Optional[str]
 
 
-class _PortSpecRequired(TypedDict):
+class _PortMappingRequired(TypedDict):
+    #: Port on the host. A range (`5173-5223`) with a single `target` takes the
+    #: first free port in it.
+    published: IntOrString
+    #: Port in the guest, or a range as long as `published`'s.
+    target: IntOrString
+
+
+class PortMapping(_PortMappingRequired, total=False):
+    """Docker's long port syntax."""
+    #: Host address to listen on. Default `127.0.0.1` (docker's is `0.0.0.0`).
+    host_ip: Optional[str]
+    #: incus device name. Default: `port-host-<published>`.
+    name: Optional[str]
+    #: Extra proxy device properties (`proxy_protocol`, ...), verbatim.
+    options: Mapping[str, Scalar]
+    #: `tcp` (default) or `udp`.
+    protocol: Optional[str]
+
+
+class _ProxyPortRequired(TypedDict):
     #: Connect address, same forms as `listen`. The host defaults to 127.0.0.1
     #: (0.0.0.0 for a VM, which lets incus find the VM's address).
     connect: IntOrString
@@ -67,18 +89,15 @@ class _PortSpecRequired(TypedDict):
     listen: IntOrString
 
 
-class PortSpec(_PortSpecRequired, total=False):
-    """An incus proxy device."""
-    #: `host` (default): listen on the host. `guest`: listen in the guest.
+class ProxyPort(_ProxyPortRequired, total=False):
+    """An incus proxy written out: either direction, any address incus takes."""
+    #: `host` (default): listen on the host, connect in the guest. `guest`:
+    #: listen in the guest, connect on the host (reach a host service).
     bind: PortBind
-    #: Device name. Default: `port-<bind>-<listen port>`.
+    #: incus device name. Default: `port-<bind>-<listen port>`.
     name: Optional[str]
     #: Extra proxy device properties (`nat`, `proxy_protocol`, ...), verbatim.
     options: Mapping[str, Scalar]
-    #: Host-bound TCP/UDP only: if the listen port is taken, try the next one, up
-    #: to this many more. The chosen address is printed and a device already
-    #: listening anywhere in the range counts as correct.
-    search: Optional[IntOrString]
 
 
 class _ReadyCheckUserExistsRequired(TypedDict):
@@ -94,7 +113,7 @@ class _ReadyCheckPathWritableRequired(TypedDict):
 
 
 class ReadyCheckPathWritable(_ReadyCheckPathWritableRequired, total=False):
-    """The path is writable by the exec user (`exec.user`, else root)."""
+    """The path is writable by the service's `user` (else root)."""
 
 
 class _ReadyCheckCommandRequired(TypedDict):
@@ -106,42 +125,47 @@ class ReadyCheckCommand(_ReadyCheckCommandRequired, total=False):
 
 
 class SandboxSpec(TypedDict, total=False):
-    """Everything about one sandbox."""
+    """Everything about one sandbox: a compose service."""
     #: The sandbox's main command, run by a foreground `isb up` once the
-    #: sandbox is ready, with the `exec` defaults. Its output is streamed, and
-    #: `up` stops the sandbox when every command has exited. argv form: nothing
-    #: is joined into a shell string. Never part of the instance, so changing
-    #: it is not drift.
-    command: Optional[Sequence[Scalar]]
-    #: CPU limit (`limits.cpu`): a count like `8` or a set like `0-3`.
+    #: sandbox is ready, as `user` in `working_dir`. Its output is streamed,
+    #: and `up` stops the sandbox when every command has exited. A list is
+    #: argv; a string is split like a shell would split it, without running
+    #: one. Never part of the instance, so changing it is not drift.
+    command: Optional[Command]
+    #: incus instance name: at most 63 characters of `[a-z0-9-]` (case-insensitive),
+    #: starting with a letter. In a compose file it defaults to `<project>-<service>`.
+    container_name: Optional[str]
+    #: Number of CPUs (`limits.cpu`), a whole number like `8`.
     cpus: Optional[IntOrString]
-    #: Instance environment (`environment.<KEY>`), seen by every exec. Not for
-    #: secrets: it is plain instance config, readable by anyone who can read the
-    #: instance.
-    env: Mapping[str, Scalar]
-    #: Defaults for `exec` into this sandbox (user, cwd, env, login shell).
-    exec: ExecDefaults
+    #: CPUs to pin to (`limits.cpu`), e.g. `0-3` or `0,2`. Excludes `cpus`.
+    cpuset: Optional[IntOrString]
+    #: Instance environment (`environment.<KEY>`), seen by every exec: a map, or
+    #: a list of `KEY=VALUE`. Not for secrets: it is plain instance config,
+    #: readable by anyone who can read the instance.
+    environment: MapOrList
+    #: More exec defaults: an exec-only environment and the login shell.
+    exec: ExecSpec
     #: uid/gid mapping so a host user can write bind mounts. See [`IdmapSpec`].
     idmap: Optional[IdmapSpec]
     #: Image: a local alias or fingerprint (`dev-base`), or `remote:alias` for a
     #: well-known remote (`images:debian/12`, `ubuntu:24.04`). A local alias that
     #: does not exist is an error before anything is created.
     image: str
-    #: Labels, stored as `user.<key>` config keys. Used by `isb ls --label` and
-    #: `isb prune`. isb never removes a label it was not told about.
-    labels: Mapping[str, Scalar]
-    #: Memory limit (`limits.memory`), e.g. `8GiB`.
-    memory: Optional[IntOrString]
-    #: incus instance name: at most 63 characters of `[a-z0-9-]` (case-insensitive),
-    #: starting with a letter. In a compose file it defaults to `<project>-<service>`.
-    name: Optional[str]
-    #: Proxy devices (port forwards), in either direction.
+    #: incus profiles to apply, in order. Default: `[default]`. Fixed at creation.
+    incus_profiles: Optional[Sequence[str]]
+    #: Labels, stored as `user.<key>` config keys: a map, or a list of
+    #: `KEY=VALUE`. Used by `isb ls --label` and `isb prune`. isb never removes
+    #: a label it was not told about.
+    labels: MapOrList
+    #: Memory limit (`limits.memory`): docker units (`512m`, `8g`, bytes) or
+    #: incus ones (`8GiB`, `50%`).
+    mem_limit: Optional[IntOrString]
+    #: Published ports (`[HOST_IP:]PUBLISHED:TARGET[/PROTOCOL]` or the long
+    #: form), and incus proxies in either direction (`listen`/`connect`).
     ports: Sequence[PortSpec]
     #: Run privileged (`security.privileged`). Omit to leave the incus default
     #: (unprivileged); `false` pins it explicitly.
     privileged: Optional[BoolOrString]
-    #: Profiles to apply, in order. Default: `[default]`. Fixed at creation.
-    profiles: Optional[Sequence[str]]
     #: Extra instance config keys, set verbatim (escape hatch).
     raw_config: Mapping[str, Scalar]
     #: Extra devices, set verbatim (escape hatch). Keys are device names.
@@ -157,79 +181,100 @@ class SandboxSpec(TypedDict, total=False):
     storage: Optional[str]
     #: `container` (default) or `virtual-machine` (`vm`). Fixed at creation.
     type: InstanceType
-    #: Mounts, keyed by the absolute path inside the guest.
-    volumes: Mapping[str, VolumeSpec]
+    #: Guest user for `command`, `isb exec` and `path_writable`: a name
+    #: (`dev`), `uid`, `uid:gid` or `name:group`. Default root.
+    user: Optional[IntOrString]
+    #: Mounts: `SOURCE:TARGET[:OPTIONS]` or the long form. A source starting
+    #: with `/`, `.` or `~` is a host path; anything else is a named volume.
+    volumes: Sequence[VolumeSpec]
+    #: Working directory for `command` and `isb exec`. Default: the user's home.
+    working_dir: Optional[str]
 
 
-class VolumeSpec(TypedDict, total=False):
-    """A mount. Exactly one of `bind` or `named`."""
-    #: Host path to bind-mount. Relative paths resolve against the compose file's
-    #: directory; `~` expands; symlinks are resolved.
-    bind: Optional[str]
-    #: Device name. Default: derived from the guest path. Set it to adopt an
+class _VolumeMountRequired(TypedDict):
+    #: Host path to bind-mount (relative paths resolve against the compose
+    #: file's directory, `~` expands, symlinks are resolved), or the key of a
+    #: named volume.
+    source: str
+    #: Absolute path inside the guest.
+    target: str
+
+
+class VolumeMount(_VolumeMountRequired, total=False):
+    """The long form of a mount."""
+    #: incus device name. Default: derived from the target. Set it to adopt an
     #: existing device under a known name.
     device: Optional[str]
     #: Named volumes only: the volume must already exist; isb never creates it.
     external: BoolOrString
-    #: Named custom storage volume to mount (created if missing unless declared
-    #: `external`).
-    named: Optional[str]
     #: Extra disk device properties (`shift`, `propagation`, ...), verbatim.
     options: Mapping[str, Scalar]
     #: Named volumes only: chown the mount point to this guest user (`dev`,
     #: `dev:dev` or `1000:1000`) after it is attached, plus any root-owned
     #: parents inside that user's home that the mount conjured.
     owner: Optional[IntOrString]
-    #: Pool of the named volume. Default: the top-level volume's pool, else `auto`.
+    #: Named volumes only: the storage pool. Default: the top-level volume's
+    #: pool, else the sandbox's root pool.
     pool: Optional[str]
     #: Mount read-only.
-    readonly: BoolOrString
+    read_only: BoolOrString
+    #: `bind` (a host path) or `volume` (a named volume). Default: `bind` when
+    #: `source` starts with `/`, `.` or `~`, else `volume`.
+    type: Optional[MountType]
 
 
 class ComposeFile(TypedDict, total=False):
-    """A compose-style file: named volumes plus any number of sandboxes."""
-    #: Project name. Default sandbox names are `<name>-<service>`. Defaults to
-    #: the directory holding the first compose file.
-    name: Optional[str]
+    """A compose file: named volumes plus any number of services, each one
+    sandbox. Mirrors docker compose wherever incus allows.
+    """
     #: incus project to operate in (default: `default`).
-    project: Optional[str]
+    incus_project: Optional[str]
+    #: Project name. Default sandbox names are `<name>-<service>` and named
+    #: volumes are `<name>_<volume>`. Defaults to the directory holding the
+    #: first compose file.
+    name: Optional[str]
     #: Sandboxes, keyed by service name.
-    sandboxes: Mapping[str, SandboxSpec]
+    services: Mapping[str, SandboxSpec]
     #: Named custom storage volumes, created if missing before any sandbox that
-    #: uses them. Keys are volume names.
+    #: uses them. Keys are what services refer to.
     volumes: Mapping[str, NamedVolumeSpec]
 
 
 class SandboxSpecFields(TypedDict, total=False):
-    """SandboxSpec without `name` and `image`: the keyword arguments of Sandbox.create."""
+    """SandboxSpec without `container_name` and `image`: the keyword arguments of Sandbox.create."""
     #: The sandbox's main command, run by a foreground `isb up` once the
-    #: sandbox is ready, with the `exec` defaults. Its output is streamed, and
-    #: `up` stops the sandbox when every command has exited. argv form: nothing
-    #: is joined into a shell string. Never part of the instance, so changing
-    #: it is not drift.
-    command: Optional[Sequence[Scalar]]
-    #: CPU limit (`limits.cpu`): a count like `8` or a set like `0-3`.
+    #: sandbox is ready, as `user` in `working_dir`. Its output is streamed,
+    #: and `up` stops the sandbox when every command has exited. A list is
+    #: argv; a string is split like a shell would split it, without running
+    #: one. Never part of the instance, so changing it is not drift.
+    command: Optional[Command]
+    #: Number of CPUs (`limits.cpu`), a whole number like `8`.
     cpus: Optional[IntOrString]
-    #: Instance environment (`environment.<KEY>`), seen by every exec. Not for
-    #: secrets: it is plain instance config, readable by anyone who can read the
-    #: instance.
-    env: Mapping[str, Scalar]
-    #: Defaults for `exec` into this sandbox (user, cwd, env, login shell).
-    exec: ExecDefaults
+    #: CPUs to pin to (`limits.cpu`), e.g. `0-3` or `0,2`. Excludes `cpus`.
+    cpuset: Optional[IntOrString]
+    #: Instance environment (`environment.<KEY>`), seen by every exec: a map, or
+    #: a list of `KEY=VALUE`. Not for secrets: it is plain instance config,
+    #: readable by anyone who can read the instance.
+    environment: MapOrList
+    #: More exec defaults: an exec-only environment and the login shell.
+    exec: ExecSpec
     #: uid/gid mapping so a host user can write bind mounts. See [`IdmapSpec`].
     idmap: Optional[IdmapSpec]
-    #: Labels, stored as `user.<key>` config keys. Used by `isb ls --label` and
-    #: `isb prune`. isb never removes a label it was not told about.
-    labels: Mapping[str, Scalar]
-    #: Memory limit (`limits.memory`), e.g. `8GiB`.
-    memory: Optional[IntOrString]
-    #: Proxy devices (port forwards), in either direction.
+    #: incus profiles to apply, in order. Default: `[default]`. Fixed at creation.
+    incus_profiles: Optional[Sequence[str]]
+    #: Labels, stored as `user.<key>` config keys: a map, or a list of
+    #: `KEY=VALUE`. Used by `isb ls --label` and `isb prune`. isb never removes
+    #: a label it was not told about.
+    labels: MapOrList
+    #: Memory limit (`limits.memory`): docker units (`512m`, `8g`, bytes) or
+    #: incus ones (`8GiB`, `50%`).
+    mem_limit: Optional[IntOrString]
+    #: Published ports (`[HOST_IP:]PUBLISHED:TARGET[/PROTOCOL]` or the long
+    #: form), and incus proxies in either direction (`listen`/`connect`).
     ports: Sequence[PortSpec]
     #: Run privileged (`security.privileged`). Omit to leave the incus default
     #: (unprivileged); `false` pins it explicitly.
     privileged: Optional[BoolOrString]
-    #: Profiles to apply, in order. Default: `[default]`. Fixed at creation.
-    profiles: Optional[Sequence[str]]
     #: Extra instance config keys, set verbatim (escape hatch).
     raw_config: Mapping[str, Scalar]
     #: Extra devices, set verbatim (escape hatch). Keys are device names.
@@ -245,26 +290,39 @@ class SandboxSpecFields(TypedDict, total=False):
     storage: Optional[str]
     #: `container` (default) or `virtual-machine` (`vm`). Fixed at creation.
     type: InstanceType
-    #: Mounts, keyed by the absolute path inside the guest.
-    volumes: Mapping[str, VolumeSpec]
+    #: Guest user for `command`, `isb exec` and `path_writable`: a name
+    #: (`dev`), `uid`, `uid:gid` or `name:group`. Default root.
+    user: Optional[IntOrString]
+    #: Mounts: `SOURCE:TARGET[:OPTIONS]` or the long form. A source starting
+    #: with `/`, `.` or `~` is a host path; anything else is a named volume.
+    volumes: Sequence[VolumeSpec]
+    #: Working directory for `command` and `isb exec`. Default: the user's home.
+    working_dir: Optional[str]
 
 
 IdmapSpec = Union[IdmapMode, IdmapMap, IdmapRaw]
+PortSpec = Union[str, PortMapping, ProxyPort]
 ReadyCheck = Union[Literal["running", "agent", "default_route"], ReadyCheckUserExists, ReadyCheckPathWritable, ReadyCheckCommand]
+VolumeSpec = Union[str, VolumeMount]
 
 __all__ = [
     "BoolOrString",
+    "Command",
     "ComposeFile",
-    "ExecDefaults",
+    "ExecSpec",
     "IdmapMap",
     "IdmapMode",
     "IdmapRaw",
     "IdmapSpec",
     "InstanceType",
     "IntOrString",
+    "MapOrList",
+    "MountType",
     "NamedVolumeSpec",
     "PortBind",
+    "PortMapping",
     "PortSpec",
+    "ProxyPort",
     "ReadyCheck",
     "ReadyCheckCommand",
     "ReadyCheckPathWritable",
@@ -272,5 +330,6 @@ __all__ = [
     "SandboxSpec",
     "SandboxSpecFields",
     "Scalar",
+    "VolumeMount",
     "VolumeSpec",
 ]

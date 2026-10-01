@@ -50,18 +50,21 @@ async def main() -> None:
             image="dev-base",
             client=client,
             cpus=4,
-            memory="4GiB",
+            mem_limit="4g",
             idmap="auto",
             labels={"app": "web"},
-            volumes={
-                "/home/dev/src": Volume.bind("./src", device="src"),
-                "/home/dev/.cache": Volume.named("dev-cache", owner="dev"),
-            },
+            environment={"NODE_ENV": "development"},
+            volumes=[
+                Volume.bind("./src", "/home/dev/src", device="src"),
+                Volume.named("dev-cache", "/home/dev/.cache", owner="dev"),
+            ],
             ports=[
-                PortBinding.host("5173", "5173", name="vite", search=20),
+                PortBinding.publish("5173-5193", 5173, name="vite"),  # first free port
+                "8080:80",  # docker's short syntax works too
             ],
             ready=["running", "default_route", {"user_exists": "dev"}],
-            exec={"user": "dev", "cwd": "/home/dev/src"},
+            user="dev",
+            working_dir="/home/dev/src",
             on_progress=print,
         )
         print(sb.last_report)
@@ -137,24 +140,32 @@ directory at the time of the call, and compose file paths are made absolute.
 | `await Sandbox.list_with(labels)` / `Sandbox.list()` | `list[SandboxInfo]`. `labels` is `{"k": "v", "k2": None}` or `["k=v", "k2"]`. |
 | `await Sandbox.remove(name, force=False)` | Delete. A running sandbox needs `force`. |
 
-`**spec` are the `SandboxSpec` fields of the compose format
-([docs/spec.md](https://github.com/execution-associates/isb/blob/main/docs/spec.md)):
-`cpus`, `memory`, `storage`, `type` (`"container"`, `"virtual-machine"` or
-`"vm"`), `privileged`, `idmap`, `profiles`, `labels`, `env`, `volumes`, `ports`,
-`ready`, `ready_timeout`, `exec`, `raw_config`, `raw_devices`. A full spec dict
-can be passed as `spec=` instead. The server rejects unknown fields
-(`InvalidError`). The create-style methods also take `base_dir`, `wait_ready`
-(default true), `named_volumes` (top-level named volume definitions, as in a
-compose file's `volumes:`) and `on_progress` (called with each progress line).
+`name` is the incus instance name (the spec's `container_name`). `**spec` are
+the fields of a compose service
+([docs/spec.md](https://github.com/execution-associates/isb/blob/main/docs/spec.md)),
+named as in docker compose: `cpus` (a count) or `cpuset` (`"0-3"`),
+`mem_limit` (`"512m"`, `"8g"`, `"8GiB"`), `storage`, `type` (`"container"`,
+`"virtual-machine"` or `"vm"`), `privileged`, `idmap`, `incus_profiles`,
+`labels` and `environment` (a map or a `["KEY=VALUE"]` list), `volumes` and
+`ports` (lists; see Builders), `user`, `working_dir`, `exec` (`env` for exec
+only, `login`), `command` (a string or argv), `ready`, `ready_timeout`,
+`raw_config`, `raw_devices`. A full spec dict can be passed as `spec=` instead.
+The server rejects unknown fields (`InvalidError`). The create-style methods
+also take `base_dir`, `wait_ready` (default true), `named_volumes` and
+`on_progress` (called with each progress line). `named_volumes` are top-level
+volume definitions, as in a compose file's `volumes:`: a mount's source names
+a key, and the incus volume is that definition's `name`, else the key itself.
 
 On an instance: `info()`, `labels()`, `start()`, `stop(force=False, timeout="30s")`,
 `restart()`, `wait_ready(ready=None, ready_timeout=None)`, `remove(force=False)`,
-`add_port(port)` (returns the listen address in use), `remove_device(name)`
-(returns whether it existed).
+`add_port(port)` (a `ports` entry; returns the listen address in use),
+`remove_device(name)` (returns whether it existed).
 
 A handle from `create`, `connect_or_create` or `Project.sandbox` carries the
-spec's `exec` defaults (user, cwd, env, login) and sends them with every exec;
-per-call arguments override them.
+exec defaults its spec implies (`user`, `working_dir`, `exec.env`,
+`exec.login`) as `sb.exec_defaults` (an `ExecDefaults` dict of `user`, `cwd`,
+`env`, `login`) and sends them with every exec; per-call arguments override
+them.
 
 ### Exec
 
@@ -192,24 +203,39 @@ code, `await p.collect()` gathers the rest into an `ExecOutput`. Used as
 
 ### Builders
 
-These return plain dicts for the spec:
+These return plain dicts, one `volumes` or `ports` list entry each. Docker's
+short strings work in the same lists: `"./src:/home/dev/src:ro"` (options `ro`,
+`rw`, `owner=USER`, `device=NAME`, `pool=POOL`, `external`; a source starting
+with `/`, `.` or `~` is a host path, anything else a named volume) and
+`"[HOST_IP:]PUBLISHED:TARGET[/udp]"` (HOST_IP defaults to 127.0.0.1).
 
-- `Volume.bind(host_path, *, readonly=False, device=None, options=None)`
-- `Volume.named(name, *, mode=NamedVolumeMode.ENSURE_EXISTS, owner=None, readonly=False, pool=None, device=None)`;
-  `NamedVolumeMode.EXISTING` means the volume must exist (`external: true`).
-- `PortBinding.host(listen, connect, *, name=None, search=None)`: listen on the
-  host, connect in the guest.
-- `PortBinding.guest(listen, connect, *, name=None)`: listen in the guest,
-  connect on the host.
+- `Volume.bind(source, target, *, read_only=False, device=None, options=None)`:
+  bind-mount a host path.
+- `Volume.named(source, target, *, external=False, owner=None, read_only=False, pool=None, device=None, options=None)`:
+  mount a named volume, created if missing unless `external`; `owner` chowns
+  the mount point.
+- `PortBinding.publish(published, target, *, host_ip=None, protocol=None, name=None, options=None)`:
+  publish a guest port on the host. A `published` range (`"5173-5223"`) with
+  one `target` takes the first free port; `ApplyReport.ports` says which.
+- `PortBinding.host(listen, connect, *, name=None, search=None, options=None)`:
+  an incus proxy listening on the host, connecting in the guest, for addresses
+  `publish` cannot express (`unix:` sockets, a connect host). `search=N` turns
+  a single listen port P into the published range `P-(P+N)`, so it needs a
+  single TCP/UDP listen port and a connect port with no host of its own
+  (ValueError otherwise).
+- `PortBinding.guest(listen, connect, *, name=None, options=None)`: listen in
+  the guest, connect on the host.
 
 ### Project
 
 `await Project.load(files=None, *, env_files=None, project_name=None, vars=None)`
-loads and resolves compose files (default `./isb.yaml`, else `./isb.yml`).
-`vars` win over the environment for `${VAR}`. The result has `name`,
-`base_dir`, `files`, `file` (the resolved file, every sandbox named) and
-`services`. Then `up(services=None, *, prune_devices=False, wait_ready=True)`
-returns `(service, ApplyReport)` pairs, `plan(...)` returns `list[Plan]`,
+loads and resolves compose files (default `./isb.yaml`, else `./isb.yml`,
+plus `./isb.override.yaml` when present). A `.env` next to the first file is
+read unless `env_files` is given. `vars` win over the environment for `${VAR}`.
+The result has `name`, `base_dir`, `files`, `file` (the resolved file, every
+service's `container_name` filled in) and `services`. Then
+`up(services=None, *, prune_devices=False, wait_ready=True)` returns
+`(service, ApplyReport)` pairs, `plan(...)` returns `list[Plan]`,
 `down(services=None, *, volumes=False)` deletes, and `sandbox("web")` returns a
 handle with that service's exec defaults.
 
@@ -226,9 +252,13 @@ that no longer exists.
 
 `SandboxInfo`, `ApplyReport`, `Plan`, `VolumeInfo`, `PruneResult`, `ExecOutput`
 and `ExecEvent` are dataclasses. Plan actions are dicts tagged by `action`.
-The spec types (`SandboxSpec`, `VolumeSpec`, `PortSpec`, `ReadyCheck`,
-`ExecDefaults`, `IdmapSpec`, `NamedVolumeSpec`, `ComposeFile`) are TypedDicts in
-`isb._spec`, generated from the JSON Schema by `scripts/gen_types.py`:
+The spec types (`ComposeFile`, `SandboxSpec`, `VolumeSpec` = `str | VolumeMount`,
+`PortSpec` = `str | PortMapping | ProxyPort`, `ExecSpec`, `ReadyCheck`,
+`IdmapSpec`, `NamedVolumeSpec`, `MapOrList`, `Command`) are TypedDicts and
+aliases in `isb._spec`, generated from the JSON Schema by
+`scripts/gen_types.py`. `ExecDefaults` is the exec-defaults dict of the
+protocol.
+
 
 ```sh
 ISB_BIN=/path/to/isb python3 scripts/gen_types.py          # regenerate

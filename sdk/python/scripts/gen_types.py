@@ -33,7 +33,8 @@ from typing import Literal, Mapping, Optional, Sequence, TypedDict, Union
 '''
 
 # Fields of SandboxSpec that Sandbox.create takes as its own arguments.
-SPEC_FIELDS_EXCLUDE = ("name", "image")
+SPEC_FIELDS_EXCLUDE = ("container_name", "image")
+SPEC_FIELDS_DOC = "SandboxSpec without `container_name` and `image`: the keyword arguments of Sandbox.create."
 
 
 def first_paragraph(desc: str | None) -> list[str]:
@@ -122,7 +123,7 @@ class Gen:
             return hint + camel(req[0])
         return f"{hint}{i}"
 
-    def typeddict(self, name: str, s: dict[str, Any], exclude: tuple[str, ...] = ()) -> None:
+    def typeddict(self, name: str, s: dict[str, Any], exclude: tuple[str, ...] = (), doc: str | None = None) -> None:
         if name in self.typeddicts:
             return
         self.typeddicts[name] = ""  # reserve (recursion)
@@ -138,10 +139,10 @@ class Gen:
             if desc:
                 line = "".join(f"    #: {d}\n" for d in desc) + line
             (req_lines if field in required else opt_lines).append(line)
-        doc = first_paragraph(s.get("description"))
+        lines = [doc] if doc is not None else first_paragraph(s.get("description"))
         doc_line = ""
-        if doc:
-            doc_line = '    """' + "\n    ".join(doc) + ('\n    """\n' if len(doc) > 1 else '"""\n')
+        if lines:
+            doc_line = '    """' + "\n    ".join(lines) + ('\n    """\n' if len(lines) > 1 else '"""\n')
         if req_lines:
             base = f"_{name}Required"
             text = f"class {base}(TypedDict):\n" + "\n".join(req_lines) + "\n\n\n"
@@ -162,11 +163,7 @@ class Gen:
                 if t != name:
                     self.aliases[name] = (t, deps)
         spec = self.defs["SandboxSpec"]
-        self.typeddict("SandboxSpecFields", spec, exclude=SPEC_FIELDS_EXCLUDE)
-        self.typeddicts["SandboxSpecFields"] = self.typeddicts["SandboxSpecFields"].replace(
-            '"""Everything about one sandbox."""',
-            '"""SandboxSpec without `name` and `image`: the keyword arguments of Sandbox.create."""',
-        )
+        self.typeddict("SandboxSpecFields", spec, exclude=SPEC_FIELDS_EXCLUDE, doc=SPEC_FIELDS_DOC)
 
         out = [HEADER]
         # Aliases that do not reference TypedDicts first, in dependency order;

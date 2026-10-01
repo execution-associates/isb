@@ -39,32 +39,92 @@ def fake_server(tmp: str, body: str) -> str:
 
 class PureTests(unittest.TestCase):
     def test_volume_builders(self) -> None:
-        self.assertEqual(isb.Volume.bind("./src"), {"bind": "./src"})
         self.assertEqual(
-            isb.Volume.bind("/srv", readonly=True, device="src", options={"shift": True}),
-            {"bind": "/srv", "readonly": True, "device": "src", "options": {"shift": True}},
+            isb.Volume.bind("./src", "/home/dev/src"),
+            {"type": "bind", "source": "./src", "target": "/home/dev/src"},
         )
-        self.assertEqual(isb.Volume.named("cache"), {"named": "cache"})
         self.assertEqual(
-            isb.Volume.named("cache", mode=isb.NamedVolumeMode.EXISTING, owner="dev", pool="p", readonly=True),
-            {"named": "cache", "external": True, "owner": "dev", "readonly": True, "pool": "p"},
+            isb.Volume.bind("/srv", "/srv", read_only=True, device="src", options={"shift": True}),
+            {
+                "type": "bind",
+                "source": "/srv",
+                "target": "/srv",
+                "read_only": True,
+                "device": "src",
+                "options": {"shift": True},
+            },
+        )
+        self.assertEqual(
+            isb.Volume.named("cache", "/home/dev/.cache"),
+            {"type": "volume", "source": "cache", "target": "/home/dev/.cache"},
+        )
+        self.assertEqual(
+            isb.Volume.named("cache", "/c", external=True, owner="dev", pool="p", read_only=True),
+            {
+                "type": "volume",
+                "source": "cache",
+                "target": "/c",
+                "external": True,
+                "owner": "dev",
+                "read_only": True,
+                "pool": "p",
+            },
         )
 
     def test_port_builders(self) -> None:
+        self.assertEqual(isb.PortBinding.publish(8080, 80), {"published": 8080, "target": 80})
         self.assertEqual(
-            isb.PortBinding.host("tcp:127.0.0.1:5173", "tcp:127.0.0.1:5173", name="vite", search=50),
-            {
-                "bind": "host",
-                "listen": "tcp:127.0.0.1:5173",
-                "connect": "tcp:127.0.0.1:5173",
-                "name": "vite",
-                "search": 50,
-            },
+            isb.PortBinding.publish("5173-5223", 5173, host_ip="0.0.0.0", protocol="udp", name="vite"),
+            {"published": "5173-5223", "target": 5173, "host_ip": "0.0.0.0", "protocol": "udp", "name": "vite"},
+        )
+        self.assertEqual(
+            isb.PortBinding.host("tcp:127.0.0.1:5173", "tcp:127.0.0.1:5173", name="vite"),
+            {"bind": "host", "listen": "tcp:127.0.0.1:5173", "connect": "tcp:127.0.0.1:5173", "name": "vite"},
         )
         self.assertEqual(
             isb.PortBinding.guest("tcp:127.0.0.1:8190", "tcp:127.0.0.1:8080"),
             {"bind": "guest", "listen": "tcp:127.0.0.1:8190", "connect": "tcp:127.0.0.1:8080"},
         )
+
+    def test_port_search_becomes_a_range(self) -> None:
+        self.assertEqual(
+            isb.PortBinding.host("tcp:127.0.0.1:5173", "tcp:127.0.0.1:5173", name="vite", search=50),
+            {"published": "5173-5223", "target": 5173, "name": "vite"},
+        )
+        self.assertEqual(
+            isb.PortBinding.host("0.0.0.0:5353/udp", "udp:5353", search=2),
+            {"published": "5353-5355", "target": 5353, "host_ip": "0.0.0.0", "protocol": "udp"},
+        )
+        self.assertEqual(
+            isb.PortBinding.host("[::1]:8080", 80, search=0),
+            {"published": 8080, "target": 80, "host_ip": "::1"},
+        )
+        for listen, connect in [
+            ("unix:/run/x.sock", "80"),  # not a port
+            ("8080", "10.0.0.5:80"),  # explicit connect host
+            ("8080/udp", "80"),  # protocols differ
+            ("8000-8010", "80"),  # already a range
+        ]:
+            with self.assertRaises(ValueError, msg=(listen, connect)):
+                isb.PortBinding.host(listen, connect, search=5)
+        with self.assertRaises(ValueError):
+            isb.PortBinding.host("65530", "80", search=10)
+
+    def test_spec_name_and_exec_defaults(self) -> None:
+        from isb._sandbox import _build_spec
+
+        self.assertEqual(
+            _build_spec("web", "dev-base", {"cpus": 2}, {"mem_limit": "8g"}),
+            {"cpus": 2, "mem_limit": "8g", "container_name": "web", "image": "dev-base"},
+        )
+        sb = isb.Sandbox(
+            "web",
+            spec={"user": "dev", "working_dir": "/src", "exec": {"env": ["A=1", "B=x=y"], "login": True}},
+        )
+        self.assertEqual(sb.exec_defaults, {"user": "dev", "cwd": "/src", "env": {"A": "1", "B": "x=y"}, "login": True})
+        self.assertIsNone(isb.Sandbox("web", spec={"image": "dev-base"}).exec_defaults)
+        with self.assertRaises(ValueError):
+            isb.Sandbox("web", spec={"exec": {"env": ["BARE"]}})
 
     def test_duration(self) -> None:
         self.assertIsNone(duration(None))
@@ -289,6 +349,42 @@ class RpcTests(unittest.IsolatedAsyncioTestCase):
                 type="bogus",  # type: ignore[arg-type]
             )
 
+    async def test_builders_parse_on_the_server(self) -> None:
+        # A spec that parses gets as far as connecting; a bad one is `invalid` first.
+        with self.assertRaises(isb.ConnectError):
+            await isb.Sandbox.plan(
+                "x",
+                image="dev-base",
+                client=self.client,
+                named_volumes={"cache": {"name": "shared-cache"}},
+                cpus=2,
+                mem_limit="8g",
+                environment=["A=1"],
+                labels=["tmp"],
+                user="dev",
+                working_dir="/home/dev",
+                command="sleep infinity",
+                volumes=[
+                    "./src:/home/dev/src:ro",
+                    isb.Volume.bind(".", "/w"),
+                    isb.Volume.named("cache", "/c", owner="dev"),
+                ],
+                ports=[
+                    "8080:80",
+                    isb.PortBinding.publish("5173-5223", 5173),
+                    isb.PortBinding.host("9000", "9000", search=3),
+                    isb.PortBinding.guest("8190", "8080"),
+                ],
+            )
+        with self.assertRaises(isb.InvalidError) as cm:
+            await isb.Sandbox.plan(
+                "x",
+                image="dev-base",
+                client=self.client,
+                ports=[{"listen": "1", "connect": "2", "search": 5}],  # type: ignore[list-item]
+            )
+        self.assertIn("search", str(cm.exception))
+
     async def test_exec_needs_connection(self) -> None:
         sb = isb.Sandbox("web", client=self.client, exec_defaults={"user": "dev"})
         with self.assertRaises(isb.ConnectError):
@@ -315,27 +411,36 @@ class RpcTests(unittest.IsolatedAsyncioTestCase):
             with open(f, "w") as fh:
                 fh.write(
                     textwrap.dedent("""\
-                    sandboxes:
+                    services:
                       web:
                         image: "${IMG}"
                         cpus: 2
                         volumes:
-                          /src: {bind: ./src}
-                        exec: {user: dev, cwd: /src}
+                          - ./src:/src
+                          - cache:/home/dev/.cache
+                        user: dev
+                        working_dir: /src
+                        exec: {env: [A=1]}
                       Worker_1:
                         image: "${IMG}"
+                    volumes:
+                      cache: {}
                     """)
                 )
             p = await isb.Project.load(f, vars={"IMG": "dev-base"}, project_name="Demo App", client=self.client)
             self.assertEqual(p.name, "demo-app")
             self.assertEqual(sorted(p.services), ["Worker_1", "web"])
-            web = p.file["sandboxes"]["web"]
+            web = p.file["services"]["web"]
             self.assertEqual(web["image"], "dev-base")
-            self.assertEqual(web["name"], "demo-app-web")
+            self.assertEqual(web["container_name"], "demo-app-web")
+            self.assertEqual(
+                [(v["type"], v["target"]) for v in web["volumes"] if not isinstance(v, str)],
+                [("bind", "/src"), ("volume", "/home/dev/.cache")],
+            )
+            self.assertEqual((p.file.get("volumes") or {})["cache"].get("name"), "demo-app_cache")
             sb = p.sandbox("web")
             self.assertEqual(sb.name, "demo-app-web")
-            defaults = sb.exec_defaults or {}
-            self.assertEqual((defaults.get("user"), defaults.get("cwd")), ("dev", "/src"))
+            self.assertEqual(sb.exec_defaults, {"user": "dev", "cwd": "/src", "env": {"A": "1"}})
             self.assertEqual(p.sandbox("Worker_1").name, "demo-app-worker-1")
             with self.assertRaises(isb.NotFoundError):
                 p.sandbox("nope")

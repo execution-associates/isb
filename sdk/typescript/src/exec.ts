@@ -1,5 +1,5 @@
 import type { Client } from "./client.js";
-import type { ExecDefaults } from "./spec.js";
+import type { ExecDefaults } from "./types.js";
 import { b64decode, b64encode, type Duration, durationParam, utf8 } from "./util.js";
 
 /** Options for {@link Sandbox.exec}. They override the sandbox's exec defaults. */
@@ -8,7 +8,7 @@ export interface ExecOptions {
   cwd?: string;
   /** Guest user: a name, `uid`, or `uid:gid`. */
   user?: string | number;
-  /** Environment, over the instance `env` and the exec defaults. */
+  /** Environment, over the instance `environment` and the exec defaults. */
   env?: Record<string, string>;
   /** Run through the user's login shell. */
   login?: boolean;

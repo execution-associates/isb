@@ -274,11 +274,11 @@ class OwnSandboxTests(unittest.IsolatedAsyncioTestCase):
                 client=self.client,
                 labels=LABELS,
                 idmap="auto",
-                volumes={
-                    "/home/dev/.cache/thing": isb.Volume.named(vol, owner="dev"),
-                    "/mnt/ro": isb.Volume.bind(d, readonly=True, device="ro"),
-                },
-                exec={"user": "dev"},
+                volumes=[
+                    isb.Volume.named(vol, "/home/dev/.cache/thing", owner="dev"),
+                    isb.Volume.bind(d, "/mnt/ro", read_only=True, device="ro"),
+                ],
+                user="dev",
                 ready=["running", {"path_writable": "/home/dev/.cache/thing"}],
             )
             script = "stat -c %U /home/dev/.cache/thing /home/dev/.cache; touch /home/dev/.cache/thing/x && echo ok"
@@ -327,21 +327,23 @@ class OwnSandboxTests(unittest.IsolatedAsyncioTestCase):
             with open(compose, "w") as fh:
                 fh.write(
                     textwrap.dedent("""\
-                    sandboxes:
+                    services:
                       web:
                         image: "${IMG}"
                         idmap: auto
-                        labels: {isb-test: py, isb-test-py-run: "${RUN}"}
+                        labels: [isb-test=py, "isb-test-py-run=${RUN}"]
                         volumes:
-                          /home/dev/src: {bind: ./src, device: src}
+                          - ./src:/home/dev/src:device=src
                         ready: [running, {user_exists: dev}]
-                        exec: {user: dev, cwd: /home/dev/src, env: {GREETING: "${GREETING:-hello}"}}
+                        user: dev
+                        working_dir: /home/dev/src
+                        exec: {env: {GREETING: "${GREETING:-hello}"}}
                     """)
                 )
             project = await isb.Project.load(
                 compose, vars={"IMG": IMAGE, "RUN": str(os.getpid())}, project_name=pname, client=self.client
             )
-            web_name = project.file["sandboxes"]["web"]["name"]
+            web_name = project.file["services"]["web"]["container_name"]
             self.assertEqual(web_name, f"{pname}-web")
             self.addAsyncCleanup(self._remove, str(web_name))
 

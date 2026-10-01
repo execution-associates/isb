@@ -2,6 +2,13 @@
 // Field names are exactly those of the compose YAML (docs/spec.md).
 
 /**
+ * A command: argv, or a string split the way a shell splits words.
+ *
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "Command".
+ */
+export type Command = string | Scalar[];
+/**
  * A scalar (string, number or boolean) read as a string.
  *
  * This interface was referenced by `ComposeFile`'s JSON-Schema
@@ -13,6 +20,17 @@ export type Scalar = string | boolean | number;
  * via the `definition` "IntOrString".
  */
 export type IntOrString = number | string;
+/**
+ * A map, or docker's list of `KEY=VALUE` strings.
+ *
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "MapOrList".
+ */
+export type MapOrList =
+  | {
+      [k: string]: Scalar;
+    }
+  | string[];
 /**
  * This interface was referenced by `ComposeFile`'s JSON-Schema
  * via the `definition` "BoolOrString".
@@ -47,6 +65,13 @@ export type IdmapSpec = IdmapMode | IdmapMap | IdmapRaw;
  */
 export type IdmapMode = "auto" | "none" | "always";
 /**
+ * A published port, docker style, or an incus proxy in either direction.
+ *
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "PortSpec".
+ */
+export type PortSpec = string | PortMapping | ProxyPort;
+/**
  * Which side listens.
  *
  * This interface was referenced by `ComposeFile`'s JSON-Schema
@@ -80,36 +105,52 @@ export type ReadyCheck =
  * via the `definition` "InstanceType".
  */
 export type InstanceType = "container" | "virtual-machine" | "vm";
+/**
+ * A mount: `SOURCE:TARGET[:OPTIONS]` or the long form.
+ *
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "VolumeSpec".
+ */
+export type VolumeSpec = string | VolumeMount;
+/**
+ * What a mount's `source` is.
+ *
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "MountType".
+ */
+export type MountType = "bind" | "volume";
 
 /**
- * A compose-style file: named volumes plus any number of sandboxes.
+ * A compose file: named volumes plus any number of services, each one
+ * sandbox. Mirrors docker compose wherever incus allows.
  */
 export interface ComposeFile {
   /**
-   * Project name. Default sandbox names are `<name>-<service>`. Defaults to
-   * the directory holding the first compose file.
+   * incus project to operate in (default: `default`).
+   */
+  incus_project?: string | null;
+  /**
+   * Project name. Default sandbox names are `<name>-<service>` and named
+   * volumes are `<name>_<volume>`. Defaults to the directory holding the
+   * first compose file.
    */
   name?: string | null;
   /**
-   * incus project to operate in (default: `default`).
-   */
-  project?: string | null;
-  /**
    * Sandboxes, keyed by service name.
    */
-  sandboxes?: {
+  services?: {
     [k: string]: SandboxSpec;
   };
   /**
    * Named custom storage volumes, created if missing before any sandbox that
-   * uses them. Keys are volume names.
+   * uses them. Keys are what services refer to.
    */
   volumes?: {
     [k: string]: NamedVolumeSpec;
   };
 }
 /**
- * Everything about one sandbox.
+ * Everything about one sandbox: a compose service.
  *
  * This interface was referenced by `ComposeFile`'s JSON-Schema
  * via the `definition` "SandboxSpec".
@@ -117,25 +158,27 @@ export interface ComposeFile {
 export interface SandboxSpec {
   /**
    * The sandbox's main command, run by a foreground `isb up` once the
-   * sandbox is ready, with the `exec` defaults. Its output is streamed, and
-   * `up` stops the sandbox when every command has exited. argv form: nothing
-   * is joined into a shell string. Never part of the instance, so changing
-   * it is not drift.
+   * sandbox is ready, as `user` in `working_dir`. Its output is streamed,
+   * and `up` stops the sandbox when every command has exited. A list is
+   * argv; a string is split like a shell would split it, without running
+   * one. Never part of the instance, so changing it is not drift.
    */
-  command?: Scalar[] | null;
+  command?: Command | null;
   /**
-   * CPU limit (`limits.cpu`): a count like `8` or a set like `0-3`.
+   * incus instance name: at most 63 characters of `[a-z0-9-]` (case-insensitive),
+   * starting with a letter. In a compose file it defaults to `<project>-<service>`.
+   */
+  container_name?: string | null;
+  /**
+   * Number of CPUs (`limits.cpu`), a whole number like `8`.
    */
   cpus?: IntOrString | null;
   /**
-   * Instance environment (`environment.<KEY>`), seen by every exec. Not for
-   * secrets: it is plain instance config, readable by anyone who can read the
-   * instance.
+   * CPUs to pin to (`limits.cpu`), e.g. `0-3` or `0,2`. Excludes `cpus`.
    */
-  env?: {
-    [k: string]: Scalar;
-  };
-  exec?: ExecDefaults;
+  cpuset?: IntOrString | null;
+  environment?: MapOrList;
+  exec?: ExecSpec;
   /**
    * uid/gid mapping so a host user can write bind mounts. See [`IdmapSpec`].
    */
@@ -147,23 +190,18 @@ export interface SandboxSpec {
    */
   image?: string;
   /**
-   * Labels, stored as `user.<key>` config keys. Used by `isb ls --label` and
-   * `isb prune`. isb never removes a label it was not told about.
+   * incus profiles to apply, in order. Default: `[default]`. Fixed at creation.
    */
-  labels?: {
-    [k: string]: Scalar;
-  };
+  incus_profiles?: string[] | null;
+  labels?: MapOrList;
   /**
-   * Memory limit (`limits.memory`), e.g. `8GiB`.
+   * Memory limit (`limits.memory`): docker units (`512m`, `8g`, bytes) or
+   * incus ones (`8GiB`, `50%`).
    */
-  memory?: IntOrString | null;
+  mem_limit?: IntOrString | null;
   /**
-   * incus instance name: at most 63 characters of `[a-z0-9-]` (case-insensitive),
-   * starting with a letter. In a compose file it defaults to `<project>-<service>`.
-   */
-  name?: string | null;
-  /**
-   * Proxy devices (port forwards), in either direction.
+   * Published ports (`[HOST_IP:]PUBLISHED:TARGET[/PROTOCOL]` or the long
+   * form), and incus proxies in either direction (`listen`/`connect`).
    */
   ports?: PortSpec[];
   /**
@@ -171,10 +209,6 @@ export interface SandboxSpec {
    * (unprivileged); `false` pins it explicitly.
    */
   privileged?: BoolOrString | null;
-  /**
-   * Profiles to apply, in order. Default: `[default]`. Fixed at creation.
-   */
-  profiles?: string[] | null;
   /**
    * Extra instance config keys, set verbatim (escape hatch).
    */
@@ -206,35 +240,29 @@ export interface SandboxSpec {
   storage?: string | null;
   type?: InstanceType;
   /**
-   * Mounts, keyed by the absolute path inside the guest.
-   */
-  volumes?: {
-    [k: string]: VolumeSpec;
-  };
-}
-/**
- * Defaults for exec into a sandbox. Per-call options override them.
- *
- * This interface was referenced by `ComposeFile`'s JSON-Schema
- * via the `definition` "ExecDefaults".
- */
-export interface ExecDefaults {
-  /**
-   * Working directory in the guest.
-   */
-  cwd?: string | null;
-  /**
-   * Environment for exec (merged over the instance `env`).
-   */
-  env?: {
-    [k: string]: Scalar;
-  };
-  login?: BoolOrString;
-  /**
-   * Guest user: a name (`dev`), `uid`, or `uid:gid`. Names are resolved in the
-   * guest, and set HOME/USER/LOGNAME unless given in env.
+   * Guest user for `command`, `isb exec` and `path_writable`: a name
+   * (`dev`), `uid`, `uid:gid` or `name:group`. Default root.
    */
   user?: IntOrString | null;
+  /**
+   * Mounts: `SOURCE:TARGET[:OPTIONS]` or the long form. A source starting
+   * with `/`, `.` or `~` is a host path; anything else is a named volume.
+   */
+  volumes?: VolumeSpec[];
+  /**
+   * Working directory for `command` and `isb exec`. Default: the user's home.
+   */
+  working_dir?: string | null;
+}
+/**
+ * The `exec:` block of a service: exec defaults with no docker equivalent.
+ *
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "ExecSpec".
+ */
+export interface ExecSpec {
+  env?: MapOrList;
+  login?: BoolOrString;
 }
 /**
  * This interface was referenced by `ComposeFile`'s JSON-Schema
@@ -258,17 +286,45 @@ export interface IdmapRaw {
   raw: string;
 }
 /**
- * An incus proxy device.
+ * Docker's long port syntax.
  *
  * This interface was referenced by `ComposeFile`'s JSON-Schema
- * via the `definition` "PortSpec".
+ * via the `definition` "PortMapping".
  */
-export interface PortSpec {
+export interface PortMapping {
+  /**
+   * Host address to listen on. Default `127.0.0.1` (docker's is `0.0.0.0`).
+   */
+  host_ip?: string | null;
+  /**
+   * incus device name. Default: `port-host-<published>`.
+   */
+  name?: string | null;
+  /**
+   * Extra proxy device properties (`proxy_protocol`, ...), verbatim.
+   */
+  options?: {
+    [k: string]: Scalar;
+  };
+  /**
+   * `tcp` (default) or `udp`.
+   */
+  protocol?: string | null;
+  published: IntOrString;
+  target: IntOrString;
+}
+/**
+ * An incus proxy written out: either direction, any address incus takes.
+ *
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "ProxyPort".
+ */
+export interface ProxyPort {
   bind?: PortBind;
   connect: IntOrString;
   listen: IntOrString;
   /**
-   * Device name. Default: `port-<bind>-<listen port>`.
+   * incus device name. Default: `port-<bind>-<listen port>`.
    */
   name?: string | null;
   /**
@@ -277,36 +333,20 @@ export interface PortSpec {
   options?: {
     [k: string]: Scalar;
   };
-  /**
-   * Host-bound TCP/UDP only: if the listen port is taken, try the next one, up
-   * to this many more. The chosen address is printed and a device already
-   * listening anywhere in the range counts as correct.
-   */
-  search?: IntOrString | null;
 }
 /**
- * A mount. Exactly one of `bind` or `named`.
+ * The long form of a mount.
  *
  * This interface was referenced by `ComposeFile`'s JSON-Schema
- * via the `definition` "VolumeSpec".
+ * via the `definition` "VolumeMount".
  */
-export interface VolumeSpec {
+export interface VolumeMount {
   /**
-   * Host path to bind-mount. Relative paths resolve against the compose file's
-   * directory; `~` expands; symlinks are resolved.
-   */
-  bind?: string | null;
-  /**
-   * Device name. Default: derived from the guest path. Set it to adopt an
+   * incus device name. Default: derived from the target. Set it to adopt an
    * existing device under a known name.
    */
   device?: string | null;
   external?: BoolOrString;
-  /**
-   * Named custom storage volume to mount (created if missing unless declared
-   * `external`).
-   */
-  named?: string | null;
   /**
    * Extra disk device properties (`shift`, `propagation`, ...), verbatim.
    */
@@ -320,10 +360,26 @@ export interface VolumeSpec {
    */
   owner?: IntOrString | null;
   /**
-   * Pool of the named volume. Default: the top-level volume's pool, else `auto`.
+   * Named volumes only: the storage pool. Default: the top-level volume's
+   * pool, else the sandbox's root pool.
    */
   pool?: string | null;
-  readonly?: BoolOrString;
+  read_only?: BoolOrString;
+  /**
+   * Host path to bind-mount (relative paths resolve against the compose
+   * file's directory, `~` expands, symlinks are resolved), or the key of a
+   * named volume.
+   */
+  source: string;
+  /**
+   * Absolute path inside the guest.
+   */
+  target: string;
+  /**
+   * `bind` (a host path) or `volume` (a named volume). Default: `bind` when
+   * `source` starts with `/`, `.` or `~`, else `volume`.
+   */
+  type?: MountType | null;
 }
 /**
  * A named custom storage volume.
@@ -339,6 +395,11 @@ export interface NamedVolumeSpec {
     [k: string]: Scalar;
   };
   external?: BoolOrString;
+  /**
+   * The incus volume name. Default: `<project>_<key>`, or the key itself
+   * for an `external` volume.
+   */
+  name?: string | null;
   /**
    * Storage pool. `auto` (default) means the same pool the sandbox uses
    * (`storage`), resolved the same way.

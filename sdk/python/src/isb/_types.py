@@ -3,12 +3,30 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Mapping, Optional, TypedDict, Union
+
+from ._spec import BoolOrString, Scalar
 
 Action = Dict[str, Any]
 """One plan step: an object tagged by `action` (`create_volume`, `create_instance`,
 `set_config`, `add_device`, `replace_device`, `remove_device`, `start_instance`,
 `add_port`, `fix_owner`, `note`). See docs/rpc.md."""
+
+
+class ExecDefaults(TypedDict, total=False):
+    """Defaults for exec into a sandbox; per-call options override them.
+
+    A spec implies them: `user`, `working_dir` (as `cwd`), `exec.env` and
+    `exec.login`."""
+
+    user: Union[str, int]
+    """Guest user: a name (`dev`), `uid`, `uid:gid` or `name:group`."""
+    cwd: str
+    """Working directory in the guest."""
+    env: Mapping[str, Scalar]
+    """Environment for exec (merged over the instance `environment`)."""
+    login: BoolOrString
+    """Run argv through the user's login shell."""
 
 
 def _strmap(v: Any) -> Dict[str, str]:
@@ -58,7 +76,7 @@ class ApplyReport:
     created: bool
     applied: List[Action] = field(default_factory=list)
     ports: Dict[str, str] = field(default_factory=dict)
-    """Device name to the listen address in use, for ports with `search`."""
+    """Device name to the listen address in use, for ports published from a range."""
     restart_needed: List[str] = field(default_factory=list)
     """Config keys changed that take effect only after a restart."""
 

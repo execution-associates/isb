@@ -25,19 +25,29 @@ def _paths(p: Paths) -> List[str]:
     return [os.path.abspath(os.fspath(x)) for x in p]
 
 
-def _default_files() -> List[str]:
-    for name in ("isb.yaml", "isb.yml"):
+def _first_existing(names: Sequence[str]) -> Optional[str]:
+    for name in names:
         path = os.path.join(os.getcwd(), name)
         if os.path.exists(path):
-            return [path]
-    return [os.path.join(os.getcwd(), "isb.yaml")]
+            return path
+    return None
+
+
+def _default_files() -> List[str]:
+    """`isb.yaml` (else `isb.yml`) in the cwd, plus `isb.override.yaml` (else
+    `isb.override.yml`) when present, as the CLI does."""
+    main = _first_existing(("isb.yaml", "isb.yml"))
+    if main is None:
+        return [os.path.join(os.getcwd(), "isb.yaml")]
+    override = _first_existing(("isb.override.yaml", "isb.override.yml"))
+    return [main] if override is None else [main, override]
 
 
 class Project:
     """A loaded compose file (or several, merged in order).
 
     `file` is the resolved file: interpolated, merged, with the project name
-    and every sandbox name filled in. `up`/`plan`/`down` reload the files on
+    and every service's `container_name` filled in. `up`/`plan`/`down` reload the files on
     the server each time, with the same variables."""
 
     def __init__(
@@ -66,7 +76,9 @@ class Project:
         vars: Optional[Mapping[str, str]] = None,  # noqa: A002 (the protocol's name)
         client: Optional[Client] = None,
     ) -> "Project":
-        """Load compose files (default `./isb.yaml`, else `./isb.yml`).
+        """Load compose files (default `./isb.yaml`, else `./isb.yml`, plus
+        `isb.override.yaml` next to it when present; a `.env` next to the
+        first file is read too).
 
         `vars` win over the environment of the isb process for `${VAR}`;
         `env_files` come after both."""
@@ -84,14 +96,15 @@ class Project:
     @property
     def services(self) -> List[str]:
         """Service names (sorted, as the server returns them)."""
-        return list((self.file.get("sandboxes") or {}).keys())
+        return list((self.file.get("services") or {}).keys())
 
     def sandbox(self, service: str) -> Sandbox:
-        """A handle on a service's sandbox, carrying its `exec` defaults."""
-        spec = (self.file.get("sandboxes") or {}).get(service)
+        """A handle on a service's sandbox, carrying its exec defaults
+        (`user`, `working_dir`, `exec`)."""
+        spec = (self.file.get("services") or {}).get(service)
         if spec is None:
             raise NotFoundError("not_found", f"no service {service!r} in project {self.name}")
-        name = spec.get("name") or f"{self.name}-{service}"
+        name = spec.get("container_name") or f"{self.name}-{service}"
         return Sandbox(name, client=self.client, spec=dict(spec))
 
     def _with(self, services: Optional[Sequence[str]], **extra: Any) -> Dict[str, Any]:

@@ -142,7 +142,8 @@ pub fn docker_port(
     Ok(p)
 }
 
-/// Parse a `-p` value.
+/// Parse a `-p` value: the compose short syntax, or the CLI's
+/// `listen=..,connect=..` form.
 pub fn port(s: &str) -> Result<PortSpec> {
     if s.contains('=') {
         let mut p = PortSpec::default();
@@ -195,6 +196,11 @@ pub fn port(s: &str) -> Result<PortSpec> {
         }
         return Ok(p);
     }
+    docker_short_port(s)
+}
+
+/// Docker's short port syntax: `[HOST_IP:]PUBLISHED:TARGET[/PROTOCOL]`.
+pub fn docker_short_port(s: &str) -> Result<PortSpec> {
     let (body, proto) = match s.rsplit_once('/') {
         Some((b, p)) if p == "tcp" || p == "udp" => (b, p),
         Some(_) => {
@@ -298,6 +304,7 @@ mod tests {
         assert_eq!(p.listen, "tcp:[::1]:8080");
         assert!(port("8000:9000-9002").is_err());
         assert!(port("8000-8001:9000-9002").is_err());
+        assert!(docker_short_port("listen=tcp:1.2.3.4:1,connect=tcp:1.2.3.4:2").is_err());
         let p =
             port("bind=guest,listen=tcp:127.0.0.1:8190,connect=tcp:127.0.0.1:9000,name=backend")
                 .unwrap();

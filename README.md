@@ -150,9 +150,10 @@ async def main() -> None:
         image="images:ubuntu/24.04",
         cpus=2,
         idmap="auto",
-        volumes={"/home/ubuntu/site": Volume.bind("./site")},
-        ports=[{"listen": 8000, "connect": 8000}],
-        exec={"user": "ubuntu", "cwd": "/home/ubuntu/site"},
+        volumes=[Volume.bind("./site", "/home/ubuntu/site")],
+        ports=["8000:8000"],
+        user="ubuntu",
+        working_dir="/home/ubuntu/site",
     )
 
     out = await sb.exec("uname", ["-a"])
@@ -178,13 +179,14 @@ More in [sdk/python](sdk/python): stdin, compose files, errors.
 import { Sandbox, Volume } from "@execution-associates/isb";
 
 const sb = await Sandbox.connectOrCreate({
-  name: "web",
+  container_name: "web",
   image: "images:ubuntu/24.04",
   cpus: 2,
   idmap: "auto",
-  volumes: { "/home/ubuntu/site": Volume.bind("./site") },
-  ports: [{ listen: 8000, connect: 8000 }],
-  exec: { user: "ubuntu", cwd: "/home/ubuntu/site" },
+  volumes: [Volume.bind("./site", "/home/ubuntu/site")],
+  ports: ["8000:8000"],
+  user: "ubuntu",
+  working_dir: "/home/ubuntu/site",
 });
 
 const out = await sb.exec("uname", ["-a"]);

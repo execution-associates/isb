@@ -397,7 +397,7 @@ pub enum MountType {
 }
 
 /// A mount. Written as `SOURCE:TARGET[:OPTIONS]` or as the long form
-/// ([`VolumeMount`]); always serialized in the long form.
+/// (`VolumeMount` in the schema); always serialized in the long form.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct VolumeSpec {
     /// `bind` (a host path) or `volume` (a named volume).
@@ -556,7 +556,7 @@ impl PortBind {
 }
 
 /// An incus proxy device. Written as docker's `[HOST_IP:]PUBLISHED:TARGET[/PROTOCOL]`,
-/// its long form ([`PortMapping`]), or the incus form ([`ProxyPort`]).
+/// its long form (`PortMapping` in the schema), or the incus form (`ProxyPort`).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PortSpec {
     /// Device name. Default: `port-<bind>-<listen port>`.
@@ -741,11 +741,10 @@ impl<'de> Deserialize<'de> for PortSpec {
         let custom = |e: String| D::Error::custom(format!("port: {e}"));
         match v {
             serde_json::Value::String(s) => {
-                crate::shorthand::port(&s).map_err(|e| custom(e.to_string()))
+                crate::shorthand::docker_short_port(&s).map_err(|e| custom(e.to_string()))
             }
-            serde_json::Value::Number(n) => {
-                crate::shorthand::port(&n.to_string()).map_err(|e| custom(e.to_string()))
-            }
+            serde_json::Value::Number(n) => crate::shorthand::docker_short_port(&n.to_string())
+                .map_err(|e| custom(e.to_string())),
             serde_json::Value::Object(ref m) if m.contains_key("search") => Err(custom(
                 "search is not an isb key: publish a range instead, e.g. \"5173-5223:5173\" or published: 5173-5223".into(),
             )),
@@ -808,7 +807,7 @@ pub enum ReadyCheck {
     DefaultRoute,
     /// `getent passwd <user>` succeeds in the guest.
     UserExists(String),
-    /// The path is writable by the exec user (`exec.user`, else root).
+    /// The path is writable by the service's `user` (else root).
     PathWritable(String),
     /// This argv exits 0 in the guest (run as root).
     Command(Vec<String>),
@@ -968,16 +967,6 @@ impl ExecDefaults {
 /// Mount builders: `Volume::bind(host)`, `Volume::named(name)`.
 pub struct Volume;
 
-/// What to do when a named volume does not exist.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum NamedVolumeMode {
-    /// Create it if missing (default).
-    #[default]
-    EnsureExists,
-    /// It must already exist.
-    Existing,
-}
-
 impl Volume {
     /// Bind-mount a host path. The target is set by [`SandboxSpec::volume`].
     pub fn bind(host_path: impl Into<String>) -> VolumeSpec {
@@ -999,9 +988,9 @@ impl Volume {
 }
 
 impl VolumeSpec {
-    /// Named volumes: create if missing, or require that it exists.
-    pub fn mode(mut self, mode: NamedVolumeMode) -> Self {
-        self.external = mode == NamedVolumeMode::Existing;
+    /// Named volumes: the volume must already exist; isb never creates it.
+    pub fn external(mut self, external: bool) -> Self {
+        self.external = external;
         self
     }
     pub fn read_only(mut self, ro: bool) -> Self {
