@@ -13,20 +13,25 @@ creating what is missing and changing only what differs, every time you run it.
 
 ```yaml
 # isb.yaml
-sandboxes:
+services:
   web:
     image: images:ubuntu/24.04
     cpus: 2
-    memory: 2GiB
+    mem_limit: 2g
     idmap: auto                  # files you create inside stay yours outside
     volumes:
-      /home/ubuntu/site: { bind: ./site }
+      - ./site:/home/ubuntu/site
     ports:
-      - { listen: 8000, connect: 8000 }   # reachable on the host's localhost
+      - "8000:8000"              # on the host's 127.0.0.1, unless you name an address
     ready: [running, default_route]
-    exec: { user: ubuntu, cwd: /home/ubuntu/site }
-    command: [python3, -u, -m, http.server, 8000]
+    user: ubuntu
+    working_dir: /home/ubuntu/site
+    command: python3 -u -m http.server 8000
 ```
+
+If you know docker compose you know the format: the same keys and syntax, plus
+a few incus-only ones (`type: vm`, `idmap`, `ready`). The [reference](docs/spec.md)
+lists the handful of places it differs, such as ports defaulting to localhost.
 
 ```console
 $ isb up                  # create it (or fix only what drifted), then run `command`
@@ -42,7 +47,7 @@ that want the sandbox up and then carry on use `-d`:
 
 ```console
 $ isb up -d                                 # create or reconcile, wait until ready, return
-$ isb exec web -- python3 -m unittest       # runs with the service's exec defaults
+$ isb exec web -- python3 -m unittest       # as the service's user, in its working_dir
 $ isb down
 ```
 
@@ -225,6 +230,7 @@ the way docker compose does it:
 ```console
 $ WORKTREE=$PWD isb up
 $ isb --env-file dev.env up       # KEY=VALUE lines; the environment wins
+$ isb up                          # reads .env next to isb.yaml, if there is one
 ```
 
 `${VAR:-default}` supplies a default, `${VAR:?message}` fails with a message,

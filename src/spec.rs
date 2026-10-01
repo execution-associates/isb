@@ -584,13 +584,13 @@ pub(crate) struct PortMapping {
     name: Option<String>,
 
     /// Port in the guest, or a range as long as `published`'s.
-    #[serde(deserialize_with = "flex::string")]
+    #[serde(deserialize_with = "flex::string", serialize_with = "port_number")]
     #[schemars(with = "flex::IntOrString")]
     target: String,
 
     /// Port on the host. A range (`5173-5223`) with a single `target` takes the
     /// first free port in it.
-    #[serde(deserialize_with = "flex::string")]
+    #[serde(deserialize_with = "flex::string", serialize_with = "port_number")]
     #[schemars(with = "flex::IntOrString")]
     published: String,
 
@@ -610,6 +610,14 @@ pub(crate) struct PortMapping {
     )]
     #[schemars(with = "BTreeMap<String, flex::Scalar>")]
     options: BTreeMap<String, String>,
+}
+
+/// A single port as a number, a range as a string.
+fn port_number<S: serde::Serializer>(p: &str, s: S) -> Result<S::Ok, S::Error> {
+    match p.parse::<u16>() {
+        Ok(n) => s.serialize_u16(n),
+        Err(_) => s.serialize_str(p),
+    }
 }
 
 /// An incus proxy written out: either direction, any address incus takes.

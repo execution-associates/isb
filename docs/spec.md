@@ -1,27 +1,37 @@
 # isb compose file reference
 
-A compose file describes named storage volumes and any number of sandboxes (incus
-containers or VMs). `isb up` creates what is missing and reconciles what exists,
-changing only what differs. isb talks to incusd over its unix socket
+A compose file describes named storage volumes and any number of services, each
+one sandbox (an incus container or VM). The format is docker compose's wherever
+incus allows; "Differences from docker compose" lists where it is not. `isb up`
+creates what is missing and reconciles what exists, changing only what differs. isb talks to incusd over its unix socket
 (`--socket`, else `$INCUS_SOCKET`, else `$INCUS_DIR/unix.socket`, else
 `/var/lib/incus/unix.socket`).
 
 ## Files and validation
 
-- With no `-f`, isb looks in the current directory for `isb.yaml`, then `isb.yml`.
-- `-f FILE` may be repeated. It is accepted before the subcommand and after the
-  compose-aware ones (`up`, `down`, `plan`, `config`, `ps`, `inspect`, `exec`):
-  `isb -f a.yaml up -f b.yaml` loads `a.yaml` then `b.yaml`.
-- Files are merged in order. Mappings merge key by key, recursively. Everything
-  else (scalars and sequences such as `ports`, `ready`, `profiles`) is replaced
-  by the later file. `volumes` merges per guest path and then field by field.
+- With no `-f`, isb looks in the current directory for `isb.yaml`, then
+  `isb.yml`, and merges `isb.override.yaml` (or `isb.override.yml`) over it if
+  one exists.
+- `-f FILE` may be repeated, and then no override file is loaded. It is accepted
+  before the subcommand and after the compose-aware ones (`up`, `down`, `plan`,
+  `config`, `ps`, `inspect`, `exec`): `isb -f a.yaml up -f b.yaml` loads
+  `a.yaml` then `b.yaml`.
+- Files are merged in order, as docker compose merges them. Mappings merge key
+  by key, recursively; `environment` and `labels` merge by key whichever form
+  they are written in. A service's `ports` are appended (an identical entry is
+  kept once), and its `volumes` merge by target, a later mount replacing an
+  earlier one at the same target. Everything else (scalars and other lists,
+  such as `command`, `ready`, `incus_profiles`) is replaced by the later file.
 - Each file is also validated on its own, so an error names the file.
 - Relative bind paths resolve against the directory of the first file, including
   mounts declared in later files.
-- Every object rejects unknown fields, so a typo is an error. Keys starting with
-  `x-` are dropped at the top level and directly inside each sandbox (and only
-  there). They are useful as YAML anchor holders. YAML anchors, aliases and
-  `<<` merge keys work within one file.
+- Every object rejects unknown fields, so a typo is an error. A docker compose
+  key isb has no equivalent for (`build`, `depends_on`, `healthcheck`,
+  `networks`, ...) is an error that says what to use instead. The obsolete
+  top-level `version` is ignored. Keys starting with `x-` are dropped at the top
+  level and directly inside each service (and only there). They are useful as
+  YAML anchor holders. YAML anchors, aliases and `<<` merge keys work within one
+  file.
 
 To check a file without touching anything:
 
@@ -34,22 +44,52 @@ To check a file without touching anything:
 
 Interpolation produces strings, so typed fields also accept strings:
 
-- Booleans (`privileged`, `readonly`, `external`, `login`) accept `true`/`false`
+- Booleans (`privileged`, `read_only`, `external`, `login`) accept `true`/`false`
   or a string: `true`, `yes`, `on`, `1`, `false`, `no`, `off`, `0` or empty,
   case-insensitive.
-- `cpus`, `memory`, `ready_timeout`, `exec.user` and a mount's `owner` accept a
-  non-negative integer or a string. Floats are rejected.
-- `search` accepts an integer or a numeric string, at most 65535.
+- `cpus`, `cpuset`, `mem_limit`, `ready_timeout`, `user`, a mount's `owner` and
+  a port's `target` and `published` accept a non-negative integer or a string.
+  Floats are rejected.
 - Durations (`ready_timeout`): a number with an optional unit `ms`, `s`/`sec`/
   `secs`, `m`/`min`/`mins`, `h`. No unit means seconds. Decimals work (`1.5m`).
-- The values of free-form string maps (`labels`, `env`, `raw_config`, the
-  properties in `raw_devices`, mount and port `options`, top-level volume
+- The values of free-form string maps (`labels`, `environment`, `raw_config`,
+  the properties in `raw_devices`, mount and port `options`, top-level volume
   `config`, `exec.env`) may be any scalar and are stored as its string form:
-  `env: {DEBUG: 1}` is `"1"`, `raw_config: {security.nesting: true}` is
+  `environment: {DEBUG: 1}` is `"1"`, `raw_config: {security.nesting: true}` is
   `"true"`. A float is written in its shortest form (`1.0` becomes `"1"`), so
   quote a value whose exact spelling matters. Map keys must be strings.
-- Other string fields (`name`, `image`, `storage`, `exec.cwd`, ...) take YAML
-  strings only.
+- `environment`, `exec.env` and `labels` may also be written as a list of
+  `KEY=VALUE` strings. In an environment, a bare `KEY` takes its value from the
+  variables used for interpolation and is left out when unset, as in docker. A
+  bare label is empty.
+- Other string fields (`container_name`, `image`, `storage`, `working_dir`,
+  ...) take YAML strings only.
+
+## Differences from docker compose
+
+The format follows docker compose; these are the places it does not, each on
+purpose.
+
+- **Ports listen on `127.0.0.1` by default,** not `0.0.0.0`. Publishing to every
+  interface by accident is a well-known way to expose a dev server. Write the
+  address to publish elsewhere: `"0.0.0.0:8080:80"`.
+- **A port needs its host side.** `"80"` alone means a random host port in
+  docker; isb has no random ports, so it is an error.
+- **An unset variable is an error,** where docker substitutes an empty string
+  with a warning. A blank `container_name` or mount path does damage quietly.
+  `${VAR:-}` allows empty.
+- **The file is `isb.yaml`,** so it can sit next to a docker project's
+  `compose.yaml` without either tool reading the other's.
+- **`ready` instead of `healthcheck`.** isb's checks gate `up` once, and include
+  incus-specific ones (`default_route`, `user_exists`, `path_writable`).
+- **incus keys keep incus names:** `type: vm`, `storage`, `idmap`,
+  `incus_profiles`, `incus_project`, `raw_config`, `raw_devices`, and the
+  `listen`/`connect` port form. docker's `profiles` (service activation) and
+  `name`'s role as the project are left to mean what they mean in docker.
+- **A long-syntax mount may omit `type`;** it is inferred from `source`, as in
+  the short syntax.
+- **No images are built, and there are no networks, `depends_on`, `restart`,
+  `secrets` or `configs`.** Those keys are errors that say what to use instead.
 
 ## Interpolation
 
@@ -79,8 +119,9 @@ merged. An unreferenced `x-` block is therefore never expanded; one pulled in wi
   `${VAR/x/y}` or an unterminated `${`, are errors.
 - With an empty message, `${VAR:?}` reports `VAR is required`.
 
-Variable sources: the process environment, then `--env-file FILE` (repeatable).
-The process environment wins; a later env file overrides an earlier one. An env
+Variable sources: the process environment, then `--env-file FILE` (repeatable),
+or, without `--env-file`, a `.env` file next to the first compose file if there
+is one. The process environment wins; a later env file overrides an earlier one. An env
 file has `KEY=VALUE` lines, blank lines and `#` comment lines are skipped, an
 `export ` prefix is allowed, one pair of matching `"` or `'` around the value is
 removed, and nothing is expanded. Inline comments are not stripped. A non-blank
@@ -91,28 +132,30 @@ line without `=` is an error.
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `name` | string | directory of the first file | Compose project name. |
-| `project` | string | `default` | incus project to operate in. |
-| `volumes` | map of name to volume | `{}` | Named custom storage volumes. |
-| `sandboxes` | map of service to sandbox | `{}` | The sandboxes, keyed by service name. |
+| `incus_project` | string | `default` | incus project to operate in. |
+| `volumes` | map of key to volume | `{}` | Named custom storage volumes. |
+| `services` | map of service to sandbox | `{}` | The sandboxes, keyed by service name. |
 
 `name` is sanitized: lowercased, each run of characters outside `[a-z0-9]`
 becomes one `-`, leading and trailing `-` are trimmed, and `isb-` is prepended if
 the result does not start with a letter (an empty result becomes `isb`).
 `-P/--project-name` overrides it. The default sandbox name is
 `<name>-<service>`, with the service key sanitized the same way (`Web_1` in
-project `lasso` becomes `lasso-web-1`).
+project `lasso` becomes `lasso-web-1`). The default volume name is
+`<name>_<key>`.
 
-`project` is overridden by `--project` or `$INCUS_PROJECT`. It also scopes the
+`incus_project` is overridden by `--project` or `$INCUS_PROJECT`. It also scopes the
 per-sandbox lock (see "The ensure flow").
 
-## `volumes.<name>`
+## `volumes.<key>`
 
-A named custom storage volume (filesystem content type). Declaring it here is
-optional: a volume a sandbox mounts but that is not declared is created with no
-config. A declared volume that no sandbox mounts is never created.
+A named custom storage volume (filesystem content type). A service mounts it by
+its key, and may only mount a volume declared here. A declared volume that no
+service mounts is never created.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
+| `name` | string | `<project>_<key>`; the key if `external` | The incus volume name. Set it to share one volume across projects. |
 | `pool` | string | `auto` | Storage pool. `auto` means the root pool of the sandbox that mounts it. A named pool must exist. |
 | `config` | map of string | `{}` | Volume config keys (`size: 10GiB`). Applied only when isb creates the volume; never compared or changed later. |
 | `external` | bool | `false` | The volume must already exist. isb never creates it; `plan` and `up` fail if it is missing. |
@@ -120,7 +163,7 @@ config. A declared volume that no sandbox mounts is never created.
 A volume is created before the sandbox that mounts it. If two sandboxes resolve
 the same volume to different pools, each pool gets its own volume.
 
-## `sandboxes.<service>`
+## `services.<service>`
 
 Each field below lists its type, default, what it becomes in incus, and whether
 `isb up` reconciles it on an existing instance or only uses it at creation.
@@ -128,7 +171,7 @@ Each field below lists its type, default, what it becomes in incus, and whether
 never unsets a key: removing a field, label or env var from the file leaves the
 old key on the instance.
 
-### `name`
+### `container_name`
 
 String. Default `<project>-<service>` (also when empty). The incus instance name:
 at most 63 characters of `[A-Za-z0-9-]`, starting with a letter, not ending with
@@ -183,12 +226,22 @@ root disk on another pool is reported as a note. This resolved pool is also the
 
 ### `cpus`
 
-Integer or string, optional. Becomes `limits.cpu`: a count (`8`) or a CPU set
-(`0-3`). Reconciled, live.
+Whole number, optional. Becomes `limits.cpu` (`8`): incus pins the instance to
+that many CPUs and balances it across them. Fractions (docker's `0.5`) are
+rejected; for a CPU-time cap set `raw_config: {limits.cpu.allowance: 50%}`.
+Reconciled, live.
 
-### `memory`
+### `cpuset`
 
-Integer or string, optional. Becomes `limits.memory` (`8GiB`). Reconciled, live.
+String, optional. Becomes `limits.cpu` as a CPU set (`0-3`, `0,2`). Setting both
+`cpus` and `cpuset` is an error. Reconciled, live.
+
+### `mem_limit`
+
+Size, optional. Becomes `limits.memory`. Docker's units are translated, binary
+as docker reads them: `512m` is `512MiB`, `8g` and `8GB` are `8GiB`, and a bare
+number is bytes. incus' binary units (`8GiB`) and percentages (`50%`) pass
+through. Sizes are whole numbers (`1536m`, not `1.5g`). Reconciled, live.
 
 ### `privileged`
 
@@ -233,14 +286,15 @@ and leaves it to be unset by hand.
 Container-only. On a VM, `auto` and `none` are accepted and do nothing; any
 other form (`always`, the map form including `{}`, or `{raw: ...}`) is an error.
 
-### `profiles`
+### `incus_profiles`
 
 List of strings, default `[default]`. Applied in order at creation. Fixed at
 creation; a different list (order counts) is reported as a note.
 
 ### `labels`
 
-Map of string to string. Each becomes config key `user.<key>`. A key must be
+Map of string to string, or a list of `KEY=VALUE`. Each becomes config key
+`user.<key>`. A key must be
 non-empty and contain no whitespace. Reconciled, live. Labels not in the file are
 never removed. Used by `isb ls --label key[=value]` and
 `isb prune --label key --missing-path`. isb itself writes
@@ -251,27 +305,36 @@ bookkeeping and are not shown as labels.
 labels: {app: web, worktree: "${WORKTREE}"}
 ```
 
-### `env`
+### `environment`
 
-Map of string to string. Each becomes `environment.<KEY>`, which incus applies to
-every exec. Reconciled. This is plain instance config, readable by anyone who can
+Map of string to string, or a list of `KEY=VALUE`. Each becomes
+`environment.<KEY>`, which incus applies to every exec. Reconciled. This is plain instance config, readable by anyone who can
 read the instance: never put a secret here.
 
 ### `volumes`
 
-Map keyed by the absolute path inside the guest. A trailing `/` is ignored; the
-same path twice (after that) is an error. Each entry sets exactly one of `bind`
-or `named`.
+List of mounts, in docker's short or long syntax. The same target twice (a
+trailing `/` ignored) is an error.
+
+**Short syntax:** `SOURCE:TARGET[:OPTIONS]`. A `SOURCE` starting with `/`, `.`
+or `~` is a host path (a bind mount); anything else is the key of a named volume.
+`TARGET` is absolute. `OPTIONS` is a comma list of `ro`, `rw`, docker's
+propagation modes (`shared`, `rslave`, ...), `z`/`Z` (ignored), and isb's
+`owner=USER`, `device=NAME`, `pool=POOL`, `external`. There are no anonymous
+volumes, so a bare `TARGET` is an error.
+
+**Long syntax:**
 
 | Field | Applies to | Type | Default | Meaning |
 |---|---|---|---|---|
-| `bind` | bind | string | | Host path to bind-mount. |
-| `named` | named | string | | Named custom volume to mount. |
-| `pool` | named | string | see below | Pool of the named volume. |
-| `readonly` | both | bool | `false` | Mount read-only (`readonly: "true"`). |
-| `external` | named | bool | `false` | The volume must already exist. |
-| `owner` | named | string or int | | chown the mount point in the guest. |
-| `device` | both | string | derived | Device name. |
+| `type` | both | `bind` or `volume` | from `source`, as in the short syntax | |
+| `source` | both | string | required | Host path, or the key of a named volume. |
+| `target` | both | string | required | Absolute path inside the guest. |
+| `read_only` | both | bool | `false` | Mount read-only (`readonly: "true"`). |
+| `external` | volume | bool | `false` | The volume must already exist. |
+| `pool` | volume | string | see below | Pool of the named volume. |
+| `owner` | volume | string or int | | chown the mount point in the guest. |
+| `device` | both | string | derived | incus device name. |
 | `options` | both | map of string | `{}` | Extra disk device properties (`shift`, `propagation`, ...), verbatim. |
 
 `owner`, `pool` and `external` on a bind mount are errors (isb never chowns host
@@ -306,6 +369,10 @@ incusd, whose mount view can differ from isb's:
 The prefix must end at a path boundary: with `FROM=/home/u`, `/home/user2` is
 left alone.
 
+**Named volume name.** The top-level volume's `name` (`<project>_<key>` by
+default). In a bare spec over RPC or the library, with no top-level volumes, the
+source is the incus volume name itself.
+
 **Named volume pool.** The mount's `pool`, else the top-level volume's `pool`,
 else `auto`. `auto` means this sandbox's root pool (`storage`). A named pool must
 exist.
@@ -333,14 +400,39 @@ check, since the chown runs through the incus agent.
 
 ```yaml
 volumes:
-  /home/dev/src: {bind: ./src, device: src}
-  /home/dev/.cache: {named: dev-cache, owner: dev}
-  /srv/ref: {bind: ~/ref, readonly: true, options: {shift: "true"}}
+  - ./src:/home/dev/src:device=src
+  - dev-cache:/home/dev/.cache:owner=dev
+  - {type: bind, source: ~/ref, target: /srv/ref, read_only: true, options: {shift: "true"}}
 ```
 
 ### `ports`
 
-List of proxy devices, in either direction.
+List of incus proxy devices: ports published from the guest in docker's short or
+long syntax, or a proxy in either direction in incus' own terms.
+
+**Short syntax:** `[HOST_IP:]PUBLISHED:TARGET[/PROTOCOL]`, as in docker, except
+that `HOST_IP` defaults to `127.0.0.1` rather than `0.0.0.0`. IPv6 hosts go in
+brackets (`[::1]:8080:80`). A bare `TARGET` is an error: docker would pick a
+random host port, and isb needs to know it.
+
+**Long syntax:**
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `target` | port or range | required | Port in the guest. |
+| `published` | port or range | required | Port on the host. |
+| `host_ip` | string | `127.0.0.1` | Host address to listen on. |
+| `protocol` | `tcp` or `udp` | `tcp` | |
+| `name` | string | derived | incus device name. |
+| `options` | map of string | `{}` | Extra proxy properties (`proxy_protocol`, ...), verbatim. |
+
+**Ranges.** A `published` range with a single `target` (`5173-5223:5173`) takes
+the first free host port in the range, as docker does; see "Searched ports"
+below. Two ranges of the same length (`8000-8010:9000-9010`) map port to port.
+A `target` range with a single or different-length `published` is an error.
+
+**incus form,** for anything the docker forms cannot say, such as a guest that
+reaches a host service:
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
@@ -348,11 +440,14 @@ List of proxy devices, in either direction.
 | `bind` | `host` or `guest` | `host` | `host`: listen on the host, connect in the guest (publish a guest port). `guest`: listen in the guest, connect on the host (reach a host service). |
 | `listen` | string | required | An address (see below). |
 | `connect` | string | required | An address (see below). |
-| `search` | integer | none | Host-bound TCP/UDP only: step past a taken listen port, up to this many more. |
 | `options` | map of string | `{}` | Extra proxy properties (`nat`, `proxy_protocol`, ...), verbatim. |
 
-**Addresses.** Docker-style shorthand works; the protocol defaults to `tcp` and
-the host to `127.0.0.1`:
+A port with `listen` or `connect` is in the incus form, where a range keeps
+incus' meaning (a listen range forwards to a connect port or range), never a
+search.
+
+**Addresses** (incus form). The protocol defaults to `tcp` and the host to
+`127.0.0.1`:
 
 | Written | Means |
 |---|---|
@@ -362,36 +457,37 @@ the host to `127.0.0.1`:
 | `tcp:5173`, `udp:5353` | `tcp:127.0.0.1:5173`, `udp:127.0.0.1:5353` |
 | `tcp:HOST:PORT`, `udp:HOST:PORT`, `unix:PATH` | as written |
 
-On a VM, `connect` defaults to host `0.0.0.0` instead, which lets incus' NAT mode
-find the VM's address. IPv6 hosts go in brackets (`[::1]:8080`). The port may be
-a range or a list, as incus allows (`8000-8010`, `80,443`). isb stores the full
-form, so `5173` in the spec matches an existing device written as
-`tcp:127.0.0.1:5173`, and reconcile leaves it alone. Becomes
-`{type: proxy, bind, listen, connect, ...options}`; on a VM, `nat: "true"` is
-added before `options`. An option named `type`, `bind`, `listen` or `connect` is
-an error ("would override a core property"). Reconciled per the device rules. On
-a VM, `bind: guest` is an error.
+**Device.** Every form becomes `{type: proxy, bind, listen, connect,
+...options}`, with the guest side (`connect` of a published port) on
+`127.0.0.1`. On a VM the guest side defaults to host `0.0.0.0` instead, which
+lets incus' NAT mode find the VM's address, and `nat: "true"` is added before
+`options`. The port may be a range or a list, as incus allows (`8000-8010`,
+`80,443`). isb stores the full form, so `5173:5173` in the spec matches an
+existing device written as `listen: tcp:127.0.0.1:5173`, `connect:
+tcp:127.0.0.1:5173`, and reconcile leaves it alone. An option named `type`,
+`bind`, `listen` or `connect` is an error ("would override a core property").
+Reconciled per the device rules. On a VM, `bind: guest` is an error.
 
 **Default name.** `port-<bind>-<port>` for TCP (`port-host-5173`),
 `port-<bind>-udp-<port>` for UDP, and `port-<bind>-<derived>` for unix sockets,
 where `<derived>` is the device-name rule applied to the whole address
-(`unix:/run/app.sock` gives `port-guest-unix-run-app-sock`).
+(`unix:/run/app.sock` gives `port-guest-unix-run-app-sock`). For a published
+range it is the first port of the range.
 
-**`search`.** Set with `bind: guest` or a `unix:` listen address, it is an error
-(also when it is `0`); `0` otherwise means no search. A searched port is not in
-the create request. It is added after the instance is running: for each port from
-the requested one to requested + `search`, isb first tries to bind it locally
-(TCP only) and skips it if it is in use, then adds the device, and moves to the
-next port if incus refuses. `isb up` prints `<service> <device> <listen>` for
-each port it added this way. An existing device with that name whose listen port
-is anywhere in the range (same protocol and address, every other property equal)
-counts as correct. One that is not (outside the range, or otherwise different) is
-removed and searched for again after the start, rather than replaced at a port
-that may be taken.
+**Searched ports.** A published range with a single target is not in the create
+request. It is added after the instance is running: for each port of the range
+in order, isb first tries to bind it locally (TCP only) and skips it if it is in
+use, then adds the device, and moves to the next port if incus refuses. `isb up`
+prints `<service> <device> <listen>` for each such port. An existing device with
+that name whose listen port is anywhere in the range (same protocol and address,
+every other property equal) counts as correct. One that is not (outside the
+range, or otherwise different) is removed and searched for again after the
+start, rather than replaced at a port that may be taken.
 
 ```yaml
 ports:
-  - {name: vite, listen: "${IP}:5173", connect: 5173, search: 50}
+  - "${IP}:5173-5223:5173"
+  - {name: api, target: 8000, published: 8001}
   - {name: backend, bind: guest, listen: 8190, connect: 8080}
 ```
 
@@ -417,7 +513,7 @@ happens at most once per readiness wait.
 | `agent` | `true` runs in the guest through the incus agent (a VM's agent answers exec). Passes as soon as a container is running. |
 | `default_route` | The guest has a default route: a line in `/proc/net/route` with destination `00000000` and the up flag, or a line in `/proc/net/ipv6_route` with an all-zero destination, prefix length `00`, on a device other than `lo`. Read as root. |
 | `{user_exists: USER}` | `getent passwd USER` exits 0 (run as root). |
-| `{path_writable: PATH}` | `test -w PATH` exits 0, run as `exec.user` (else root). Only the user is taken from `exec`; its `cwd` defaults to that user's home. |
+| `{path_writable: PATH}` | `test -w PATH` exits 0, run as `user` (else root), from that user's home. |
 | `{command: [ARGV...]}` | The argv exits 0, run as root with no shell and no `exec` defaults. Non-string items are stringified (`[true]` is `["true"]`). |
 
 "Running" alone is not ready: networking comes up a moment after the instance
@@ -434,18 +530,12 @@ usable about a second after Running; a VM boots a kernel and its agent, 50 to
 90 s under nested virtualization). One deadline for all checks together, measured from the
 start of the first. Not stored in incus.
 
-### `exec`
+### `user`
 
-Defaults for `isb exec SERVICE` (when the target is a service name resolved
-through the compose file) and for the `path_writable` check. Per-call flags
-override them. Client-side only; nothing in incus changes.
-
-| Field | Type | Meaning |
-|---|---|---|
-| `user` | string or int | `NAME`, `UID`, `UID:GID` or `NAME:GROUP`. Default root. |
-| `cwd` | string | Working directory. Default: the user's home from passwd, if any. |
-| `env` | map of string | Exec environment, over the instance `env`. Per-call `-e` wins over it. |
-| `login` | bool | Run through the user's login shell. Default `false`. |
+String or integer, optional. The guest user for `command`, `isb exec SERVICE`
+and the `path_writable` check: `NAME`, `UID`, `UID:GID` or `NAME:GROUP`. Default
+root. Per-call `isb exec -u` overrides it. Client-side only; nothing in incus
+changes.
 
 User resolution, in the guest, as root:
 
@@ -458,8 +548,24 @@ User resolution, in the guest, as root:
   `getent group`.
 
 When the user resolves to a passwd entry, `HOME` (from the home), `USER` and
-`LOGNAME` are set unless already given in `env` or per call. With a TTY, `TERM`
-is set from the caller's `$TERM` (else `xterm-256color`) unless given.
+`LOGNAME` are set unless already given in the environment or per call. With a
+TTY, `TERM` is set from the caller's `$TERM` (else `xterm-256color`) unless
+given.
+
+### `working_dir`
+
+String, optional. Working directory for `command` and `isb exec SERVICE`.
+Default: the user's home from passwd, if any. Per-call `isb exec -w` overrides
+it. Client-side only.
+
+### `exec`
+
+More exec defaults, with no docker equivalent. Client-side only.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `env` | map or list of `KEY=VALUE` | Environment for exec only, over `environment`, never stored in the instance. Per-call `-e` wins over it. |
+| `login` | bool | Run through the user's login shell. Default `false`. |
 
 With `login`, argv becomes `SHELL -l -c 'exec "$@"' isb ARGV...`, so profile
 scripts run while argv stays separate arguments. `SHELL` is the user's passwd
@@ -467,18 +573,20 @@ shell unless it ends in `nologin` or `/false`; otherwise, and when no user is
 set, it is `/bin/sh`.
 
 ```yaml
+user: dev
+working_dir: /home/dev/src
 exec:
-  user: dev
-  cwd: /home/dev/src
   env: {PATH: "/home/dev/.local/bin:/usr/local/bin:/usr/bin:/bin"}
   login: false
 ```
 
 ### `command`
 
-The sandbox's main command, as argv (no shell): `[bun, run, dev]`. A
-foreground `isb up` runs it once the sandbox is ready, with the service's
-`exec` defaults, and streams its output prefixed with `<service> | `. When
+The sandbox's main command: argv (`[bun, run, dev]`), or a string split into
+words the way a shell splits them (quotes group, backslash escapes) but never
+run through one, as docker does: `bun run dev`. A foreground `isb up` runs it
+once the sandbox is ready, as `user` in `working_dir` with the `exec` defaults,
+and streams its output prefixed with `<service> | `. When
 every service's command has exited, `up` stops the sandboxes and exits with the
 first non-zero status (0 if all succeeded). Ignored by `isb up -d`. Client-side
 only, so changing it is never drift.
@@ -525,7 +633,7 @@ exists before first boot. Then it is started, searched ports are added, and
 `owner` fixups run.
 
 **Config.** Each key the file produces (`limits.*`, `security.privileged`,
-`raw.idmap`, `user.*`, `environment.*`, `raw_config`) is set if its value
+`raw.idmap`, `user.*` from `labels`, `environment.*`, `raw_config`) is set if its value
 differs. Keys not in the file, including ones incus sets, are never removed. A
 changed `raw.*` or `security.*` key is reported as taking effect after
 `isb restart NAME`; isb does not restart on its own. Other keys take effect as
@@ -553,11 +661,11 @@ replaced in place: it is removed, and searched for again after the start.
 A device the file does not mention is left alone, unless `--prune-devices` is
 given; then it is removed, except `root` and any device adopted in step 3.
 
-**Fixed at creation.** `type`, `storage` (the root pool) and `profiles` are
+**Fixed at creation.** `type`, `storage` (the root pool) and `incus_profiles` are
 never changed; a mismatch is reported as a note. `image` is never changed either;
 a local alias that has moved to a new fingerprint since the instance was built is
-reported as a note. Named volume `config`, `raw_devices.root` and `name` are only
-used at creation and are not compared.
+reported as a note. Named volume `config`, `raw_devices.root` and
+`container_name` are only used at creation and are not compared.
 
 **Start.** A stopped instance is started after config and device changes are
 written, so it boots with the right devices.
@@ -566,7 +674,7 @@ written, so it boots with the right devices.
 volumes, set differing config keys, replace wrong devices, add missing ones,
 start a stopped instance, add searched ports, chown newly attached owned mounts,
 and run readiness checks (skip them with `--no-ready`). It will not: recreate
-the instance, change its type, root pool, profiles or image, unset config keys,
+the instance, change its type, root pool, incus profiles or image, unset config keys,
 remove `raw.idmap`, restart the instance, touch a correct device, or remove any
 device without `--prune-devices`.
 
@@ -606,13 +714,14 @@ For a VM:
 - `image` must be a VM image.
 - `privileged` is an error.
 - `idmap` other than `auto` or `none` is an error; `auto` is a no-op.
-- `ports` must be `bind: host`; `bind: guest` is an error. Each proxy gets
+- `ports` must be host-bound; `bind: guest` is an error. Each proxy gets
   `nat: "true"` automatically, since incus proxies into a VM only in NAT mode.
-  With incus 7.0.1 or later, `connect: tcp:0.0.0.0:PORT` lets incus find the
-  VM's address itself. Older incus needs a static IP on the VM's NIC
+  With incus 7.0.1 or later, the default guest address `0.0.0.0` lets incus
+  find the VM's address itself. Older incus needs a static IP on the VM's NIC
   (`raw_devices: {eth0: {type: nic, network: incusbr0, ipv4.address: ...}}`)
   and that address in `connect`. A NAT listen on host `127.0.0.1` does not
-  work (`route_localnet` is off on the bridge).
+  work (`route_localnet` is off on the bridge), so publish on another address
+  (`"100.64.0.5:8080:80"`).
 
 - NAT forwarding is DNAT and does not pass through a host firewall such as
   ufw. Listen on the specific address you mean to expose (a tailnet IP, say),
@@ -631,19 +740,17 @@ For a VM:
 
 Used by `isb create` and `isb port add`.
 
-**`-v SRC:GUEST[:OPTS]`** A mount. `SRC` starting with `/`, `.` or `~` is a bind
-path; anything else is a named volume. `GUEST` must be absolute and cannot
-contain `:`. `OPTS` is a comma list of `ro`, `rw`, `external`, `owner=USER`,
-`device=NAME`, `pool=POOL`.
+**`-v SRC:GUEST[:OPTS]`** A mount, in the compose short syntax. `SRC` starting
+with `/`, `.` or `~` is a bind path; anything else is a named volume, used as
+the incus volume name. `GUEST` must be absolute and cannot contain `:`.
 
 ```
 -v ./src:/home/dev/src:ro,device=src
 -v dev-cache:/home/dev/.cache:owner=dev
 ```
 
-**`-p [IP:]HOSTPORT:GUESTPORT[/tcp|/udp]`** Publish a guest port: `bind: host`,
-listen `PROTO:IP:HOSTPORT` (IP default `127.0.0.1`), connect
-`PROTO:127.0.0.1:GUESTPORT`, protocol default `tcp`.
+**`-p [IP:]PUBLISHED:TARGET[/tcp|/udp]`** Publish a guest port, in the compose
+short syntax, ranges included.
 
 **`-p listen=ADDR,connect=ADDR[,bind=host|guest][,name=N][,search=N][,OPT=V...]`**
 The full form. `OPT` is one of the proxy options `nat`, `proxy_protocol`, `uid`,
@@ -662,9 +769,9 @@ Compose (take service names; all services when none are given):
 
 | Verb | Does |
 |---|---|
-| `up [SVC...] [-d] [--no-log-prefix] [-t D] [--prune-devices] [--no-ready] [--json]` | Create or reconcile. For every port with `search`, prints `SERVICE DEVICE LISTEN` on stdout with the listen address in use, whether `up` added the device or found it already correct. With `--json`, each report's `ports` object maps device to that address. Then, like `docker compose up`, stays in the foreground (see [Foreground `up`](#foreground-up)); `-d` returns instead and leaves the sandboxes running. |
+| `up [SVC...] [-d] [--no-log-prefix] [-t D] [--prune-devices] [--no-ready] [--json]` | Create or reconcile. For every published range, prints `SERVICE DEVICE LISTEN` on stdout with the listen address in use, whether `up` added the device or found it already correct. With `--json`, each report's `ports` object maps device to that address. Then, like `docker compose up`, stays in the foreground (see [Foreground `up`](#foreground-up)); `-d` returns instead and leaves the sandboxes running. |
 | `plan [SVC...] [--prune-devices] [--json] [--exit-code]` | Show what `up` would change. |
-| `down [SVC...] [--volumes]` | Delete the sandboxes (running ones are stopped). With `--volumes` and no service list, also delete the file's non-external named volumes: every one a sandbox mounts, in the pool `up` used (mount `pool`, else top-level `pool`, else that sandbox's `storage` pool), plus declared top-level ones no sandbox mounts (in their `pool`, `auto` meaning the host default). A volume still in use is kept with a message. With a service list, `--volumes` is ignored with a message. |
+| `down [SVC...] [--volumes]` | Delete the sandboxes (running ones are stopped). With `--volumes` and no service list, also delete the file's non-external named volumes: every one a service mounts, in the pool `up` used (mount `pool`, else top-level `pool`, else that sandbox's `storage` pool), plus declared ones no service mounts (in their `pool`, `auto` meaning the host default). A volume still in use is kept with a message. With a service list, `--volumes` is ignored with a message. |
 | `config [--services]` | Print the resolved file. |
 | `ps [SVC...] [--json]` | Status per service; without a compose file, running instances. |
 | `exec TARGET [-u USER] [-w CWD] [-e K=V] [-l] [-t\|-T] [-n] [--timeout D] -- ARGV...` | Run argv (no shell). `TARGET` is a service if a compose file defines it, else an instance. TTY when stdin is a terminal. Exit code is the command's, or 125 if isb itself failed. |
@@ -700,7 +807,7 @@ Instances (take instance names):
 
 | Verb | Does |
 |---|---|
-| `create NAME -i IMAGE [flags] [--ensure] [--no-ready]` | Create from flags (`--cpus`, `-m`, `-s`, `--idmap`, `--privileged true\|false`, `-l`, `-e`, `-v`, `-p`, `--ready`, `--ready-timeout`, `-c k=v`, `--profile`, `--vm`). Fails if it exists unless `--ensure`, which reconciles like `up`. `--no-ready` skips readiness in both modes. Relative bind paths resolve against the current directory. `--idmap` also accepts a raw value. |
+| `create NAME -i IMAGE [flags] [--ensure] [--no-ready]` | Create from flags (`--cpus`, `--cpuset-cpus`, `-m`, `-s`, `--idmap`, `--privileged true\|false`, `-l`, `-e`, `-v`, `-p`, `--ready`, `--ready-timeout`, `-c k=v`, `--profile`, `--vm`). Fails if it exists unless `--ensure`, which reconciles like `up`. `--no-ready` skips readiness in both modes. Relative bind paths resolve against the current directory. `--idmap` also accepts a raw value. |
 | `start`, `stop [-f] [-t 30s]`, `restart` | Lifecycle. `start` and `restart` wait for `running` only, not the file's `ready` checks. |
 | `rm [-f] NAME...` | Delete (`-f` stops a running one first). Aliases `remove`, `delete`. |
 | `ls [-l KEY[=VALUE]...] [--json]` | List, filtered by labels (`user.isb.*` keys are not labels). |
@@ -713,47 +820,41 @@ Instances (take instance names):
 ## Annotated example
 
 ```yaml
-name: webapp                      # sandbox names default to webapp-<service>
-project: default                  # incus project
+name: webapp                      # sandboxes webapp-<service>, volumes webapp_<key>
+incus_project: default
 
 x-base: &base                     # dropped after anchors are resolved
   image: images:debian/12
   storage: auto                   # incus-zfs, else default, else first pool
-  profiles: [default]
+  incus_profiles: [default]
   idmap: auto                     # raw.idmap only where /etc/subuid needs it
 
 volumes:
-  bun-cache: {}                   # created on first use, in the sandbox's pool
+  bun-cache: {}                   # webapp_bun-cache, created on first use
   datasets:
-    external: true                # must already exist
+    external: true                # must already exist, named exactly datasets
     pool: default
 
-sandboxes:
+services:
   web:
     <<: *base
-    name: "${WEB_NAME:-webapp-web}"
+    container_name: "${WEB_NAME:-webapp-web}"
     cpus: "${CPUS:-8}"            # limits.cpu
-    memory: 8GiB                  # limits.memory
+    mem_limit: 8g                 # limits.memory 8GiB
     privileged: false             # security.privileged (restart to apply)
     labels:
       worktree: "${WORKTREE:?set WORKTREE}"   # user.worktree, for isb prune
-    env:
-      NODE_ENV: development       # environment.NODE_ENV; never a secret
+    environment:
+      - NODE_ENV=development      # environment.NODE_ENV; never a secret
     volumes:
-      /home/dev/src:
-        bind: ./src               # relative to this file; symlinks resolved
-        device: src
-      /home/dev/.bun/install/cache:
-        named: bun-cache
+      - ./src:/home/dev/src:device=src        # relative to this file
+      - type: volume
+        source: bun-cache
+        target: /home/dev/.bun/install/cache
         owner: dev                # chown after attach, plus root-owned parents in ~dev
-      /data:
-        named: datasets
-        readonly: true
+      - datasets:/data:ro
     ports:
-      - name: vite                # host listens, guest connects
-        listen: "tcp:${LISTEN_IP:-127.0.0.1}:5173"
-        connect: tcp:127.0.0.1:5173
-        search: 50                # 5173..5223, first free wins
+      - "${LISTEN_IP:-127.0.0.1}:5173-5223:5173"  # first free of 5173..5223
       - name: backend             # guest listens, host connects
         bind: guest
         listen: tcp:127.0.0.1:8190
@@ -762,13 +863,14 @@ sandboxes:
       - running
       - default_route
       - user_exists: dev
-      - path_writable: /home/dev/src   # as exec.user
+      - path_writable: /home/dev/src   # as user
     ready_timeout: 90s
+    user: dev                     # HOME, USER, LOGNAME from passwd
+    working_dir: /home/dev/src
     exec:
-      user: dev                   # HOME, USER, LOGNAME from passwd
-      cwd: /home/dev/src
       env:
         PATH: "/home/dev/.local/bin:/usr/local/bin:/usr/bin:/bin"
+    command: bun run dev          # run by a foreground isb up
     raw_config:
       security.nesting: true      # stored as "true"; restart to apply
     raw_devices:
