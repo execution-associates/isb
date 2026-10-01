@@ -215,8 +215,13 @@ struct CreateArgs {
     /// Image: local alias/fingerprint, or `images:debian/12` style.
     #[arg(short, long)]
     image: String,
+    /// Number of CPUs (limits.cpu).
     #[arg(long)]
     cpus: Option<String>,
+    /// CPUs to pin to, e.g. 0-3 (limits.cpu).
+    #[arg(long)]
+    cpuset_cpus: Option<String>,
+    /// Memory limit: 512m, 8g, 8GiB.
     #[arg(short, long)]
     memory: Option<String>,
     /// Storage pool (`auto`: incus-zfs, else default, else first).
@@ -236,7 +241,8 @@ struct CreateArgs {
     /// `SRC:GUEST[:ro,owner=U,device=N]` (SRC is a host path or a volume name).
     #[arg(short, long = "volume")]
     volumes: Vec<String>,
-    /// `[IP:]HOST:GUEST[/udp]`, or `listen=..,connect=..[,bind=guest][,name=][,search=]`.
+    /// `[IP:]PUBLISHED:TARGET[/udp]` (PUBLISHED may be a range), or
+    /// `listen=..,connect=..[,bind=guest][,name=][,search=]`.
     #[arg(short, long = "port")]
     ports: Vec<String>,
     /// Readiness check (repeatable): running, default_route, user_exists=U,
@@ -552,7 +558,7 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         Cmd::Inspect { name, json, .. } => {
             let c = ctx.client(None);
             let name = match ctx.maybe_load()? {
-                Some(p) if p.file.sandboxes.contains_key(&name) => {
+                Some(p) if p.file.services.contains_key(&name) => {
                     p.service(&name)?.name.clone().unwrap_or(name)
                 }
                 _ => name,
@@ -643,7 +649,7 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         Cmd::Config { services, .. } => {
             let p = ctx.load()?;
             if services {
-                for s in p.file.sandboxes.keys() {
+                for s in p.file.services.keys() {
                     println!("{s}");
                 }
             } else {
@@ -657,6 +663,7 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
 fn create(ctx: &Ctx, a: CreateArgs) -> Result<u8> {
     let mut spec = SandboxSpec::new(&a.name, &a.image);
     spec.cpus = a.cpus;
+    spec.cpuset = a.cpuset_cpus;
     spec.memory = a.memory;
     spec.storage = a.storage;
     spec.privileged = a.privileged;
@@ -682,8 +689,7 @@ fn create(ctx: &Ctx, a: CreateArgs) -> Result<u8> {
         spec.raw_config.insert(k, v);
     }
     for v in &a.volumes {
-        let (g, vol) = shorthand::volume(v)?;
-        spec.volumes.insert(g, vol);
+        spec.volumes.push(shorthand::volume(v)?);
     }
     for p in &a.ports {
         spec.ports.push(shorthand::port(p)?);
@@ -724,7 +730,7 @@ fn ps(ctx: &Ctx, services: Vec<String>, json: bool) -> Result<u8> {
     let mut rows = Vec::new();
     match ctx.maybe_load()? {
         Some(p) => {
-            let c = ctx.client(p.file.project.as_deref());
+            let c = ctx.client(p.file.incus_project.as_deref());
             let all: BTreeMap<String, SandboxInfo> = Sandbox::list(&c)?
                 .into_iter()
                 .map(|i| (i.name.clone(), i))
@@ -779,11 +785,11 @@ fn exec(ctx: &Ctx, a: ExecArgs) -> Result<u8> {
     // A compose service if a file was named (or exists here) and defines it;
     // otherwise an instance name.
     let (client, sb) = match ctx.maybe_load()? {
-        Some(p) if p.file.sandboxes.contains_key(&a.target) => {
+        Some(p) if p.file.services.contains_key(&a.target) => {
             let spec = p.service(&a.target)?;
-            let c = ctx.client(p.file.project.as_deref());
+            let c = ctx.client(p.file.incus_project.as_deref());
             let name = spec.name.clone().unwrap_or_default();
-            let sb = Sandbox::get(&c, &name)?.with_exec_defaults(spec.exec.clone());
+            let sb = Sandbox::get(&c, &name)?.with_exec_defaults(spec.exec_defaults());
             (c, sb)
         }
         Some(p) if !ctx.global.files.is_empty() => {

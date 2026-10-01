@@ -928,7 +928,7 @@ mod tests {
         ));
         assert_eq!(msgs[0]["protocol"], json!(PROTOCOL));
         assert_eq!(by_id(&msgs, 1)["result"]["protocol"], json!(PROTOCOL));
-        assert!(by_id(&msgs, 2)["result"].to_string().contains("sandboxes"));
+        assert!(by_id(&msgs, 2)["result"].to_string().contains("services"));
         assert!(msgs.iter().any(|m| m["error"]["code"] == "bad_request"));
         assert_eq!(by_id(&msgs, 3)["error"]["code"], "protocol");
         assert_eq!(by_id(&msgs, 4)["error"]["code"], "invalid");
@@ -942,13 +942,13 @@ mod tests {
     fn compose_load_over_rpc() {
         let dir = tempfile::tempdir().unwrap();
         let f = dir.path().join("isb.yaml");
-        std::fs::write(&f, "sandboxes:\n  web: {image: \"${IMG}\", cpus: 2}\n").unwrap();
+        std::fs::write(&f, "services:\n  web: {image: \"${IMG}\", cpus: 2}\n").unwrap();
         let req = json!({"id": 1, "method": "compose.load", "params": {"files": [f], "vars": {"IMG": "dev-base"}, "project_name": "demo"}});
         let msgs = run(&format!("{req}\n"));
         let r = &by_id(&msgs, 1)["result"];
         assert_eq!(r["name"], "demo");
-        assert_eq!(r["file"]["sandboxes"]["web"]["image"], "dev-base");
-        assert_eq!(r["file"]["sandboxes"]["web"]["name"], "demo-web");
+        assert_eq!(r["file"]["services"]["web"]["image"], "dev-base");
+        assert_eq!(r["file"]["services"]["web"]["container_name"], "demo-web");
     }
 
     #[test]

@@ -174,7 +174,7 @@ fn create_ready_and_noop_ensure_keeps_watches() {
             "/mnt/web",
             Volume::bind(web.path().to_str().unwrap()).device("web"),
         )
-        .exec_user("dev")
+        .user("dev")
         .ready(vec![
             ReadyCheck::Running,
             ReadyCheck::DefaultRoute,
@@ -783,7 +783,9 @@ fn compose_cli() {
     let web = dir.path().join("web");
     std::fs::create_dir(&web).unwrap();
     let name = test_name("compose");
-    let vol = test_name("cvol");
+    // Named volumes are `<project>_<key>`, as in docker compose.
+    let proj = test_name("cproj");
+    let vol = format!("{proj}_data");
     cleanup.instance(&name);
     let pool = sandbox::host_facts(&client)
         .unwrap()
@@ -795,34 +797,36 @@ fn compose_cli() {
         &file,
         format!(
             r#"
+name: {proj}
 x-limits: &limits
   cpus: 2
-  memory: 1GiB
+  mem_limit: 1g
 volumes:
-  {vol}: {{}}
-sandboxes:
+  data: {{}}
+services:
   web:
     <<: *limits
-    name: "${{ISB_T_NAME}}"
+    container_name: "${{ISB_T_NAME}}"
     image: "${{ISB_T_IMAGE:-dev-base}}"
     idmap: auto
-    labels: {{ isb-test: "1", isb-test.web: "${{ISB_T_WEB}}" }}
+    labels: [isb-test=1, "isb-test.web=${{ISB_T_WEB}}"]
     volumes:
-      /home/dev/web: {{ bind: ./web, device: web }}
-      /home/dev/.cache/t: {{ named: {vol}, owner: dev }}
+      - {{ type: bind, source: ./web, target: /home/dev/web, device: web }}
+      - {{ source: data, target: /home/dev/.cache/t, owner: dev }}
     ports:
-      - {{ name: http, listen: "tcp:127.0.0.1:${{ISB_T_PORT}}", connect: "tcp:127.0.0.1:8000", search: 20 }}
+      - {{ name: http, published: "${{ISB_T_PORT}}-${{ISB_T_PORT_END}}", target: 8000 }}
     ready: [running, default_route, {{user_exists: dev}}, {{path_writable: /home/dev/web}}]
+    user: dev
+    working_dir: /home/dev/web
     exec:
-      user: dev
-      cwd: /home/dev/web
-      env: {{ GREETING: hello }}
+      env: [GREETING=hello]
 "#
         ),
     )
     .unwrap();
     let bin = isb_bin();
     let port = free_port().to_string();
+    let port_end = (port.parse::<u16>().unwrap() + 20).to_string();
     let run = |args: &[&str]| {
         let out = Command::new(&bin)
             .arg("-f")
@@ -832,6 +836,7 @@ sandboxes:
             .env("ISB_T_IMAGE", image())
             .env("ISB_T_WEB", &web)
             .env("ISB_T_PORT", &port)
+            .env("ISB_T_PORT_END", &port_end)
             .stdin(Stdio::null())
             .output()
             .unwrap();
@@ -916,7 +921,7 @@ fn compose_foreground() {
         std::fs::write(
             &file,
             format!(
-                "sandboxes:\n  web:\n    name: {name}\n    image: {}\n    command: [sh, -c, {cmd:?}]\n",
+                "services:\n  web:\n    container_name: {name}\n    image: {}\n    command: [sh, -c, {cmd:?}]\n",
                 image()
             ),
         )
