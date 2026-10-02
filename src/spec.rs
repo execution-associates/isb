@@ -11,33 +11,40 @@ use serde::{Deserialize, Serialize};
 
 use crate::flex;
 
-/// A compose-style file: named volumes plus any number of sandboxes.
+/// A compose file: named volumes plus any number of services, each one
+/// sandbox. Mirrors docker compose wherever incus allows.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ComposeFile {
-    /// Project name. Default sandbox names are `<name>-<service>`. Defaults to
-    /// the directory holding the first compose file.
+    /// Project name. Default sandbox names are `<name>-<service>` and named
+    /// volumes are `<name>_<volume>`. Defaults to the directory holding the
+    /// first compose file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 
     /// incus project to operate in (default: `default`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub project: Option<String>,
+    pub incus_project: Option<String>,
 
     /// Named custom storage volumes, created if missing before any sandbox that
-    /// uses them. Keys are volume names.
+    /// uses them. Keys are what services refer to.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub volumes: BTreeMap<String, NamedVolumeSpec>,
 
     /// Sandboxes, keyed by service name.
     #[serde(default)]
-    pub sandboxes: BTreeMap<String, SandboxSpec>,
+    pub services: BTreeMap<String, SandboxSpec>,
 }
 
 /// A named custom storage volume.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NamedVolumeSpec {
+    /// The incus volume name. Default: `<project>_<key>`, or the key itself
+    /// for an `external` volume.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
     /// Storage pool. `auto` (default) means the same pool the sandbox uses
     /// (`storage`), resolved the same way.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -117,13 +124,17 @@ impl InstanceType {
     }
 }
 
-/// Everything about one sandbox.
+/// Everything about one sandbox: a compose service.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxSpec {
     /// incus instance name: at most 63 characters of `[a-z0-9-]` (case-insensitive),
     /// starting with a letter. In a compose file it defaults to `<project>-<service>`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "container_name",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub name: Option<String>,
 
     /// Image: a local alias or fingerprint (`dev-base`), or `remote:alias` for a
@@ -139,9 +150,8 @@ pub struct SandboxSpec {
     /// and any explicit `idmap` (`idmap: auto` is a no-op there). Host paths are
     /// shared into a VM over virtiofs, where inotify from host edits is not
     /// delivered, so file watchers inside the VM need polling. Proxies into a
-    /// VM must be `bind: host`, and incus runs them in NAT mode (`nat: true`,
-    /// set automatically; with incus 7.0.1+ `connect: tcp:0.0.0.0:PORT` finds
-    /// the VM's address); `bind: guest` is not available for VMs.
+    /// VM must be host-bound, and incus runs them in NAT mode (`nat: true`,
+    /// set automatically); `bind: guest` is not available for VMs.
     #[serde(default, rename = "type", skip_serializing_if = "is_default")]
     pub instance_type: InstanceType,
 
@@ -150,7 +160,7 @@ pub struct SandboxSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub storage: Option<String>,
 
-    /// CPU limit (`limits.cpu`): a count like `8` or a set like `0-3`.
+    /// Number of CPUs (`limits.cpu`), a whole number like `8`.
     #[serde(
         default,
         deserialize_with = "flex::opt_string",
@@ -159,9 +169,20 @@ pub struct SandboxSpec {
     #[schemars(with = "Option<flex::IntOrString>")]
     pub cpus: Option<String>,
 
-    /// Memory limit (`limits.memory`), e.g. `8GiB`.
+    /// CPUs to pin to (`limits.cpu`), e.g. `0-3` or `0,2`. Excludes `cpus`.
     #[serde(
         default,
+        deserialize_with = "flex::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "Option<flex::IntOrString>")]
+    pub cpuset: Option<String>,
+
+    /// Memory limit (`limits.memory`): docker units (`512m`, `8g`, bytes) or
+    /// incus ones (`8GiB`, `50%`).
+    #[serde(
+        default,
+        rename = "mem_limit",
         deserialize_with = "flex::opt_string",
         skip_serializing_if = "Option::is_none"
     )]
@@ -182,36 +203,44 @@ pub struct SandboxSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idmap: Option<IdmapSpec>,
 
-    /// Profiles to apply, in order. Default: `[default]`. Fixed at creation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// incus profiles to apply, in order. Default: `[default]`. Fixed at creation.
+    #[serde(
+        default,
+        rename = "incus_profiles",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub profiles: Option<Vec<String>>,
 
-    /// Labels, stored as `user.<key>` config keys. Used by `isb ls --label` and
-    /// `isb prune`. isb never removes a label it was not told about.
+    /// Labels, stored as `user.<key>` config keys: a map, or a list of
+    /// `KEY=VALUE`. Used by `isb ls --label` and `isb prune`. isb never removes
+    /// a label it was not told about.
     #[serde(
         default,
-        deserialize_with = "flex::string_map",
+        deserialize_with = "flex::string_map_or_list",
         skip_serializing_if = "BTreeMap::is_empty"
     )]
-    #[schemars(with = "BTreeMap<String, flex::Scalar>")]
+    #[schemars(with = "flex::MapOrList")]
     pub labels: BTreeMap<String, String>,
 
-    /// Instance environment (`environment.<KEY>`), seen by every exec. Not for
-    /// secrets: it is plain instance config, readable by anyone who can read the
-    /// instance.
+    /// Instance environment (`environment.<KEY>`), seen by every exec: a map, or
+    /// a list of `KEY=VALUE`. Not for secrets: it is plain instance config,
+    /// readable by anyone who can read the instance.
     #[serde(
         default,
-        deserialize_with = "flex::string_map",
+        rename = "environment",
+        deserialize_with = "flex::env_map_or_list",
         skip_serializing_if = "BTreeMap::is_empty"
     )]
-    #[schemars(with = "BTreeMap<String, flex::Scalar>")]
+    #[schemars(with = "flex::MapOrList")]
     pub env: BTreeMap<String, String>,
 
-    /// Mounts, keyed by the absolute path inside the guest.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub volumes: BTreeMap<String, VolumeSpec>,
+    /// Mounts: `SOURCE:TARGET[:OPTIONS]` or the long form. A source starting
+    /// with `/`, `.` or `~` is a host path; anything else is a named volume.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub volumes: Vec<VolumeSpec>,
 
-    /// Proxy devices (port forwards), in either direction.
+    /// Published ports (`[HOST_IP:]PUBLISHED:TARGET[/PROTOCOL]` or the long
+    /// form), and incus proxies in either direction (`listen`/`connect`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ports: Vec<PortSpec>,
 
@@ -230,21 +259,35 @@ pub struct SandboxSpec {
     #[schemars(with = "Option<flex::IntOrString>")]
     pub ready_timeout: Option<String>,
 
-    /// Defaults for `exec` into this sandbox (user, cwd, env, login shell).
-    #[serde(default, skip_serializing_if = "ExecDefaults::is_empty")]
-    pub exec: ExecDefaults,
-
-    /// The sandbox's main command, run by a foreground `isb up` once the
-    /// sandbox is ready, with the `exec` defaults. Its output is streamed, and
-    /// `up` stops the sandbox when every command has exited. argv form: nothing
-    /// is joined into a shell string. Never part of the instance, so changing
-    /// it is not drift.
+    /// Guest user for `command`, `isb exec` and `path_writable`: a name
+    /// (`dev`), `uid`, `uid:gid` or `name:group`. Default root.
     #[serde(
         default,
-        deserialize_with = "flex::opt_string_vec",
+        deserialize_with = "flex::opt_string",
         skip_serializing_if = "Option::is_none"
     )]
-    #[schemars(with = "Option<Vec<flex::Scalar>>")]
+    #[schemars(with = "Option<flex::IntOrString>")]
+    pub user: Option<String>,
+
+    /// Working directory for `command` and `isb exec`. Default: the user's home.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
+
+    /// More exec defaults: an exec-only environment and the login shell.
+    #[serde(default, skip_serializing_if = "ExecSpec::is_empty")]
+    pub exec: ExecSpec,
+
+    /// The sandbox's main command, run by a foreground `isb up` once the
+    /// sandbox is ready, as `user` in `working_dir`. Its output is streamed,
+    /// and `up` stops the sandbox when every command has exited. A list is
+    /// argv; a string is split like a shell would split it, without running
+    /// one. Never part of the instance, so changing it is not drift.
+    #[serde(
+        default,
+        deserialize_with = "flex::opt_command",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "Option<flex::Command>")]
     pub command: Option<Vec<String>>,
 
     /// Extra instance config keys, set verbatim (escape hatch).
@@ -264,6 +307,18 @@ pub struct SandboxSpec {
     )]
     #[schemars(with = "BTreeMap<String, BTreeMap<String, flex::Scalar>>")]
     pub raw_devices: BTreeMap<String, BTreeMap<String, String>>,
+}
+
+impl SandboxSpec {
+    /// The exec defaults this spec implies: `user`, `working_dir` and `exec`.
+    pub fn exec_defaults(&self) -> ExecDefaults {
+        ExecDefaults {
+            user: self.user.clone(),
+            cwd: self.working_dir.clone(),
+            env: self.exec.env.clone(),
+            login: self.exec.login,
+        }
+    }
 }
 
 fn is_default<T: Default + PartialEq>(v: &T) -> bool {
@@ -330,66 +385,154 @@ fn default_id() -> u32 {
     1000
 }
 
-/// A mount. Exactly one of `bind` or `named`.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+/// What a mount's `source` is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MountType {
+    /// A host path.
+    #[default]
+    Bind,
+    /// A named custom storage volume.
+    Volume,
+}
+
+/// A mount. Written as `SOURCE:TARGET[:OPTIONS]` or as the long form
+/// (`VolumeMount` in the schema); always serialized in the long form.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct VolumeSpec {
-    /// Host path to bind-mount. Relative paths resolve against the compose file's
-    /// directory; `~` expands; symlinks are resolved.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bind: Option<String>,
-
-    /// Named custom storage volume to mount (created if missing unless declared
-    /// `external`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub named: Option<String>,
-
-    /// Pool of the named volume. Default: the top-level volume's pool, else `auto`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// `bind` (a host path) or `volume` (a named volume).
+    #[serde(rename = "type")]
+    pub mount_type: MountType,
+    /// Host path (bind) or volume key (volume).
+    pub source: String,
+    /// Absolute path inside the guest.
+    pub target: String,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub read_only: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub external: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pool: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub options: BTreeMap<String, String>,
+}
+
+/// The long form of a mount.
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[allow(dead_code)]
+pub(crate) struct VolumeMount {
+    /// `bind` (a host path) or `volume` (a named volume). Default: `bind` when
+    /// `source` starts with `/`, `.` or `~`, else `volume`.
+    #[serde(default, rename = "type")]
+    mount_type: Option<MountType>,
+
+    /// Host path to bind-mount (relative paths resolve against the compose
+    /// file's directory, `~` expands, symlinks are resolved), or the key of a
+    /// named volume.
+    source: String,
+
+    /// Absolute path inside the guest.
+    target: String,
 
     /// Mount read-only.
-    #[serde(
-        default,
-        deserialize_with = "flex::bool",
-        skip_serializing_if = "std::ops::Not::not"
-    )]
+    #[serde(default, deserialize_with = "flex::bool")]
     #[schemars(with = "flex::BoolOrString")]
-    pub readonly: bool,
+    read_only: bool,
 
     /// Named volumes only: the volume must already exist; isb never creates it.
-    #[serde(
-        default,
-        deserialize_with = "flex::bool",
-        skip_serializing_if = "std::ops::Not::not"
-    )]
+    #[serde(default, deserialize_with = "flex::bool")]
     #[schemars(with = "flex::BoolOrString")]
-    pub external: bool,
+    external: bool,
+
+    /// Named volumes only: the storage pool. Default: the top-level volume's
+    /// pool, else the sandbox's root pool.
+    #[serde(default)]
+    pool: Option<String>,
 
     /// Named volumes only: chown the mount point to this guest user (`dev`,
     /// `dev:dev` or `1000:1000`) after it is attached, plus any root-owned
     /// parents inside that user's home that the mount conjured.
-    #[serde(
-        default,
-        deserialize_with = "flex::opt_string",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, deserialize_with = "flex::opt_string")]
     #[schemars(with = "Option<flex::IntOrString>")]
-    pub owner: Option<String>,
+    owner: Option<String>,
 
-    /// Device name. Default: derived from the guest path. Set it to adopt an
+    /// incus device name. Default: derived from the target. Set it to adopt an
     /// existing device under a known name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub device: Option<String>,
+    #[serde(default)]
+    device: Option<String>,
 
     /// Extra disk device properties (`shift`, `propagation`, ...), verbatim.
-    #[serde(
-        default,
-        deserialize_with = "flex::string_map",
-        skip_serializing_if = "BTreeMap::is_empty"
-    )]
+    #[serde(default, deserialize_with = "flex::string_map")]
     #[schemars(with = "BTreeMap<String, flex::Scalar>")]
-    pub options: BTreeMap<String, String>,
+    options: BTreeMap<String, String>,
+}
+
+/// Whether a mount source names a host path rather than a volume.
+pub(crate) fn is_host_path(source: &str) -> bool {
+    source.starts_with('/') || source.starts_with('.') || source.starts_with('~')
+}
+
+impl From<VolumeMount> for VolumeSpec {
+    fn from(m: VolumeMount) -> Self {
+        let mount_type = m.mount_type.unwrap_or(if is_host_path(&m.source) {
+            MountType::Bind
+        } else {
+            MountType::Volume
+        });
+        VolumeSpec {
+            mount_type,
+            source: m.source,
+            target: m.target,
+            read_only: m.read_only,
+            external: m.external,
+            pool: m.pool,
+            owner: m.owner,
+            device: m.device,
+            options: m.options,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for VolumeSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error as _;
+        match serde_json::Value::deserialize(d)? {
+            serde_json::Value::String(s) => {
+                crate::shorthand::volume(&s).map_err(|e| D::Error::custom(e.to_string()))
+            }
+            v @ serde_json::Value::Object(_) => serde_json::from_value::<VolumeMount>(v)
+                .map(Into::into)
+                .map_err(|e| D::Error::custom(format!("volume: {e}"))),
+            other => Err(D::Error::custom(format!(
+                "volume: expected SOURCE:TARGET[:OPTIONS] or {{type, source, target, ...}}, got {other}"
+            ))),
+        }
+    }
+}
+
+impl JsonSchema for VolumeSpec {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "VolumeSpec".into()
+    }
+
+    fn json_schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let long = g.subschema_for::<VolumeMount>();
+        schemars::json_schema!({
+            "description": "A mount: `SOURCE:TARGET[:OPTIONS]` or the long form.",
+            "oneOf": [
+                {
+                    "type": "string",
+                    "description": "SOURCE:TARGET[:OPTIONS]. OPTIONS is a comma list of ro, rw, owner=USER, device=NAME, pool=POOL, external."
+                },
+                long
+            ]
+        })
+    }
 }
 
 /// Which side listens.
@@ -412,41 +555,96 @@ impl PortBind {
     }
 }
 
-/// An incus proxy device.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+/// An incus proxy device. Written as docker's `[HOST_IP:]PUBLISHED:TARGET[/PROTOCOL]`,
+/// its long form (`PortMapping` in the schema), or the incus form (`ProxyPort`).
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct PortSpec {
     /// Device name. Default: `port-<bind>-<listen port>`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-
-    /// `host` (default): listen on the host. `guest`: listen in the guest.
-    #[serde(default)]
     pub bind: PortBind,
+    /// incus listen address (`tcp:HOST:PORT`, or any shorthand `normalize_addr`
+    /// accepts).
+    pub listen: String,
+    /// incus connect address, same forms.
+    pub connect: String,
+    /// Host-bound TCP/UDP only: if the listen port is taken, try the next one,
+    /// up to this many more. Written in the file as a published range
+    /// (`5173-5223:5173`).
+    pub search: Option<u16>,
+    /// Extra proxy device properties, verbatim.
+    pub options: BTreeMap<String, String>,
+}
+
+/// Docker's long port syntax.
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PortMapping {
+    /// incus device name. Default: `port-host-<published>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+
+    /// Port in the guest, or a range as long as `published`'s.
+    #[serde(deserialize_with = "flex::string", serialize_with = "port_number")]
+    #[schemars(with = "flex::IntOrString")]
+    target: String,
+
+    /// Port on the host. A range (`5173-5223`) with a single `target` takes the
+    /// first free port in it.
+    #[serde(deserialize_with = "flex::string", serialize_with = "port_number")]
+    #[schemars(with = "flex::IntOrString")]
+    published: String,
+
+    /// Host address to listen on. Default `127.0.0.1` (docker's is `0.0.0.0`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    host_ip: Option<String>,
+
+    /// `tcp` (default) or `udp`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    protocol: Option<String>,
+
+    /// Extra proxy device properties (`proxy_protocol`, ...), verbatim.
+    #[serde(
+        default,
+        deserialize_with = "flex::string_map",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    #[schemars(with = "BTreeMap<String, flex::Scalar>")]
+    options: BTreeMap<String, String>,
+}
+
+/// A single port as a number, a range as a string.
+fn port_number<S: serde::Serializer>(p: &str, s: S) -> Result<S::Ok, S::Error> {
+    match p.parse::<u16>() {
+        Ok(n) => s.serialize_u16(n),
+        Err(_) => s.serialize_str(p),
+    }
+}
+
+/// An incus proxy written out: either direction, any address incus takes.
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ProxyPort {
+    /// incus device name. Default: `port-<bind>-<listen port>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+
+    /// `host` (default): listen on the host, connect in the guest. `guest`:
+    /// listen in the guest, connect on the host (reach a host service).
+    #[serde(default, skip_serializing_if = "is_default")]
+    bind: PortBind,
 
     /// Listen address: `5173`, `HOST:5173`, `5173/udp`, or the full
     /// `tcp:HOST:PORT` / `udp:HOST:PORT` / `unix:PATH`. The protocol defaults
     /// to tcp and the host to 127.0.0.1.
     #[serde(deserialize_with = "flex::string")]
     #[schemars(with = "flex::IntOrString")]
-    pub listen: String,
+    listen: String,
 
     /// Connect address, same forms as `listen`. The host defaults to 127.0.0.1
     /// (0.0.0.0 for a VM, which lets incus find the VM's address).
     #[serde(deserialize_with = "flex::string")]
     #[schemars(with = "flex::IntOrString")]
-    pub connect: String,
-
-    /// Host-bound TCP/UDP only: if the listen port is taken, try the next one, up
-    /// to this many more. The chosen address is printed and a device already
-    /// listening anywhere in the range counts as correct.
-    #[serde(
-        default,
-        deserialize_with = "flex::opt_u16",
-        skip_serializing_if = "Option::is_none"
-    )]
-    #[schemars(with = "Option<flex::IntOrString>")]
-    pub search: Option<u16>,
+    connect: String,
 
     /// Extra proxy device properties (`nat`, `proxy_protocol`, ...), verbatim.
     #[serde(
@@ -455,7 +653,145 @@ pub struct PortSpec {
         skip_serializing_if = "BTreeMap::is_empty"
     )]
     #[schemars(with = "BTreeMap<String, flex::Scalar>")]
-    pub options: BTreeMap<String, String>,
+    options: BTreeMap<String, String>,
+}
+
+impl PortMapping {
+    fn into_spec(self) -> crate::error::Result<PortSpec> {
+        let proto = self.protocol.as_deref().unwrap_or("tcp");
+        let mut p = crate::shorthand::docker_port(
+            self.host_ip.as_deref(),
+            &self.published,
+            &self.target,
+            proto,
+        )?;
+        p.name = self.name;
+        p.options = self.options;
+        Ok(p)
+    }
+}
+
+/// The port of an address with no explicit host (`5173`, `tcp:5173`), or with
+/// one of the default connect hosts, which a searched port may not change.
+fn connect_port(connect: &str) -> Option<(&str, &str)> {
+    let (proto, rest) = match connect.split_once(':') {
+        Some((p @ ("tcp" | "udp"), rest)) => (p, rest),
+        _ => match connect.rsplit_once('/') {
+            Some((rest, p @ ("tcp" | "udp"))) => (p, rest),
+            _ => ("tcp", connect),
+        },
+    };
+    let port = match rest.rsplit_once(':') {
+        Some(("127.0.0.1" | "0.0.0.0", port)) => port,
+        Some(_) => return None,
+        None => rest,
+    };
+    port.parse::<u16>().ok().map(|_| (proto, port))
+}
+
+impl PortSpec {
+    /// The docker long form, when this port can be written as one: it is
+    /// host-bound, listens on a single port and connects to a single port on
+    /// the guest's default address.
+    fn as_mapping(&self) -> Option<PortMapping> {
+        if self.bind != PortBind::Host {
+            return None;
+        }
+        let listen = crate::plan::normalize_addr(&self.listen, "127.0.0.1").ok()?;
+        let (lproto, host, lport) = crate::plan::split_addr(&listen)?;
+        let (cproto, cport) = connect_port(&self.connect)?;
+        if lproto != cproto {
+            return None;
+        }
+        let published = match self.search.filter(|n| *n > 0) {
+            Some(n) => format!("{lport}-{}", lport.checked_add(n)?),
+            None => lport.to_string(),
+        };
+        Some(PortMapping {
+            name: self.name.clone(),
+            target: cport.to_string(),
+            published,
+            host_ip: (host != "127.0.0.1").then(|| host.trim_matches(['[', ']']).to_string()),
+            protocol: (lproto != "tcp").then(|| lproto.to_string()),
+            options: self.options.clone(),
+        })
+    }
+}
+
+impl Serialize for PortSpec {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        if let Some(m) = self.as_mapping() {
+            return m.serialize(s);
+        }
+        ProxyPort {
+            name: self.name.clone(),
+            bind: self.bind,
+            listen: self.listen.clone(),
+            connect: self.connect.clone(),
+            options: self.options.clone(),
+        }
+        .serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for PortSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let v = serde_json::Value::deserialize(d)?;
+        let custom = |e: String| D::Error::custom(format!("port: {e}"));
+        match v {
+            serde_json::Value::String(s) => {
+                crate::shorthand::docker_short_port(&s).map_err(|e| custom(e.to_string()))
+            }
+            serde_json::Value::Number(n) => crate::shorthand::docker_short_port(&n.to_string())
+                .map_err(|e| custom(e.to_string())),
+            serde_json::Value::Object(ref m) if m.contains_key("search") => Err(custom(
+                "search is not an isb key: publish a range instead, e.g. \"5173-5223:5173\" or published: 5173-5223".into(),
+            )),
+            serde_json::Value::Object(ref m)
+                if ["listen", "connect", "bind"].iter().any(|k| m.contains_key(*k)) =>
+            {
+                let r: ProxyPort = serde_json::from_value(v).map_err(|e| custom(e.to_string()))?;
+                Ok(PortSpec {
+                    name: r.name,
+                    bind: r.bind,
+                    listen: r.listen,
+                    connect: r.connect,
+                    search: None,
+                    options: r.options,
+                })
+            }
+            v @ serde_json::Value::Object(_) => serde_json::from_value::<PortMapping>(v)
+                .map_err(|e| custom(e.to_string()))?
+                .into_spec()
+                .map_err(|e| custom(e.to_string())),
+            other => Err(custom(format!(
+                "expected [HOST_IP:]PUBLISHED:TARGET[/PROTOCOL], {{target, published, ...}} or {{listen, connect, ...}}, got {other}"
+            ))),
+        }
+    }
+}
+
+impl JsonSchema for PortSpec {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "PortSpec".into()
+    }
+
+    fn json_schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let mapping = g.subschema_for::<PortMapping>();
+        let proxy = g.subschema_for::<ProxyPort>();
+        schemars::json_schema!({
+            "description": "A published port, docker style, or an incus proxy in either direction.",
+            "oneOf": [
+                {
+                    "type": "string",
+                    "description": "[HOST_IP:]PUBLISHED:TARGET[/PROTOCOL]. HOST_IP defaults to 127.0.0.1. PUBLISHED may be a range (5173-5223) to take the first free port."
+                },
+                mapping,
+                proxy
+            ]
+        })
+    }
 }
 
 /// A readiness check. "Running" alone is not ready: networking comes up a beat
@@ -471,7 +807,7 @@ pub enum ReadyCheck {
     DefaultRoute,
     /// `getent passwd <user>` succeeds in the guest.
     UserExists(String),
-    /// The path is writable by the exec user (`exec.user`, else root).
+    /// The path is writable by the service's `user` (else root).
     PathWritable(String),
     /// This argv exits 0 in the guest (run as root).
     Command(Vec<String>),
@@ -549,6 +885,37 @@ impl std::fmt::Display for ReadyCheck {
     }
 }
 
+/// The `exec:` block of a service: exec defaults with no docker equivalent.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExecSpec {
+    /// Environment for exec only (merged over `environment`, never stored in
+    /// the instance).
+    #[serde(
+        default,
+        deserialize_with = "flex::env_map_or_list",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    #[schemars(with = "flex::MapOrList")]
+    pub env: BTreeMap<String, String>,
+
+    /// Run argv through the user's login shell (`$SHELL -l -c 'exec "$@"'`), so
+    /// profile scripts run. argv is still passed as separate arguments.
+    #[serde(
+        default,
+        deserialize_with = "flex::bool",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    #[schemars(with = "flex::BoolOrString")]
+    pub login: bool,
+}
+
+impl ExecSpec {
+    pub fn is_empty(&self) -> bool {
+        self == &ExecSpec::default()
+    }
+}
+
 /// Defaults for exec into a sandbox. Per-call options override them.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -600,21 +967,12 @@ impl ExecDefaults {
 /// Mount builders: `Volume::bind(host)`, `Volume::named(name)`.
 pub struct Volume;
 
-/// What to do when a named volume does not exist.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum NamedVolumeMode {
-    /// Create it if missing (default).
-    #[default]
-    EnsureExists,
-    /// It must already exist.
-    Existing,
-}
-
 impl Volume {
-    /// Bind-mount a host path.
+    /// Bind-mount a host path. The target is set by [`SandboxSpec::volume`].
     pub fn bind(host_path: impl Into<String>) -> VolumeSpec {
         VolumeSpec {
-            bind: Some(host_path.into()),
+            mount_type: MountType::Bind,
+            source: host_path.into(),
             ..Default::default()
         }
     }
@@ -622,20 +980,21 @@ impl Volume {
     /// Mount a named custom volume (created if missing).
     pub fn named(name: impl Into<String>) -> VolumeSpec {
         VolumeSpec {
-            named: Some(name.into()),
+            mount_type: MountType::Volume,
+            source: name.into(),
             ..Default::default()
         }
     }
 }
 
 impl VolumeSpec {
-    /// Named volumes: create if missing, or require that it exists.
-    pub fn mode(mut self, mode: NamedVolumeMode) -> Self {
-        self.external = mode == NamedVolumeMode::Existing;
+    /// Named volumes: the volume must already exist; isb never creates it.
+    pub fn external(mut self, external: bool) -> Self {
+        self.external = external;
         self
     }
-    pub fn readonly(mut self, ro: bool) -> Self {
-        self.readonly = ro;
+    pub fn read_only(mut self, ro: bool) -> Self {
+        self.read_only = ro;
         self
     }
     pub fn owner(mut self, owner: impl Into<String>) -> Self {
@@ -706,6 +1065,10 @@ impl SandboxSpec {
         self.cpus = Some(cpus.to_string());
         self
     }
+    pub fn cpuset(mut self, set: impl Into<String>) -> Self {
+        self.cpuset = Some(set.into());
+        self
+    }
     pub fn memory(mut self, m: impl Into<String>) -> Self {
         self.memory = Some(m.into());
         self
@@ -731,8 +1094,9 @@ impl SandboxSpec {
         self
     }
     /// Mount `vol` at `guest_path`.
-    pub fn volume(mut self, guest_path: impl Into<String>, vol: VolumeSpec) -> Self {
-        self.volumes.insert(guest_path.into(), vol);
+    pub fn volume(mut self, guest_path: impl Into<String>, mut vol: VolumeSpec) -> Self {
+        vol.target = guest_path.into();
+        self.volumes.push(vol);
         self
     }
     pub fn port(mut self, p: PortSpec) -> Self {
@@ -747,12 +1111,12 @@ impl SandboxSpec {
         self.ready_timeout = Some(t.into());
         self
     }
-    pub fn exec_user(mut self, u: impl Into<String>) -> Self {
-        self.exec.user = Some(u.into());
+    pub fn user(mut self, u: impl Into<String>) -> Self {
+        self.user = Some(u.into());
         self
     }
-    pub fn exec_cwd(mut self, c: impl Into<String>) -> Self {
-        self.exec.cwd = Some(c.into());
+    pub fn working_dir(mut self, c: impl Into<String>) -> Self {
+        self.working_dir = Some(c.into());
         self
     }
     pub fn raw_config(mut self, k: impl Into<String>, v: impl Into<String>) -> Self {
@@ -780,9 +1144,9 @@ mod tests {
 
     #[test]
     fn rejects_unknown_fields() {
-        let e = parse("sandboxes:\n  web:\n    image: x\n    cpu: 8\n").unwrap_err();
+        let e = parse("services:\n  web:\n    image: x\n    cpu: 8\n").unwrap_err();
         assert!(e.contains("unknown field `cpu`"), "{e}");
-        let e = parse("sandboxes:\n  web:\n    image: x\n    volumes:\n      /a: {bnd: /b}\n")
+        let e = parse("services:\n  web:\n    image: x\n    volumes:\n      - {source: /b, target: /a, bnd: 1}\n")
             .unwrap_err();
         assert!(e.contains("bnd"), "{e}");
     }
@@ -790,55 +1154,147 @@ mod tests {
     #[test]
     fn accepts_strings_for_scalars() {
         let f = parse(
-            "sandboxes:\n  web:\n    image: x\n    cpus: \"8\"\n    privileged: \"false\"\n    ports:\n      - {listen: 'tcp:1.2.3.4:5173', connect: 'tcp:127.0.0.1:5173', search: '50'}\n",
+            "services:\n  web:\n    image: x\n    cpus: \"8\"\n    privileged: \"false\"\n    ports:\n      - {published: '5173-5223', target: '5173', host_ip: 1.2.3.4}\n",
         )
         .unwrap();
-        let w = &f.sandboxes["web"];
+        let w = &f.services["web"];
         assert_eq!(w.cpus.as_deref(), Some("8"));
         assert_eq!(w.privileged, Some(false));
         assert_eq!(w.ports[0].search, Some(50));
-        let f = parse("sandboxes:\n  web:\n    image: x\n    cpus: 4\n").unwrap();
-        assert_eq!(f.sandboxes["web"].cpus.as_deref(), Some("4"));
+        assert_eq!(w.ports[0].listen, "tcp:1.2.3.4:5173");
+        let f = parse("services:\n  web:\n    image: x\n    cpus: 4\n").unwrap();
+        assert_eq!(f.services["web"].cpus.as_deref(), Some("4"));
     }
 
     #[test]
     fn scalar_values_in_string_maps() {
         let f = parse(
-            "sandboxes:\n  web:\n    image: x\n    env: {DEBUG: 1, ON: true}\n    raw_config: {security.nesting: true}\n    raw_devices: {gpu: {type: gpu, id: 0}}\n    exec: {user: 1000}\n",
+            "services:\n  web:\n    image: x\n    environment: {DEBUG: 1, ON: true}\n    raw_config: {security.nesting: true}\n    raw_devices: {gpu: {type: gpu, id: 0}}\n    user: 1000\n",
         )
         .unwrap();
-        let w = &f.sandboxes["web"];
+        let w = &f.services["web"];
         assert_eq!(w.env["DEBUG"], "1");
         assert_eq!(w.env["ON"], "true");
         assert_eq!(w.raw_config["security.nesting"], "true");
         assert_eq!(w.raw_devices["gpu"]["id"], "0");
-        assert_eq!(w.exec.user.as_deref(), Some("1000"));
+        assert_eq!(w.user.as_deref(), Some("1000"));
     }
 
     #[test]
-    fn port_numbers_parse_as_addresses() {
+    fn list_forms_of_environment_and_labels() {
         let f = parse(
-            "sandboxes:\n  web:\n    image: x\n    ports:\n      - {listen: \"${IP}:5173\", connect: 5173}\n      - {bind: guest, listen: 8190, connect: \"8080\"}\n",
+            "services:\n  web:\n    image: x\n    environment: [A=1, B=x=y]\n    labels: [k=v, bare]\n    exec: {env: [C=3]}\n",
         )
         .unwrap();
-        let p = &f.sandboxes["web"].ports;
-        assert_eq!(p[0].connect, "5173");
-        assert_eq!(p[1].listen, "8190");
-        assert_eq!(p[1].connect, "8080");
+        let w = &f.services["web"];
+        assert_eq!(w.env["A"], "1");
+        assert_eq!(w.env["B"], "x=y");
+        assert_eq!(w.labels["k"], "v");
+        assert_eq!(w.labels["bare"], "");
+        assert_eq!(w.exec.env["C"], "3");
+        let e = parse("services:\n  web: {image: x, environment: [NOVALUE]}\n").unwrap_err();
+        assert!(e.contains("NOVALUE"), "{e}");
+    }
+
+    #[test]
+    fn volume_forms() {
+        let f = parse(
+            "services:\n  web:\n    image: x\n    volumes:\n      - ./src:/home/dev/src:ro\n      - cache:/home/dev/.cache:owner=dev\n      - {type: bind, source: ~/ref, target: /srv/ref, read_only: true, options: {shift: true}}\n      - {source: data, target: /data, device: d}\n",
+        )
+        .unwrap();
+        let v = &f.services["web"].volumes;
+        assert_eq!(v.len(), 4);
+        assert_eq!(
+            (
+                v[0].mount_type,
+                v[0].source.as_str(),
+                v[0].target.as_str(),
+                v[0].read_only
+            ),
+            (MountType::Bind, "./src", "/home/dev/src", true)
+        );
+        assert_eq!(v[1].mount_type, MountType::Volume);
+        assert_eq!(v[1].owner.as_deref(), Some("dev"));
+        assert_eq!(v[2].options["shift"], "true");
+        // The long form infers the type from the source, like the short form.
+        assert_eq!(v[3].mount_type, MountType::Volume);
+        assert!(parse("services:\n  web: {image: x, volumes: [/anon]}\n").is_err());
+        assert!(parse("services:\n  web: {image: x, volumes: [{source: a}]}\n").is_err());
+    }
+
+    #[test]
+    fn port_forms() {
+        let f = parse(
+            "services:\n  web:\n    image: x\n    ports:\n      - 8080:80\n      - \"${IP}:5173:5173/udp\"\n      - {target: 80, published: 8081}\n      - {name: backend, bind: guest, listen: 8190, connect: \"8080\"}\n",
+        )
+        .unwrap();
+        let p = &f.services["web"].ports;
+        assert_eq!(
+            (p[0].listen.as_str(), p[0].connect.as_str()),
+            ("tcp:127.0.0.1:8080", "tcp:80")
+        );
+        assert_eq!(p[1].listen, "udp:${IP}:5173");
+        assert_eq!(p[2].listen, "tcp:127.0.0.1:8081");
+        assert_eq!(p[3].bind, PortBind::Guest);
+        assert_eq!(
+            (p[3].listen.as_str(), p[3].connect.as_str()),
+            ("8190", "8080")
+        );
+        let e = parse("services:\n  web: {image: x, ports: [5173]}\n").unwrap_err();
+        assert!(e.contains("host port"), "{e}");
+        let e =
+            parse("services:\n  web: {image: x, ports: [{listen: 1, connect: 2, search: 5}]}\n")
+                .unwrap_err();
+        assert!(e.contains("published"), "{e}");
+    }
+
+    #[test]
+    fn ports_serialize_back_to_what_parses() {
+        let f = parse(
+            "services:\n  web:\n    image: x\n    ports:\n      - 100.1.2.3:5173-5223:5173\n      - 53:53/udp\n      - 8000-8002:9000-9002\n      - {bind: guest, listen: 8190, connect: 8080}\n      - {listen: 'tcp:0.0.0.0:80', connect: 'tcp:10.0.0.2:80'}\n",
+        )
+        .unwrap();
+        let y = serde_yaml_ng::to_string(&f).unwrap();
+        assert!(y.contains("published: 5173-5223"), "{y}");
+        assert!(y.contains("protocol: udp"), "{y}");
+        let back: ComposeFile = serde_yaml_ng::from_str(&y).unwrap();
+        assert_eq!(back, f);
+    }
+
+    #[test]
+    fn volumes_serialize_back_to_what_parses() {
+        let f = parse(
+            "services:\n  web:\n    image: x\n    volumes: [./a:/a:ro, 'c:/c:owner=dev,device=d']\n",
+        )
+        .unwrap();
+        let y = serde_yaml_ng::to_string(&f).unwrap();
+        let back: ComposeFile = serde_yaml_ng::from_str(&y).unwrap();
+        assert_eq!(back, f);
+    }
+
+    #[test]
+    fn command_as_a_string() {
+        let f =
+            parse("services:\n  a: {image: x, command: \"sh -c 'bun install && bun run dev'\"}\n")
+                .unwrap();
+        assert_eq!(
+            f.services["a"].command.as_deref().unwrap(),
+            ["sh", "-c", "bun install && bun run dev"]
+        );
     }
 
     #[test]
     fn idmap_forms() {
         let f = parse(
-            "sandboxes:\n  a: {image: x, idmap: auto}\n  b: {image: x, idmap: {raw: 'both 1 1'}}\n  c: {image: x, idmap: {mode: always, host_uid: 1001}}\n",
+            "services:\n  a: {image: x, idmap: auto}\n  b: {image: x, idmap: {raw: 'both 1 1'}}\n  c: {image: x, idmap: {mode: always, host_uid: 1001}}\n",
         )
         .unwrap();
         assert_eq!(
-            f.sandboxes["a"].idmap,
+            f.services["a"].idmap,
             Some(IdmapSpec::Mode(IdmapMode::Auto))
         );
-        assert!(matches!(f.sandboxes["b"].idmap, Some(IdmapSpec::Raw(_))));
-        match &f.sandboxes["c"].idmap {
+        assert!(matches!(f.services["b"].idmap, Some(IdmapSpec::Raw(_))));
+        match &f.services["c"].idmap {
             Some(IdmapSpec::Map(m)) => {
                 assert_eq!(m.mode, IdmapMode::Always);
                 assert_eq!(m.host_uid, 1001);
@@ -851,14 +1307,14 @@ mod tests {
     #[test]
     fn ready_forms() {
         let f = parse(
-            "sandboxes:\n  a:\n    image: x\n    ready: [running, default_route, {user_exists: dev}, {path_writable: /x}, {command: [true]}]\n",
+            "services:\n  a:\n    image: x\n    ready: [running, default_route, {user_exists: dev}, {path_writable: /x}, {command: [true]}]\n",
         )
         .unwrap();
-        let r = f.sandboxes["a"].ready.as_ref().unwrap();
+        let r = f.services["a"].ready.as_ref().unwrap();
         assert_eq!(r.len(), 5);
         assert_eq!(r[4], ReadyCheck::Command(vec!["true".into()]));
         assert!(
-            parse("sandboxes:\n  a: {image: x, ready: [bogus]}\n")
+            parse("services:\n  a: {image: x, ready: [bogus]}\n")
                 .unwrap_err()
                 .contains("bogus")
         );
@@ -867,11 +1323,11 @@ mod tests {
     #[test]
     fn command_items_may_be_unquoted_scalars() {
         let f = parse(
-            "sandboxes:\n  a:\n    image: x\n    command: [python3, -m, http.server, 8000, true, 1.5]\n",
+            "services:\n  a:\n    image: x\n    command: [python3, -m, http.server, 8000, true, 1.5]\n",
         )
         .unwrap();
         assert_eq!(
-            f.sandboxes["a"].command.as_deref().unwrap(),
+            f.services["a"].command.as_deref().unwrap(),
             ["python3", "-m", "http.server", "8000", "true", "1.5"]
         );
     }
@@ -879,7 +1335,7 @@ mod tests {
     #[test]
     fn schema_generates() {
         let s = compose_schema();
-        assert!(s.to_string().contains("sandboxes"));
+        assert!(s.to_string().contains("services"));
     }
 
     #[test]

@@ -3,6 +3,22 @@
 /** Device or config properties: strings only. */
 export type Props = Record<string, string>;
 
+/**
+ * Exec defaults as `sandbox.exec` (`defaults`) and `sandbox.wait_ready`
+ * (`exec`) take them. A spec implies them through its `user`, `working_dir`
+ * and `exec` keys.
+ */
+export interface ExecDefaults {
+  /** Guest user: a name (`dev`), `uid`, or `uid:gid`. */
+  user?: string;
+  /** Working directory in the guest. */
+  cwd?: string;
+  /** Environment for exec, over the instance `environment`. */
+  env?: Record<string, string>;
+  /** Run through the user's login shell. */
+  login?: boolean | string;
+}
+
 /** A sandbox as listed: `sandbox.get`, `sandbox.list`, `sandbox.create`. */
 export interface SandboxInfo {
   name: string;

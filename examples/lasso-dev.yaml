@@ -28,11 +28,13 @@
 #   - $HOME/... translated via /etc/workspace/guest-home inside a workspace box
 #                                                    -> automatic in isb (or ISB_HOST_PATH_MAP)
 #   - shared bun cache volume, created if missing, chowned to dev with the
-#     parents the mount conjured                     -> named volume with owner: dev
+#     parents the mount conjured                     -> named volume with owner: dev,
+#                                                       name: pinned so every
+#                                                       worktree shares it
 #   - wait for a default route after first start    -> ready: [..., default_route]
 #   - start it if stopped                           -> up starts a stopped instance
 #   - `sudo -u dev -H bash -lc 'eval "$(mise activate bash --shims)" && cd DIR && CMD'`
-#                                                    -> exec: user/cwd/env below
+#                                                    -> user, working_dir, exec.env below
 #
 # Opting out of the shared bun cache (LASSO_DEV_BUN_CACHE= in container.sh):
 # a mount cannot be switched off by a variable, so use an overlay file that
@@ -42,16 +44,18 @@ name: lasso-dev
 
 volumes:
   # Shared by every dev container: content-addressed and written
-  # tmp-then-rename, so sharing is safe for correctness.
-  lasso-bun-cache: {}
+  # tmp-then-rename, so sharing is safe for correctness. The name is pinned so
+  # it is not lasso-dev_bun-cache.
+  bun-cache:
+    name: lasso-bun-cache
 
-sandboxes:
+services:
   web:
-    name: "${LASSO_DEV_CONTAINER:?set LASSO_DEV_CONTAINER (lasso computes it from the src/web path)}"
+    container_name: "${LASSO_DEV_CONTAINER:?set LASSO_DEV_CONTAINER (lasso computes it from the src/web path)}"
     image: "${LASSO_DEV_IMAGE:-dev-base}"
     storage: "${LASSO_DEV_STORAGE:-auto}"
     cpus: 8          # caps, not reservations
-    memory: 8GiB
+    mem_limit: 8g
     privileged: false
     idmap: auto
     labels:
@@ -62,22 +66,17 @@ sandboxes:
     volumes:
       # Only src/web is mounted, never the repo root: a postinstall script that
       # could reach .git could drop a hook, and main auto-pushes.
-      /home/dev/repo/src/web:
-        bind: "${LASSO_WEB}"
-        device: web
-      /home/dev/.bun/install/cache:
-        named: lasso-bun-cache
-        device: bun-cache
-        owner: dev
+      - "${LASSO_WEB}:/home/dev/repo/src/web:device=web"
+      - bun-cache:/home/dev/.bun/install/cache:device=bun-cache,owner=dev
     ready:
       - running
       - default_route          # the first task is always `bun install`
       - user_exists: dev
       - path_writable: /home/dev/repo/src/web
     ready_timeout: 60s
+    user: dev
+    working_dir: /home/dev/repo/src/web
     exec:
-      user: dev
-      cwd: /home/dev/repo/src/web
       env:
         # Equivalent of `mise activate bash --shims`: the toolchain (node, bun,
         # uv) on PATH without a login shell.

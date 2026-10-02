@@ -54,6 +54,5 @@ pub use plan::{Action, DiffOptions, SandboxPlan};
 pub use sandbox::{ApplyReport, EnsureOptions, LabelFilter, Sandbox, SandboxInfo};
 pub use spec::{
     ComposeFile, ExecDefaults, IdmapMap, IdmapMode, IdmapRaw, IdmapSpec, InstanceType,
-    NamedVolumeMode, NamedVolumeSpec, PortBind, PortBinding, PortSpec, ReadyCheck, SandboxSpec,
-    Volume, VolumeSpec,
+    NamedVolumeSpec, PortBind, PortBinding, PortSpec, ReadyCheck, SandboxSpec, Volume, VolumeSpec,
 };

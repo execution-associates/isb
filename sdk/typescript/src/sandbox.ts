@@ -10,17 +10,17 @@ import {
   toArgv,
 } from "./exec.js";
 import type {
-  ExecDefaults,
+  MapOrList,
   NamedVolumeSpec,
   PortSpec,
   ReadyCheck,
   SandboxSpec as SpecFields,
 } from "./spec.js";
-import type { ApplyReport, Plan, SandboxInfo } from "./types.js";
+import type { ApplyReport, ExecDefaults, Plan, SandboxInfo } from "./types.js";
 import { type Duration, durationParam } from "./util.js";
 
 /** A sandbox spec with its instance name, as `sandbox.*` methods take it. */
-export type SandboxSpec = SpecFields & { name: string; image: string };
+export type SandboxSpec = SpecFields & { container_name: string; image: string };
 
 /** Receives progress lines (`web: creating from dev-base`). */
 export type ProgressHandler = (line: string) => void;
@@ -28,7 +28,11 @@ export type ProgressHandler = (line: string) => void;
 export interface SpecOptions extends CallOptions {
   /** Anchor for relative bind paths (default: the server's working directory). */
   baseDir?: string;
-  /** Named-volume definitions, as a compose file's top-level `volumes:`. */
+  /**
+   * Named-volume definitions, as a compose file's top-level `volumes:`, keyed
+   * by what the spec's mounts name. The incus volume is the definition's
+   * `name`, else the key.
+   */
   volumes?: Record<string, NamedVolumeSpec>;
 }
 
@@ -89,6 +93,32 @@ function labelFilters(labels: ListOptions["labels"]): string[] {
   return Object.entries(labels).map(([k, v]) => (v === null ? k : `${k}=${v}`));
 }
 
+function envMap(env: MapOrList | undefined): Record<string, string> | undefined {
+  if (env === undefined) return undefined;
+  if (!Array.isArray(env)) {
+    return Object.fromEntries(Object.entries(env).map(([k, v]) => [k, String(v)]));
+  }
+  const m: Record<string, string> = {};
+  for (const kv of env) {
+    const i = kv.indexOf("=");
+    if (i <= 0)
+      throw new TypeError(`environment entry ${JSON.stringify(kv)} has no value: write KEY=VALUE`);
+    m[kv.slice(0, i)] = kv.slice(i + 1);
+  }
+  return m;
+}
+
+/** The exec defaults a spec implies: `user`, `working_dir` and `exec`. */
+export function execDefaultsOf(spec: SpecFields): ExecDefaults {
+  const d: ExecDefaults = {};
+  if (spec.user != null) d.user = String(spec.user);
+  if (spec.working_dir != null) d.cwd = spec.working_dir;
+  const env = envMap(spec.exec?.env);
+  if (env !== undefined && Object.keys(env).length > 0) d.env = env;
+  if (spec.exec?.login !== undefined) d.login = spec.exec.login;
+  return d;
+}
+
 /** What a Sandbox remembers from the spec it was made from. */
 export interface SandboxDefaults {
   exec?: ExecDefaults;
@@ -98,7 +128,8 @@ export interface SandboxDefaults {
 
 /**
  * A handle on one sandbox (an incus instance) by name. Methods always ask
- * isb; nothing is cached except the spec's exec and readiness defaults.
+ * isb; nothing is cached except the spec's exec defaults (`user`,
+ * `working_dir`, `exec`) and readiness defaults.
  */
 export class Sandbox {
   readonly name: string;
@@ -120,8 +151,9 @@ export class Sandbox {
 
   /** @internal A handle carrying the spec's exec and readiness defaults. */
   static fromSpec(spec: SpecFields, client: Client, name: string): Sandbox {
+    const exec = execDefaultsOf(spec);
     return new Sandbox(name, client, {
-      exec: spec.exec,
+      exec: Object.keys(exec).length > 0 ? exec : undefined,
       ready: spec.ready,
       ready_timeout: spec.ready_timeout,
     });
@@ -232,7 +264,10 @@ export class Sandbox {
     await this.client.request("sandbox.remove", { name: this.name, force: opts.force ?? false });
   }
 
-  /** Add a proxy device (or leave a correct one alone); returns the listen address in use. */
+  /**
+   * Add a proxy device (or leave a correct one alone) from a `ports` entry;
+   * returns the listen address in use.
+   */
   async addPort(port: PortSpec): Promise<string> {
     const r = await this.client.request<{ listen: string }>("sandbox.add_port", {
       name: this.name,

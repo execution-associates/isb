@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 use crate::error::{Error, Result};
 use crate::flex::parse_duration;
 use crate::idmap::{self, SubIds};
-use crate::spec::{ExecDefaults, InstanceType, PortBind, ReadyCheck, SandboxSpec};
+use crate::spec::{ExecDefaults, InstanceType, MountType, PortBind, ReadyCheck, SandboxSpec};
 
 pub type Props = BTreeMap<String, String>;
 
@@ -369,6 +369,36 @@ pub fn resolve_host_path(p: &str, base: &Path) -> Result<String> {
     Ok(canon.to_string_lossy().into_owned())
 }
 
+/// Translate a docker memory size (`512m`, `8g`, `1073741824`) to
+/// incus' units (`512MiB`, `8GiB`, bytes). Docker's units are binary, so `g`
+/// and `GB` are GiB. incus' binary units (`8GiB`) and `50%` pass through.
+pub fn memory_limit(m: &str) -> std::result::Result<String, String> {
+    let t = m.trim();
+    let split = t
+        .find(|c: char| !c.is_ascii_digit() && c != '.')
+        .unwrap_or(t.len());
+    let (num, unit) = (&t[..split], t[split..].trim());
+    if num.is_empty() || num.parse::<u64>().is_err() {
+        // incus parses sizes as integers, so 1.5g has to be written 1536m.
+        return Err(format!("{m:?} is not a whole size (e.g. 512m, 8g, 8GiB)"));
+    }
+    let suffix = match unit.to_ascii_lowercase().as_str() {
+        "" | "b" => "",
+        "k" | "kb" => "KiB",
+        "m" | "mb" => "MiB",
+        "g" | "gb" => "GiB",
+        "t" | "tb" => "TiB",
+        // incus' own binary spellings, and percentages.
+        "%" | "kib" | "mib" | "gib" | "tib" => return Ok(t.to_string()),
+        _ => {
+            return Err(format!(
+                "{m:?}: unknown unit {unit:?} (b, k, m, g, t, KiB, MiB, GiB, TiB or %)"
+            ));
+        }
+    };
+    Ok(format!("{num}{suffix}"))
+}
+
 /// Resolve a spec. `base` anchors relative bind paths.
 pub fn resolve(
     spec: &SandboxSpec,
@@ -413,11 +443,28 @@ pub fn resolve(
     }
 
     let mut config = Props::new();
-    if let Some(c) = &spec.cpus {
-        config.insert("limits.cpu".into(), c.clone());
+    match (&spec.cpus, &spec.cpuset) {
+        (Some(_), Some(_)) => {
+            return Err(Error::invalid(format!(
+                "{name}: set cpus (a count) or cpuset (which CPUs), not both"
+            )));
+        }
+        (Some(c), None) => {
+            if !c.trim().parse::<u32>().is_ok_and(|n| n > 0) {
+                return Err(Error::invalid(format!(
+                    "{name}: cpus is a whole number of CPUs, got {c:?} (pin CPUs with cpuset: \"0-3\")"
+                )));
+            }
+            config.insert("limits.cpu".into(), c.trim().to_string());
+        }
+        (None, Some(set)) => {
+            config.insert("limits.cpu".into(), set.clone());
+        }
+        (None, None) => {}
     }
     if let Some(m) = &spec.memory {
-        config.insert("limits.memory".into(), m.clone());
+        let m = memory_limit(m).map_err(|e| Error::invalid(format!("{name}: mem_limit: {e}")))?;
+        config.insert("limits.memory".into(), m);
     }
     if let Some(p) = spec.privileged {
         config.insert("security.privileged".into(), p.to_string());
@@ -470,7 +517,8 @@ pub fn resolve(
     let mut volumes: Vec<EnsureVolume> = Vec::new();
     let mut owners = Vec::new();
     let mut guest_paths = BTreeSet::new();
-    for (guest, v) in &spec.volumes {
+    for v in &spec.volumes {
+        let guest = &v.target;
         if !guest.starts_with('/') {
             return Err(Error::invalid(format!(
                 "{name}: mount path {guest:?} must be absolute"
@@ -493,8 +541,8 @@ pub fn resolve(
             ("type".into(), "disk".into()),
             ("path".into(), guest_norm.clone()),
         ]);
-        match (&v.bind, &v.named) {
-            (Some(b), None) => {
+        match v.mount_type {
+            MountType::Bind => {
                 if v.owner.is_some() {
                     return Err(Error::invalid(format!(
                         "{name}: {guest}: owner is only for named volumes (isb never chowns host paths)"
@@ -505,11 +553,16 @@ pub fn resolve(
                         "{name}: {guest}: pool and external are only for named volumes"
                     )));
                 }
-                let src = resolve_host_path(b, base)?;
+                let src = resolve_host_path(&v.source, base)?;
                 props.insert("source".into(), host.translate(&src));
             }
-            (None, Some(n)) => {
-                let def = defs.get(n);
+            MountType::Volume => {
+                let def = defs.get(&v.source);
+                // A compose file names its volumes `<project>_<key>`; a bare
+                // spec names the incus volume directly.
+                let n = &def
+                    .and_then(|d| d.name.clone())
+                    .unwrap_or_else(|| v.source.clone());
                 let vpool = match v.pool.as_deref().or(def.and_then(|d| d.pool.as_deref())) {
                     Some(p) if p != "auto" => host.pick_pool(Some(p))?,
                     _ => pool.clone(),
@@ -533,13 +586,8 @@ pub fn resolve(
                     });
                 }
             }
-            _ => {
-                return Err(Error::invalid(format!(
-                    "{name}: {guest}: set exactly one of bind or named"
-                )));
-            }
         }
-        if v.readonly {
+        if v.read_only {
             props.insert("readonly".into(), "true".into());
         }
         for k in v.options.keys() {
@@ -571,6 +619,11 @@ pub fn resolve(
         let connect = normalize_addr(&p.connect, connect_host)
             .map_err(|e| Error::invalid(format!("{name}: port connect: {e}")))?;
         if p.search.is_some() {
+            if split_addr(&connect).is_none_or(|(_, h, _)| h != connect_host) {
+                return Err(Error::invalid(format!(
+                    "{name}: a published port range connects to the guest's default address ({connect_host}), not {connect}"
+                )));
+            }
             if p.bind != PortBind::Host {
                 return Err(Error::invalid(format!(
                     "{name}: port search only applies to bind: host"
@@ -668,7 +721,7 @@ pub fn resolve(
             }
         }),
         ready_timeout,
-        exec: spec.exec.clone(),
+        exec: spec.exec_defaults(),
         idmap_mode,
     })
 }
@@ -1659,9 +1712,7 @@ mod tests {
         assert!(r(&s).unwrap_err().to_string().contains("does not exist"));
         let s = base.clone().volume("/x", Volume::bind("/").owner("dev"));
         assert!(r(&s).is_err());
-        let mut v = Volume::bind("/");
-        v.named = Some("n".into());
-        let s = base.clone().volume("/x", v);
+        let s = base.clone().volume("/x", Volume::bind("/").pool("p"));
         assert!(r(&s).is_err());
         let s = base
             .clone()
@@ -1677,6 +1728,76 @@ mod tests {
         assert!(r(&s).unwrap_err().to_string().contains("core property"));
         let s = base.clone().volume("/y", Volume::bind("/").device("web"));
         assert!(r(&s).unwrap_err().to_string().contains("used twice"));
+    }
+
+    #[test]
+    fn docker_memory_units() {
+        assert_eq!(memory_limit("512m").unwrap(), "512MiB");
+        assert_eq!(memory_limit("8g").unwrap(), "8GiB");
+        // Docker reads GB as GiB too.
+        assert_eq!(memory_limit("8GB").unwrap(), "8GiB");
+        assert_eq!(memory_limit("8GiB").unwrap(), "8GiB");
+        assert_eq!(memory_limit("50%").unwrap(), "50%");
+        assert_eq!(memory_limit("1073741824").unwrap(), "1073741824");
+        assert!(memory_limit("1.5g").is_err());
+        assert!(memory_limit("8 parsecs").is_err());
+    }
+
+    #[test]
+    fn cpus_and_cpuset() {
+        let t = tmp();
+        let r = |s: &SandboxSpec| resolve(s, &VolumeDefs::new(), &host(), Path::new("/"));
+        let base = lasso_spec(t.path().to_str().unwrap());
+        assert_eq!(r(&base).unwrap().config["limits.cpu"], "8");
+        let mut s = base.clone();
+        s.cpus = None;
+        s.cpuset = Some("0-3".into());
+        assert_eq!(r(&s).unwrap().config["limits.cpu"], "0-3");
+        s.cpus = Some("2".into());
+        assert!(r(&s).unwrap_err().to_string().contains("not both"));
+        let mut s = base.clone();
+        s.cpus = Some("0-3".into());
+        assert!(r(&s).unwrap_err().to_string().contains("cpuset"));
+    }
+
+    #[test]
+    fn named_volume_uses_its_declared_name() {
+        let t = tmp();
+        let mut defs = VolumeDefs::new();
+        defs.insert(
+            "lasso-bun-cache".into(),
+            NamedVolumeSpec {
+                name: Some("lasso-dev_lasso-bun-cache".into()),
+                ..Default::default()
+            },
+        );
+        let d = resolve(
+            &lasso_spec(t.path().to_str().unwrap()),
+            &defs,
+            &host(),
+            Path::new("/"),
+        )
+        .unwrap();
+        assert_eq!(
+            d.devices["bun-cache"].props["source"],
+            "lasso-dev_lasso-bun-cache"
+        );
+        assert_eq!(d.volumes[0].name, "lasso-dev_lasso-bun-cache");
+    }
+
+    #[test]
+    fn a_searched_port_connects_to_the_default_address() {
+        let t = tmp();
+        let r = |s: &SandboxSpec| resolve(s, &VolumeDefs::new(), &host(), Path::new("/"));
+        let base = lasso_spec(t.path().to_str().unwrap());
+        let ok = base
+            .clone()
+            .port(PortBinding::host("tcp:1.2.3.4:5173", "tcp:127.0.0.1:5173").search(5));
+        assert_eq!(r(&ok).unwrap().devices["port-host-5173"].search, Some(5));
+        let bad = base
+            .clone()
+            .port(PortBinding::host("tcp:1.2.3.4:5173", "tcp:10.0.0.2:5173").search(5));
+        assert!(r(&bad).unwrap_err().to_string().contains("default address"));
     }
 
     #[test]
@@ -1706,8 +1827,8 @@ mod tests {
         assert!(r(&s).is_err());
         // `vm` is accepted as shorthand in YAML.
         let f: crate::spec::ComposeFile =
-            serde_yaml_ng::from_str("sandboxes:\n  a: {image: x, type: vm}\n").unwrap();
-        assert_eq!(f.sandboxes["a"].instance_type, InstanceType::VirtualMachine);
+            serde_yaml_ng::from_str("services:\n  a: {image: x, type: vm}\n").unwrap();
+        assert_eq!(f.services["a"].instance_type, InstanceType::VirtualMachine);
     }
 
     #[test]

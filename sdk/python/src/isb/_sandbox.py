@@ -26,8 +26,8 @@ from typing import (
 
 from ._client import Client, EventHandler, default_client
 from ._errors import NotFoundError, ProcessError
-from ._spec import ExecDefaults, NamedVolumeSpec, PortSpec, ReadyCheck, SandboxSpec
-from ._types import ApplyReport, ExecEvent, ExecOutput, Plan, PruneResult, SandboxInfo
+from ._spec import NamedVolumeSpec, PortSpec, ReadyCheck, SandboxSpec
+from ._types import ApplyReport, ExecDefaults, ExecEvent, ExecOutput, Plan, PruneResult, SandboxInfo
 from ._util import Duration, b64decode, b64encode, duration
 
 if TYPE_CHECKING:
@@ -68,7 +68,7 @@ def _build_spec(
     d: Dict[str, Any] = dict(spec or {})
     d.update(fields)
     if name is not None:
-        d["name"] = name
+        d["container_name"] = name
     if image is not None:
         d["image"] = image
     return d
@@ -85,6 +85,37 @@ def _spec_params(
     if named_volumes:
         p["volumes"] = dict(named_volumes)
     return p
+
+
+def _env_map(env: Any) -> Dict[str, Any]:
+    """An environment given as a map or as docker's `KEY=VALUE` list, as a map."""
+    if not env:
+        return {}
+    if isinstance(env, Mapping):
+        return dict(env)
+    out: Dict[str, Any] = {}
+    for item in env:
+        k, sep, v = str(item).partition("=")
+        if not sep:
+            raise ValueError(f"environment entry {k!r} has no value: write {k}=VALUE")
+        out[k] = v
+    return out
+
+
+def _exec_defaults(spec: Mapping[str, Any]) -> Optional[ExecDefaults]:
+    """The exec defaults a spec implies: `user`, `working_dir` and `exec`."""
+    d: ExecDefaults = {}
+    if spec.get("user") is not None:
+        d["user"] = spec["user"]
+    if spec.get("working_dir") is not None:
+        d["cwd"] = spec["working_dir"]
+    ex = spec.get("exec") or {}
+    env = _env_map(ex.get("env"))
+    if env:
+        d["env"] = env
+    if ex.get("login") is not None:
+        d["login"] = ex["login"]
+    return d or None
 
 
 def _argv(cmd: Cmd, args: Optional[Sequence[str]]) -> List[str]:
@@ -142,8 +173,9 @@ class Sandbox:
     """A handle on one sandbox (an incus instance).
 
     Get one from `create`, `connect_or_create`, `get`, or `Project.sandbox`.
-    A handle from create/connect_or_create/compose carries the spec's `exec`
-    defaults (user, cwd, env, login), which `exec` sends along."""
+    A handle from create/connect_or_create/compose carries the exec defaults
+    its spec implies (`user`, `working_dir`, `exec.env`, `exec.login`), which
+    `exec` sends along."""
 
     def __init__(
         self,
@@ -157,7 +189,7 @@ class Sandbox:
         self.client = _client(client)
         self.spec: Optional[Dict[str, Any]] = dict(spec) if spec is not None else None
         if exec_defaults is None and spec is not None:
-            exec_defaults = spec.get("exec")
+            exec_defaults = _exec_defaults(spec)
         self.exec_defaults: Optional[ExecDefaults] = exec_defaults
         self.last_info: Optional[SandboxInfo] = None
         self.last_report: Optional[ApplyReport] = None
@@ -183,11 +215,14 @@ class Sandbox:
     ) -> "Sandbox":
         """Create a sandbox. Fails with AlreadyExistsError if the name is taken.
 
-        `fields` are SandboxSpec fields (cpus, memory, volumes, ports, ready,
-        exec, ...); `spec` may instead (or also) give a full spec dict, with
-        `fields`, `name` and `image` taking precedence. `named_volumes` are
-        top-level named volume definitions, as in a compose file's `volumes:`.
-        Relative bind paths resolve against `base_dir` (default: cwd)."""
+        `name` is the incus instance name (the spec's `container_name`).
+        `fields` are SandboxSpec fields (cpus, mem_limit, environment, volumes,
+        ports, user, working_dir, ready, ...); `spec` may instead (or also)
+        give a full spec dict, with `fields`, `name` and `image` taking
+        precedence. `named_volumes` are top-level named volume definitions, as
+        in a compose file's `volumes:`: a mount's `source` names a key, whose
+        `name` is the incus volume (default: the key itself). Relative bind
+        paths resolve against `base_dir` (default: cwd)."""
         c = _client(client)
         s = _build_spec(name, image, spec, fields)
         params = _spec_params(s, base_dir, named_volumes)
@@ -329,8 +364,12 @@ class Sandbox:
         )
 
     async def add_port(self, port: PortSpec) -> str:
-        """Add a proxy device (leaves a correct one alone). Returns the listen address in use."""
-        r = await self.client.call("sandbox.add_port", {"name": self.name, "port": dict(port)})
+        """Add a proxy device (leaves a correct one alone). `port` is a `ports`
+        entry: `"8080:80"`, `PortBinding.publish(...)`, `PortBinding.host(...)`
+        or `PortBinding.guest(...)`. Returns the listen address in use."""
+        r = await self.client.call(
+            "sandbox.add_port", {"name": self.name, "port": port if isinstance(port, str) else dict(port)}
+        )
         return str(r["listen"])
 
     async def remove_device(self, device: str) -> bool:

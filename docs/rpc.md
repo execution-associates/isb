@@ -13,7 +13,7 @@ it; relative paths resolve against that directory.
 When it starts, the server writes one hello line:
 
 ```json
-{"isb": "0.4.0", "protocol": 1}
+{"isb": "0.5.0", "protocol": 1}
 ```
 
 A client checks `protocol` and refuses versions it does not know.
@@ -72,8 +72,8 @@ control connection when it exits, and incus kills them.
 
 ## Types
 
-- **spec**: a sandbox spec, exactly the `sandboxes.<service>` object of the
-  compose format (docs/spec.md), plus `name`. The JSON Schema from `isb schema`
+- **spec**: a sandbox spec, exactly the `services.<service>` object of the
+  compose format (docs/spec.md), with `container_name` required. The JSON Schema from `isb schema`
   (or method `schema`) describes it as the `SandboxSpec` definition.
 - **info**: a sandbox as listed:
   `{name, status, type, labels, config, devices, profiles, created_at, description}`.
@@ -113,13 +113,15 @@ Every method accepts an optional `project` (incus project) param.
 | `sandbox.start` | `name` | null, once running |
 | `sandbox.stop` | `name`, `force?`, `timeout?` (`"30s"`) | null |
 | `sandbox.restart` | `name` | null |
-| `sandbox.wait_ready` | `name`, `ready?` (checks, default `["running"]`), `ready_timeout?` (`"60s"`), `exec?` (exec defaults, for `path_writable`) | null |
+| `sandbox.wait_ready` | `name`, `ready?` (checks, default `["running"]`), `ready_timeout?` (`"60s"`), `exec?` (exec defaults `{user, cwd, env, login}`, for `path_writable`) | null |
 | `sandbox.add_port` | `name`, `port` (a `ports` entry) | `{listen}`: the address in use |
 | `sandbox.remove_device` | `name`, `device` | `{removed}` |
 
 `base_dir` anchors relative bind paths (default: the server's working
 directory). `volumes` are named-volume definitions, as in a compose file's
-top-level `volumes:`.
+top-level `volumes:`: a mount's `source` is looked up there, and the
+definition's `name` (else the key) is the incus volume name. With no
+definitions, the `source` is the incus volume name.
 
 ### Exec
 
@@ -178,12 +180,13 @@ A volume is `{name, pool, content_type, config, used_by}`. `pool` defaults to
 
 ### Compose
 
-All take `files` (default `./isb.yaml`), `env_files?`, `project_name?`, and
+All take `files` (default `./isb.yaml` plus `./isb.override.yaml` if present),
+`env_files?` (default `.env` next to the first file, if present), `project_name?`, and
 `vars?` (a map that wins over the server's environment for `${VAR}`).
 
 | method | extra params | result |
 |---|---|---|
-| `compose.load` | | `{name, base_dir, files, file}` (the resolved file, every sandbox named) |
+| `compose.load` | | `{name, base_dir, files, file}` (the resolved file, with every `container_name` and volume `name` filled in) |
 | `compose.up` | `services?`, `wait_ready?` (true), `prune_devices?` | `[{service, report}]`; sends `progress` |
 | `compose.plan` | `services?`, `prune_devices?` | [plan] |
 | `compose.down` | `services?`, `volumes?` | null; sends `progress` |
@@ -191,7 +194,7 @@ All take `files` (default `./isb.yaml`), `env_files?`, `project_name?`, and
 ## Example session
 
 ```text
-<- {"isb":"0.4.0","protocol":1}
+<- {"isb":"0.5.0","protocol":1}
 -> {"id":1,"method":"sandbox.ensure","params":{"spec":{"name":"web","image":"dev-base","cpus":2}}}
 <- {"id":1,"event":"progress","data":"web: creating from dev-base"}
 <- {"id":1,"event":"progress","data":"web: starting"}

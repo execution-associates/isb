@@ -39,10 +39,10 @@ describe.skipIf(!enabled)("integration", () => {
   let client: Client;
   let tmp: string;
   const spec: SandboxSpec = {
-    name: `${PREFIX}-a`,
+    container_name: `${PREFIX}-a`,
     image: IMAGE,
     labels: { "isb-test": "ts", "isb-test-run": `${process.pid}` },
-    env: { FROM_SPEC: "yes" },
+    environment: ["FROM_SPEC=yes"],
     ready: ["running", "default_route", { user_exists: "dev" }],
     ready_timeout: "90s",
   };
@@ -83,7 +83,7 @@ describe.skipIf(!enabled)("integration", () => {
     async () => {
       const lines: string[] = [];
       sb = await Sandbox.create(spec, { client, onProgress: (l) => lines.push(l) });
-      expect(sb.name).toBe(spec.name);
+      expect(sb.name).toBe(spec.container_name);
       expect(lines.length).toBeGreaterThan(0);
       const info = await sb.info();
       expect(info.status).toBe("Running");
@@ -109,15 +109,15 @@ describe.skipIf(!enabled)("integration", () => {
   );
 
   test("get, listWith labels, labels()", async () => {
-    const got = await Sandbox.get(spec.name, { client });
+    const got = await Sandbox.get(spec.container_name, { client });
     expect((await got.labels())["isb-test"]).toBe("ts");
     const byMap = await Sandbox.listWith(
       { labels: { "isb-test-run": `${process.pid}`, "isb-test": null } },
       { client },
     );
-    expect(byMap.map((i) => i.name)).toEqual([spec.name]);
+    expect(byMap.map((i) => i.name)).toEqual([spec.container_name]);
     const byList = await Sandbox.listWith({ labels: [`isb-test-run=${process.pid}`] }, { client });
-    expect(byList.map((i) => i.name)).toEqual([spec.name]);
+    expect(byList.map((i) => i.name)).toEqual([spec.container_name]);
     const none = await Sandbox.listWith({ labels: { "isb-test-run": "no-such-run" } }, { client });
     expect(none).toEqual([]);
   });
@@ -244,14 +244,16 @@ describe.skipIf(!enabled)("integration", () => {
   test(
     "named volume with owner via Volume.named (reconciled onto the sandbox)",
     async () => {
+      // The mount names the definition's key; the incus volume is its `name`.
       const vol = `${PREFIX}-cache`;
+      const defs = { cache: { name: vol } };
       const withVol: SandboxSpec = {
         ...spec,
-        volumes: { "/home/dev/.cache/sdk": Volume.named(vol, { owner: "dev" }) },
+        volumes: [Volume.named("cache", "/home/dev/.cache/sdk", { owner: "dev" })],
       };
-      const plan = await Sandbox.plan(withVol, { client });
+      const plan = await Sandbox.plan(withVol, { volumes: defs, client });
       expect(plan.actions.map((a) => a.action)).toContain("create_volume");
-      const again = await Sandbox.connectOrCreate(withVol, { client });
+      const again = await Sandbox.connectOrCreate(withVol, { volumes: defs, client });
       const kinds = again.lastReport?.applied.map((a) => a.action) ?? [];
       expect(kinds).toContain("add_device");
       expect(kinds).toContain("fix_owner");
@@ -259,7 +261,7 @@ describe.skipIf(!enabled)("integration", () => {
       expect(r.stdoutText.trim()).toBe("dev");
       const info = await volumes.get(vol, { client });
       expect(info.name).toBe(vol);
-      expect(info.used_by.join(" ")).toContain(spec.name);
+      expect(info.used_by.join(" ")).toContain(spec.container_name);
       // In use: refused.
       expect(volumes.remove(vol, { client })).rejects.toBeDefined();
       // Detach it again (prune the device), then remove the volume.
@@ -298,15 +300,16 @@ describe.skipIf(!enabled)("integration", () => {
       writeFileSync(
         file,
         [
-          "sandboxes:",
+          "services:",
           "  web:",
           `    image: ${IMAGE}`,
-          "    labels: {isb-test: ts}",
-          '    env: {GREETING: "${GREETING}"}',
+          "    labels: [isb-test=ts]",
+          '    environment: {GREETING: "${GREETING}"}',
           "    volumes:",
-          "      /home/dev/src: {bind: ./src, device: src, readonly: true}",
+          "      - ./src:/home/dev/src:ro,device=src",
           "    ready: [running, {user_exists: dev}]",
-          "    exec: {user: dev, cwd: /home/dev/src}",
+          "    user: dev",
+          "    working_dir: /home/dev/src",
           "",
         ].join("\n"),
       );
@@ -317,7 +320,7 @@ describe.skipIf(!enabled)("integration", () => {
         client,
       });
       expect(proj.services).toEqual(["web"]);
-      expect(proj.spec("web").name).toBe(`${PREFIX}-proj-web`);
+      expect(proj.spec("web").container_name).toBe(`${PREFIX}-proj-web`);
 
       const plans = await proj.plan();
       expect(plans).toHaveLength(1);

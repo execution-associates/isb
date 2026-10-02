@@ -19,13 +19,13 @@
 #
 # Differences from the shell version:
 #   - No cleanup-before-add. A `vite` device left behind by a killed run that
-#     still listens inside its search range counts as correct and is kept (it
+#     still listens inside its published range counts as correct and is kept (it
 #     is this worktree's own container), and a stale `backend` pointing at an
 #     old port is replaced because it differs.
 #   - The free-port scan and the add are one step: isb probes the host port,
 #     then adds the device, and moves to the next port if either fails.
 
-sandboxes:
+services:
   web:
     ports:
       # container 127.0.0.1:8190 -> host 127.0.0.1:<backend port>. The backend
@@ -34,15 +34,15 @@ sandboxes:
         bind: guest
         listen: tcp:127.0.0.1:8190
         connect: "tcp:127.0.0.1:${LASSO_BACKEND_PORT:?set LASSO_BACKEND_PORT}"
-      # host <tailnet ip>:<first free port from 5173> -> container 127.0.0.1:5173.
-      # Vite binds loopback inside the container, so nothing else is published.
+      # host <tailnet ip>:<first free port of 5173-5223> -> container
+      # 127.0.0.1:5173. Vite binds loopback inside the container, so nothing
+      # else is published.
       - name: vite
-        bind: host
-        listen: "tcp:${LASSO_LISTEN_IP:?set LASSO_LISTEN_IP}:5173"
-        connect: tcp:127.0.0.1:5173
-        search: 50
-    # What the foreground `up` runs once the container is ready, with the exec
-    # defaults from lasso-dev.yaml (user dev, cwd src/web, mise shims on PATH).
+        host_ip: "${LASSO_LISTEN_IP:?set LASSO_LISTEN_IP}"
+        published: 5173-5223
+        target: 5173
+    # What the foreground `up` runs once the container is ready, as user dev in
+    # src/web with the mise shims on PATH (all from lasso-dev.yaml).
     # The backend proxy above makes the host backend 127.0.0.1:8190 in here.
     command:
       - sh

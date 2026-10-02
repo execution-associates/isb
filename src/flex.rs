@@ -59,19 +59,6 @@ pub(crate) fn opt_string<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Strin
     }))
 }
 
-pub(crate) fn opt_u16<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u16>, D::Error> {
-    let n = match IntOrString::deserialize(d)? {
-        IntOrString::Int(n) => n,
-        IntOrString::String(s) => s
-            .trim()
-            .parse::<u64>()
-            .map_err(|_| D::Error::custom(format!("expected a number, got {s:?}")))?,
-    };
-    u16::try_from(n)
-        .map(Some)
-        .map_err(|_| D::Error::custom(format!("{n} is out of range (max 65535)")))
-}
-
 /// A scalar (string, number or boolean) read as a string.
 #[derive(serde::Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
@@ -103,13 +90,137 @@ pub(crate) fn string_map<'de, D: Deserializer<'de>>(
     Ok(m.into_iter().map(|(k, v)| (k, v.into_string())).collect())
 }
 
-/// An argv whose items may be written as unquoted scalars
-/// (`command: [python3, -m, http.server, 8000]`).
-pub(crate) fn opt_string_vec<'de, D: Deserializer<'de>>(
+/// A map, or docker's list of `KEY=VALUE` strings.
+#[derive(Deserialize, JsonSchema)]
+#[serde(untagged)]
+#[allow(dead_code)]
+pub(crate) enum MapOrList {
+    Map(std::collections::BTreeMap<String, Scalar>),
+    List(Vec<String>),
+}
+
+fn map_or_list<'de, D: Deserializer<'de>>(
+    d: D,
+    bare: impl Fn(&str) -> Result<String, String>,
+) -> Result<std::collections::BTreeMap<String, String>, D::Error> {
+    match MapOrList::deserialize(d)? {
+        MapOrList::Map(m) => Ok(m.into_iter().map(|(k, v)| (k, v.into_string())).collect()),
+        MapOrList::List(l) => l
+            .into_iter()
+            .map(|item| match item.split_once('=') {
+                Some((k, v)) => Ok((k.to_string(), v.to_string())),
+                None => bare(&item).map(|v| (item.clone(), v)),
+            })
+            .collect::<Result<_, _>>()
+            .map_err(D::Error::custom),
+    }
+}
+
+/// Labels: a map or a list of `KEY=VALUE`; a bare `KEY` is an empty label,
+/// as in docker.
+pub(crate) fn string_map_or_list<'de, D: Deserializer<'de>>(
+    d: D,
+) -> Result<std::collections::BTreeMap<String, String>, D::Error> {
+    map_or_list(d, |_| Ok(String::new()))
+}
+
+/// An environment: a map or a list of `KEY=VALUE`. A compose file resolves a
+/// bare `KEY` from the environment before this sees it, as docker does; here,
+/// with nothing to resolve it against, it is an error.
+pub(crate) fn env_map_or_list<'de, D: Deserializer<'de>>(
+    d: D,
+) -> Result<std::collections::BTreeMap<String, String>, D::Error> {
+    map_or_list(d, |k| {
+        Err(format!(
+            "environment entry {k:?} has no value: write {k}=VALUE"
+        ))
+    })
+}
+
+/// A command: argv, or a string split the way a shell splits words.
+#[derive(Deserialize, JsonSchema)]
+#[serde(untagged)]
+#[allow(dead_code)]
+pub(crate) enum Command {
+    String(String),
+    Argv(Vec<Scalar>),
+}
+
+pub(crate) fn opt_command<'de, D: Deserializer<'de>>(
     d: D,
 ) -> Result<Option<Vec<String>>, D::Error> {
-    let v = Vec::<Scalar>::deserialize(d)?;
-    Ok(Some(v.into_iter().map(Scalar::into_string).collect()))
+    match Command::deserialize(d)? {
+        Command::Argv(v) => Ok(Some(v.into_iter().map(Scalar::into_string).collect())),
+        Command::String(s) => split_words(&s).map(Some).map_err(D::Error::custom),
+    }
+}
+
+/// Split a command line into words like a POSIX shell, without expanding
+/// anything: whitespace separates, quotes group, backslash escapes. Docker
+/// splits a string `command` the same way.
+pub fn split_words(s: &str) -> Result<Vec<String>, String> {
+    let mut words = Vec::new();
+    let mut cur = String::new();
+    let mut in_word = false;
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            c if c.is_whitespace() => {
+                if in_word {
+                    words.push(std::mem::take(&mut cur));
+                    in_word = false;
+                }
+            }
+            '\'' => {
+                in_word = true;
+                loop {
+                    match chars.next() {
+                        Some('\'') => break,
+                        Some(c) => cur.push(c),
+                        None => return Err(format!("unterminated ' in {s:?}")),
+                    }
+                }
+            }
+            '"' => {
+                in_word = true;
+                loop {
+                    match chars.next() {
+                        Some('"') => break,
+                        Some('\\') => match chars.next() {
+                            Some(c @ ('"' | '\\' | '$' | '`')) => cur.push(c),
+                            Some('\n') => {}
+                            Some(c) => {
+                                cur.push('\\');
+                                cur.push(c);
+                            }
+                            None => return Err(format!("unterminated \" in {s:?}")),
+                        },
+                        Some(c) => cur.push(c),
+                        None => return Err(format!("unterminated \" in {s:?}")),
+                    }
+                }
+            }
+            '\\' => {
+                in_word = true;
+                match chars.next() {
+                    Some('\n') => {}
+                    Some(c) => cur.push(c),
+                    None => return Err(format!("trailing \\ in {s:?}")),
+                }
+            }
+            c => {
+                in_word = true;
+                cur.push(c);
+            }
+        }
+    }
+    if in_word {
+        words.push(cur);
+    }
+    if words.is_empty() {
+        return Err("command is empty".into());
+    }
+    Ok(words)
 }
 
 pub(crate) fn string_map_map<'de, D: Deserializer<'de>>(
@@ -163,6 +274,20 @@ mod tests {
             Duration::from_millis(1500)
         );
         assert!(parse_duration("5 parsecs").is_err());
+    }
+
+    #[test]
+    fn words() {
+        assert_eq!(
+            split_words(r#"sh -c 'bun install && exec bun run dev'"#).unwrap(),
+            ["sh", "-c", "bun install && exec bun run dev"]
+        );
+        assert_eq!(
+            split_words(r#"echo "a \"b\" $X" c\ d ''"#).unwrap(),
+            ["echo", r#"a "b" $X"#, "c d", ""]
+        );
+        assert!(split_words("echo 'oops").is_err());
+        assert!(split_words("   ").is_err());
     }
 
     #[test]

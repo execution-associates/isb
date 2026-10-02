@@ -7,17 +7,22 @@ use serde_yaml_ng::Value;
 
 use crate::error::{Error, Result};
 use crate::interp;
-use crate::spec::{ComposeFile, SandboxSpec};
+use crate::spec::{ComposeFile, MountType, SandboxSpec};
 
 /// File names tried, in order, when no `-f` is given.
 pub const DEFAULT_FILES: &[&str] = &["isb.yaml", "isb.yml"];
+
+/// Override files merged over the default file when no `-f` is given, like
+/// docker's `compose.override.yaml`.
+pub const OVERRIDE_FILES: &[&str] = &["isb.override.yaml", "isb.override.yml"];
 
 /// A loaded, interpolated, merged compose project.
 #[derive(Debug, Clone)]
 pub struct Project {
     /// Project name (default sandbox names are `<name>-<service>`).
     pub name: String,
-    /// The merged file, with every sandbox's `name` filled in.
+    /// The merged file, with every service's `container_name` and every
+    /// volume's `name` filled in.
     pub file: ComposeFile,
     /// Directory of the first file: relative bind paths resolve against it.
     pub base_dir: PathBuf,
@@ -27,12 +32,12 @@ pub struct Project {
 impl Project {
     /// A sandbox by service name.
     pub fn service(&self, service: &str) -> Result<&SandboxSpec> {
-        self.file.sandboxes.get(service).ok_or_else(|| {
+        self.file.services.get(service).ok_or_else(|| {
             Error::invalid(format!(
-                "no sandbox {service:?} in {} (have: {})",
+                "no service {service:?} in {} (have: {})",
                 self.files_display(),
                 self.file
-                    .sandboxes
+                    .services
                     .keys()
                     .cloned()
                     .collect::<Vec<_>>()
@@ -44,7 +49,7 @@ impl Project {
     /// Service names in order, or the given subset (validated).
     pub fn select(&self, services: &[String]) -> Result<Vec<String>> {
         if services.is_empty() {
-            return Ok(self.file.sandboxes.keys().cloned().collect());
+            return Ok(self.file.services.keys().cloned().collect());
         }
         for s in services {
             self.service(s)?;
@@ -69,9 +74,11 @@ impl Project {
 /// How to load.
 #[derive(Debug, Clone, Default)]
 pub struct LoadOptions {
-    /// Compose files, merged in order. Empty: `isb.yaml` / `isb.yml` in the cwd.
+    /// Compose files, merged in order. Empty: `isb.yaml` / `isb.yml` in the
+    /// cwd, plus `isb.override.yaml` / `isb.override.yml` if present.
     pub files: Vec<PathBuf>,
     /// dotenv files for interpolation. The process environment wins over them.
+    /// Empty: `.env` next to the first compose file, if present.
     pub env_files: Vec<PathBuf>,
     /// Overrides the project name.
     pub project_name: Option<String>,
@@ -82,6 +89,14 @@ pub struct LoadOptions {
 /// Find the default compose file in `dir`, if any.
 pub fn find_default(dir: &Path) -> Option<PathBuf> {
     DEFAULT_FILES
+        .iter()
+        .map(|f| dir.join(f))
+        .find(|p| p.is_file())
+}
+
+/// Find the override file in `dir`, if any.
+pub fn find_override(dir: &Path) -> Option<PathBuf> {
+    OVERRIDE_FILES
         .iter()
         .map(|f| dir.join(f))
         .find(|p| p.is_file())
@@ -99,9 +114,26 @@ pub fn load(opts: &LoadOptions) -> Result<Project> {
                 cwd.display()
             ))
         })?);
+        files.extend(find_override(&cwd));
+    }
+    let base = files[0]
+        .parent()
+        .map(|p| {
+            if p.as_os_str().is_empty() {
+                PathBuf::from(".")
+            } else {
+                p.to_path_buf()
+            }
+        })
+        .unwrap_or_else(|| PathBuf::from("."));
+    let base = base.canonicalize().unwrap_or(base);
+    let mut env_files = opts.env_files.clone();
+    if env_files.is_empty() {
+        // Like docker: `.env` in the project directory, unless --env-file.
+        env_files.extend(Some(base.join(".env")).filter(|p| p.is_file()));
     }
     let mut dotenv: BTreeMap<String, String> = BTreeMap::new();
-    for f in &opts.env_files {
+    for f in &env_files {
         let text = std::fs::read_to_string(f).map_err(|e| Error::Parse {
             path: f.display().to_string(),
             message: e.to_string(),
@@ -128,17 +160,6 @@ pub fn load(opts: &LoadOptions) -> Result<Project> {
         })?;
         docs.push((f.clone(), text));
     }
-    let base = files[0]
-        .parent()
-        .map(|p| {
-            if p.as_os_str().is_empty() {
-                PathBuf::from(".")
-            } else {
-                p.to_path_buf()
-            }
-        })
-        .unwrap_or_else(|| PathBuf::from("."));
-    let base = base.canonicalize().unwrap_or(base);
     load_docs(&docs, &base, opts.project_name.as_deref(), &lookup)
 }
 
@@ -162,10 +183,12 @@ pub fn load_docs(
         }
         v.apply_merge().map_err(|e| perr(e.to_string()))?;
         strip_extensions(&mut v);
+        reject_docker_only_keys(&v).map_err(perr)?;
         interp::interpolate_yaml(&mut v, lookup).map_err(|e| perr(e.to_string()))?;
+        normalize_lists(&mut v, lookup);
         // Validate each file on its own too, for an error that names the file.
         serde_yaml_ng::from_value::<ComposeFile>(v.clone()).map_err(|e| perr(e.to_string()))?;
-        deep_merge(&mut merged, v);
+        merge_file(&mut merged, v);
     }
     let files: Vec<PathBuf> = docs.iter().map(|(p, _)| p.clone()).collect();
     let mut file: ComposeFile = serde_yaml_ng::from_value(merged).map_err(|e| Error::Parse {
@@ -185,9 +208,33 @@ pub fn load_docs(
                 .unwrap_or_else(|| "isb".into())
         });
     let name = sanitize_name(&name);
-    for (service, spec) in file.sandboxes.iter_mut() {
+    for (key, vol) in file.volumes.iter_mut() {
+        if vol.name.as_deref().is_none_or(str::is_empty) {
+            vol.name = Some(if vol.external {
+                key.clone()
+            } else {
+                format!("{name}_{key}")
+            });
+        }
+    }
+    for (service, spec) in file.services.iter_mut() {
         if spec.name.as_deref().is_none_or(str::is_empty) {
             spec.name = Some(format!("{name}-{}", sanitize_name(service)));
+        }
+        for v in &spec.volumes {
+            if v.mount_type == MountType::Volume && !file.volumes.contains_key(&v.source) {
+                return Err(Error::Parse {
+                    path: files
+                        .iter()
+                        .map(|p| p.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(" + "),
+                    message: format!(
+                        "service {service:?} mounts volume {:?}, which is not declared under top-level volumes",
+                        v.source
+                    ),
+                });
+            }
         }
     }
     file.name = Some(name.clone());
@@ -199,10 +246,10 @@ pub fn load_docs(
     })
 }
 
-/// A client for the project's incus project (`project:` in the file), unless
-/// `client` was already pointed elsewhere explicitly.
+/// A client for the project's incus project (`incus_project:` in the file),
+/// unless `client` was already pointed elsewhere explicitly.
 pub fn client_for(client: &crate::Client, project: &Project) -> crate::Client {
-    match (&project.file.project, client.project_name()) {
+    match (&project.file.incus_project, client.project_name()) {
         (Some(p), "default") => client.clone().project(p),
         _ => client.clone(),
     }
@@ -299,11 +346,21 @@ pub fn down(
     }
     let facts = crate::sandbox::host_facts(&c)?;
     let mut seen = std::collections::BTreeSet::new();
-    for spec in project.file.sandboxes.values() {
+    let vol_name = |key: &str| {
+        project
+            .file
+            .volumes
+            .get(key)
+            .and_then(|d| d.name.clone())
+            .unwrap_or_else(|| key.to_string())
+    };
+    for spec in project.file.services.values() {
         let pool = facts.pick_pool(spec.storage.as_deref())?;
-        for v in spec.volumes.values() {
-            let Some(vname) = &v.named else { continue };
-            let def = project.file.volumes.get(vname);
+        for v in &spec.volumes {
+            if v.mount_type != MountType::Volume {
+                continue;
+            }
+            let def = project.file.volumes.get(&v.source);
             if v.external || def.is_some_and(|d| d.external) {
                 continue;
             }
@@ -311,12 +368,13 @@ pub fn down(
                 Some(x) if x != "auto" => x.to_string(),
                 _ => pool.clone(),
             };
-            seen.insert((vpool, vname.clone()));
+            seen.insert((vpool, vol_name(&v.source)));
         }
     }
-    for (vname, def) in &project.file.volumes {
-        if !def.external && !seen.iter().any(|(_, n)| n == vname) {
-            seen.insert((facts.pick_pool(def.pool.as_deref())?, vname.clone()));
+    for (key, def) in &project.file.volumes {
+        let vname = vol_name(key);
+        if !def.external && !seen.iter().any(|(_, n)| *n == vname) {
+            seen.insert((facts.pick_pool(def.pool.as_deref())?, vname));
         }
     }
     for (pool, vname) in seen {
@@ -347,18 +405,230 @@ pub fn sanitize_name(s: &str) -> String {
     }
 }
 
-/// Drop `x-*` keys (compose-style extension fields, handy as YAML anchor
-/// holders) at the top level and inside each sandbox.
+/// Drop `x-*` keys (compose extension fields, handy as YAML anchor holders)
+/// at the top level and inside each service, and the obsolete `version`.
 fn strip_extensions(v: &mut Value) {
     let Value::Mapping(top) = v else { return };
-    top.retain(|k, _| !k.as_str().is_some_and(|s| s.starts_with("x-")));
-    if let Some(Value::Mapping(sbs)) = top.get_mut("sandboxes") {
+    top.retain(|k, _| {
+        !k.as_str()
+            .is_some_and(|s| s.starts_with("x-") || s == "version")
+    });
+    if let Some(Value::Mapping(sbs)) = top.get_mut("services") {
         for (_, sb) in sbs.iter_mut() {
             if let Value::Mapping(m) = sb {
                 m.retain(|k, _| !k.as_str().is_some_and(|s| s.starts_with("x-")));
             }
         }
     }
+}
+
+/// Docker compose keys isb has no equivalent for, with what to use instead.
+/// Anything else unknown is still rejected, by serde, as an unknown field.
+const DOCKER_ONLY_TOP: &[(&str, &str)] = &[
+    (
+        "networks",
+        "networking comes from incus profiles (incus_profiles)",
+    ),
+    ("configs", "bind-mount the file instead"),
+    ("secrets", "pass secrets per command with isb exec -e"),
+    ("include", "pass several files with -f"),
+    ("sandboxes", "services are under services:"),
+    ("project", "the incus project is incus_project:"),
+];
+
+const DOCKER_ONLY_SERVICE: &[(&str, &str)] = &[
+    (
+        "build",
+        "isb runs incus images: build one and name it in image",
+    ),
+    ("depends_on", "isb has no service dependencies"),
+    ("healthcheck", "use ready, isb's one-shot readiness checks"),
+    ("entrypoint", "use command"),
+    ("env_file", "list the variables under environment"),
+    ("restart", "sandboxes keep running until stopped"),
+    ("deploy", "use cpus, cpuset and mem_limit"),
+    (
+        "profiles",
+        "docker's service profiles are not supported; incus profiles are incus_profiles",
+    ),
+    (
+        "networks",
+        "networking comes from incus profiles (incus_profiles) or raw_devices",
+    ),
+    (
+        "network_mode",
+        "networking comes from incus profiles (incus_profiles) or raw_devices",
+    ),
+    ("hostname", "the guest's hostname is its container_name"),
+    ("expose", "use ports"),
+    ("devices", "use raw_devices"),
+    ("gpus", "use raw_devices, e.g. {gpu: {type: gpu}}"),
+    ("sysctls", "use raw_config with linux.sysctl.* keys"),
+    ("secrets", "pass secrets per command with isb exec -e"),
+    ("working_directory", "the key is working_dir"),
+    ("env", "the key is environment"),
+    ("memory", "the key is mem_limit"),
+    ("name", "the instance name is container_name"),
+];
+
+/// A friendly error for a docker compose key that isb does not support.
+fn reject_docker_only_keys(v: &Value) -> std::result::Result<(), String> {
+    let Value::Mapping(top) = v else {
+        return Ok(());
+    };
+    let unsupported = |key: &str, table: &[(&str, &str)], at: &str| {
+        table
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(k, hint)| format!("{at}`{k}` is not an isb key: {hint}"))
+    };
+    for k in top.keys().filter_map(Value::as_str) {
+        if let Some(e) = unsupported(k, DOCKER_ONLY_TOP, "") {
+            return Err(e);
+        }
+    }
+    if let Some(Value::Mapping(services)) = top.get("services") {
+        for (name, svc) in services {
+            let Value::Mapping(svc) = svc else { continue };
+            let at = format!("service {:?}: ", name.as_str().unwrap_or_default());
+            for k in svc.keys().filter_map(Value::as_str) {
+                if let Some(e) = unsupported(k, DOCKER_ONLY_SERVICE, &at) {
+                    return Err(e);
+                }
+            }
+            if let Some(Value::Mapping(exec)) = svc.get("exec") {
+                for (k, to) in [("user", "user"), ("cwd", "working_dir")] {
+                    if exec.contains_key(k) {
+                        return Err(format!(
+                            "{at}`exec.{k}` is not an isb key: use {to} on the service"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Turn docker's list forms of `environment`, `exec.env` and `labels` into
+/// maps, so files merge them key by key. A bare `KEY` in an environment takes
+/// its value from the variables used for interpolation, and is dropped when
+/// unset, as docker does; a bare label is empty.
+fn normalize_lists(v: &mut Value, lookup: &dyn Fn(&str) -> Option<String>) {
+    fn to_map(v: &mut Value, bare: &dyn Fn(&str) -> Option<String>) {
+        let Value::Sequence(items) = v else { return };
+        let mut m = serde_yaml_ng::Mapping::new();
+        for item in items.iter() {
+            let Some(s) = item.as_str() else {
+                // Leave it for serde to reject with a proper message.
+                return;
+            };
+            match s.split_once('=') {
+                Some((k, val)) => {
+                    m.insert(k.into(), val.into());
+                }
+                None => {
+                    if let Some(val) = bare(s) {
+                        m.insert(s.into(), val.into());
+                    }
+                }
+            }
+        }
+        *v = Value::Mapping(m);
+    }
+    let Some(Value::Mapping(services)) = v.get_mut("services") else {
+        return;
+    };
+    for (_, svc) in services.iter_mut() {
+        let Value::Mapping(svc) = svc else { continue };
+        if let Some(e) = svc.get_mut("environment") {
+            to_map(e, lookup);
+        }
+        if let Some(Value::Mapping(exec)) = svc.get_mut("exec") {
+            if let Some(e) = exec.get_mut("env") {
+                to_map(e, lookup);
+            }
+        }
+        if let Some(l) = svc.get_mut("labels") {
+            to_map(l, &|_| Some(String::new()));
+        }
+    }
+}
+
+/// Merge one file over the files before it, the way docker compose does:
+/// mappings merge key by key and scalars and lists are replaced, except a
+/// service's `ports`, which are appended, and its `volumes`, which merge by
+/// target.
+fn merge_file(merged: &mut Value, v: Value) {
+    let (Value::Mapping(am), Value::Mapping(bm)) = (&mut *merged, v) else {
+        // Files are mappings once parsed and validated.
+        return;
+    };
+    for (k, bv) in bm {
+        let is_services = k.as_str() == Some("services");
+        match am.get_mut(&k) {
+            Some(Value::Mapping(asvcs)) if is_services => {
+                let Value::Mapping(bsvcs) = bv else {
+                    am.insert(k, bv);
+                    continue;
+                };
+                for (name, bsvc) in bsvcs {
+                    match asvcs.get_mut(&name) {
+                        Some(asvc) => merge_service(asvc, bsvc),
+                        None => {
+                            asvcs.insert(name, bsvc);
+                        }
+                    }
+                }
+            }
+            Some(av) => deep_merge(av, bv),
+            None => {
+                am.insert(k, bv);
+            }
+        }
+    }
+}
+
+fn merge_service(a: &mut Value, b: Value) {
+    let (Value::Mapping(am), Value::Mapping(bm)) = (&mut *a, &b) else {
+        deep_merge(a, b);
+        return;
+    };
+    let bm = bm.clone();
+    for (k, bv) in bm {
+        match (k.as_str(), am.get_mut(&k), bv) {
+            (Some("ports"), Some(Value::Sequence(ap)), Value::Sequence(bp)) => {
+                for p in bp {
+                    if !ap.contains(&p) {
+                        ap.push(p);
+                    }
+                }
+            }
+            (Some("volumes"), Some(Value::Sequence(av)), Value::Sequence(bv)) => {
+                for m in bv {
+                    let t = mount_target(&m);
+                    match av.iter_mut().find(|x| t.is_some() && mount_target(x) == t) {
+                        Some(slot) => *slot = m,
+                        None => av.push(m),
+                    }
+                }
+            }
+            (_, Some(av), bv) => deep_merge(av, bv),
+            (_, None, bv) => {
+                am.insert(k, bv);
+            }
+        }
+    }
+}
+
+/// The guest path of a mount in either syntax, trailing `/` ignored.
+fn mount_target(m: &Value) -> Option<String> {
+    let t = match m {
+        Value::String(s) => s.split(':').nth(1)?.to_string(),
+        Value::Mapping(map) => map.get("target")?.as_str()?.to_string(),
+        _ => return None,
+    };
+    Some(t.trim_end_matches('/').to_string())
 }
 
 /// Merge `b` over `a`: mappings merge key by key, anything else is replaced.
@@ -400,35 +670,74 @@ mod tests {
 
     #[test]
     fn defaults_names_from_project() {
-        let p = load_with(&["sandboxes:\n  web: {image: dev-base}\n"], &[]).unwrap();
+        let p = load_with(&["services:\n  web: {image: dev-base}\n"], &[]).unwrap();
         assert_eq!(p.name, "my-project");
         assert_eq!(
-            p.file.sandboxes["web"].name.as_deref(),
+            p.file.services["web"].name.as_deref(),
             Some("my-project-web")
         );
-        let p = load_with(&["name: lasso\nsandboxes:\n  Web_1: {image: x}\n"], &[]).unwrap();
+        let p = load_with(&["name: lasso\nservices:\n  Web_1: {image: x}\n"], &[]).unwrap();
         assert_eq!(
-            p.file.sandboxes["Web_1"].name.as_deref(),
+            p.file.services["Web_1"].name.as_deref(),
             Some("lasso-web-1")
         );
     }
 
     #[test]
+    fn named_volumes_are_project_prefixed() {
+        let p = load_with(
+            &["name: app\nvolumes:\n  cache: {}\n  shared: {external: true}\n  pinned: {name: exactly-this}\nservices:\n  web:\n    image: x\n    volumes: [cache:/c, shared:/s, pinned:/p]\n"],
+            &[],
+        )
+        .unwrap();
+        let v = &p.file.volumes;
+        assert_eq!(v["cache"].name.as_deref(), Some("app_cache"));
+        assert_eq!(v["shared"].name.as_deref(), Some("shared"));
+        assert_eq!(v["pinned"].name.as_deref(), Some("exactly-this"));
+        // Mounts keep the key; resolution maps it to the volume's name.
+        assert_eq!(p.file.services["web"].volumes[0].source, "cache");
+    }
+
+    #[test]
+    fn undeclared_named_volume_is_an_error() {
+        let e = load_with(
+            &["services:\n  web: {image: x, volumes: [cache:/c]}\n"],
+            &[],
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("\"cache\"") && e.contains("not declared"), "{e}");
+    }
+
+    #[test]
     fn interpolates_and_types() {
         let p = load_with(
-            &["sandboxes:\n  web:\n    name: \"${NAME}\"\n    image: dev-base\n    cpus: ${CPUS:-8}\n    labels: {wt: \"${WT}\"}\n"],
+            &["services:\n  web:\n    container_name: \"${NAME}\"\n    image: dev-base\n    cpus: ${CPUS:-8}\n    labels: {wt: \"${WT}\"}\n"],
             &[("NAME", "dev-x"), ("WT", "/w")],
         )
         .unwrap();
-        let w = &p.file.sandboxes["web"];
+        let w = &p.file.services["web"];
         assert_eq!(w.name.as_deref(), Some("dev-x"));
         assert_eq!(w.cpus.as_deref(), Some("8"));
         assert_eq!(w.labels["wt"], "/w");
     }
 
     #[test]
+    fn bare_environment_keys_come_from_the_environment() {
+        let p = load_with(
+            &["services:\n  web:\n    image: x\n    environment: [SET, UNSET, A=1]\n    exec: {env: [SET]}\n"],
+            &[("SET", "yes")],
+        )
+        .unwrap();
+        let w = &p.file.services["web"];
+        assert_eq!(w.env.len(), 2);
+        assert_eq!(w.env["SET"], "yes");
+        assert_eq!(w.exec.env["SET"], "yes");
+    }
+
+    #[test]
     fn unset_variable_is_an_error_naming_the_file() {
-        let e = load_with(&["sandboxes:\n  web: {image: \"${IMG}\"}\n"], &[])
+        let e = load_with(&["services:\n  web: {image: \"${IMG}\"}\n"], &[])
             .unwrap_err()
             .to_string();
         assert!(e.contains("f0.yaml") && e.contains("IMG"), "{e}");
@@ -438,46 +747,70 @@ mod tests {
     fn later_files_merge_over_earlier() {
         let p = load_with(
             &[
-                "sandboxes:\n  web:\n    image: dev-base\n    cpus: 8\n    labels: {a: '1'}\n",
-                "sandboxes:\n  web:\n    cpus: 4\n    labels: {b: '2'}\n    ports:\n      - {name: vite, listen: 'tcp:1.2.3.4:5173', connect: 'tcp:127.0.0.1:5173'}\n",
+                "services:\n  web:\n    image: dev-base\n    cpus: 8\n    labels: [a=1]\n    environment: [X=1]\n    ports: [8080:80]\n    volumes: [./a:/a, ./b:/b]\n    command: [one]\n",
+                "services:\n  web:\n    cpus: 4\n    labels: {b: '2'}\n    environment: [Y=2]\n    ports: [8080:80, 9090:90]\n    volumes: ['./c:/a/:ro']\n    command: two three\n",
             ],
             &[],
         )
         .unwrap();
-        let w = &p.file.sandboxes["web"];
+        let w = &p.file.services["web"];
         assert_eq!(w.image, "dev-base");
         assert_eq!(w.cpus.as_deref(), Some("4"));
         assert_eq!(w.labels.len(), 2);
-        assert_eq!(w.ports.len(), 1);
+        assert_eq!(w.env.len(), 2);
+        // Ports append (an identical entry once); volumes merge by target.
+        assert_eq!(w.ports.len(), 2);
+        assert_eq!(w.volumes.len(), 2);
+        assert_eq!(w.volumes[0].source, "./c");
+        assert!(w.volumes[0].read_only);
+        assert_eq!(w.volumes[1].source, "./b");
+        assert_eq!(w.command.as_deref().unwrap(), ["two", "three"]);
     }
 
     #[test]
-    fn extension_keys_and_anchors() {
+    fn extension_keys_anchors_and_version() {
         let p = load_with(
-            &["x-common: &common\n  image: dev-base\n  cpus: 2\nsandboxes:\n  a:\n    <<: *common\n    x-note: hi\n  b:\n    <<: *common\n    cpus: 3\n"],
+            &["version: '3.8'\nx-common: &common\n  image: dev-base\n  cpus: 2\nservices:\n  a:\n    <<: *common\n    x-note: hi\n  b:\n    <<: *common\n    cpus: 3\n"],
             &[],
         )
         .unwrap();
-        assert_eq!(p.file.sandboxes["a"].cpus.as_deref(), Some("2"));
-        assert_eq!(p.file.sandboxes["b"].cpus.as_deref(), Some("3"));
-        assert_eq!(p.file.sandboxes["b"].image, "dev-base");
+        assert_eq!(p.file.services["a"].cpus.as_deref(), Some("2"));
+        assert_eq!(p.file.services["b"].cpus.as_deref(), Some("3"));
+        assert_eq!(p.file.services["b"].image, "dev-base");
     }
 
     #[test]
     fn unknown_fields_rejected() {
-        let e = load_with(&["sandboxes:\n  web: {image: x, mem: 1}\n"], &[])
+        let e = load_with(&["services:\n  web: {image: x, mem: 1}\n"], &[])
             .unwrap_err()
             .to_string();
         assert!(e.contains("mem"), "{e}");
-        let e = load_with(&["sandbox:\n  web: {image: x}\n"], &[])
+        let e = load_with(&["service:\n  web: {image: x}\n"], &[])
             .unwrap_err()
             .to_string();
-        assert!(e.contains("sandbox"), "{e}");
+        assert!(e.contains("service"), "{e}");
+    }
+
+    #[test]
+    fn docker_only_keys_get_a_hint() {
+        let hint = |doc: &str| load_with(&[doc], &[]).unwrap_err().to_string();
+        let e = hint("services:\n  web: {image: x, build: .}\n");
+        assert!(e.contains("`build`") && e.contains("image"), "{e}");
+        let e = hint("services:\n  web: {image: x, healthcheck: {}}\n");
+        assert!(e.contains("ready"), "{e}");
+        let e = hint("services:\n  web: {image: x, profiles: [dev]}\n");
+        assert!(e.contains("incus_profiles"), "{e}");
+        let e = hint("networks: {}\nservices: {}\n");
+        assert!(e.contains("`networks`"), "{e}");
+        let e = hint("sandboxes:\n  web: {image: x}\n");
+        assert!(e.contains("services"), "{e}");
+        let e = hint("services:\n  web: {image: x, exec: {user: dev}}\n");
+        assert!(e.contains("user on the service"), "{e}");
     }
 
     #[test]
     fn select_services() {
-        let p = load_with(&["sandboxes:\n  a: {image: x}\n  b: {image: x}\n"], &[]).unwrap();
+        let p = load_with(&["services:\n  a: {image: x}\n  b: {image: x}\n"], &[]).unwrap();
         assert_eq!(p.select(&[]).unwrap(), vec!["a", "b"]);
         assert_eq!(p.select(&["b".into()]).unwrap(), vec!["b"]);
         assert!(p.select(&["c".into()]).is_err());

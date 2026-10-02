@@ -42,24 +42,32 @@ on that host, so treat any isb call as privileged.
 
 ## The compose file
 
+It is docker compose's format: `services:`, `container_name`, `environment`,
+`volumes` and `ports` in docker's short or long syntax, `user`, `working_dir`,
+`command`, `mem_limit`. The incus-only keys are `type: vm`, `storage`, `idmap`,
+`ready`, `incus_profiles`, `raw_config` and `raw_devices`.
+
 ```yaml
 # isb.yaml
-sandboxes:
+volumes:
+  cache: {}                                   # incus volume <project>_cache
+services:
   web:
     image: images:ubuntu/24.04        # or a local alias; images:debian/13, ...
     cpus: 2
-    memory: 2GiB
+    mem_limit: 2g
     idmap: auto                       # files created inside stay owned by you
     labels: { owner: "${USER}" }
     volumes:
-      /home/ubuntu/src: { bind: ./src }                  # host path, relative to this file
-      /home/ubuntu/.cache: { named: web-cache, owner: ubuntu }   # outlives the sandbox
+      - ./src:/home/ubuntu/src                       # host path, relative to this file
+      - cache:/home/ubuntu/.cache:owner=ubuntu       # outlives the sandbox
     ports:
-      - { listen: 8000, connect: 8000 }                  # host 127.0.0.1:8000 -> guest :8000
-      - { bind: guest, listen: 9000, connect: 9000 }     # guest :9000 -> one host service
+      - "8000:8000"                                  # host 127.0.0.1:8000 -> guest :8000
+      - { bind: guest, listen: 9000, connect: 9000 } # guest :9000 -> one host service
     ready: [running, default_route, { user_exists: ubuntu }]
-    exec: { user: ubuntu, cwd: /home/ubuntu/src }
-    command: [sh, -c, "npm ci && exec npm run dev"]      # what a foreground `isb up` runs
+    user: ubuntu
+    working_dir: /home/ubuntu/src
+    command: sh -c "npm ci && exec npm run dev"      # what a foreground `isb up` runs
 ```
 
 ```sh
@@ -67,7 +75,7 @@ isb plan                 # what would change (--exit-code: 2 if anything)
 isb up                   # create or reconcile, wait for `ready`, run `command`,
                          # and BLOCK until it exits; then stop the sandboxes
 isb up -d                # create or reconcile, wait for `ready`, return
-isb exec web -- ls -la   # runs with the service's exec defaults
+isb exec web -- ls -la   # runs as the service's user, in its working_dir
 isb ps                   # status of the file's sandboxes
 isb config               # the file with every ${VAR} filled in
 isb down                 # delete them (--volumes also deletes named volumes)
@@ -84,11 +92,16 @@ sandboxes. So:
 
 Field reference: `docs/spec.md` in the repo, or `isb schema` for the JSON Schema.
 
-- `${VAR}` comes from the environment (and `--env-file`); an unset `${VAR}` is
-  an error, so use `${VAR:-default}` when empty is fine.
-- Ports take shorthand: `5173`, `0.0.0.0:5173`, `5353/udp`, or full
-  `tcp:HOST:PORT`. Protocol defaults to tcp, host to 127.0.0.1. `search: 20`
-  steps past taken host ports; `isb port get NAME DEVICE` prints the one in use.
+- `${VAR}` comes from the environment, then `.env` next to the file (or
+  `--env-file`); an unset `${VAR}` is an error, so use `${VAR:-default}` when
+  empty is fine. `isb.override.yaml` is merged over `isb.yaml` when present.
+- Where it differs from docker: ports listen on **127.0.0.1** unless you write
+  an address (`"0.0.0.0:8080:80"`), and need the host port (`"80"` alone is an
+  error). A published range (`"5173-5223:5173"`) takes the first free port;
+  `isb port get NAME DEVICE` prints the one in use. Named volumes are
+  `<project>_<key>`; set `name:` on the volume to share one across projects.
+  Docker keys with no isb equivalent (`build`, `depends_on`, `healthcheck`,
+  `networks`) are errors that say what to use instead.
 - Readiness checks: `running`, `default_route`, `agent` (VMs), `{user_exists:
   U}`, `{path_writable: P}`, `{command: [argv]}`. Default deadline 60s (300s VM).
 
@@ -121,7 +134,7 @@ from isb import Sandbox, Volume
 sb = await Sandbox.connect_or_create(
     "task1",
     image="images:ubuntu/24.04",
-    volumes={"/work": Volume.bind("./repo")},
+    volumes=[Volume.bind("./repo", "/work")],
     labels={"owner": "me"},
 )
 out = await sb.exec("make", ["test"], cwd="/work")
@@ -135,9 +148,9 @@ TypeScript (`bun add @execution-associates/isb`):
 import { Sandbox, Volume } from "@execution-associates/isb";
 
 const sb = await Sandbox.connectOrCreate({
-  name: "task1",
+  container_name: "task1",
   image: "images:ubuntu/24.04",
-  volumes: { "/work": Volume.bind("./repo") },
+  volumes: [Volume.bind("./repo", "/work")],
 });
 const out = await sb.exec("make", ["test"], { cwd: "/work" });
 console.log(out.exitCode, out.stdoutText);
@@ -154,7 +167,7 @@ and `Project.load("isb.yaml")` with `up()`, `plan()` and `down()`.
 - **`isb up` never deletes what it was not told about.** Config keys and devices
   added by hand or by another tool stay put; `--prune-devices` removes unknown
   devices. Removing a field from the spec does not unset it on the instance.
-- **The image, storage pool, profiles and type are fixed at creation.** `plan`
+- **The image, storage pool, incus profiles and type are fixed at creation.** `plan`
   reports drift in them as a note; recreate (`isb down` then `isb up`) to change
   them.
 - **A correct mount is never re-added**, so a dev server's file watching keeps
@@ -162,6 +175,6 @@ and `Project.load("isb.yaml")` with `up()`, `plan()` and `down()`.
 - **VMs** need a VM image (`images:ubuntu/24.04/cloud`), take tens of seconds to
   boot, and wait for the incus agent before `exec` works. Host edits to a shared
   folder do not reach file watchers inside a VM (use polling). Port forwards into
-  a VM must be `bind: host`, and must not listen on host 127.0.0.1.
+  a VM must be host-bound, and must not listen on host 127.0.0.1.
 - A stalled incus step fails with the step's name and a deadline rather than
   hanging; `--create-timeout 20m` allows slow image downloads.

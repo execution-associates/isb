@@ -6,7 +6,8 @@ isb COMMAND --help    # one command's flags
 ```
 
 ```text
-isb create NAME -i IMAGE [--vm] [--cpus N] [-m MEM] [-v SRC:GUEST[:ro,owner=U]] [-p [IP:]HOST:GUEST]
+isb create NAME -i IMAGE [--vm] [--cpus N] [--cpuset-cpus SET] [-m MEM] [-v SRC:GUEST[:ro,owner=U]]
+                         [-p [IP:]PUBLISHED:TARGET]
                          [-l k=v] [-e K=V] [--idmap auto] [--ready CHECK] [--ensure]
 isb start|stop|restart|rm NAME...
 isb ls [--label k[=v]] [--json]            list, filtered by label
@@ -20,7 +21,7 @@ isb device ls|rm NAME ...
 isb prune --label KEY --missing-path [-y]  delete sandboxes whose label is a vanished host path
 isb schema                                 JSON Schema of the YAML format
 
-# compose (-f FILE, repeatable; default ./isb.yaml)
+# compose (-f FILE, repeatable; default ./isb.yaml plus ./isb.override.yaml)
 isb up [SERVICE...] [-d] [--no-log-prefix] [-t D] [--prune-devices] [--no-ready] [--json]
 isb plan [SERVICE...] [--json] [--exit-code]
 isb down [SERVICE...] [--volumes]
@@ -45,8 +46,10 @@ and 1 on error.
 **`prune`** is a dry run unless given `-y`, and never touches a sandbox without
 the label, or one whose path still exists.
 
-**Compose files** are found as `./isb.yaml` (or `isb.yml`) unless `-f FILE` is
-given; several `-f` files merge in order. See
+**Compose files** are found as `./isb.yaml` (or `isb.yml`), with
+`./isb.override.yaml` merged over it if present, unless `-f FILE` is given;
+several `-f` files merge in order. `.env` next to the first file supplies
+`${VAR}`s unless `--env-file` is given. See
 [spec.md](spec.md#files-and-validation).
 
 **Global flags:** `--socket PATH` (default `$INCUS_SOCKET`, else

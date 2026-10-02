@@ -9,9 +9,9 @@ export {
   type BindOptions,
   type HostPortOptions,
   type NamedOptions,
-  NamedVolumeMode,
   PortBinding,
   type PortOptions,
+  type PublishOptions,
   Volume,
 } from "./builders.js";
 export {
@@ -56,6 +56,7 @@ export {
 export {
   type CreateOptions,
   type EnsureOptions,
+  execDefaultsOf,
   type ListOptions,
   type PlanOptions,
   type ProgressHandler,
@@ -69,19 +70,25 @@ export {
 export type * as spec from "./spec.js";
 export type {
   BoolOrString,
+  Command,
   ComposeFile,
-  ExecDefaults,
+  ExecSpec,
   IdmapMap,
   IdmapMode,
   IdmapRaw,
   IdmapSpec,
   InstanceType,
   IntOrString,
+  MapOrList,
+  MountType,
   NamedVolumeSpec,
   PortBind,
+  PortMapping,
   PortSpec,
+  ProxyPort,
   ReadyCheck,
   Scalar,
+  VolumeMount,
   VolumeSpec,
 } from "./spec.js";
 export type { Spawner } from "./transport.js";
@@ -89,6 +96,7 @@ export {
   type Action,
   type ActionKind,
   type ApplyReport,
+  type ExecDefaults,
   type Plan,
   type Props,
   type PruneItem,
