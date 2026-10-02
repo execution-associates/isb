@@ -417,8 +417,32 @@ pub struct VolumeSpec {
     pub owner: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub device: Option<String>,
+    #[serde(skip_serializing_if = "VolumeOptions::is_default")]
+    pub volume: VolumeOptions,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub options: BTreeMap<String, String>,
+}
+
+/// docker's `volume:` block of a long-form mount.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VolumeOptions {
+    /// Named volumes only: do not seed an empty volume with what the image has
+    /// at `target`. Seeding is docker's default; isb does it in containers
+    /// (incus `initial.copy`) when the server supports it.
+    #[serde(
+        default,
+        deserialize_with = "flex::bool",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    #[schemars(with = "flex::BoolOrString")]
+    pub nocopy: bool,
+}
+
+impl VolumeOptions {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// The long form of a mount.
@@ -466,6 +490,10 @@ pub(crate) struct VolumeMount {
     #[serde(default)]
     device: Option<String>,
 
+    /// docker's volume options (`nocopy`).
+    #[serde(default)]
+    volume: VolumeOptions,
+
     /// Extra disk device properties (`shift`, `propagation`, ...), verbatim.
     #[serde(default, deserialize_with = "flex::string_map")]
     #[schemars(with = "BTreeMap<String, flex::Scalar>")]
@@ -493,6 +521,7 @@ impl From<VolumeMount> for VolumeSpec {
             pool: m.pool,
             owner: m.owner,
             device: m.device,
+            volume: m.volume,
             options: m.options,
         }
     }
@@ -1007,6 +1036,11 @@ impl VolumeSpec {
     }
     pub fn pool(mut self, pool: impl Into<String>) -> Self {
         self.pool = Some(pool.into());
+        self
+    }
+    /// Named volumes: do not seed an empty volume from the image.
+    pub fn nocopy(mut self, nocopy: bool) -> Self {
+        self.volume.nocopy = nocopy;
         self
     }
     pub fn option(mut self, k: impl Into<String>, v: impl Into<String>) -> Self {

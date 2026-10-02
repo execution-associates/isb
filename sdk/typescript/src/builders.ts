@@ -23,6 +23,8 @@ export interface NamedOptions extends BindOptions {
   owner?: string | number;
   /** Storage pool (default: the top-level volume's pool, else the sandbox's root pool). */
   pool?: string;
+  /** Do not seed an empty volume with what the image has at `target`. */
+  nocopy?: boolean;
 }
 
 function mount(
@@ -58,6 +60,7 @@ export const Volume = {
     if (opts.external) v.external = true;
     if (opts.owner !== undefined) v.owner = opts.owner;
     if (opts.pool !== undefined) v.pool = opts.pool;
+    if (opts.nocopy) v.volume = { nocopy: true };
     return v;
   },
 };

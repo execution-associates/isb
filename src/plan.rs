@@ -35,6 +35,8 @@ pub struct HostFacts {
     /// path incusd resolves can differ from the one this process sees (see
     /// [`HostFacts::detect_path_map`]).
     pub path_map: Option<(String, String)>,
+    /// The server can seed a new volume from the image (`disk_initial_copy`).
+    pub initial_copy: bool,
 }
 
 impl HostFacts {
@@ -548,9 +550,9 @@ pub fn resolve(
                         "{name}: {guest}: owner is only for named volumes (isb never chowns host paths)"
                     )));
                 }
-                if v.pool.is_some() || v.external {
+                if v.pool.is_some() || v.external || v.volume.nocopy {
                     return Err(Error::invalid(format!(
-                        "{name}: {guest}: pool and external are only for named volumes"
+                        "{name}: {guest}: pool, external and nocopy are only for named volumes"
                     )));
                 }
                 let src = resolve_host_path(&v.source, base)?;
@@ -569,6 +571,12 @@ pub fn resolve(
                 };
                 props.insert("pool".into(), vpool.clone());
                 props.insert("source".into(), n.clone());
+                // docker seeds an empty named volume with the image's content at
+                // the target. incus does the same with initial.copy, containers
+                // only; an older server just mounts it empty, as isb always did.
+                if !vm && host.initial_copy && !v.volume.nocopy {
+                    props.insert("initial.copy".into(), "true".into());
+                }
                 let ev = EnsureVolume {
                     pool: vpool,
                     name: n.clone(),
@@ -973,8 +981,14 @@ fn normalize(p: &Props) -> Props {
 
 /// Whether an existing device satisfies a desired one.
 pub fn device_matches(desired: &DesiredDevice, actual: &Props) -> bool {
-    let d = normalize(&desired.props);
-    let a = normalize(actual);
+    let mut d = normalize(&desired.props);
+    let mut a = normalize(actual);
+    // initial.copy only acts the first time a volume is used, so a disk that
+    // differs in nothing else is correct, and replacing it would remount it.
+    if d.get("type").map(String::as_str) == Some("disk") {
+        d.remove("initial.copy");
+        a.remove("initial.copy");
+    }
     if d == a {
         return true;
     }
@@ -1252,6 +1266,7 @@ mod tests {
             },
             pools: vec!["container-roots".into(), "default".into()],
             path_map: None,
+            initial_copy: false,
         }
     }
 
@@ -1302,6 +1317,55 @@ mod tests {
         assert!(h.pick_pool(Some("nope")).is_err());
         h.pools.clear();
         assert!(h.pick_pool(None).is_err());
+    }
+
+    #[test]
+    fn named_volumes_seed_from_the_image_when_the_server_can() {
+        let t = tmp();
+        let web = t.path().to_str().unwrap();
+        let spec = lasso_spec(web).volume("/srv/plain", Volume::named("plain").nocopy(true));
+        let copy = |h: &HostFacts, s: &SandboxSpec| {
+            let d = resolve(s, &VolumeDefs::new(), h, Path::new("/")).unwrap();
+            ["bun-cache", "web", "srv-plain"]
+                .map(|k| d.devices[k].props.get("initial.copy").cloned())
+        };
+        // An older server: no key anywhere, the behavior isb always had.
+        assert_eq!(copy(&host(), &spec), [None, None, None]);
+        let mut h = host();
+        h.initial_copy = true;
+        // Named volumes only, and nocopy opts out.
+        assert_eq!(copy(&h, &spec), [Some("true".into()), None, None]);
+        // Not in a VM: incus only seeds container volumes.
+        let mut vm = SandboxSpec::new("vm-x", "dev-base").volume("/c", Volume::named("c"));
+        vm.instance_type = InstanceType::VirtualMachine;
+        let d = resolve(&vm, &VolumeDefs::new(), &h, Path::new("/")).unwrap();
+        assert!(!d.devices["c"].props.contains_key("initial.copy"));
+        // nocopy on a bind mount is an error, as are pool and external.
+        let bad = lasso_spec(web).volume("/x", Volume::bind(web).nocopy(true));
+        assert!(resolve(&bad, &VolumeDefs::new(), &h, Path::new("/")).is_err());
+    }
+
+    #[test]
+    fn initial_copy_alone_never_replaces_a_disk() {
+        let t = tmp();
+        let web = t.path().to_str().unwrap();
+        // A sandbox made before the server could seed volumes, then reconciled
+        // after the upgrade: its volume must not be remounted.
+        let old = resolve(
+            &lasso_spec(web),
+            &VolumeDefs::new(),
+            &host(),
+            Path::new("/"),
+        )
+        .unwrap();
+        let mut h = host();
+        h.initial_copy = true;
+        let new = resolve(&lasso_spec(web), &VolumeDefs::new(), &h, Path::new("/")).unwrap();
+        assert!(new.devices["bun-cache"].props.contains_key("initial.copy"));
+        assert!(device_matches(
+            &new.devices["bun-cache"],
+            &actual_from(&old).devices["bun-cache"]
+        ));
     }
 
     #[test]

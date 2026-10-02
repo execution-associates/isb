@@ -380,6 +380,16 @@ export interface VolumeMount {
    * `source` starts with `/`, `.` or `~`, else `volume`.
    */
   type?: MountType | null;
+  volume?: VolumeOptions;
+}
+/**
+ * docker's `volume:` block of a long-form mount.
+ *
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "VolumeOptions".
+ */
+export interface VolumeOptions {
+  nocopy?: BoolOrString;
 }
 /**
  * A named custom storage volume.
