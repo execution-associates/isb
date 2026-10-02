@@ -50,13 +50,15 @@ class Volume:
         pool: Optional[str] = None,
         device: Optional[str] = None,
         options: Optional[Mapping[str, Scalar]] = None,
+        nocopy: bool = False,
     ) -> VolumeMount:
         """Mount the named custom volume `source` at `target` in the guest.
 
         `source` is a key of the top-level volume definitions (`named_volumes`),
         whose `name` is the incus volume; without a definition it is the incus
         volume name itself. The volume is created if missing unless `external`.
-        `owner` chowns the mount point to that guest user once attached."""
+        `owner` chowns the mount point to that guest user once attached.
+        `nocopy` skips seeding an empty volume with the image's content."""
         v: VolumeMount = {"type": "volume", "source": source, "target": target}
         if external:
             v["external"] = True
@@ -70,6 +72,8 @@ class Volume:
             v["device"] = device
         if options:
             v["options"] = dict(options)
+        if nocopy:
+            v["volume"] = {"nocopy": True}
         return v
 
 

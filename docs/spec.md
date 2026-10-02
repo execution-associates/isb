@@ -320,7 +320,7 @@ trailing `/` ignored) is an error.
 or `~` is a host path (a bind mount); anything else is the key of a named volume.
 `TARGET` is absolute. `OPTIONS` is a comma list of `ro`, `rw`, docker's
 propagation modes (`shared`, `rslave`, ...), `z`/`Z` (ignored), and isb's
-`owner=USER`, `device=NAME`, `pool=POOL`, `external`. There are no anonymous
+`owner=USER`, `device=NAME`, `pool=POOL`, `external`, and docker's `nocopy`. There are no anonymous
 volumes, so a bare `TARGET` is an error.
 
 **Long syntax:**
@@ -334,11 +334,12 @@ volumes, so a bare `TARGET` is an error.
 | `external` | volume | bool | `false` | The volume must already exist. |
 | `pool` | volume | string | see below | Pool of the named volume. |
 | `owner` | volume | string or int | | chown the mount point in the guest. |
+| `volume.nocopy` | volume | bool | `false` | Do not seed the volume from the image (see below). |
 | `device` | both | string | derived | incus device name. |
 | `options` | both | map of string | `{}` | Extra disk device properties (`shift`, `propagation`, ...), verbatim. |
 
-`owner`, `pool` and `external` on a bind mount are errors (isb never chowns host
-paths).
+`owner`, `pool`, `external` and `volume.nocopy` on a bind mount are errors (isb
+never chowns host paths).
 
 **Device.** A bind mount becomes `{type: disk, path: GUEST, source: HOST}`; a
 named mount becomes `{type: disk, path: GUEST, pool: POOL, source: NAME}`, plus
@@ -379,6 +380,15 @@ exist.
 
 **`external`.** True on either the mount or the top-level volume makes the
 volume required: `plan` and `up` fail if it does not exist.
+
+**Seeding.** As in docker, a named volume that is empty the first time it is
+used starts as a copy of what the image has at the target, ownership included,
+so a seeded mount needs no `owner`. isb adds `initial.copy: "true"` to the
+device when the instance is a container and the server has the
+`disk_initial_copy` API extension; `nocopy` leaves it off. On an older server,
+or in a VM, the volume is mounted empty. Because the key only acts on first use,
+a disk that differs from the spec in nothing but `initial.copy` is correct and
+is not replaced, so upgrading isb or incus never remounts an existing volume.
 
 **`owner`.** `USER`, `USER:GROUP`, or a numeric uid (`1000`, `1000:1000`). After
 the volume is attached, isb runs a script in the guest as root:

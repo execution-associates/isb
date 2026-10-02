@@ -57,12 +57,13 @@ pub fn volume(s: &str) -> Result<VolumeSpec> {
                     v.options.insert("propagation".into(), o.into());
                 }
                 None if o == "external" => v.external = true,
+                None if o == "nocopy" => v.volume.nocopy = true,
                 Some(("owner", u)) => v.owner = Some(u.into()),
                 Some(("device", d)) => v.device = Some(d.into()),
                 Some(("pool", p)) => v.pool = Some(p.into()),
                 _ => {
                     return Err(Error::invalid(format!(
-                        "volume {s:?}: unknown option {o:?} (ro, rw, owner=, device=, pool=, external)"
+                        "volume {s:?}: unknown option {o:?} (ro, rw, nocopy, owner=, device=, pool=, external)"
                     )));
                 }
             }

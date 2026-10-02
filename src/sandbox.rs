@@ -156,10 +156,14 @@ pub fn host_facts(client: &Client) -> Result<HostFacts> {
                 .collect()
         })
         .unwrap_or_default();
+    let initial_copy = client.server_info()?["api_extensions"]
+        .as_array()
+        .is_some_and(|a| a.iter().any(|e| e == "disk_initial_copy"));
     Ok(HostFacts {
         subids: SubIds::read_host(),
         pools,
         path_map: HostFacts::detect_path_map(),
+        initial_copy,
     })
 }
 

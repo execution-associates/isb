@@ -221,6 +221,16 @@ class VolumeMount(_VolumeMountRequired, total=False):
     #: `bind` (a host path) or `volume` (a named volume). Default: `bind` when
     #: `source` starts with `/`, `.` or `~`, else `volume`.
     type: Optional[MountType]
+    #: docker's volume options (`nocopy`).
+    volume: VolumeOptions
+
+
+class VolumeOptions(TypedDict, total=False):
+    """docker's `volume:` block of a long-form mount."""
+    #: Named volumes only: do not seed an empty volume with what the image has
+    #: at `target`. Seeding is docker's default; isb does it in containers
+    #: (incus `initial.copy`) when the server supports it.
+    nocopy: BoolOrString
 
 
 class ComposeFile(TypedDict, total=False):
@@ -331,5 +341,6 @@ __all__ = [
     "SandboxSpecFields",
     "Scalar",
     "VolumeMount",
+    "VolumeOptions",
     "VolumeSpec",
 ]

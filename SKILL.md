@@ -100,6 +100,9 @@ Field reference: `docs/spec.md` in the repo, or `isb schema` for the JSON Schema
   error). A published range (`"5173-5223:5173"`) takes the first free port;
   `isb port get NAME DEVICE` prints the one in use. Named volumes are
   `<project>_<key>`; set `name:` on the volume to share one across projects.
+  As in docker, a new named volume starts as a copy of what the image has at
+  the target (containers, incus with `disk_initial_copy`); `:nocopy` mounts
+  it empty.
   Docker keys with no isb equivalent (`build`, `depends_on`, `healthcheck`,
   `networks`) are errors that say what to use instead.
 - Readiness checks: `running`, `default_route`, `agent` (VMs), `{user_exists:
