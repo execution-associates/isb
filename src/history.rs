@@ -761,6 +761,8 @@ pub fn from_event(e: &crate::stack::controller::Event) -> Option<NewRecord> {
 fn secret_key(k: &str) -> bool {
     let l = k.to_ascii_lowercase();
     l.starts_with("environment.")
+        || l == "environment"
+        || l == "env"
         || l == "user.isb.create-token"
         || l.starts_with("cloud-init.")
         || l == "user.user-data"
@@ -780,7 +782,20 @@ pub fn scrub(v: &Value, depth: usize) -> Value {
             m.iter()
                 .filter(|(k, _)| !secret_key(k))
                 .take(64)
-                .map(|(k, v)| (k.clone(), scrub(v, depth + 1)))
+                .map(|(k, v)| match (k.as_str(), v) {
+                    // A command line can carry anything: keep the program
+                    // and how many arguments, never the arguments.
+                    ("command" | "argv" | "args", Value::Array(a)) => (
+                        k.clone(),
+                        json!({
+                            "program": a.first().and_then(Value::as_str).map(|p| {
+                                clip(p.rsplit('/').next().unwrap_or(p).to_string(), 64)
+                            }),
+                            "args": a.len().saturating_sub(1),
+                        }),
+                    ),
+                    _ => (k.clone(), scrub(v, depth + 1)),
+                })
                 .collect(),
         ),
         Value::Object(_) => json!("…"),
@@ -1063,10 +1078,113 @@ fn write_loop(log: &AuditLog, rx: &Receiver<NewRecord>, dropped: &AtomicU64) {
     }
 }
 
+/// How long repeats of a routine action are folded into one row.
+pub const REPEAT_WINDOW: Duration = Duration::from_secs(3600);
+
+/// Routine actions that repeat all day (isb's own probes exec `systemctl
+/// is-active` in every replica every few seconds): the first of a kind per
+/// instance, program and requestor in a window is recorded as it happens,
+/// the rest are counted and recorded as one summary row when the window
+/// ends. Anything else (created, deleted, started, updated, ...) is always
+/// recorded one by one.
+const ROUTINE: &[&str] = &[
+    "instance-exec",
+    "instance-file-pushed",
+    "instance-file-retrieved",
+    "instance-log-retrieved",
+    "instance-metrics-retrieved",
+];
+
+pub struct Repeats {
+    window: i64,
+    /// key → (first time, last time, how many after the first, the first row)
+    seen: std::collections::HashMap<String, (i64, i64, u64, NewRecord)>,
+}
+
+impl Repeats {
+    pub fn new(window: Duration) -> Repeats {
+        Repeats {
+            window: window.as_millis() as i64,
+            seen: Default::default(),
+        }
+    }
+
+    fn key(n: &NewRecord) -> Option<String> {
+        if n.source != "incus" || !ROUTINE.contains(&n.kind.as_str()) {
+            return None;
+        }
+        let program = n.details["context"]["command"]["program"]
+            .as_str()
+            .or_else(|| n.details["context"]["path"].as_str())
+            .unwrap_or("");
+        Some(format!(
+            "{}|{}|{}|{}|{}",
+            n.kind,
+            n.project.as_deref().unwrap_or(""),
+            n.object.as_deref().unwrap_or(""),
+            program,
+            n.actor.as_deref().unwrap_or("")
+        ))
+    }
+
+    /// The row to record now, or `None` when it is a repeat being counted.
+    pub fn admit(&mut self, n: NewRecord) -> Option<NewRecord> {
+        let Some(k) = Self::key(&n) else {
+            return Some(n);
+        };
+        match self.seen.get_mut(&k) {
+            Some((first, last, count, _)) if n.time - *first < self.window => {
+                *last = n.time;
+                *count += 1;
+                None
+            }
+            _ => {
+                self.seen.insert(k, (n.time, n.time, 0, n.clone()));
+                Some(n)
+            }
+        }
+    }
+
+    /// Summary rows for windows that ended (all of them with `all`).
+    pub fn flush(&mut self, now: i64, all: bool) -> Vec<NewRecord> {
+        let window = self.window;
+        let done: Vec<String> = self
+            .seen
+            .iter()
+            .filter(|(_, (first, ..))| all || now - first >= window)
+            .map(|(k, _)| k.clone())
+            .collect();
+        let mut out = Vec::new();
+        for k in done {
+            let Some((first, last, count, row)) = self.seen.remove(&k) else {
+                continue;
+            };
+            if count == 0 {
+                continue;
+            }
+            let mut n = row;
+            n.time = last;
+            n.message = Some(format!(
+                "{count} more {} like this between {first} and {last} (folded)",
+                n.kind
+            ));
+            if let Value::Object(m) = &mut n.details {
+                m.insert(
+                    "repeats".into(),
+                    json!({"count": count, "from": first, "to": last}),
+                );
+            }
+            out.push(n);
+        }
+        out
+    }
+}
+
 /// Follow incus' lifecycle events, in every project, until `stop`: each
 /// one recorded, reconnecting with backoff, and every stretch without a
 /// connection recorded as an `incus.gap`.
 pub fn watch_incus(client: crate::client::Client, rec: Arc<Recorder>, stop: Arc<AtomicBool>) {
+    let mut repeats = Repeats::new(REPEAT_WINDOW);
     let mut down_since: Option<i64> = None;
     let mut why = String::new();
     let mut attempt: u32 = 0;
@@ -1085,12 +1203,21 @@ pub fn watch_incus(client: crate::client::Client, rec: Arc<Recorder>, stop: Arc<
                 loop {
                     if stop.load(Ordering::Relaxed) {
                         let _ = ws.close(None);
+                        for n in repeats.flush(crate::audit::now_ms(), true) {
+                            rec.record(n);
+                        }
                         return;
                     }
                     match ws.read() {
                         Ok(tungstenite::Message::Text(t)) => {
                             if let Ok(v) = serde_json::from_str::<Value>(&t) {
-                                if let Some(n) = from_incus(&v, crate::audit::now_ms()) {
+                                let now = crate::audit::now_ms();
+                                if let Some(n) = from_incus(&v, now) {
+                                    if let Some(n) = repeats.admit(n) {
+                                        rec.record(n);
+                                    }
+                                }
+                                for n in repeats.flush(now, false) {
                                     rec.record(n);
                                 }
                             }
@@ -1100,7 +1227,12 @@ pub fn watch_incus(client: crate::client::Client, rec: Arc<Recorder>, stop: Arc<
                             if matches!(
                                 e.kind(),
                                 std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                            ) => {}
+                            ) =>
+                        {
+                            for n in repeats.flush(crate::audit::now_ms(), false) {
+                                rec.record(n);
+                            }
+                        }
                         Err(e) => {
                             down_since = Some(crate::audit::now_ms());
                             why = format!("the event stream broke: {e}");
@@ -1173,6 +1305,21 @@ mod tests {
             "{d}"
         );
         assert!(d.contains("limits.cpu"));
+        // An exec keeps the program and the argument count, never the
+        // arguments.
+        let mut ex = incus_event(
+            "instance-exec",
+            "/1.0/instances/web-1?project=isb-acme",
+            "isb-acme",
+        );
+        ex["metadata"]["context"] = json!({"command": ["/bin/sh", "-c", "export API_KEY=hunter3"]});
+        let n = from_incus(&ex, 5).unwrap();
+        let d = n.details.to_string();
+        assert!(!d.contains("hunter3"), "{d}");
+        assert_eq!(
+            n.details["context"]["command"],
+            json!({"program": "sh", "args": 2})
+        );
         // Images and other projects are host level.
         let n = from_incus(
             &incus_event(
@@ -1208,6 +1355,43 @@ mod tests {
             (t.as_deref(), o.as_deref(), p.as_deref()),
             (Some("storage-volume"), Some("data x"), Some("isb-a"))
         );
+    }
+
+    #[test]
+    fn routine_repeats_are_folded() {
+        let ev = |t: i64, program: &str| {
+            let mut e = incus_event(
+                "instance-exec",
+                "/1.0/instances/web-1?project=isb-acme",
+                "isb-acme",
+            );
+            e["metadata"]["context"] = json!({"command": [program, "is-active", "x"]});
+            let mut n = from_incus(&e, 0).unwrap();
+            n.time = t;
+            n
+        };
+        let mut r = Repeats::new(Duration::from_secs(60));
+        assert!(r.admit(ev(0, "systemctl")).is_some());
+        assert!(r.admit(ev(5_000, "systemctl")).is_none());
+        assert!(r.admit(ev(10_000, "systemctl")).is_none());
+        // Another program is its own row.
+        assert!(r.admit(ev(11_000, "sh")).is_some());
+        // Not routine: always recorded.
+        let del = from_incus(
+            &incus_event(
+                "instance-deleted",
+                "/1.0/instances/web-1?project=isb-acme",
+                "isb-acme",
+            ),
+            1,
+        )
+        .unwrap();
+        assert!(r.admit(del.clone()).is_some() && r.admit(del).is_some());
+        assert!(r.flush(30_000, false).is_empty());
+        let s = r.flush(61_000, false);
+        assert_eq!(s.len(), 1);
+        assert_eq!(s[0].details["repeats"]["count"], 2);
+        assert!(r.admit(ev(70_000, "systemctl")).is_some());
     }
 
     #[test]

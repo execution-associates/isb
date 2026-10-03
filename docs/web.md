@@ -24,7 +24,7 @@ of it) in a browser:
   unlinks providers, adds and deletes passkeys, makes and revokes API tokens
   (shown once), and lists your sessions.
 
-Each org has five sections, and a sixth for its owners and admins:
+Each org has six sections:
 
 - **Overview** (`/orgs/ORG`): its projects with their health, the latest
   deployments of every app, its stacks and a live activity feed.
@@ -52,17 +52,24 @@ Each org has five sections, and a sixth for its owners and admins:
   network (bridge, subnet, service-name domain, bind roots) and egress
   exceptions. Platform admins edit the quota and egress exceptions and
   delete the org (typing its name); everyone else sees them read-only.
-- **Audit** (`/orgs/ORG/audit`, owners and admins): the org's audit log
-  ([audit.md](audit.md)) newest first, filtered by actor, action and target
-  (globs), outcome and time, with older entries on demand, a live tail over
-  `/api/v1/audit/stream`, each entry's details (address, agent, request id,
-  whitelisted arguments, its hash) on a click, and **Export JSONL** of
-  everything matching.
+- **History** (`/orgs/ORG/history`, every member): what happened in the
+  org ([history.md](history.md)): the controller's events, incus changes
+  made through isb or not (with who requested them), and, for owners and
+  admins, the audit log ([audit.md](audit.md)). A source filter, object,
+  kind and actor filters (globs), a time range, older entries on demand, a
+  live tail over `/api/v1/history/stream`, each entry's details (and the
+  likely cause of an incus change) on a click, and **Export JSONL** of
+  everything matching. `/orgs/ORG/audit` opens it on the audit log.
 
 Platform admins also get **Platform** (`/admin/orgs`, `/admin/users`,
-`/admin/server`, `/admin/audit`): every org (create, delete), every user
+`/admin/server`, `/admin/history`): every org (create, delete), every user
 (disable, enable, make or unmake platform admin), the server's status, and
-the whole audit log (every org, platform-level entries only, or one org).
+the whole history (every org and the host, host-level rows only, or one
+org).
+
+Viewers see an app's pages without Deploy, Start, Stop or the Terminal
+tab, and the Projects pages without New project, New app and project
+actions; the server refuses those to them regardless.
 
 New API tokens (Account) pick an org, an expiry and an **Access**: full (the
 role's reach, what an agent gets by default), deploy, read only, or only

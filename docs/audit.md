@@ -103,15 +103,15 @@ isb audit ls [--org ORG | --platform] [--actor GLOB] [--action GLOB]
              [--target GLOB] [--outcome ok|error|CODE] [--since 24h] [--until 1h]
              [-n 50] [--json]
 isb audit export [same filters]      every match as JSON lines, oldest first
-isb audit verify                     the chain; exits 1 when an entry does not check out
+isb audit verify                     both chains (audit and history); exits 1 when an entry does not check out
 ```
 
 ## The web UI
 
-**Audit** under each org (owners and admins) and in **Platform** (every org,
-platform-level only, or one org): filters, newest first with older pages on
-demand, a live tail over the stream (only what you may read), each entry's
-details on a click, and **Export JSONL** of everything matching the filters.
+The audit rows are one source of the **History** page
+([history.md](history.md#the-web-ui)), under each org and in **Platform**;
+`/orgs/ORG/audit` opens it filtered to the audit log. Audit rows show there
+for org owners and admins and platform admins only.
 
 ## Settings
 

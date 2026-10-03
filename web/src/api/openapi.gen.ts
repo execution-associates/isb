@@ -744,6 +744,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/history_query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * History
+         * @description What happened, merged into one timeline: the stack controller's events (deploys, rollouts, health, restarts), incus lifecycle events in every project including changes made outside isb (instance-created/deleted, image-alias-deleted, ...) with who requested them, audit rows (tool calls, sign-ins), and markers for when isb was not watching (serve.started, serve.stopped, incus.gap). Newest first, or oldest first with ascending=true; page with `before` = the `next` you got. `object` finds everything about an instance, image, volume, stack, app or service (substring, or exact=true). correlate=true links incus instance events to the audit row that likely caused them (inferred, by time and name). Org members see their orgs; host-level rows (images, pools, other projects) are for platform admins; audit rows for org owners and admins.
+         */
+        post: operations["history_query"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/ingress_status": {
         parameters: {
             query?: never;
@@ -3629,6 +3649,60 @@ export interface operations {
                     org?: string;
                     since?: number;
                     wait?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    history_query: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Glob on who. */
+                    actor?: string;
+                    ascending?: boolean;
+                    /** @description The `next` of the previous page. */
+                    before?: string;
+                    correlate?: boolean;
+                    exact?: boolean;
+                    /** @description Glob on the kind or audit action: instance-*, deploy.*, secret_*. */
+                    kind?: string;
+                    limit?: number;
+                    object?: string;
+                    org?: string;
+                    /** @description Only host-level rows (platform admins). */
+                    platform?: boolean;
+                    /** @description Unix milliseconds, inclusive. */
+                    since?: number;
+                    /** @description audit, controller, incus, marker; comma-separated. Default all. */
+                    source?: string;
+                    /** @description Unix milliseconds, exclusive. */
+                    until?: number;
                 };
             };
         };

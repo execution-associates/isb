@@ -17,7 +17,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { canWrite } from "@/lib/admin";
 import { relativeTime } from "@/lib/format";
+import { useMe } from "@/lib/session";
 import { cn } from "@/lib/utils";
 import { type App, appState, type Deployment, isGit, keys, serviceOf, type StackDetail, useApps, useLatestDeployments, useProjects, useStack } from "./api";
 import { AppStateBadge, ConfirmDialog, Crumbs, DeploymentBadge, EmptyState, LiveIndicator, QueryError, TabLinks } from "./components";
@@ -28,6 +30,7 @@ import { imageName, shortSha } from "./util";
 
 export function ProjectPage() {
   const { org = "", project = "", env } = useParams();
+  const writer = canWrite(useMe().data!, org);
   const projects = useProjects(org);
   const apps = useApps(org);
   const live = useOrgLive(org);
@@ -70,10 +73,13 @@ export function ProjectPage() {
         actions={
           <>
             <LiveIndicator state={live} />
-            <Button onClick={() => setNewApp(true)}>
-              <Plus />
-              New app
-            </Button>
+            {writer && (
+              <Button onClick={() => setNewApp(true)}>
+                <Plus />
+                New app
+              </Button>
+            )}
+            {writer && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="icon" aria-label="Project actions">
@@ -96,6 +102,7 @@ export function ProjectPage() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            )}
           </>
         }
       />

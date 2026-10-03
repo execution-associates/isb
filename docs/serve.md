@@ -64,7 +64,9 @@ org. API tokens can be narrowed with scopes (`read`, `deploy`, `admin`,
 - The unix socket is the daemon's own user and reaches everything.
 - Every call that changes something, every refusal, every secret read,
   sign-in, webhook delivery and terminal session is recorded in the audit
-  log ([audit.md](audit.md)).
+  log ([audit.md](audit.md)), and every controller event and incus
+  lifecycle event (in every project, made through isb or not) in the
+  history ([history.md](history.md)).
 
 ## The web terminal
 
@@ -268,7 +270,8 @@ directly.
 | `overview` | Everything a dashboard shows in one call: host CPU and memory with history, every stack in detail, sandboxes with their CPU and memory, the latest event number. |
 | `events` | The event feed (deploys, rollouts, health changes, restarts, failures) after a `since` cursor, optionally waiting up to 30 s for one. |
 | `audit_list` | The audit log, filtered (actor, action and target globs, outcome, surface, time) and paged; an org's owners and admins see their org, platform admins everything ([audit.md](audit.md)). |
-| `audit_verify` | Walk the audit log's hash chain. Platform admins. |
+| `audit_verify` | Walk the audit log's and the history's hash chains. Platform admins. |
+| `history_query` | The history ([history.md](history.md)): controller events, incus lifecycle events in every project with their requestor, audit rows and markers, merged; filter by org, object, kind, source, actor, time; `correlate` links incus changes to the audit row that likely caused them. Members see their orgs; host-level rows are for platform admins. |
 
 `stack_deploy` also takes `dry_run: true`, which returns the per-service
 changes without deploying. `isb tui` ([tui.md](tui.md)) is built on
@@ -308,3 +311,5 @@ prior `initialize`, and there is no session id.
 | `--caddy-bin` | `ISB_CADDY_BIN` | the pinned Caddy release, downloaded and checked |
 | `--audit-retention` | `ISB_AUDIT_RETENTION` | `90d`: how long audit entries are kept ([audit.md](audit.md)) |
 | `--audit-all` | `ISB_AUDIT_ALL` | off: read-only tool calls are not recorded (secret reads and refusals always are) |
+| `--history-retention` | `ISB_HISTORY_RETENTION` | `365d`: how long history rows are kept ([history.md](history.md)) |
+| `--history-max-rows` | `ISB_HISTORY_MAX_ROWS` | `5000000`: past it, the oldest history rows go first |

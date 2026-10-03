@@ -10,7 +10,9 @@ import { PageHeader } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { canWrite } from "@/lib/admin";
 import { errorMessage } from "@/lib/messages";
+import { useMe } from "@/lib/session";
 import { type App, appState, isGit, isNotFound, keys, serviceOf, useApp, useDeployments, useStack } from "./api";
 import { AdvancedTab } from "./app-advanced";
 import { DomainsTab } from "./app-domains";
@@ -46,6 +48,9 @@ export function AppPage() {
   const app = useApp(org, name);
   const live = useOrgLive(org);
   const o = encodeURIComponent(org);
+  // Viewers read: no terminal (the server refuses it to them anyway).
+  const writer = canWrite(useMe().data!, org);
+  const tabs = TABS.filter((t) => writer || t.id !== "terminal");
 
   if (app.isLoading) {
     return (
@@ -76,7 +81,7 @@ export function AppPage() {
     );
   }
   const a = app.data;
-  const active = (TABS.some((t) => t.id === tab) ? tab : "general") as TabId;
+  const active = (tabs.some((t) => t.id === tab) ? tab : "general") as TabId;
   return (
     <>
       <Crumbs
@@ -87,8 +92,8 @@ export function AppPage() {
           { label: a.name },
         ]}
       />
-      <AppHeader org={org} app={a} live={<LiveIndicator state={live} />} />
-      <TabLinks active={active} tabs={TABS.map((t) => ({ ...t, to: `/orgs/${o}/apps/${a.name}/${t.id}` }))} />
+      <AppHeader org={org} app={a} live={<LiveIndicator state={live} />} writer={writer} />
+      <TabLinks active={active} tabs={tabs.map((t) => ({ ...t, to: `/orgs/${o}/apps/${a.name}/${t.id}` }))} />
       {active === "general" && <GeneralTab org={org} app={a} />}
       {active === "environment" && <EnvironmentTab org={org} app={a} />}
       {active === "domains" && <DomainsTab org={org} app={a} />}
@@ -105,7 +110,7 @@ export function AppPage() {
   );
 }
 
-function AppHeader({ org, app, live }: { org: string; app: App; live: React.ReactNode }) {
+function AppHeader({ org, app, live, writer }: { org: string; app: App; live: React.ReactNode; writer: boolean }) {
   const stack = useStack(org, app.stack);
   const deps = useDeployments(org, app.name, 5);
   const qc = useQueryClient();
@@ -150,7 +155,7 @@ function AppHeader({ org, app, live }: { org: string; app: App; live: React.Reac
         actions={
           <>
             {live}
-            {state === "stopped" ? (
+            {!writer ? null : state === "stopped" ? (
               <Button variant="outline" onClick={start} disabled={starting}>
                 {starting ? <Loader2 className="animate-spin" /> : <Play />}
                 Start
@@ -163,10 +168,12 @@ function AppHeader({ org, app, live }: { org: string; app: App; live: React.Reac
                 </Button>
               )
             )}
-            <Button onClick={() => deploy.run().catch(() => {})} disabled={deploy.pending}>
-              {deploy.pending ? <Loader2 className="animate-spin" /> : <Rocket />}
-              {app.current_deployment ? "Redeploy" : "Deploy"}
-            </Button>
+            {writer && (
+              <Button onClick={() => deploy.run().catch(() => {})} disabled={deploy.pending}>
+                {deploy.pending ? <Loader2 className="animate-spin" /> : <Rocket />}
+                {app.current_deployment ? "Redeploy" : "Deploy"}
+              </Button>
+            )}
           </>
         }
       />

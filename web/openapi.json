@@ -2326,6 +2326,92 @@
         "summary": "Events"
       }
     },
+    "/api/v1/tools/history_query": {
+      "post": {
+        "description": "What happened, merged into one timeline: the stack controller's events (deploys, rollouts, health, restarts), incus lifecycle events in every project including changes made outside isb (instance-created/deleted, image-alias-deleted, ...) with who requested them, audit rows (tool calls, sign-ins), and markers for when isb was not watching (serve.started, serve.stopped, incus.gap). Newest first, or oldest first with ascending=true; page with `before` = the `next` you got. `object` finds everything about an instance, image, volume, stack, app or service (substring, or exact=true). correlate=true links incus instance events to the audit row that likely caused them (inferred, by time and name). Org members see their orgs; host-level rows (images, pools, other projects) are for platform admins; audit rows for org owners and admins.",
+        "operationId": "history_query",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "actor": {
+                    "description": "Glob on who.",
+                    "type": "string"
+                  },
+                  "ascending": {
+                    "type": "boolean"
+                  },
+                  "before": {
+                    "description": "The `next` of the previous page.",
+                    "type": "string"
+                  },
+                  "correlate": {
+                    "type": "boolean"
+                  },
+                  "exact": {
+                    "type": "boolean"
+                  },
+                  "kind": {
+                    "description": "Glob on the kind or audit action: instance-*, deploy.*, secret_*.",
+                    "type": "string"
+                  },
+                  "limit": {
+                    "maximum": 1000,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "object": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "type": "string"
+                  },
+                  "platform": {
+                    "description": "Only host-level rows (platform admins).",
+                    "type": "boolean"
+                  },
+                  "since": {
+                    "description": "Unix milliseconds, inclusive.",
+                    "type": "integer"
+                  },
+                  "source": {
+                    "description": "audit, controller, incus, marker; comma-separated. Default all.",
+                    "type": "string"
+                  },
+                  "until": {
+                    "description": "Unix milliseconds, exclusive.",
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "History"
+      }
+    },
     "/api/v1/tools/ingress_status": {
       "post": {
         "description": "The HTTP(S) edge: its listeners, CA and Caddy process; every routed domain with its URL, certificate state (issued, pending, failed, unsupported, cloudflare, none) and live upstreams; domain conflicts and refusals; and each Cloudflare-tunnel org's cloudflared and API sync. Shows the caller's orgs only.",
