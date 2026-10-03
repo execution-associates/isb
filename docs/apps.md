@@ -48,7 +48,7 @@ token deploys an app.
 |---|---|
 | `name` | `[a-z0-9-]`, unique in the org; the service name in its stack. Fixed. |
 | `project`, `environment` | Where it runs (environment default `production`). Fixed. |
-| `source` | `{image: REF}` (`docker:nginx:1.27`, `ghcr:org/app:tag`, a local alias), or `{git: {url, ref, subdir, auth, submodules}}`. |
+| `source` | `{image: REF}` (`docker:nginx:1.27`, `ghcr:org/app:tag`, a local alias), `{git: {url, ref, subdir, auth, submodules}}`, or `{database: {engine, version, database, user}}` ([databases.md](databases.md)). |
 | `build` | Git sources only: `{builder: {type: railpack \| nixpacks \| dockerfile (path, target) \| buildpacks (builder)}, args: {K: V}, untrusted: true}`. `untrusted` (the default) builds in a VM. |
 | `env` | `.env` text, or a map `{KEY: value \| {secret: NAME}}`. |
 | `domains` | `[{host, path?, port?, https?, redirect?}]` for the ingress; `port` defaults to the app's `port`. |

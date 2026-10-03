@@ -70,6 +70,29 @@ isb app deployments NAME [--json] | logs NAME [ID] [-f]
 isb app env NAME | env-set NAME [FILE|-] [--deploy]   the environment as .env text
 isb app webhook NAME [--rotate] | deploy-key NAME
 
+# databases, backups and scheduled jobs, per org (docs/databases.md, docs/jobs.md); --org ORG
+isb db create NAME --project P [--environment E] --engine ENGINE[:VERSION] [--database D] [--user U]
+              [--publish [IP:]PORT] [--no-deploy]     postgres, mysql, mariadb, mongodb, redis
+isb db ls [--project P] [--json] | show NAME [--show-password] [--json] | rm NAME
+isb backup dest create NAME --endpoint URL --bucket B [--region R] [--prefix P] [--path-style]
+              (--access-key ID | --access-key-secret S --secret-key-secret S) [--create-bucket] [--no-test]
+                                           the secret key comes from $ISB_S3_SECRET_KEY or stdin
+isb backup dest ls [--json] | rm NAME | test NAME
+isb backup create NAME --database DB --destination D --schedule CRON [--keep N]
+              [--compression gzip|zstd|none] [--timezone +HH:MM]
+isb backup update NAME [--schedule CRON] [--keep N] [--destination D] [--enable|--disable]
+isb backup ls [--json] | files NAME [--json] | rm NAME
+isb backup run NAME [-d]                   back up now; follows the run's log
+isb backup runs [NAME] [--restores] [--json] | logs [NAME] [RUN] [--restore] [-f]
+isb backup restore [BACKUP] [--destination D --key K] (--into DB [-y] | --new NAME [--project P]
+              [--environment E]) [-d]       --into asks before replacing the database's data
+isb job create NAME --schedule CRON (--app A | --stack S --service SVC) [--mode exec|run]
+              [--timeout D] [--concurrency skip|allow] [--keep N] [--timezone +HH:MM] [-u USER]
+              [-e K=V]... -- COMMAND...
+isb job ls [--json] | show NAME | rm NAME
+isb job update NAME [--schedule CRON] [--timeout D] [--enable|--disable] [-- COMMAND...]
+isb job run NAME [-d] | runs NAME [--json] | logs NAME [RUN] [-f]
+
 # builds and the local registry, on the isb serve daemon (docs/builds.md); --org ORG
 isb build DIR --app APP [--tag T] [--builder railpack|nixpacks|dockerfile] [--dockerfile PATH]
               [--target STAGE] [--arg K=V]... [--subdir DIR] [--untrusted] [--timeout D] [-d]

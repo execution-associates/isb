@@ -425,6 +425,29 @@ impl Client {
         }
     }
 
+    /// Create the bucket; one that exists and is ours is fine.
+    pub fn create_bucket(&self) -> Result<()> {
+        let mut r = self.send("PUT", "", &[], &[], &[])?;
+        if r.status().is_success() {
+            return Ok(());
+        }
+        let body = r
+            .body_mut()
+            .with_config()
+            .limit(64 << 10)
+            .read_to_string()
+            .unwrap_or_default();
+        if body.contains("BucketAlreadyOwnedByYou") {
+            return Ok(());
+        }
+        Err(Error::invalid(format!(
+            "s3 create bucket {}: HTTP {} {}",
+            self.b.bucket,
+            r.status().as_u16(),
+            s3_error(&body)
+        )))
+    }
+
     /// The object's size, or `None` when it does not exist.
     pub fn head(&self, key: &str) -> Result<Option<u64>> {
         let r = self.send("HEAD", key, &[], &[], &[])?;

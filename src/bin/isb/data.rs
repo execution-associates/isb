@@ -261,6 +261,9 @@ pub enum DestCmd {
         /// Skip the write/read/delete check.
         #[arg(long)]
         no_test: bool,
+        /// Create the bucket (self-hosted stores).
+        #[arg(long)]
+        create_bucket: bool,
     },
     #[command(alias = "list")]
     Ls {
@@ -481,10 +484,12 @@ pub fn backup(org: &Option<String>, cmd: BackupCmd) -> Result<u8> {
                 access_key_secret,
                 secret_key_secret,
                 no_test,
+                create_bucket,
             } => {
                 let mut a = json!({
                     "name": name, "endpoint": endpoint, "bucket": bucket, "region": region,
                     "prefix": prefix, "path_style": path_style, "test": !no_test,
+                    "create_bucket": create_bucket,
                 });
                 match (access_key, access_key_secret, secret_key_secret) {
                     (_, Some(ak), Some(sk)) => {

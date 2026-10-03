@@ -252,7 +252,7 @@ pub fn register(r: &mut Registry, ctx: Ctx) -> Result<()> {
     tool!(
         "backup_destination_create",
         "Create a backup destination",
-        "An S3-compatible bucket for backups: endpoint (https://s3.<region>.amazonaws.com, an R2/B2/MinIO URL), region (default us-east-1), bucket, key prefix, path_style (true for MinIO and most self-hosted stores). The key pair is given as access_key/secret_key (stored as the org secrets backup.<name>.access-key/.secret-key) or as the names of existing secrets. Endpoints on this host (loopback) are for the local CLI and platform admins. test=true writes, reads back and deletes a small object first.",
+        "An S3-compatible bucket for backups: endpoint (https://s3.<region>.amazonaws.com, an R2/B2/MinIO URL), region (default us-east-1), bucket, key prefix, path_style (true for MinIO and most self-hosted stores). The key pair is given as access_key/secret_key (stored as the org secrets backup.<name>.access-key/.secret-key) or as the names of existing secrets. Endpoints on this host (loopback) are for the local CLI and platform admins. create_bucket=true creates the bucket; test=true writes, reads back and deletes a small object.",
         obj(
             json!({
                 "name": {"type": "string"},
@@ -265,14 +265,18 @@ pub fn register(r: &mut Registry, ctx: Ctx) -> Result<()> {
                 "secret_key": {"type": "string"},
                 "access_key_secret": {"type": "string"},
                 "secret_key_secret": {"type": "string"},
-                "test": {"type": "boolean"}
+                "test": {"type": "boolean"},
+                "create_bucket": {"type": "boolean", "description": "Create the bucket first (self-hosted stores)."}
             }),
             &["name", "endpoint", "bucket"]
         ),
         write_open,
         |x: &Ctx, mut a: Value, c: &Caller| -> Result<Value> {
             let org = org_of(&a)?;
-            let t = take(&mut a, &["org", "access_key", "secret_key", "test"]);
+            let t = take(
+                &mut a,
+                &["org", "access_key", "secret_key", "test", "create_bucket"],
+            );
             let s = |k: &str| t.get(k).and_then(Value::as_str).map(String::from);
             if let Some(o) = a.as_object_mut() {
                 o.entry("access_key_secret").or_insert(json!(""));
@@ -287,6 +291,13 @@ pub fn register(r: &mut Registry, ctx: Ctx) -> Result<()> {
                 trusted(c),
             )?;
             let mut out = json!({"destination": d});
+            if t.get("create_bucket")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                x.backups.destination_create_bucket(&org, &d.name)?;
+                out["bucket_created"] = json!(true);
+            }
             if t.get("test").and_then(Value::as_bool).unwrap_or(false) {
                 out["test"] = match x.backups.destination_test(&org, &d.name) {
                     Ok(v) => v,

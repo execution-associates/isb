@@ -692,6 +692,13 @@ impl Backups {
         })
     }
 
+    /// Create the destination's bucket (self-hosted stores; S3 itself
+    /// usually wants buckets made in its console).
+    pub fn destination_create_bucket(&self, org: &OrgId, name: &str) -> Result<()> {
+        let d = self.destination_get(org, name)?;
+        self.client(org, &d)?.create_bucket()
+    }
+
     /// Write, read back and delete a small object under the destination's
     /// prefix: the key pair, the bucket and the network all work.
     pub fn destination_test(&self, org: &OrgId, name: &str) -> Result<Value> {
