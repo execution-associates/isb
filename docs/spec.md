@@ -26,8 +26,8 @@ creates what is missing and reconciles what exists, changing only what differs. 
 - Relative bind paths resolve against the directory of the first file, including
   mounts declared in later files.
 - Every object rejects unknown fields, so a typo is an error. A docker compose
-  key isb has no equivalent for (`build`, `depends_on`, `healthcheck`,
-  `networks`, ...) is an error that says what to use instead. The obsolete
+  key isb has no equivalent for (`build`, `networks`, `env_file`,
+  ...) is an error that says what to use instead. The obsolete
   top-level `version` is ignored. Keys starting with `x-` are dropped at the top
   level and directly inside each service (and only there). They are useful as
   YAML anchor holders. YAML anchors, aliases and `<<` merge keys work within one
@@ -80,16 +80,24 @@ purpose.
   `${VAR:-}` allows empty.
 - **The file is `isb.yaml`,** so it can sit next to a docker project's
   `compose.yaml` without either tool reading the other's.
-- **`ready` instead of `healthcheck`.** isb's checks gate `up` once, and include
-  incus-specific ones (`default_route`, `user_exists`, `path_writable`).
+- **`ready` as well as `healthcheck`.** isb's `ready` checks gate `up` once, and
+  include incus-specific ones (`default_route`, `user_exists`, `path_writable`).
 - **incus keys keep incus names:** `type: vm`, `storage`, `idmap`,
   `incus_profiles`, `incus_project`, `raw_config`, `raw_devices`, and the
   `listen`/`connect` port form. docker's `profiles` (service activation) and
   `name`'s role as the project are left to mean what they mean in docker.
 - **A long-syntax mount may omit `type`;** it is inferred from `source`, as in
   the short syntax.
-- **No images are built, and there are no networks, `depends_on`, `restart`,
-  `secrets` or `configs`.** Those keys are errors that say what to use instead.
+- **No images are built, and there are no networks or `configs`.** Those keys
+  are errors that say what to use instead.
+- **`restart` and `deploy` mean what they mean to docker, split by command.**
+  `isb up` honours `restart` (the app is supervised in the guest) and refuses
+  more than one replica; `isb stack deploy` honours all of `deploy` and, like
+  swarm, takes its restart behaviour from `deploy.restart_policy`.
+- **On an OCI image, `command` replaces the whole command line,** including the
+  image's entrypoint, since incus does not expose the two separately. Set
+  `entrypoint` too to keep the image's.
+
 
 ## Interpolation
 
@@ -134,6 +142,7 @@ line without `=` is an error.
 | `name` | string | directory of the first file | Compose project name. |
 | `incus_project` | string | `default` | incus project to operate in. |
 | `volumes` | map of key to volume | `{}` | Named custom storage volumes. |
+| `secrets` | map of key to secret | `{}` | Secrets services can mount as files. |
 | `services` | map of service to sandbox | `{}` | The sandboxes, keyed by service name. |
 
 `name` is sanitized: lowercased, each run of characters outside `[a-z0-9]`
@@ -163,6 +172,25 @@ service mounts is never created.
 A volume is created before the sandbox that mounts it. If two sandboxes resolve
 the same volume to different pools, each pool gets its own volume.
 
+## `secrets.<key>`
+
+A secret's value, read when the file is deployed: by `isb up`, or by the
+client running `isb stack deploy`. Exactly one source:
+
+| Field | Meaning |
+|---|---|
+| `file` | A host file holding the value, relative to the compose file. |
+| `environment` | An environment variable (or `--env-file` / `.env` entry) holding it. |
+
+A secret no service uses is never read. Values never reach instance config;
+see the service's `secrets`.
+
+```yaml
+secrets:
+  db_password: {environment: DB_PASSWORD}
+  tls_key: {file: ./certs/key.pem}
+```
+
 ## `services.<service>`
 
 Each field below lists its type, default, what it becomes in incus, and whether
@@ -190,6 +218,27 @@ remotes, pulled over simplestreams:
 | `ubuntu:` | `https://cloud-images.ubuntu.com/releases` |
 | `ubuntu-daily:` | `https://cloud-images.ubuntu.com/daily` |
 | `ubuntu-minimal:` | `https://cloud-images.ubuntu.com/minimal/releases` |
+
+Or an OCI (docker) image, pulled from a registry:
+
+| Prefix | Registry | Example |
+|---|---|---|
+| `docker:` | `https://docker.io` | `docker:nginx:1.27` (Docker Hub's `library/` and `:latest` are filled in) |
+| `ghcr:` | `https://ghcr.io` | `ghcr:org/app:v2` |
+| `quay:` | `https://quay.io` | `quay:org/app` |
+| `oci:` | `https://REGISTRY` | `oci:registry.example.com/team/app:1.0` |
+
+An OCI image runs as an application container: its process is the instance's
+init, its stdout and stderr are the console log (`isb logs`), and it stops when
+the process exits. It needs `skopeo` on the host and incus with the
+`instance_oci` API extension (incus 6.3 or later). On one:
+
+- `command` (with `entrypoint`, if set) becomes `oci.entrypoint`, the whole
+  command line. It is instance config, reconciled like any other key, and takes
+  effect on restart.
+- `working_dir` becomes `oci.cwd`, and `user` must be numeric (`1000` or
+  `1000:1000`), becoming `oci.uid`/`oci.gid`.
+- It must be a container (`type: vm` is an error).
 
 The string is split at the first `:`, so any other prefix is an error and a local
 alias cannot contain `:`. A local image that does not exist is an error before
@@ -594,15 +643,131 @@ exec:
 
 The sandbox's main command: argv (`[bun, run, dev]`), or a string split into
 words the way a shell splits them (quotes group, backslash escapes) but never
-run through one, as docker does: `bun run dev`. A foreground `isb up` runs it
-once the sandbox is ready, as `user` in `working_dir` with the `exec` defaults,
-and streams its output prefixed with `<service> | `. When
-every service's command has exited, `up` stops the sandboxes and exits with the
-first non-zero status (0 if all succeeded). Ignored by `isb up -d`. Client-side
-only, so changing it is never drift.
+run through one, as docker does: `bun run dev`.
+
+Without `restart`, a foreground `isb up` runs it once the sandbox is ready, as
+`user` in `working_dir` with the `exec` defaults, and streams its output
+prefixed with `<service> | `. When every service's command has exited, `up`
+stops the sandboxes and exits with the first non-zero status (0 if all
+succeeded). Ignored by `isb up -d`. Client-side only, so changing it is never
+drift.
+
+With `restart` (and always under `isb stack deploy`), the command is supervised
+inside the guest instead; see `restart`. On an OCI image it is the instance's
+command line; see `image`.
 
 ```yaml
 command: [sh, -c, "bun install && exec bun run dev"]
+```
+
+### `entrypoint`
+
+OCI images only: argv or a string, like `command`. The command line is
+`entrypoint` followed by `command`. An error on any other image.
+
+### `restart`
+
+`no` (default), `always`, `on-failure` or `unless-stopped`. Anything but `no`
+makes the service long-running: it is meant to outlive `isb up`.
+
+- The instance starts with the host: `always` and `on-failure` set
+  `boot.autostart: true`; `unless-stopped` leaves it unset, which in incus
+  restores whatever state the instance had at shutdown. All three set
+  `boot.autorestart: true`, so incus restarts an instance whose init dies.
+- On a system image, `command` is installed as a systemd unit,
+  `isb-<service>.service`, with `Restart=always` (`on-failure` for
+  `on-failure`) after 5 s, its environment (`environment` plus `exec.env`) in a
+  0600 `/etc/isb/<service>.env`, `User=` and `WorkingDirectory=` from `user`
+  and `working_dir`, and `exec.login` running it through the user's login
+  shell. A program that is not an absolute path runs through `/bin/sh` so that
+  `$PATH` applies. `isb up` rewrites the unit and restarts the app only when
+  the unit or its environment changed. The image needs systemd; one without
+  it is an error that says so.
+- On an OCI image, incus restarts the app (`boot.autorestart`).
+- A foreground `isb up` follows the app's output (the journal, or the console
+  log) instead of running the command, and Ctrl-C stops the sandboxes as
+  before. `isb logs SERVICE` shows recent output at any time.
+
+```yaml
+restart: always
+command: [node, server.js]
+```
+
+### `healthcheck`
+
+docker compose's healthcheck. `isb up` uses it for `depends_on` with
+`condition: service_healthy`; `isb stack deploy` probes every replica on its
+`interval`, keeps unhealthy ones out of the load balancer and restarts them.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `test` | required | `[CMD, argv...]`, `[CMD-SHELL, "shell line"]`, a plain string (a shell line), or `[NONE]`. Run in the guest as the service's `user`. |
+| `interval` | `30s` | Between checks once healthy or unhealthy. |
+| `timeout` | `30s` | One check's deadline. |
+| `retries` | `3` | Consecutive failures before unhealthy. |
+| `start_period` | `0s` | After a start, failures do not count for this long. |
+| `start_interval` | `5s` | Between checks until the first result. |
+| `disable` | `false` | Turn off a healthcheck set in another file. |
+
+```yaml
+healthcheck:
+  test: [CMD, curl, -fsS, http://127.0.0.1:8080/health]
+  interval: 10s
+  start_period: 20s
+```
+
+### `depends_on`
+
+Services to bring up first: a list of names, or a map to
+`{condition: service_started | service_healthy}` (default `service_started`).
+`isb up SERVICE` also brings up what it depends on, and `down` removes
+dependents first. A cycle, an unknown service or a service depending on itself
+is an error at load.
+
+Under `isb up`, `service_healthy` probes the dependency's `healthcheck` until it
+passes before touching its dependents. The dependency needs a `healthcheck`,
+and its `command` must be supervised (`restart`), since a plain command only
+starts once every service is up. Under `isb stack deploy`, a service waits until
+its dependencies have a running (or healthy) replica.
+
+```yaml
+depends_on:
+  db: {condition: service_healthy}
+```
+
+### `deploy`
+
+For `isb stack deploy` (see [stacks.md](stacks.md)). `isb up` accepts it,
+refuses `replicas` above 1, and applies only `resources`.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `mode` | `replicated` | The only mode. |
+| `replicas` | `1` | Instances of the service. |
+| `update_config` | | How a changed service rolls out: `parallelism` (1; 0 = all), `delay` (0s), `order` (`stop-first` or `start-first`), `monitor` (5s), `failure_action` (`pause`, `rollback` or `continue`). |
+| `rollback_config` | | Accepted for compatibility; rollbacks use `update_config`. |
+| `restart_policy` | | `condition` (`any`, `on-failure`, `none`), `delay` (5s), `max_attempts`, `window`. |
+| `resources.limits` | | `cpus` (whole CPUs) and `memory`: the same as `cpus` and `mem_limit`, which they may not repeat. |
+| `labels` | | Labels for the service's instances, merged over `labels`. |
+
+### `secrets`
+
+Secrets (top-level `secrets`) to write into the guest: names, or the long form
+`{source, target, uid, gid, mode}`. Each becomes a file at
+`/run/secrets/<target>` (default target: the source; an absolute target is used
+as is), owned by `uid`/`gid` (default: a numeric `user`, else root) with `mode`
+(default `0400`; YAML's unquoted `0400` and `"0400"` both mean octal).
+
+`/run` is a tmpfs in a systemd guest, so isb also keeps a root-only copy in
+`/var/lib/isb/secrets` with a script that puts the files back; a supervised
+unit runs it before every start, so after a reboot the app has its secrets with
+no isb around. The values never appear in instance config or in `isb config`.
+A changed value replaces a stack's instances (it is part of the revision).
+
+```yaml
+secrets:
+  - db_password
+  - {source: tls_key, target: tls.key, uid: 1000, mode: "0440"}
 ```
 
 ### `raw_config`

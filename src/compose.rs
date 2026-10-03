@@ -474,6 +474,14 @@ pub fn up_handles(
     } else {
         BTreeMap::new()
     };
+    for s in &selected {
+        if project.file.services[s].replicas() > 1 {
+            return Err(Error::invalid(format!(
+                "service {s:?} asks for {} replicas; isb up runs one, `isb stack deploy` runs replicas behind a load balancer",
+                project.file.services[s].replicas()
+            )));
+        }
+    }
     let mut out = Vec::new();
     for s in selected {
         let spec = project.service(&s)?;

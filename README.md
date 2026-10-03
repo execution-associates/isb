@@ -51,6 +51,40 @@ $ isb exec web -- python3 -m unittest       # as the service's user, in its work
 $ isb down
 ```
 
+## Long-running services
+
+Add `restart: always` and a service's `command` is supervised inside its
+guest instead of by `isb up`: it is restarted when it crashes and comes back
+with the host, with nothing of isb's running. For more than that, deploy the
+same file as a **stack** to the `isb serve` daemon, a docker swarm for one
+host:
+
+```yaml
+services:
+  api:
+    image: docker:node:22        # an OCI image, or any incus image (dev-base, images:debian/12)
+    command: [node, server.js]
+    ports: ["127.0.0.1:8080:8080"]
+    healthcheck: {test: [CMD, curl, -fsS, http://127.0.0.1:8080/health]}
+    deploy:
+      replicas: 3
+      update_config: {order: start-first}
+```
+
+```console
+$ isb serve install          # the daemon, as a systemd user service
+$ isb stack deploy app       # replicas, load-balanced, health-checked
+$ isb stack ps app
+$ isb stack rollback app
+```
+
+The daemon load-balances published ports over healthy replicas, restarts
+unhealthy ones, rolls out changes with no downtime and rolls them back, and
+resumes every stack when it restarts. It also serves the same operations as
+**MCP tools**, so an agent behind Cloudflare Access can deploy apps and run
+sandboxes, held to a policy that keeps the host out of its reach. See
+[docs/stacks.md](docs/stacks.md) and [docs/serve.md](docs/serve.md).
+
 ## Why incus
 
 incus runs **system containers**: a whole Linux machine, with its own init,
@@ -109,6 +143,8 @@ incus has the machinery. isb makes it declarative and dependable:
 - **A dev environment per branch.** One sandbox per git worktree, each with its
   own dependencies and dev server, side by side. lasso runs its frontend
   tooling this way ([examples/lasso-dev.yaml](examples/lasso-dev.yaml)).
+- **Apps that run for months.** Replicated, health-checked, load-balanced
+  services with rolling updates, from the same file you develop with.
 - **Throwaway test machines.** Real init and services, created from code in
   seconds, removed just as fast.
 
@@ -244,6 +280,8 @@ filled in.
 
 - [docs/spec.md](docs/spec.md): every YAML field, and how reconciling works
 - [docs/cli.md](docs/cli.md): every command and flag
+- [docs/stacks.md](docs/stacks.md): long-running stacks: replicas, health, rollouts
+- [docs/serve.md](docs/serve.md): the `isb serve` daemon and its MCP server behind Cloudflare Access
 - [docs/rpc.md](docs/rpc.md): the protocol the SDKs speak, for other languages
 - [examples/](examples): a real per-worktree dev setup, and a VM
 - [SKILL.md](SKILL.md): an agent skill for isb. Put it in your agent's skills

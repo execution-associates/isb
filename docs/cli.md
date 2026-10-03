@@ -27,7 +27,16 @@ isb plan [SERVICE...] [--json] [--exit-code]
 isb down [SERVICE...] [--volumes]
 isb ps [SERVICE...] [--json]
 isb exec SERVICE -- ARGV...
+isb logs SERVICE [-n 100]                  output of a long-running (restart:) or OCI service
 isb config
+
+# stacks, on the isb serve daemon (docs/stacks.md, docs/serve.md)
+isb serve [--listen 127.0.0.1:8092] [...]  run the daemon
+isb serve install                          as a systemd user service
+isb stack deploy [NAME] [-d] [--timeout D]
+isb stack ls | ps NAME | logs NAME SERVICE | config NAME
+isb stack scale NAME SERVICE=N... | redeploy NAME SERVICE | rollback NAME
+isb stack rm NAME [--volumes]
 ```
 
 **`up` runs in the foreground**, like `docker compose up`: it runs each
@@ -35,6 +44,12 @@ service's `command`, streams its output, and stops the sandboxes when the
 commands exit, on Ctrl-C, or when the process that started isb goes away. `-d`
 returns once they are up. See
 [spec.md](spec.md#foreground-up).
+
+**Long-running services.** A service with `restart` has its `command`
+supervised inside the guest (a systemd unit, or incus for an OCI image), so it
+survives isb and host reboots. A foreground `up` then follows its output rather
+than running it, and `isb logs SERVICE` shows it later. See
+[spec.md](spec.md#restart).
 
 **Exit codes.** `isb exec` exits with the command's own status. A foreground
 `isb up` exits with the first failing command's status, 128+N on signal N, or

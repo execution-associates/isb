@@ -1066,3 +1066,181 @@ fn virtual_machine() {
     let plan = sandbox::plan_desired(&client, &d, DiffOptions::default()).unwrap();
     assert!(plan.is_noop(), "{:?}", plan.actions);
 }
+
+fn http_get(addr: &str) -> std::io::Result<String> {
+    let mut s = std::net::TcpStream::connect(addr)?;
+    s.set_read_timeout(Some(Duration::from_secs(5)))?;
+    s.write_all(b"GET / HTTP/1.0\r\n\r\n")?;
+    let mut out = String::new();
+    s.read_to_string(&mut out)?;
+    Ok(out
+        .split("\r\n\r\n")
+        .nth(1)
+        .unwrap_or("")
+        .trim()
+        .to_string())
+}
+
+/// `restart:` supervises the command in the guest: it is restarted by
+/// systemd when killed, and after a reboot it has its secret back with no
+/// isb running.
+#[test]
+fn long_running_service() {
+    if !enabled() {
+        return;
+    }
+    let client = Client::new();
+    let mut cleanup = Cleanup::new(&client);
+    let dir = tempdir();
+    let name = test_name("svc");
+    cleanup.instance(&name);
+    let yaml = format!(
+        "secrets: {{tok: {{environment: ISB_TEST_TOKEN}}}}\n\
+         services:\n  app:\n    container_name: {name}\n    image: {}\n    labels: {{isb-test: '1'}}\n\
+         \x20   restart: always\n    user: dev\n    secrets: [{{source: tok, uid: 1000}}]\n\
+         \x20   command: [python3, -m, http.server, '8000', -d, /run/secrets]\n",
+        image()
+    );
+    let lookup = |k: &str| (k == "ISB_TEST_TOKEN").then(|| "t0ken".to_string());
+    let mut p = isb::compose::load_docs(
+        &[(dir.path().join("isb.yaml"), yaml)],
+        dir.path(),
+        Some("isbtest"),
+        &lookup,
+    )
+    .unwrap();
+    p.vars.insert("ISB_TEST_TOKEN".into(), "t0ken".into());
+    let ups = isb::compose::up_handles(&client, &p, &[], EnsureOptions::default(), &mut |l| {
+        eprintln!("{l}")
+    })
+    .unwrap();
+    let sb = &ups[0].2;
+    let fetch = |sb: &Sandbox| {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            let o = sb
+                .exec_with(
+                    ["python3", "-c", "import urllib.request as u; print(u.urlopen('http://127.0.0.1:8000/tok').read().decode())"],
+                    ExecOptions::default(),
+                )
+                .unwrap();
+            if o.success() {
+                return o.stdout_text().trim().to_string();
+            }
+            assert!(
+                Instant::now() < deadline,
+                "app never served: {}",
+                o.stderr_text()
+            );
+            std::thread::sleep(Duration::from_millis(500));
+        }
+    };
+    assert_eq!(fetch(sb), "t0ken");
+    assert_eq!(isb::supervise::unit_state(sb, "app").unwrap(), "active");
+    // Killed: systemd brings it back.
+    sb.exec(["pkill", "-f", "http.server"]).unwrap();
+    assert_eq!(fetch(sb), "t0ken");
+    // Rebooted: /run/secrets is a fresh tmpfs, restored by the unit itself.
+    sb.restart().unwrap();
+    assert_eq!(fetch(sb), "t0ken");
+    let info = sb.info().unwrap();
+    assert_eq!(
+        info.config.get("boot.autostart").map(String::as_str),
+        Some("true")
+    );
+}
+
+/// The stack controller: replicas behind the balancer, a forced rolling
+/// redeploy with no failed request, scale down, remove.
+#[test]
+fn stack_controller() {
+    if !enabled() {
+        return;
+    }
+    let client = Client::new();
+    let state = tempfile::tempdir().unwrap();
+    let store = isb::stack::Store::open(state.path()).unwrap();
+    let ctl = isb::stack::Controller::start(client.clone(), store, Duration::from_secs(2)).unwrap();
+    let stack = format!("isb-test-{}", std::process::id() % 100000);
+    let port = free_port();
+    let yaml = format!(
+        "services:\n  web:\n    image: {}\n    labels: {{isb-test: '1'}}\n    user: dev\n\
+         \x20   command: [sh, -c, 'hostname > /tmp/index.html && exec python3 -m http.server 8000 -d /tmp']\n\
+         \x20   ports: ['127.0.0.1:{port}:8000']\n\
+         \x20   healthcheck: {{test: [CMD, python3, -c, \"import urllib.request as u; u.urlopen('http://127.0.0.1:8000')\"], interval: 2s, start_interval: 1s}}\n\
+         \x20   deploy: {{replicas: 2, update_config: {{order: start-first, monitor: 2s}}}}\n",
+        image()
+    );
+    let p = isb::compose::load_docs(
+        &[(state.path().join("isb.yaml"), yaml)],
+        state.path(),
+        Some(&stack),
+        &|_| None,
+    )
+    .unwrap();
+    let def = isb::stack::StackDef {
+        name: stack.clone(),
+        file: p.file,
+        base_dir: state.path().to_path_buf(),
+        secrets: Default::default(),
+        force: Default::default(),
+        deployed_at: 0,
+        deployed_by: "test".into(),
+        previous: None,
+    };
+    struct Rm(isb::stack::Controller, String);
+    impl Drop for Rm {
+        fn drop(&mut self) {
+            let _ = self.0.remove(&self.1, true, Duration::from_secs(120));
+            self.0.shutdown();
+        }
+    }
+    let _rm = Rm(ctl.clone(), stack.clone());
+    ctl.deploy(def).unwrap();
+    let st = isb::daemon::wait_settled(&ctl, &stack, Duration::from_secs(300)).unwrap();
+    assert!(st.converged, "{st:?}");
+    let addr = format!("127.0.0.1:{port}");
+    let seen: std::collections::BTreeSet<String> =
+        (0..8).map(|_| http_get(&addr).unwrap()).collect();
+    assert_eq!(seen.len(), 2, "{seen:?}");
+
+    // A forced redeploy replaces both replicas while requests keep landing.
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let load = {
+        let (stop, addr) = (stop.clone(), addr.clone());
+        std::thread::spawn(move || {
+            let (mut ok, mut failed) = (0, 0);
+            while !stop.load(Ordering::SeqCst) {
+                match http_get(&addr) {
+                    Ok(b) if !b.is_empty() => ok += 1,
+                    _ => failed += 1,
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            (ok, failed)
+        })
+    };
+    ctl.redeploy(&stack, "web").unwrap();
+    let st = isb::daemon::wait_settled(&ctl, &stack, Duration::from_secs(300)).unwrap();
+    stop.store(true, Ordering::SeqCst);
+    let (ok, failed) = load.join().unwrap();
+    assert!(st.converged, "{st:?}");
+    let after: std::collections::BTreeSet<String> =
+        (0..8).map(|_| http_get(&addr).unwrap()).collect();
+    assert!(after.is_disjoint(&seen), "{after:?} vs {seen:?}");
+    assert!(ok > 0 && failed == 0, "ok {ok}, failed {failed}");
+
+    ctl.scale(&stack, "web", 1).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(120);
+    while ctl.status(&stack).unwrap().services[0].instances.len() != 1 {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_secs(1));
+    }
+    ctl.remove(&stack, true, Duration::from_secs(120)).unwrap();
+    let left = Sandbox::list_with(&client, &[LabelFilter::parse("isb-test")])
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.name.starts_with(&stack))
+        .count();
+    assert_eq!(left, 0);
+}

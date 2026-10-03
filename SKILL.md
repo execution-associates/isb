@@ -5,8 +5,10 @@ description: >
   isb: an isb.yaml compose file or the isb CLI, Python (isb-sdk) or TypeScript
   (@execution-associates/isb) SDK. Use when you need an isolated Linux machine to
   run untrusted code, give an agent or task its own environment, run a dev server
-  per branch or worktree, or when a project has an isb.yaml, or the user mentions
-  isb, incus sandboxes, `isb up`, `isb exec`, or isb-sdk.
+  per branch or worktree, run long-lived apps as replicated, load-balanced stacks
+  (`isb stack deploy`, the `isb serve` daemon and its MCP tools), or when a project
+  has an isb.yaml, or the user mentions isb, incus sandboxes, `isb up`, `isb exec`,
+  `isb stack`, `isb serve`, or isb-sdk.
 ---
 
 # isb
@@ -103,10 +105,40 @@ Field reference: `docs/spec.md` in the repo, or `isb schema` for the JSON Schema
   As in docker, a new named volume starts as a copy of what the image has at
   the target (containers, incus with `disk_initial_copy`); `:nocopy` mounts
   it empty.
-  Docker keys with no isb equivalent (`build`, `depends_on`, `healthcheck`,
-  `networks`) are errors that say what to use instead.
+  Docker keys with no isb equivalent (`build`, `networks`, `env_file`) are
+  errors that say what to use instead. `depends_on`, `healthcheck`, `restart`,
+  `secrets`, `deploy` and `entrypoint` work as in docker (see below).
+- Images: a local alias (`dev-base`), `images:debian/12`, or an OCI image:
+  `docker:nginx:1.27`, `ghcr:org/app:tag`. An OCI image's `command` is its whole
+  command line (set `entrypoint` too to keep the image's), and its `user` must
+  be numeric.
 - Readiness checks: `running`, `default_route`, `agent` (VMs), `{user_exists:
   U}`, `{path_writable: P}`, `{command: [argv]}`. Default deadline 60s (300s VM).
+
+## Long-running services and stacks
+
+- **`restart: always` (or `on-failure`, `unless-stopped`) makes a service
+  outlive isb.** Its `command` becomes a systemd unit in the guest
+  (`isb-<service>.service`; the image needs systemd) or, for an OCI image, the
+  instance's own process; the instance starts with the host. `isb up -d` is
+  then enough to leave an app running; `isb logs SERVICE` shows its output.
+- **`secrets:`** (top-level `{name: {environment: VAR}}` or `{file: ./path}`,
+  service `secrets: [name]`) land as 0400 files in `/run/secrets`, never in
+  instance config, and survive a reboot.
+- **`depends_on: {db: {condition: service_healthy}}`** waits for `db`'s
+  `healthcheck`; under `isb up` the dependency must be long-running.
+- **Replicas need a stack.** `isb serve install` (once) runs the daemon;
+  `isb stack deploy [NAME]` deploys the same file with `deploy.replicas`,
+  load-balanced published ports (TCP, loopback by default), health-checked
+  replicas, and rolling updates (`deploy.update_config.order: start-first` for
+  no downtime). `isb stack ps NAME`, `logs`, `scale NAME svc=N`, `rollback`,
+  `redeploy NAME svc` (new instances for a moved tag), `rm [--volumes]`.
+  Apps keep running when the daemon stops; only published ports pause.
+- **Remote agents** reach the same operations as MCP tools (`stack_deploy`,
+  `stack_status`, `sandbox_create`, `sandbox_exec`, ...) at the daemon's `/mcp`,
+  behind Cloudflare Access. Remote callers are refused privileged containers,
+  raw config, host bind mounts outside `--bind-root`, non-loopback ports and
+  instances isb does not manage. Details: docs/stacks.md, docs/serve.md.
 
 ## One-off sandboxes without a file
 
