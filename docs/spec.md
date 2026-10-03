@@ -174,26 +174,27 @@ the same volume to different pools, each pool gets its own volume.
 
 ## `secrets.<key>`
 
-A secret's value, read when the file is deployed: by `isb up`, or by the
-client running `isb stack deploy`. Exactly one source:
+A secret a service uses as a file (its `secrets`) or a variable
+(`environment: {KEY: {secret: NAME}}`). Exactly one source:
 
 | Field | Meaning |
 |---|---|
-| `file` | A host file holding the value, relative to the compose file. |
-| `environment` | An environment variable (or `--env-file` / `.env` entry) holding it. |
+| `file` | A host file holding the value, relative to the compose file. Read by whoever runs `isb up` or `isb stack deploy`. |
+| `environment` | An environment variable (or `--env-file` / `.env` entry) holding it. Read the same way. |
 | `external` | `true`: the org's secret store on `isb serve`, under `name` (default: the key). |
-| `age` | The value, age-encrypted to the daemon's recipients (`isb secret encrypt`). |
+| `age` | The value, age-encrypted to the daemon's recipients (`isb secret encrypt`), decrypted with the daemon's key. |
 | `driver` | A secrets driver; `name` is the driver's reference. |
+| `refresh` | With `driver`: how often `isb serve` checks it for a new version (`30m`; default `1h`, at least `10s`). |
 
-`name` goes with `external` or `driver` only. `external`, `age` and `driver`
-are accepted and validated, but `isb up` and `isb stack deploy` do not deliver
-them yet; see [secrets.md](secrets.md). A secret no service uses is never read. Values never reach instance config;
-see the service's `secrets`.
+`name` goes with `external` or `driver` only. A secret no service uses is never
+read. A deployed stack keeps references to the org's store (name and version),
+never values; see [secrets.md](secrets.md#stacks).
 
 ```yaml
 secrets:
   db_password: {environment: DB_PASSWORD}
   tls_key: {file: ./certs/key.pem}
+  api_token: {external: true}
 ```
 
 ## `services.<service>`
@@ -363,7 +364,29 @@ labels: {app: web, worktree: "${WORKTREE}"}
 
 Map of string to string, or a list of `KEY=VALUE`. Each becomes
 `environment.<KEY>`, which incus applies to every exec. Reconciled. This is plain instance config, readable by anyone who can
-read the instance: never put a secret here.
+read the instance: never put a secret value here.
+
+A value may instead be `{secret: NAME}`, a top-level secret delivered as the
+variable (map form only):
+
+```yaml
+environment:
+  LOG_LEVEL: info
+  API_TOKEN: {secret: api_token}
+```
+
+- **System image:** the variable goes only into the supervised command's 0600
+  environment file (`/etc/isb/<service>.env`), and to a foreground `isb up`
+  command through exec, never into instance config. The service needs a
+  `command`.
+- **OCI image:** the process is the instance's init, so the variable is
+  instance config, `environment.API_TOKEN`: **plaintext in the incus
+  database**, readable by anyone who can read the instance's config (`incus
+  config show`). isb never shows it in plans or reports (`(secret)`). Mount
+  the secret as a file instead when that matters.
+
+The value must be text (UTF-8, no NUL). A new version of the secret replaces a
+stack's instances, as for a file secret.
 
 ### `volumes`
 
@@ -767,7 +790,8 @@ as is), owned by `uid`/`gid` (default: a numeric `user`, else root) with `mode`
 `/var/lib/isb/secrets` with a script that puts the files back; a supervised
 unit runs it before every start, so after a reboot the app has its secrets with
 no isb around. The values never appear in instance config or in `isb config`.
-A changed value replaces a stack's instances (it is part of the revision).
+A new version of a secret replaces a stack's instances (it is part of the
+revision).
 
 ```yaml
 secrets:

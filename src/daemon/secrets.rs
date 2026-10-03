@@ -25,7 +25,7 @@ pub type Changed = Arc<dyn Fn(&OrgId, &str) -> Vec<String> + Send + Sync>;
 /// Re-read every stack reference to a name through its driver now; returns
 /// (driver, version) per reference and the stacks rolled.
 pub type Refresh =
-    Arc<dyn Fn(&OrgId, &str) -> Result<(Vec<(String, u64)>, Vec<String>)> + Send + Sync>;
+    Arc<dyn Fn(&OrgId, &str) -> Result<crate::stack::secrets::Refreshed> + Send + Sync>;
 
 /// How the secret tools reach the stacks.
 #[derive(Clone)]
@@ -258,7 +258,9 @@ pub fn register(r: &mut Registry, secrets: Arc<Secrets>, hooks: Hooks) -> Result
         "Refresh a secret",
         "Re-read an externally stored secret from its source now, and roll the stacks using it if its version moved (listed in `rolled`). `name` is a store name, or a stack's driver reference. A no-op for the local store.",
         obj(
-            props(json!({"name": {"type": "string", "description": "A store name, or a driver reference a stack uses."}})),
+            props(
+                json!({"name": {"type": "string", "description": "A store name, or a driver reference a stack uses."}}),
+            ),
             &["name"],
         ),
         &write,
@@ -293,7 +295,9 @@ pub fn register(r: &mut Registry, secrets: Arc<Secrets>, hooks: Hooks) -> Result
         "Resolve compose secrets",
         "Local callers only (`isb up`): the values (base64) of a compose file's store-backed secrets (`external`, `age`, `driver`), read from the org's store and decrypted with the daemon's key.",
         obj(
-            props(json!({"secrets": {"type": "object", "description": "Top-level compose secrets, by key."}})),
+            props(
+                json!({"secrets": {"type": "object", "description": "Top-level compose secrets, by key."}}),
+            ),
             &["secrets"],
         ),
         &ro,
@@ -426,7 +430,11 @@ mod tests {
         // A driver reference is no store name; the stacks answer for it.
         let m = call(&r, "secret_refresh", json!({"name": "op://v/item"})).unwrap();
         assert_eq!(
-            (m["driver"].as_str(), m["version"].as_u64(), m["rolled"].clone()),
+            (
+                m["driver"].as_str(),
+                m["version"].as_u64(),
+                m["rolled"].clone()
+            ),
             (Some("vault"), Some(4), json!(["app"]))
         );
         assert!(matches!(

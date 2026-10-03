@@ -123,10 +123,9 @@ impl Project {
     /// `environment:` ones read here, the rest from
     /// [`Project::store_secrets`].
     pub fn secret_values(&self) -> Result<BTreeMap<String, Vec<u8>>> {
-        let mut out =
-            crate::supervise::resolve_secret_values(&self.file, &self.base_dir, &|k| {
-                self.lookup(k)
-            })?;
+        let mut out = crate::supervise::resolve_secret_values(&self.file, &self.base_dir, &|k| {
+            self.lookup(k)
+        })?;
         for (key, def) in self.store_backed_secrets() {
             let v = self.store_secrets.0.get(&key).ok_or_else(|| {
                 Error::invalid(format!(
@@ -1022,7 +1021,10 @@ mod tests {
         let mut p2 = p.clone();
         p2.store_secrets.0.insert("k".into(), b"v".to_vec());
         assert_eq!(p2.secret_values().unwrap()["k"], b"v");
-        assert!(!format!("{p2:?}").contains("118"), "values are not in Debug");
+        assert!(
+            !format!("{p2:?}").contains("118"),
+            "values are not in Debug"
+        );
     }
 
     #[test]
@@ -1072,7 +1074,9 @@ mod tests {
             assert!(e.contains(why), "{bad}: {e}");
         }
         let p = load_with(
-            &[&format!("secrets:\n  k: {{driver: d, name: r, refresh: 30m}}\n{svc}")],
+            &[&format!(
+                "secrets:\n  k: {{driver: d, name: r, refresh: 30m}}\n{svc}"
+            )],
             &[],
         )
         .unwrap();

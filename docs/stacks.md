@@ -85,7 +85,9 @@ must own its volume should stay at one replica with `stop-first` updates.
 
 A service's revision is a hash of everything that shapes its instances: the
 service spec (minus replica count, rollout settings, dependencies and published
-ports), its secrets' values, and its named volumes' definitions. Deploying a
+ports), its secrets' references (store name and version, so `isb secret set`
+rolls it; see [secrets.md](secrets.md#stacks)), and its named volumes'
+definitions. Deploying a
 file whose revision changed replaces that service's instances, in batches of
 `update_config.parallelism`:
 
@@ -172,8 +174,11 @@ isb stack rm NAME [--volumes]
 ```
 
 `deploy` reads the file where you run it, exactly as `isb up` would (`.env`,
-`--env-file`, `${VAR}`), resolves secrets from your environment or files, and
-sends the result to the daemon; relative bind paths stay relative to the file.
+`--env-file`, `${VAR}`), reads `file:` and `environment:` secrets from your
+files and environment, and sends the result to the daemon, which stores those
+values in the org's store as `<stack>_<key>` and reads `external`, `age` and
+`driver` secrets itself ([secrets.md](secrets.md#stacks)); relative bind paths
+stay relative to the file.
 It exits 0 once every service is converged, 1 if one paused or is failing.
 
 The CLI reaches the daemon over its unix socket (`$ISB_SERVE_SOCKET`, else

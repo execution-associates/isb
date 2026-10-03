@@ -470,7 +470,10 @@ mod tests {
         assert_eq!(env["A"], "1");
         assert_eq!(env.secrets["T"], "tok");
         let json = serde_json::to_string(&d.file).unwrap();
-        assert!(json.contains(r#""environment":{"A":"1","T":{"secret":"tok"}}"#), "{json}");
+        assert!(
+            json.contains(r#""environment":{"A":"1","T":{"secret":"tok"}}"#),
+            "{json}"
+        );
         let back: crate::spec::ComposeFile = serde_json::from_str(&json).unwrap();
         assert_eq!(back, d.file);
         assert!(

@@ -509,9 +509,10 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
                 match d.secrets.delete(&def.org, &b.name) {
                     Ok(()) => removed.push(b.name.clone()),
                     Err(e) if e.is_not_found() => {}
-                    Err(e) => d
-                        .ctl
-                        .note("warn", &q, format!("secret {}: not removed: {e}", b.name)),
+                    Err(e) => {
+                        d.ctl
+                            .note("warn", &q, format!("secret {}: not removed: {e}", b.name))
+                    }
                 }
             }
             Ok(json!({"ok": true, "secrets_removed": removed}))

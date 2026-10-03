@@ -23,14 +23,14 @@ use super::{
 use crate::balance::Balancer;
 use crate::client::{Client, encode_query, encode_segment};
 use crate::error::{Error, Result};
+use crate::org::OrgId;
 use crate::plan::{Desired, split_addr};
 use crate::sandbox::{EnsureOptions, Sandbox};
+use crate::secrets::Secrets;
 use crate::spec::{
     DependCondition, FailureAction, HealthProbe, PortBind, RestartCondition, RestartMode,
     SandboxSpec, UpdateConfig, UpdateOrder,
 };
-use crate::org::OrgId;
-use crate::secrets::Secrets;
 use crate::supervise;
 
 /// How long a replaced instance's connections may drain before it is stopped.
@@ -361,7 +361,7 @@ impl Controller {
         &self,
         org: &OrgId,
         name: &str,
-    ) -> Result<(Vec<(String, u64)>, Vec<String>)> {
+    ) -> Result<crate::stack::secrets::Refreshed> {
         let mut found = Vec::new();
         let mut rolled = Vec::new();
         for def in self.definitions() {
@@ -456,11 +456,7 @@ impl Controller {
             return false;
         }
         if let Err(e) = self.inner.store.save(&def) {
-            self.note(
-                "error",
-                q,
-                format!("cannot save new secret versions: {e}"),
-            );
+            self.note("error", q, format!("cannot save new secret versions: {e}"));
             return false;
         }
         self.apply(Arc::new(def));

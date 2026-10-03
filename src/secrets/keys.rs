@@ -503,7 +503,11 @@ mod tests {
         assert!(!src.default_file.exists());
         let k = load_identity(&src).unwrap();
         assert_eq!(
-            find_identity(&src).unwrap().identity.to_public().to_string(),
+            find_identity(&src)
+                .unwrap()
+                .identity
+                .to_public()
+                .to_string(),
             k.identity.to_public().to_string()
         );
     }

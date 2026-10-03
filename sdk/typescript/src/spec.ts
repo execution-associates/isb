@@ -68,6 +68,33 @@ export type FailureAction = "pause" | "rollback" | "continue";
  */
 export type UpdateOrder = "stop-first" | "start-first";
 /**
+ * An environment: a map (a value may be `{secret: NAME}`), or docker's
+ * list of `KEY=VALUE` strings.
+ *
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "EnvMapOrList".
+ */
+export type EnvMapOrList =
+  | {
+      [k: string]: EnvValue;
+    }
+  | string[];
+/**
+ * One `environment` value: a scalar, or a top-level secret delivered as the
+ * variable.
+ *
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "EnvValue".
+ */
+export type EnvValue =
+  | Scalar
+  | {
+      /**
+       * A top-level secret's key.
+       */
+      secret: string;
+    };
+/**
  * idmap handling.
  *
  * The usual need is "host uid/gid 1000 must be the guest's uid/gid 1000 so a
@@ -225,6 +252,12 @@ export interface SecretDef {
    * driver's reference (a 1Password `op://` path, say).
    */
   name?: string | null;
+  /**
+   * With `driver`: how often `isb serve` checks the driver for a new
+   * version (`30m`, `1h`; default 1h). A new version rolls the services
+   * using it.
+   */
+  refresh?: string | null;
 }
 /**
  * Everything about one sandbox: a compose service.
@@ -265,7 +298,7 @@ export interface SandboxSpec {
    * including the image's own entrypoint.
    */
   entrypoint?: Command | null;
-  environment?: MapOrList;
+  environment?: EnvMapOrList;
   exec?: ExecSpec;
   /**
    * A recurring health test, as in docker compose. `isb stack deploy`

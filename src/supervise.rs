@@ -626,7 +626,16 @@ mod tests {
             effective_argv(&s, Some("/bin/bash")).unwrap(),
             ["/bin/bash", "-l", "-c", "exec \"$@\"", "isb", "bun", "dev"]
         );
-        assert!(render("x", &spec("image: x\nrestart: always\n"), None, false, &BTreeMap::new()).is_err());
+        assert!(
+            render(
+                "x",
+                &spec("image: x\nrestart: always\n"),
+                None,
+                false,
+                &BTreeMap::new()
+            )
+            .is_err()
+        );
     }
 
     #[test]

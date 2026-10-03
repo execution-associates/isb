@@ -213,6 +213,10 @@ pub fn resolve(
     Ok(out)
 }
 
+/// A forced refresh: the (driver, version) of every binding to the name, and
+/// the stacks that rolled.
+pub type Refreshed = (Vec<(String, u64)>, Vec<String>);
+
 /// When each driver-backed binding is next due for a version check.
 #[derive(Debug, Default)]
 pub struct RefreshSchedule {
@@ -256,7 +260,8 @@ impl RefreshSchedule {
 
     /// Check sooner than scheduled (a forced refresh).
     pub fn reset(&mut self, q: &str, key: &str, every: Duration, now: Instant) {
-        self.next.insert((q.to_string(), key.to_string()), now + every);
+        self.next
+            .insert((q.to_string(), key.to_string()), now + every);
     }
 }
 
@@ -341,7 +346,10 @@ mod tests {
         ]);
         // The external secret must exist.
         let e = bind(&s, &org, "app", &f, &given, false).unwrap_err();
-        assert!(e.to_string().contains("isb secret create db.password"), "{e}");
+        assert!(
+            e.to_string().contains("isb secret create db.password"),
+            "{e}"
+        );
         s.create(&org, "db.password", None, b"pw", &BTreeMap::new())
             .unwrap();
         // A dry run writes nothing.
@@ -364,10 +372,7 @@ mod tests {
             ("app_tok", 1, true)
         );
         assert_eq!(b["cert"].name, "app_cert");
-        assert_eq!(
-            (b["api"].driver.as_str(), b["api"].version),
-            ("vault", 3)
-        );
+        assert_eq!((b["api"].driver.as_str(), b["api"].version), ("vault", 3));
         assert!(!b.contains_key("unused"));
         // Values come from the store, never from the binding.
         let v = values(&s, &org, &b, ["tok", "db", "api"]).unwrap();
@@ -380,8 +385,14 @@ mod tests {
         assert_eq!(again["tok"].version, 1);
         let mut given2 = given.clone();
         given2.insert("tok".into(), b"new".to_vec());
-        assert_eq!(bind(&s, &org, "app", &f, &given2, true).unwrap()["tok"].version, 2);
-        assert_eq!(bind(&s, &org, "app", &f, &given2, false).unwrap()["tok"].version, 2);
+        assert_eq!(
+            bind(&s, &org, "app", &f, &given2, true).unwrap()["tok"].version,
+            2
+        );
+        assert_eq!(
+            bind(&s, &org, "app", &f, &given2, false).unwrap()["tok"].version,
+            2
+        );
         // A missing client value is an error naming the secret.
         let e = bind(&s, &org, "app", &f, &BTreeMap::new(), false).unwrap_err();
         assert!(e.to_string().contains("no value for secret"), "{e}");
@@ -412,8 +423,7 @@ mod tests {
         );
         // Ciphertext for another key fails, naming the secret.
         let other = Keyring::new(age::x25519::Identity::generate(), vec![]);
-        let foreign =
-            crate::secrets::encrypt_inline(b"x", other.recipients()).unwrap();
+        let foreign = crate::secrets::encrypt_inline(b"x", other.recipients()).unwrap();
         f.secrets.get_mut("k").unwrap().age = Some(foreign);
         let e = bind(&s, &org, "web", &f, &BTreeMap::new(), false).unwrap_err();
         assert!(e.to_string().contains("secret \"k\""), "{e}");
@@ -462,8 +472,10 @@ mod tests {
             version: 1,
             owned: false,
         };
-        def.secrets.insert("db".into(), bind("db.password", "local"));
-        def.secrets.insert("api".into(), bind("op://v/api/key", "vault"));
+        def.secrets
+            .insert("db".into(), bind("db.password", "local"));
+        def.secrets
+            .insert("api".into(), bind("op://v/api/key", "vault"));
         // A driver binding without a declared refresh uses the default.
         let mut f2 = def.file.clone();
         f2.secrets.get_mut("api").unwrap().refresh = None;
@@ -474,7 +486,10 @@ mod tests {
         let mut sch = RefreshSchedule::default();
         let t0 = Instant::now();
         let stacks = |a: &super::super::StackDef, b: &super::super::StackDef| {
-            vec![("app".to_string(), a.clone()), ("two".to_string(), b.clone())]
+            vec![
+                ("app".to_string(), a.clone()),
+                ("two".to_string(), b.clone()),
+            ]
         };
         let list = stacks(&def, &def2);
         let it = || list.iter().map(|(q, d)| (q.as_str(), d));

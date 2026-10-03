@@ -123,8 +123,11 @@ Field reference: `docs/spec.md` in the repo, or `isb schema` for the JSON Schema
   instance's own process; the instance starts with the host. `isb up -d` is
   then enough to leave an app running; `isb logs SERVICE` shows its output.
 - **`secrets:`** (top-level `{name: {environment: VAR}}` or `{file: ./path}`,
-  service `secrets: [name]`) land as 0400 files in `/run/secrets`, never in
-  instance config, and survive a reboot.
+  or from the org's store on `isb serve`: `{external: true}`, inline `{age:
+  ...}`; service `secrets: [name]`) land as 0400 files in `/run/secrets`,
+  never in instance config, and survive a reboot. `environment: {KEY: {secret:
+  name}}` delivers one as a variable instead (an OCI image's lands in instance
+  config). Stacks roll when `isb secret set` gives one a new version.
 - **`depends_on: {db: {condition: service_healthy}}`** waits for `db`'s
   `healthcheck`; under `isb up` the dependency must be long-running.
 - **Replicas need a stack.** `isb serve install` (once) runs the daemon;

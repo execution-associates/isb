@@ -1440,13 +1440,15 @@ fn read_store_secrets(ctx: &Ctx, p: &mut Project) -> Result<()> {
             .into_iter()
             .flatten()
             .map(|(k, v)| {
-                let b = isb::rpc::b64_decode(v.as_str().unwrap_or_default())
-                    .map_err(|_| Error::Invalid(format!("secret {k:?}: bad value from isb serve")))?;
+                let b = isb::rpc::b64_decode(v.as_str().unwrap_or_default()).map_err(|_| {
+                    Error::Invalid(format!("secret {k:?}: bad value from isb serve"))
+                })?;
                 Ok((k.clone(), b))
             })
             .collect::<Result<BTreeMap<_, _>>>()?
     } else {
-        let config = isb::secrets::SecretsConfig::load(&isb::secrets::SecretsConfig::default_path())?;
+        let config =
+            isb::secrets::SecretsConfig::load(&isb::secrets::SecretsConfig::default_path())?;
         let secrets = isb::secrets::Secrets::open_existing(
             &isb::daemon::default_state_dir(),
             &isb::secrets::KeySources::from_env(),
@@ -1588,6 +1590,9 @@ fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
         );
         println!("settings: {}", r.env_path.display());
         println!("healthy at {}", r.health_url);
+        if let Some(c) = &r.key_credential {
+            println!("secrets key: systemd credential {}", c.display());
+        }
         for n in r.notes {
             println!("note: {n}");
         }

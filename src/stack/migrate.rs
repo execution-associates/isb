@@ -114,7 +114,10 @@ fn migrate_file(
     let mut old_revs = BTreeMap::new();
     for svc in old_def.file.services.keys() {
         let rev = old_def.revision_with(svc, &|k| {
-            legacy.get(k).map(|s| s.as_bytes().to_vec()).unwrap_or_default()
+            legacy
+                .get(k)
+                .map(|s| s.as_bytes().to_vec())
+                .unwrap_or_default()
         })?;
         old_revs.insert(svc.clone(), rev);
     }
@@ -268,7 +271,8 @@ mod tests {
         )
         .unwrap();
         // A current-format stack is not touched.
-        let current = json!({"name": "new", "file": {"services": {}}, "base_dir": "/", "deployed_at": 5});
+        let current =
+            json!({"name": "new", "file": {"services": {}}, "base_dir": "/", "deployed_at": 5});
         std::fs::write(
             dir.path().join("state/stacks/new.json"),
             serde_json::to_string(&current).unwrap(),
@@ -284,13 +288,17 @@ mod tests {
             view["previous"] = Value::Null;
             let d: StackDef = serde_json::from_value(view).unwrap();
             let l = legacy_values(&v);
-            d.revision_with("web", &|k| l[k].as_bytes().to_vec()).unwrap()
+            d.revision_with("web", &|k| l[k].as_bytes().to_vec())
+                .unwrap()
         };
 
         let r = run(&store, &s, None);
         assert_eq!(r.len(), 2, "{r:?}");
         let lines: Vec<String> = r.iter().map(|m| m.as_ref().unwrap().to_string()).collect();
-        assert!(lines[0].starts_with("migrated stack alpha/app: 2 secret value(s)"), "{lines:?}");
+        assert!(
+            lines[0].starts_with("migrated stack alpha/app: 2 secret value(s)"),
+            "{lines:?}"
+        );
         assert!(lines[1].contains("stack app:"), "{lines:?}");
         for line in &lines {
             assert!(!line.contains("t0ken"), "{line}");

@@ -34,6 +34,9 @@ pub struct ServiceInstall {
     pub env_path: PathBuf,
     pub listen: String,
     pub health_url: String,
+    /// The daemon's secrets key as an encrypted systemd credential, when
+    /// this systemd can make one.
+    pub key_credential: Option<PathBuf>,
     /// Things the user should know, one sentence each (linger, version pinning).
     pub notes: Vec<String>,
 }
@@ -56,6 +59,7 @@ pub fn install_user_service(opts: &ServiceOptions) -> Result<ServiceInstall> {
     let env_path = config.join("isb/serve.env");
     let unit_path = config.join("systemd/user").join(UNIT_NAME);
     let exe = std::env::current_exe()?.canonicalize()?;
+    let key = setup_key(&config)?;
 
     let existing = match std::fs::read_to_string(&env_path) {
         Ok(s) => Some(s),
@@ -87,7 +91,16 @@ pub fn install_user_service(opts: &ServiceOptions) -> Result<ServiceInstall> {
         }
         write_atomic(&env_path, text.as_bytes(), 0o600)?;
     }
-    write_atomic(&unit_path, render_unit(&exe, &env_path).as_bytes(), 0o644)?;
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let cred = key
+        .credential
+        .as_deref()
+        .map(|p| credential_path(p, home.as_deref()));
+    write_atomic(
+        &unit_path,
+        render_unit(&exe, &env_path, cred.as_deref()).as_bytes(),
+        0o644,
+    )?;
 
     for args in [
         &["daemon-reload"][..],
@@ -109,7 +122,7 @@ pub fn install_user_service(opts: &ServiceOptions) -> Result<ServiceInstall> {
         ),
     })?;
 
-    let mut notes = Vec::new();
+    let mut notes = key.notes;
     if let Some(user) = std::env::var("USER")
         .ok()
         .or_else(|| std::env::var("LOGNAME").ok())
@@ -132,8 +145,157 @@ pub fn install_user_service(opts: &ServiceOptions) -> Result<ServiceInstall> {
         env_path,
         listen,
         health_url,
+        key_credential: key.credential,
         notes,
     })
+}
+
+/// The daemon's secrets key as the install left it.
+struct KeySetup {
+    /// The encrypted credential, when systemd-creds could make one.
+    credential: Option<PathBuf>,
+    notes: Vec<String>,
+}
+
+/// The credential file `isb serve install` writes, under the config dir.
+pub const CREDENTIAL_FILE: &str = "isb/isb-age-key.cred";
+
+/// Put the daemon's age key in an encrypted systemd credential where
+/// systemd-creds can make user credentials (systemd 256+); else leave it in
+/// the key file. The key is generated if there is none, but never when a
+/// credential already holds it.
+fn setup_key(config: &Path) -> Result<KeySetup> {
+    use crate::secrets::keys;
+    let sources = keys::KeySources::from_env();
+    let cred = config.join(CREDENTIAL_FILE);
+    let key_file = sources.default_file.clone();
+    let version = systemd_version();
+    if !version.is_some_and(|v| v >= 256) {
+        // Make sure there is a key, so the daemon does not generate one at
+        // first start unnoticed.
+        let k = keys::load_identity(&sources)?;
+        let mut notes = k.notes;
+        notes.push(format!(
+            "systemd-creds here cannot encrypt user credentials ({}; needs systemd 256+), so the daemon reads its secrets key from {}: keep that file out of unencrypted backups, and add a break-glass recipient (docs/secrets.md)",
+            version.map_or("not found".to_string(), |v| format!("systemd {v}")),
+            key_file.display()
+        ));
+        return Ok(KeySetup {
+            credential: None,
+            notes,
+        });
+    }
+    let mut notes = Vec::new();
+    let k = match keys::find_identity(&sources) {
+        Ok(k) => k,
+        // The plaintext was removed after an earlier install: the
+        // credential is the key now. Keep it; never mint a new one.
+        Err(_) if cred.exists() => {
+            notes.push(format!(
+                "kept the daemon's secrets key in the systemd credential {}",
+                cred.display()
+            ));
+            return Ok(KeySetup {
+                credential: Some(cred),
+                notes,
+            });
+        }
+        Err(_) => keys::load_identity(&sources)?,
+    };
+    notes.extend(k.notes);
+    encrypt_credential(&keys::identity_file_text(&k.identity), &cred)?;
+    notes.push(format!(
+        "the daemon's secrets key ({}) is now an encrypted systemd credential, {}, bound to this machine and user",
+        k.identity.to_public(),
+        cred.display()
+    ));
+    if key_file.exists() {
+        notes.push(format!(
+            "the daemon no longer needs the plaintext key; to remove it: `shred -u {}`. Before you do, add a break-glass recipient (recipients = [...] in {}) and `isb secret reencrypt --all`: the credential cannot be decrypted on another machine, so without one, losing this host loses every secret. `isb up` without a running daemon also reads that file",
+            key_file.display(),
+            keys::SecretsConfig::default_path().display()
+        ));
+    }
+    Ok(KeySetup {
+        credential: Some(cred),
+        notes,
+    })
+}
+
+/// `systemd-creds --version`'s major version.
+fn systemd_version() -> Option<u32> {
+    let out = Command::new("systemd-creds")
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_systemd_version(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// `systemd 259 (259.5-0ubuntu3.4)` -> 259.
+fn parse_systemd_version(text: &str) -> Option<u32> {
+    let first = text.lines().next()?;
+    let mut words = first.split_whitespace();
+    if words.next()? != "systemd" {
+        return None;
+    }
+    words.next()?.parse().ok()
+}
+
+/// Encrypt `text` as the user credential `isb-age-key` into `path` (0600):
+/// written next to it, then renamed, so a failure leaves the old one.
+fn encrypt_credential(text: &str, path: &Path) -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    let dir = path
+        .parent()
+        .ok_or_else(|| Error::invalid(format!("{} has no parent", path.display())))?;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)?;
+    let tmp = dir.join(format!(".isb-age-key.cred.{}.tmp", std::process::id()));
+    let _ = std::fs::remove_file(&tmp);
+    let mut child = Command::new("systemd-creds")
+        .args(["encrypt", "--user"])
+        .arg(format!("--name={}", crate::secrets::keys::CREDENTIAL_NAME))
+        .arg("-")
+        .arg(&tmp)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(text.as_bytes())?;
+    }
+    let out = child.wait_with_output()?;
+    let r = (|| -> Result<()> {
+        if !out.status.success() {
+            return Err(Error::OperationFailed {
+                step: "systemd-creds encrypt --user".into(),
+                message: String::from_utf8_lossy(&out.stderr).trim().to_string(),
+            });
+        }
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+        std::fs::rename(&tmp, path)?;
+        Ok(())
+    })();
+    if r.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    r
+}
+
+/// The credential's path as the unit names it: `%h/...` under the home
+/// directory, else absolute; escaped for a unit file either way.
+pub fn credential_path(path: &Path, home: Option<&Path>) -> String {
+    match home.and_then(|h| path.strip_prefix(h).ok()) {
+        Some(rest) => format!("%h/{}", escape_env_path(&rest.to_string_lossy())),
+        None => escape_env_path(&path.to_string_lossy()),
+    }
 }
 
 fn config_dir() -> Result<PathBuf> {
@@ -190,7 +352,16 @@ fn wait_healthy(listen: &str, timeout: Duration) -> std::result::Result<(), Stri
 
 /// The unit file. No sandboxing directives: the service drives incusd and
 /// reads the user's projects, and most of them need a system manager anyway.
-pub fn render_unit(exe: &Path, env_path: &Path) -> String {
+/// `credential` (from [`credential_path`]) loads the encrypted secrets key.
+pub fn render_unit(exe: &Path, env_path: &Path, credential: Option<&str>) -> String {
+    let cred = credential
+        .map(|c| {
+            format!(
+                "LoadCredentialEncrypted={}:{c}\n",
+                crate::secrets::keys::CREDENTIAL_NAME
+            )
+        })
+        .unwrap_or_default();
     format!(
         "[Unit]
 Description=isb serve: incus app stacks and MCP server
@@ -200,7 +371,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=-{}
-ExecStart={} serve
+{cred}ExecStart={} serve
 Restart=always
 RestartSec=2
 
@@ -315,7 +486,9 @@ mod tests {
         let u = render_unit(
             Path::new("/home/me/.local/bin/isb"),
             Path::new("/home/me/.config/isb/serve.env"),
+            None,
         );
+        assert!(!u.contains("Credential"), "{u}");
         assert!(
             u.contains("\nExecStart=\"/home/me/.local/bin/isb\" serve\n"),
             "{u}"
@@ -325,12 +498,60 @@ mod tests {
         assert!(u.contains("After=network-online.target"));
         assert!(u.contains("WantedBy=default.target"));
         assert!(!u.contains("Protect"), "no sandboxing directives");
-        let odd = render_unit(Path::new("/opt/my isb/100%$x\"/isb"), Path::new("/a b/%e"));
+        let odd = render_unit(
+            Path::new("/opt/my isb/100%$x\"/isb"),
+            Path::new("/a b/%e"),
+            None,
+        );
         assert!(
             odd.contains("ExecStart=\"/opt/my isb/100%%$$x\\\"/isb\" serve"),
             "{odd}"
         );
         assert!(odd.contains("EnvironmentFile=-/a\\x20b/%%e"), "{odd}");
+    }
+
+    #[test]
+    fn unit_loads_the_encrypted_key() {
+        let home = Path::new("/home/me");
+        let c = credential_path(
+            Path::new("/home/me/.config/isb/isb-age-key.cred"),
+            Some(home),
+        );
+        assert_eq!(c, "%h/.config/isb/isb-age-key.cred");
+        let u = render_unit(
+            Path::new("/home/me/.local/bin/isb"),
+            Path::new("/home/me/.config/isb/serve.env"),
+            Some(&c),
+        );
+        assert!(
+            u.contains(
+                "\nEnvironmentFile=-/home/me/.config/isb/serve.env\nLoadCredentialEncrypted=isb-age-key:%h/.config/isb/isb-age-key.cred\nExecStart="
+            ),
+            "{u}"
+        );
+        // Outside the home directory: absolute, escaped.
+        assert_eq!(
+            credential_path(Path::new("/srv/cfg 1/k%.cred"), Some(home)),
+            "/srv/cfg\\x201/k%%.cred"
+        );
+        assert_eq!(
+            credential_path(Path::new("/srv/k.cred"), None),
+            "/srv/k.cred"
+        );
+    }
+
+    #[test]
+    fn systemd_versions() {
+        assert_eq!(
+            parse_systemd_version("systemd 259 (259.5-0ubuntu3.4)\n+PAM +AUDIT"),
+            Some(259)
+        );
+        assert_eq!(
+            parse_systemd_version("systemd 255 (255.4-1ubuntu8)"),
+            Some(255)
+        );
+        assert_eq!(parse_systemd_version("something else"), None);
+        assert_eq!(parse_systemd_version(""), None);
     }
 
     #[test]
