@@ -38,6 +38,10 @@ struct Global {
     #[arg(long, global = true, env = "INCUS_PROJECT")]
     project: Option<String>,
 
+    /// The org to work in: its incus project (`isb org ls`).
+    #[arg(long, global = true, env = "ISB_ORG")]
+    org: Option<String>,
+
     /// Compose file(s), merged in order (default: ./isb.yaml or ./isb.yml).
     /// Also accepted after the compose-aware subcommands.
     #[arg(short = 'f', long = "file")]
@@ -224,6 +228,12 @@ enum Cmd {
     /// Deploy and manage stacks on the `isb serve` daemon.
     #[command(subcommand)]
     Stack(StackCmd),
+    /// Orgs: isolated tenants, each an incus project with its own network.
+    #[command(subcommand)]
+    Org(OrgCmd),
+    /// One-time host preparation (needs root).
+    #[command(subcommand)]
+    Host(HostCmd),
     /// A live dashboard of stacks and sandboxes (`isb serve`'s view; with no
     /// daemon, sandboxes only).
     Tui,
@@ -285,6 +295,68 @@ enum ServeAction {
         /// The loopback address to serve on (default: the env file's, else 127.0.0.1:8092).
         #[arg(long)]
         listen: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum OrgCmd {
+    /// Create an org, or update an existing one's limits.
+    Create {
+        name: String,
+        /// Total CPUs across the org.
+        #[arg(long)]
+        cpus: Option<u32>,
+        /// Total memory, e.g. 16GiB.
+        #[arg(long)]
+        memory: Option<String>,
+        /// Total disk, e.g. 100GiB.
+        #[arg(long)]
+        disk: Option<String>,
+        /// Most instances the org may have.
+        #[arg(long)]
+        instances: Option<u32>,
+        /// CPUs an instance gets when its spec sets none (default 1).
+        #[arg(long)]
+        default_cpus: Option<u32>,
+        /// Memory an instance gets when its spec sets none (default 512MiB).
+        #[arg(long)]
+        default_memory: Option<String>,
+        /// Host directory the org may bind-mount from (repeatable).
+        #[arg(long)]
+        bind_root: Vec<PathBuf>,
+    },
+    /// List orgs.
+    #[command(alias = "list")]
+    Ls {
+        #[arg(long)]
+        json: bool,
+    },
+    /// One org's settings and usage.
+    Show {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete an org (with --force, everything in it).
+    #[command(alias = "remove")]
+    Rm {
+        name: String,
+        #[arg(long)]
+        force: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum HostCmd {
+    /// Let org bridges through a default-deny host firewall (ufw): DHCP and
+    /// DNS to the host, and egress through the uplink. Run once, as root.
+    Setup {
+        /// The uplink interface (default: the default route's).
+        #[arg(long)]
+        uplink: Option<String>,
+        /// Print the firewall commands instead of running them.
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -543,7 +615,19 @@ impl Ctx {
             Some(s) => Client::with_socket(s),
             None => Client::new(),
         };
-        if let Some(p) = self.global.project.as_deref().or(project) {
+        let org_project = self
+            .global
+            .org
+            .as_deref()
+            .and_then(|o| isb::org::OrgId::new(o).ok())
+            .map(|o| o.incus_project());
+        if let Some(p) = self
+            .global
+            .project
+            .as_deref()
+            .or(org_project.as_deref())
+            .or(project)
+        {
             c = c.project(p);
         }
         let mut t = Timeouts::default();
@@ -639,6 +723,8 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         Cmd::Logs { service, lines, .. } => logs(ctx, &service, lines),
         Cmd::Serve(a) => serve(ctx, a),
         Cmd::Stack(s) => stack(ctx, s),
+        Cmd::Org(o) => org(ctx, o),
+        Cmd::Host(HostCmd::Setup { uplink, dry_run }) => host_setup(uplink, dry_run),
         Cmd::Tui => {
             isb::tui::run(ctx.client(None), isb::server::default_socket_path())?;
             Ok(0)
@@ -1536,6 +1622,245 @@ fn print_stack(st: &serde_json::Value) {
     }
 }
 
+fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
+    use isb::org::{self, OrgId, OrgOptions};
+    let c = ctx.client(Some("default"));
+    let mut rep = ctx.report();
+    match cmd {
+        OrgCmd::Create {
+            name,
+            cpus,
+            memory,
+            disk,
+            instances,
+            default_cpus,
+            default_memory,
+            bind_root,
+        } => {
+            let id = OrgId::new(name)?;
+            let roots = bind_root
+                .into_iter()
+                .map(|p| {
+                    p.canonicalize()
+                        .map_err(|e| Error::Invalid(format!("{}: {e}", p.display())))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let info = org::ensure(
+                &c,
+                &id,
+                &OrgOptions {
+                    cpus,
+                    memory,
+                    disk,
+                    instances,
+                    default_cpus,
+                    default_memory,
+                    bind_roots: roots,
+                },
+                &mut rep,
+            )?;
+            println!(
+                "{} (project {}, network {} {})",
+                info.name,
+                info.project,
+                info.network.unwrap_or_default(),
+                info.subnet.unwrap_or_default()
+            );
+            Ok(0)
+        }
+        OrgCmd::Ls { json } => {
+            let all = org::list(&c)?;
+            if json {
+                print_json(&all);
+                return Ok(0);
+            }
+            let mut rows = vec![vec![
+                "ORG".into(),
+                "PROJECT".into(),
+                "NETWORK".into(),
+                "INSTANCES".into(),
+                "CPUS".into(),
+                "MEMORY".into(),
+            ]];
+            for o in all {
+                rows.push(vec![
+                    o.name.to_string(),
+                    o.project,
+                    o.subnet.or(o.network).unwrap_or_else(|| "-".into()),
+                    match o.instances_limit {
+                        Some(l) => format!("{}/{l}", o.instances),
+                        None => o.instances.to_string(),
+                    },
+                    o.cpus.unwrap_or_else(|| "-".into()),
+                    o.memory.unwrap_or_else(|| "-".into()),
+                ]);
+            }
+            table(rows);
+            Ok(0)
+        }
+        OrgCmd::Show { name, json } => {
+            let o = org::get(&c, &OrgId::new(name)?)?;
+            if json {
+                print_json(&o);
+            } else {
+                println!("org        {}", o.name);
+                println!("project    {}", o.project);
+                println!(
+                    "network    {} {}",
+                    o.network.as_deref().unwrap_or("-"),
+                    o.subnet.as_deref().unwrap_or("")
+                );
+                println!(
+                    "instances  {}{}",
+                    o.instances,
+                    o.instances_limit
+                        .map(|l| format!(" of {l}"))
+                        .unwrap_or_default()
+                );
+                println!("cpus       {}", o.cpus.as_deref().unwrap_or("unlimited"));
+                println!("memory     {}", o.memory.as_deref().unwrap_or("unlimited"));
+                println!("disk       {}", o.disk.as_deref().unwrap_or("unlimited"));
+                println!(
+                    "bind roots {}",
+                    if o.bind_roots.is_empty() {
+                        "none".to_string()
+                    } else {
+                        o.bind_roots.join(", ")
+                    }
+                );
+            }
+            Ok(0)
+        }
+        OrgCmd::Rm { name, force } => {
+            org::remove(&c, &OrgId::new(name)?, force, &mut rep)?;
+            Ok(0)
+        }
+    }
+}
+
+/// The ufw rules org bridges need on a default-deny host, as argv lists.
+/// DHCP is not among them: see [`BEFORE_RULES`].
+fn host_rules(uplink: &str) -> Vec<Vec<String>> {
+    let v = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
+    let mut out = vec![
+        v("ufw allow in on isbbr+ to any port 53 comment"),
+        v(&format!(
+            "ufw route allow in on isbbr+ out on {uplink} comment"
+        )),
+    ];
+    for (r, c) in out
+        .iter_mut()
+        .zip(["isb org bridges: DNS", "isb org bridges: egress"])
+    {
+        r.push(c.to_string());
+    }
+    out
+}
+
+/// DHCP accepted ahead of ufw's conntrack-INVALID drop. With br_netfilter
+/// on, the bridged copy of a DHCP broadcast is dropped in FORWARD, and once
+/// the bridge carries an incus ACL the copy meant for dnsmasq then counts as
+/// INVALID; a `ufw allow` rule comes too late to see it.
+const BEFORE_RULES: &str = "# isb org bridges: begin\n\
+-A ufw-before-input -i isbbr+ -p udp --dport 67 -j ACCEPT\n\
+# isb org bridges: end\n";
+
+const BEFORE_RULES_PATH: &str = "/etc/ufw/before.rules";
+
+/// `before.rules` with isb's block inserted before the first
+/// `ufw-before-input` rule, or `None` when it is already there.
+fn with_before_rules(text: &str) -> Option<String> {
+    if text.contains("# isb org bridges: begin") {
+        return None;
+    }
+    let mut out = String::with_capacity(text.len() + BEFORE_RULES.len());
+    let mut done = false;
+    for line in text.split_inclusive('\n') {
+        if !done && line.starts_with("-A ufw-before-input") {
+            out.push_str(BEFORE_RULES);
+            done = true;
+        }
+        out.push_str(line);
+    }
+    done.then_some(out)
+}
+
+fn host_setup(uplink: Option<String>, dry_run: bool) -> Result<u8> {
+    let uplink = match uplink {
+        Some(u) => u,
+        None => default_route_iface()
+            .ok_or_else(|| Error::Invalid("no default route; pass --uplink".into()))?,
+    };
+    let ufw_active = std::process::Command::new("ufw")
+        .arg("status")
+        .output()
+        .ok()
+        .is_some_and(|o| String::from_utf8_lossy(&o.stdout).contains("Status: active"));
+    let rules = host_rules(&uplink);
+    if dry_run || !rustix::process::geteuid().is_root() {
+        if !dry_run {
+            eprintln!(
+                "isb host setup needs root to change the firewall; run it with sudo, or do this:"
+            );
+        }
+        println!("# in {BEFORE_RULES_PATH}, before the first -A ufw-before-input line:");
+        print!("{BEFORE_RULES}");
+        for r in &rules {
+            println!(
+                "{}",
+                r.iter()
+                    .map(|a| if a.contains(' ') {
+                        format!("'{a}'")
+                    } else {
+                        a.clone()
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+        }
+        println!("ufw reload");
+        return Ok(if dry_run { 0 } else { 1 });
+    }
+    if !ufw_active {
+        println!("no active ufw: incus' own firewall rules already let org bridges through");
+        return Ok(0);
+    }
+    let text = std::fs::read_to_string(BEFORE_RULES_PATH)?;
+    if let Some(new) = with_before_rules(&text) {
+        std::fs::write(format!("{BEFORE_RULES_PATH}.isb-backup"), &text)?;
+        std::fs::write(BEFORE_RULES_PATH, new)?;
+        println!(
+            "{BEFORE_RULES_PATH}: added isb's DHCP rule (backup at {BEFORE_RULES_PATH}.isb-backup)"
+        );
+    }
+    for r in rules {
+        let st = std::process::Command::new(&r[0]).args(&r[1..]).status()?;
+        if !st.success() {
+            return Err(Error::Invalid(format!("{} failed", r.join(" "))));
+        }
+    }
+    if !std::process::Command::new("ufw")
+        .arg("reload")
+        .status()?
+        .success()
+    {
+        return Err(Error::Invalid("ufw reload failed".into()));
+    }
+    println!(
+        "org bridges (isbbr*) may now reach DHCP and DNS on this host and egress through {uplink}"
+    );
+    Ok(0)
+}
+
+fn default_route_iface() -> Option<String> {
+    let t = std::fs::read_to_string("/proc/net/route").ok()?;
+    t.lines()
+        .skip(1)
+        .map(|l| l.split_whitespace().collect::<Vec<_>>())
+        .find(|f| f.get(1) == Some(&"00000000"))
+        .map(|f| f[0].to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1559,5 +1884,15 @@ mod tests {
             Cmd::Exec(a) => assert_eq!(a.argv, vec!["ls", "-la"]),
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn before_rules_insertion() {
+        let t = "*filter\n:ufw-before-input - [0:0]\n# allow all on loopback\n-A ufw-before-input -i lo -j ACCEPT\nCOMMIT\n";
+        let out = with_before_rules(t).unwrap();
+        let block = out.find("# isb org bridges: begin").unwrap();
+        assert!(block < out.find("-A ufw-before-input -i lo").unwrap());
+        assert!(with_before_rules(&out).is_none());
+        assert!(with_before_rules("no rules here\n").is_none());
     }
 }

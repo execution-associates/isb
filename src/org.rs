@@ -62,7 +62,9 @@ impl OrgId {
         if project == "default" {
             return Some(OrgId::default_org());
         }
-        project.strip_prefix("isb-").and_then(|o| OrgId::new(o).ok())
+        project
+            .strip_prefix("isb-")
+            .and_then(|o| OrgId::new(o).ok())
     }
 
     /// This org's directory under a daemon state directory.
@@ -89,7 +91,6 @@ impl From<OrgId> for String {
         o.0
     }
 }
-
 
 // ----------------------------------------------------------------------------
 // The org runtime: an incus project, a bridge, an ACL and a default profile.
@@ -154,7 +155,52 @@ fn acl_name(org: &OrgId) -> String {
 }
 
 /// Private ranges an org may not reach, apart from its own subnet.
-const PRIVATE: &str = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,169.254.0.0/16";
+const PRIVATE: [&str; 5] = [
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "100.64.0.0/10",
+    "169.254.0.0/16",
+];
+
+fn parse_cidr(s: &str) -> Option<(u32, u32)> {
+    let (ip, len) = s.split_once('/')?;
+    let ip: std::net::Ipv4Addr = ip.parse().ok()?;
+    let len: u32 = len.parse().ok().filter(|l| *l <= 32)?;
+    let mask = if len == 0 { 0 } else { u32::MAX << (32 - len) };
+    Some((u32::from(ip) & mask, len))
+}
+
+/// `range` minus `hole`, as CIDRs: halve the range until the hole is
+/// carved out exactly.
+fn subtract(range: (u32, u32), hole: (u32, u32), out: &mut Vec<String>) {
+    let (net, len) = range;
+    let mask = |l: u32| if l == 0 { 0 } else { u32::MAX << (32 - l) };
+    let inside = hole.1 >= len && (hole.0 & mask(len)) == net;
+    if !inside {
+        out.push(format!("{}/{len}", std::net::Ipv4Addr::from(net)));
+    } else if hole.1 > len {
+        let half = 1u32 << (31 - len);
+        subtract((net, len + 1), hole, out);
+        subtract((net | half, len + 1), hole, out);
+    }
+}
+
+/// What an org's ACL rejects: every private range except its own subnet.
+/// incus applies reject rules before allow rules, so the exception has to
+/// be carved out of the ranges rather than allowed on top of them.
+fn denied_ranges(own: Option<&str>) -> Vec<String> {
+    let hole = own.and_then(parse_cidr);
+    let mut out = Vec::new();
+    for r in PRIVATE {
+        let range = parse_cidr(r).expect("constant");
+        match hole {
+            Some(h) => subtract(range, h, &mut out),
+            None => out.push(r.to_string()),
+        }
+    }
+    out
+}
 
 /// The client to use for an org: its project.
 pub fn client(base: &Client, org: &OrgId) -> Client {
@@ -171,7 +217,14 @@ fn strmap(v: &Value) -> std::collections::BTreeMap<String, String> {
     v.as_object()
         .map(|m| {
             m.iter()
-                .map(|(k, v)| (k.clone(), v.as_str().map(String::from).unwrap_or_else(|| v.to_string())))
+                .map(|(k, v)| {
+                    (
+                        k.clone(),
+                        v.as_str()
+                            .map(String::from)
+                            .unwrap_or_else(|| v.to_string()),
+                    )
+                })
                 .collect()
         })
         .unwrap_or_default()
@@ -179,9 +232,16 @@ fn strmap(v: &Value) -> std::collections::BTreeMap<String, String> {
 
 /// Create an org, or bring an existing one in line with `opts`. The default
 /// org is the incus default project and is never restricted.
-pub fn ensure(base: &Client, org: &OrgId, opts: &OrgOptions, report: &mut dyn FnMut(&str)) -> Result<OrgInfo> {
+pub fn ensure(
+    base: &Client,
+    org: &OrgId,
+    opts: &OrgOptions,
+    report: &mut dyn FnMut(&str),
+) -> Result<OrgInfo> {
     if org.is_default() {
-        return Err(Error::invalid("the default org is incus' default project; it has no settings"));
+        return Err(Error::invalid(
+            "the default org is incus' default project; it has no settings",
+        ));
     }
     let h = host(base);
     let bridge = bridge_name(org);
@@ -207,16 +267,20 @@ pub fn ensure(base: &Client, org: &OrgId, opts: &OrgOptions, report: &mut dyn Fn
         )?;
     }
     let net = h.get(&net_path)?;
-    let subnet = net["config"]["ipv4.address"].as_str().unwrap_or_default().to_string();
+    let subnet = net["config"]["ipv4.address"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
     let own = subnet_of(&subnet).unwrap_or_default();
 
     // Deny private ranges, except the org's own subnet (which holds its DNS).
     let acl = acl_name(org);
-    let mut egress = Vec::new();
-    if !own.is_empty() {
-        egress.push(json!({"action": "allow", "destination": own, "state": "enabled", "description": "own subnet"}));
-    }
-    egress.push(json!({"action": "reject", "destination": PRIVATE, "state": "enabled", "description": "other orgs and private networks"}));
+    let egress = vec![json!({
+        "action": "reject",
+        "destination": denied_ranges(Some(&own).filter(|o| !o.is_empty()).map(String::as_str)).join(","),
+        "state": "enabled",
+        "description": "other orgs and private networks",
+    })];
     let acl_body = json!({
         "description": format!("isb org {org}: allow within the org, deny other private networks"),
         "egress": egress,
@@ -228,9 +292,21 @@ pub fn ensure(base: &Client, org: &OrgId, opts: &OrgOptions, report: &mut dyn Fn
         report(&format!("{org}: creating ACL {acl}"));
         let mut body = acl_body.clone();
         body["name"] = json!(acl);
-        h.mutate("POST", "/1.0/network-acls", Some(&body), &format!("create ACL {acl}"), h.get_timeouts().other)?;
+        h.mutate(
+            "POST",
+            "/1.0/network-acls",
+            Some(&body),
+            &format!("create ACL {acl}"),
+            h.get_timeouts().other,
+        )?;
     } else {
-        h.mutate("PUT", &acl_path, Some(&acl_body), &format!("update ACL {acl}"), h.get_timeouts().other)?;
+        h.mutate(
+            "PUT",
+            &acl_path,
+            Some(&acl_body),
+            &format!("update ACL {acl}"),
+            h.get_timeouts().other,
+        )?;
     }
     if net["config"]["security.acls"].as_str() != Some(acl.as_str()) {
         let mut cfg = net["config"].clone();
@@ -267,7 +343,11 @@ pub fn ensure(base: &Client, org: &OrgId, opts: &OrgOptions, report: &mut dyn Fn
         KEY_ORG: org.as_str(),
         KEY_NETWORK: bridge,
     });
-    let roots: Vec<String> = opts.bind_roots.iter().map(|p| p.display().to_string()).collect();
+    let roots: Vec<String> = opts
+        .bind_roots
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect();
     if roots.is_empty() {
         config["restricted.devices.disk"] = json!("managed");
     } else {
@@ -338,7 +418,13 @@ pub fn ensure(base: &Client, org: &OrgId, opts: &OrgOptions, report: &mut dyn Fn
             "eth0": {"type": "nic", "name": "eth0", "network": bridge},
         },
     });
-    oc.mutate("PUT", "/1.0/profiles/default", Some(&profile), &format!("set {org}'s default profile"), oc.get_timeouts().other)?;
+    oc.mutate(
+        "PUT",
+        "/1.0/profiles/default",
+        Some(&profile),
+        &format!("set {org}'s default profile"),
+        oc.get_timeouts().other,
+    )?;
     get(base, org)
 }
 
@@ -351,7 +437,10 @@ fn subnet_of(cidr: &str) -> Option<String> {
         return None;
     }
     let mask = if len == 0 { 0 } else { u32::MAX << (32 - len) };
-    Some(format!("{}/{len}", std::net::Ipv4Addr::from(u32::from(ip) & mask)))
+    Some(format!(
+        "{}/{len}",
+        std::net::Ipv4Addr::from(u32::from(ip) & mask)
+    ))
 }
 
 fn info(base: &Client, org: OrgId, p: &Value) -> Result<OrgInfo> {
@@ -379,7 +468,12 @@ fn info(base: &Client, org: OrgId, p: &Value) -> Result<OrgInfo> {
         instances_limit: cfg.get("limits.instances").cloned(),
         bind_roots: cfg
             .get("restricted.devices.disk.paths")
-            .map(|s| s.split(',').filter(|x| !x.is_empty()).map(String::from).collect())
+            .map(|s| {
+                s.split(',')
+                    .filter(|x| !x.is_empty())
+                    .map(String::from)
+                    .collect()
+            })
             .unwrap_or_default(),
         instances,
     })
@@ -389,7 +483,10 @@ fn info(base: &Client, org: OrgId, p: &Value) -> Result<OrgInfo> {
 pub fn get(base: &Client, org: &OrgId) -> Result<OrgInfo> {
     let h = host(base);
     let p = h
-        .get_opt(&format!("/1.0/projects/{}", encode_segment(&org.incus_project())))?
+        .get_opt(&format!(
+            "/1.0/projects/{}",
+            encode_segment(&org.incus_project())
+        ))?
         .ok_or_else(|| Error::NotFound(format!("org {org}")))?;
     if !org.is_default() && p["config"][KEY_ORG].as_str() != Some(org.as_str()) {
         return Err(Error::NotFound(format!("org {org}")));
@@ -404,7 +501,9 @@ pub fn list(base: &Client) -> Result<Vec<OrgInfo>> {
     let mut out = Vec::new();
     for p in v.as_array().into_iter().flatten() {
         let name = p["name"].as_str().unwrap_or_default();
-        let Some(org) = OrgId::from_incus_project(name) else { continue };
+        let Some(org) = OrgId::from_incus_project(name) else {
+            continue;
+        };
         if !org.is_default() && p["config"][KEY_ORG].as_str() != Some(org.as_str()) {
             continue;
         }
@@ -429,7 +528,13 @@ pub fn remove(base: &Client, org: &OrgId, force: bool, report: &mut dyn FnMut(&s
     }
     let h = host(base);
     let oc = client(base, org);
-    for name in oc.get("/1.0/instances")?.as_array().into_iter().flatten().filter_map(Value::as_str) {
+    for name in oc
+        .get("/1.0/instances")?
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+    {
         let n = name.rsplit('/').next().unwrap_or(name);
         report(&format!("{org}: deleting {n}"));
         crate::sandbox::Sandbox::remove(&oc, n, true)?;
@@ -445,13 +550,25 @@ pub fn remove(base: &Client, org: &OrgId, force: bool, report: &mut dyn FnMut(&s
     )?;
     if let Some(n) = &o.network {
         report(&format!("{org}: deleting network {n}"));
-        match h.mutate("DELETE", &format!("/1.0/networks/{}", encode_segment(n)), None, &format!("delete network {n}"), h.get_timeouts().other) {
+        match h.mutate(
+            "DELETE",
+            &format!("/1.0/networks/{}", encode_segment(n)),
+            None,
+            &format!("delete network {n}"),
+            h.get_timeouts().other,
+        ) {
             Err(e) if !e.is_not_found() => return Err(e),
             _ => {}
         }
     }
     let acl = acl_name(org);
-    match h.mutate("DELETE", &format!("/1.0/network-acls/{}", encode_segment(&acl)), None, &format!("delete ACL {acl}"), h.get_timeouts().other) {
+    match h.mutate(
+        "DELETE",
+        &format!("/1.0/network-acls/{}", encode_segment(&acl)),
+        None,
+        &format!("delete ACL {acl}"),
+        h.get_timeouts().other,
+    ) {
         Err(e) if !e.is_not_found() => Err(e),
         _ => Ok(()),
     }
@@ -485,5 +602,30 @@ mod tests {
         assert_eq!(subnet_of("10.64.3.1/24").as_deref(), Some("10.64.3.0/24"));
         assert_eq!(subnet_of("10.180.0.1/16").as_deref(), Some("10.180.0.0/16"));
         assert_eq!(subnet_of("nope"), None);
+    }
+
+    #[test]
+    fn denied_ranges_carve_out_the_org() {
+        let d = denied_ranges(Some("10.160.44.0/24"));
+        assert!(!d.iter().any(|r| r == "10.0.0.0/8"));
+        assert!(d.contains(&"172.16.0.0/12".to_string()));
+        // 16 halvings from /8 to /24: 16 pieces plus the other 4 ranges.
+        assert_eq!(d.len(), 16 + 4);
+        let covers = |r: &str, ip: u32| {
+            let (n, l) = parse_cidr(r).unwrap();
+            let m = if l == 0 { 0 } else { u32::MAX << (32 - l) };
+            ip & m == n
+        };
+        let ip = |s: &str| u32::from(s.parse::<std::net::Ipv4Addr>().unwrap());
+        assert!(!d.iter().any(|r| covers(r, ip("10.160.44.7"))));
+        for other in [
+            "10.160.45.1",
+            "10.0.0.1",
+            "10.255.255.254",
+            "10.238.212.250",
+        ] {
+            assert!(d.iter().any(|r| covers(r, ip(other))), "{other}");
+        }
+        assert_eq!(denied_ranges(None).len(), 5);
     }
 }
