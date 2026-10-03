@@ -72,6 +72,7 @@ pub mod tui;
 pub mod volume;
 pub mod volume_backup;
 pub mod web;
+pub mod workspace;
 
 pub use client::{Client, Timeouts};
 pub use compose::{LoadOptions, Project};

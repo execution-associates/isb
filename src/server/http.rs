@@ -279,6 +279,24 @@ impl HttpListener {
         Ok(HttpListener::Tcp(l))
     }
 
+    /// Bind a private IPv4 address (10/8, 172.16/12, 192.168/16) that is
+    /// not loopback: an org bridge's gateway, which only that org's
+    /// instances route to. The handler serving it does the gating.
+    pub fn bind_tcp_private(addr: SocketAddr) -> Result<Self> {
+        let ok = match addr.ip() {
+            std::net::IpAddr::V4(v4) => v4.is_private(),
+            std::net::IpAddr::V6(_) => false,
+        };
+        if !ok {
+            return Err(Error::invalid(format!(
+                "listen address {addr} is not a private IPv4 address"
+            )));
+        }
+        let l = TcpListener::bind(addr)?;
+        l.set_nonblocking(true)?;
+        Ok(HttpListener::Tcp(l))
+    }
+
     /// Bind a unix socket, mode 0600. A parent directory isb creates is 0700. A
     /// stale socket is replaced; a live one (something answers) is an error,
     /// and so is a path that is not a socket.

@@ -276,6 +276,14 @@ pub enum PrincipalKind {
     Superadmin {
         source: SuperadminSource,
     },
+    /// An org's workspace (docs/workspaces.md): its token (`isb_ws_...`),
+    /// held by the agents that live in it. Nobody's account: a synthetic
+    /// principal confined to `org` with the role the workspace was given.
+    Workspace {
+        org: OrgId,
+        /// The workspace's name in its org.
+        name: String,
+    },
 }
 
 /// An authenticated caller: who, how, and what they may reach. For an
@@ -349,10 +357,41 @@ impl Principal {
             PrincipalKind::Session { id } => Some(id),
             PrincipalKind::ApiToken { .. }
             | PrincipalKind::Access
-            | PrincipalKind::Superadmin { .. } => None,
+            | PrincipalKind::Superadmin { .. }
+            | PrincipalKind::Workspace { .. } => None,
         }
     }
+
+    /// The principal an org's workspace token authenticates: no account
+    /// (user id 0, named `workspace`), confined to `org` with `role`.
+    pub fn workspace(org: &OrgId, name: &str, role: Role) -> Principal {
+        Principal {
+            user: User {
+                id: 0,
+                email: WORKSPACE_ACTOR.into(),
+                name: format!("workspace {name} in {org}"),
+                platform_admin: false,
+                created_at: 0,
+                disabled: false,
+                has_password: false,
+            },
+            kind: PrincipalKind::Workspace {
+                org: org.clone(),
+                name: name.to_string(),
+            },
+            orgs: vec![(org.clone(), role)],
+            platform_admin: false,
+        }
+    }
+
+    /// An org's workspace, rather than a person or a user's token.
+    pub fn is_workspace(&self) -> bool {
+        matches!(self.kind, PrincipalKind::Workspace { .. })
+    }
 }
+
+/// How audit rows, history and `isb.owner` labels name a workspace.
+pub const WORKSPACE_ACTOR: &str = "workspace";
 
 /// Where a login came from, kept on the session for the user to review.
 #[derive(Debug, Clone, Default)]

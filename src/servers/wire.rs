@@ -90,6 +90,14 @@ impl Assertion {
                     PrincipalKind::Session { .. } => ("session", None, None, Vec::new()),
                     PrincipalKind::Access => ("access", None, None, Vec::new()),
                     PrincipalKind::Superadmin { .. } => ("superadmin", None, None, Vec::new()),
+                    // The workspace of an org on this server: the agent
+                    // judges it as the workspace it is.
+                    PrincipalKind::Workspace { org, name } => (
+                        "workspace",
+                        Some(name.clone()),
+                        Some(org.clone()),
+                        Vec::new(),
+                    ),
                     PrincipalKind::ApiToken {
                         org, name, scopes, ..
                     } => ("token", Some(name.clone()), org.clone(), scopes.clone()),
@@ -140,6 +148,13 @@ impl Assertion {
                 scopes: self.scopes.clone(),
             },
             "access" => PrincipalKind::Access,
+            "workspace" => match &self.token_org {
+                Some(org) => PrincipalKind::Workspace {
+                    org: org.clone(),
+                    name: self.token_name.clone().unwrap_or_default(),
+                },
+                None => PrincipalKind::Session { id: 0 },
+            },
             _ => PrincipalKind::Session { id: 0 },
         };
         Principal {

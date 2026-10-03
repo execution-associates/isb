@@ -24,6 +24,9 @@ struct ExecPty {
     ctl: ExecController,
     done: bool,
     instance: String,
+    /// Counts the session (a workspace's live sessions, a sandbox's
+    /// activity) until it closes.
+    guard: Option<super::workspaces::SessionGuard>,
 }
 
 impl Pty for ExecPty {
@@ -65,6 +68,7 @@ impl Pty for ExecPty {
             let _ = self.ctl.signal(9);
             self.done = true;
         }
+        self.guard = None;
     }
 }
 
@@ -88,7 +92,17 @@ pub(super) fn terminal(d: Arc<Daemon>) -> Terminal {
                         info.status.to_lowercase()
                     )));
                 }
-                return shell(&oc, name, t);
+                // The workspace opens as its user, in its home.
+                let user = match info.config.get(crate::workspace::KEY_WORKSPACE) {
+                    Some(w) => d
+                        .workspaces_def(org, w)
+                        .ok()
+                        .map(|w| (w.user.clone(), w.home_dir())),
+                    None => None,
+                };
+                let mut pty = shell(&oc, name, t, user)?;
+                pty.guard = Some(d.workspaces.session(&org.incus_project(), name));
+                return Ok(pty);
             }
             let app = d.apps.get(org, &t.app)?;
             let stack = crate::stack::qualified(org, &app.spec.stack()?);
@@ -121,7 +135,7 @@ pub(super) fn terminal(d: Arc<Daemon>) -> Terminal {
                     inst.status.to_lowercase()
                 )));
             }
-            let pty = shell(&oc, &inst.name, t)?;
+            let pty = shell(&oc, &inst.name, t, None)?;
             d.ctl.service_event(
                 "info",
                 &stack,
@@ -134,12 +148,25 @@ pub(super) fn terminal(d: Arc<Daemon>) -> Terminal {
 }
 
 /// A login shell in `instance`, on a pseudo-terminal of the asked size.
-fn shell(oc: &crate::client::Client, instance: &str, t: &TermRequest) -> Result<Box<dyn Pty>> {
+fn shell(
+    oc: &crate::client::Client,
+    instance: &str,
+    t: &TermRequest,
+    user: Option<(String, String)>,
+) -> Result<Box<ExecPty>> {
     let sb = Sandbox::get(oc, instance)?;
     let mut opts = ExecOptions::default()
         .tty(true)
         .stdin(Stdin::Piped)
         .env("TERM", "xterm-256color");
+    if let Some((u, h)) = user {
+        opts = opts
+            .user(u.clone())
+            .cwd(h.clone())
+            .env("HOME", h)
+            .env("USER", u.clone())
+            .env("LOGNAME", u);
+    }
     opts.width = Some(t.cols);
     opts.height = Some(t.rows);
     let stream = sb
@@ -150,5 +177,6 @@ fn shell(oc: &crate::client::Client, instance: &str, t: &TermRequest) -> Result<
         stream,
         done: false,
         instance: instance.to_string(),
+        guard: None,
     }))
 }

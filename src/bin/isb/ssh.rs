@@ -34,6 +34,16 @@ pub struct RemoteArgs {
 }
 
 impl RemoteArgs {
+    /// `$ISB_URL`, as the flag would read it, for commands without the flag.
+    pub fn or_env(mut self) -> Self {
+        if self.url.is_none() {
+            self.url = std::env::var("ISB_URL")
+                .ok()
+                .filter(|u| !u.trim().is_empty());
+        }
+        self
+    }
+
     pub fn remote(&self) -> Result<Remote> {
         let Some(url) = self.url.clone().filter(|u| !u.trim().is_empty()) else {
             return Ok(Remote::Socket(isb::server::default_socket_path()));

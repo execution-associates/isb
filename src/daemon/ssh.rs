@@ -106,7 +106,9 @@ pub(super) fn still_allowed(
                 return Err("the sign-in that opened this session ended".into());
             }
         }
-        PrincipalKind::Access | PrincipalKind::Superadmin { .. } => {}
+        PrincipalKind::Access
+        | PrincipalKind::Superadmin { .. }
+        | PrincipalKind::Workspace { .. } => {}
     }
     let member = u.platform_admin
         || users

@@ -107,6 +107,9 @@ impl std::fmt::Display for Caller {
                 crate::auth::PrincipalKind::ApiToken { .. } => {
                     write!(f, "{} (token)", principal.user.email)
                 }
+                crate::auth::PrincipalKind::Workspace { .. } => {
+                    f.write_str(crate::auth::WORKSPACE_ACTOR)
+                }
                 _ => f.write_str(&principal.user.email),
             },
         }
@@ -598,6 +601,11 @@ impl Endpoint {
                         if tail == "api/v1/ssh" {
                             return self.ssh(req, &org);
                         }
+                        if let Some(rest) = tail.strip_prefix("api/v1/workspace") {
+                            if rest.is_empty() || rest.starts_with('/') {
+                                return self.workspace_rest(req, rest, &org);
+                            }
+                        }
                     }
                 }
                 self.extra(req)
@@ -660,6 +668,49 @@ impl Endpoint {
         if req.method != "POST" {
             return Response::text(405, "method not allowed").header("Allow", "POST");
         }
+        self.rest_run(req, name, scope)
+    }
+
+    /// `/orgs/<org>/api/v1/workspace[/ACTION]`: the org's workspace as a
+    /// resource, over the `workspace_*` tools (docs/workspaces.md). GET
+    /// reads it (`?name=`), POST creates it, PATCH changes it, DELETE
+    /// deletes it (`{"confirm": true}`); POST `/start`, `/stop`,
+    /// `/restart`, `/rebuild`, `/token/rotate`; GET or PATCH `/settings`.
+    fn workspace_rest(&self, req: &Request, rest: &str, org: &crate::org::OrgId) -> Response {
+        let tool = match (rest, req.method.as_str()) {
+            ("" | "/", "GET") => "workspace_get",
+            ("" | "/", "POST") => "workspace_create",
+            ("" | "/", "PATCH") => "workspace_update",
+            ("" | "/", "DELETE") => "workspace_delete",
+            ("/start", "POST") => "workspace_start",
+            ("/stop", "POST") => "workspace_stop",
+            ("/restart", "POST") => "workspace_restart",
+            ("/rebuild", "POST") => "workspace_rebuild",
+            ("/token/rotate", "POST") => "workspace_token_rotate",
+            ("/settings", "GET" | "PATCH") => "workspace_settings",
+            ("" | "/", _) => {
+                return Response::text(405, "method not allowed")
+                    .header("Allow", "GET, POST, PATCH, DELETE");
+            }
+            ("/start" | "/stop" | "/restart" | "/rebuild" | "/token/rotate" | "/settings", _) => {
+                return Response::text(405, "method not allowed");
+            }
+            _ => return rest_error(404, "not_found", "no such workspace action"),
+        };
+        if req.method == "GET" {
+            // Arguments from the query string.
+            let mut r = req.clone();
+            let mut args = serde_json::Map::new();
+            if let Some(n) = query_param(req, "name") {
+                args.insert("name".into(), json!(n));
+            }
+            r.body = serde_json::to_vec(&Value::Object(args)).unwrap_or_default();
+            return self.rest_run(&r, tool, Some(org));
+        }
+        self.rest_run(req, tool, Some(org))
+    }
+
+    fn rest_run(&self, req: &Request, name: &str, scope: Option<&crate::org::OrgId>) -> Response {
         let caller = match self.authenticate(req) {
             Ok(c) => c,
             Err(r) => return r,

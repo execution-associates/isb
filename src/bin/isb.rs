@@ -29,6 +29,8 @@ mod ssh;
 mod templates;
 #[path = "isb/volumes.rs"]
 mod volumes;
+#[path = "isb/workspaces.rs"]
+mod workspaces;
 
 /// Declarative incus sandboxes.
 ///
@@ -300,6 +302,11 @@ enum Cmd {
     /// show, remove, rotate its certificate (docs/servers.md).
     #[command(subcommand)]
     Server(servers::ServerCmd),
+    /// The org's workspace on the `isb serve` daemon: its long-lived
+    /// machine with a home and an org token, and the sandboxes beside it
+    /// (docs/workspaces.md).
+    #[command(subcommand)]
+    Workspace(workspaces::WorkspaceCmd),
     /// A live dashboard of stacks and sandboxes (`isb serve`'s view; with no
     /// daemon, sandboxes only).
     Tui,
@@ -666,6 +673,10 @@ struct ServeArgs {
     /// The port each tunnel org's listener takes on its bridge address.
     #[arg(long, env = "ISB_INGRESS_TUNNEL_PORT", default_value_t = isb::ingress::DEFAULT_TUNNEL_PORT)]
     ingress_tunnel_port: u16,
+    /// The port each org's workspace reaches isb's MCP on, on its bridge
+    /// address (docs/workspaces.md).
+    #[arg(long, env = "ISB_WORKSPACE_MCP_PORT", default_value_t = isb::daemon::workspaces::DEFAULT_PORT)]
+    workspace_mcp_port: u16,
     /// The public IPv4 address `host: auto` names resolve to (sslip.io);
     /// default: the default route's source address, if it is public.
     #[arg(long, env = "ISB_INGRESS_PUBLIC_IP", value_name = "IP")]
@@ -1410,6 +1421,7 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         Cmd::Registry(r) => registry_cmd(ctx, r),
         Cmd::Notify(n) => notify::notify(&ctx.global.org, n),
         Cmd::Server(c) => servers::server(c),
+        Cmd::Workspace(w) => workspaces::workspace(&ctx.global.org, w),
         Cmd::Tui => {
             isb::tui::run(ctx.client(None), isb::server::default_socket_path())?;
             Ok(0)
@@ -2325,6 +2337,7 @@ fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
         audit_all: a.audit_all,
         history_retention: a.history_retention,
         history_max_rows: a.history_max_rows,
+        workspace_mcp_port: a.workspace_mcp_port,
         ingress: ingress_config(
             a.ingress_http,
             a.ingress_https,
@@ -2412,6 +2425,21 @@ fn ingress_config(
 /// Call a tool on the local daemon.
 fn call(tool: &str, args: serde_json::Value, timeout: Duration) -> Result<serde_json::Value> {
     let socket = isb::server::default_socket_path();
+    // Inside an org's workspace there is no daemon socket: isb serve's URL
+    // (the org bridge's, `$ISB_URL`) with the workspace's token
+    // (`$ISB_TOKEN`), as `isb ssh-config` and `isb key` use it.
+    if !socket.exists() {
+        let remote = ssh::RemoteArgs::default().or_env();
+        if remote.url.is_some() {
+            let org = args
+                .get("org")
+                .and_then(serde_json::Value::as_str)
+                .map(String::from)
+                .or_else(|| std::env::var("ISB_ORG").ok().filter(|o| !o.is_empty()))
+                .unwrap_or_else(|| "default".into());
+            return remote.remote()?.call_tool(&org, tool, args);
+        }
+    }
     isb::server::client::call_tool(&socket, tool, args, timeout).map_err(|e| match e {
         Error::Io(_) | Error::Connect { .. } if cfg!(target_os = "macos") => {
             Error::Invalid(format!(
@@ -3435,11 +3463,19 @@ fn host_rules(uplink: &str, public_ingress: bool) -> Vec<Vec<String>> {
             "ufw allow in on isbbr+ to any port {} proto tcp comment",
             isb::ingress::DEFAULT_TUNNEL_PORT
         )),
+        // An org's workspace reaches the org-bound MCP on its own bridge
+        // address; the daemon answers only that org's subnet, and other
+        // orgs' ACLs keep them off it.
+        v(&format!(
+            "ufw allow in on isbbr+ to any port {} proto tcp comment",
+            isb::daemon::workspaces::DEFAULT_PORT
+        )),
     ];
     let mut comments = vec![
         "isb org bridges: DNS",
         "isb org bridges: egress",
         "isb org bridges: tunnel ingress",
+        "isb org bridges: workspace MCP",
     ];
     if public_ingress {
         out.push(v("ufw allow 80/tcp comment"));

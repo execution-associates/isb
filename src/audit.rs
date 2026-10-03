@@ -158,6 +158,14 @@ impl Actor {
                 a.token_id = Some(*id);
                 a.token_name = Some(name.clone());
             }
+            crate::auth::PrincipalKind::Workspace { name, .. } => {
+                // The org's workspace: the row's org says which.
+                a.name = crate::auth::WORKSPACE_ACTOR.into();
+                a.kind = Some(ActorKind::Agent);
+                a.user_id = None;
+                a.email = None;
+                a.token_name = Some(format!("workspace:{name}"));
+            }
             crate::auth::PrincipalKind::Superadmin { source } => {
                 a.name = source.label();
                 a.kind = Some(ActorKind::Superadmin);
