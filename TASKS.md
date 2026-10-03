@@ -161,6 +161,10 @@ minime only runs binaries downloaded from our CI runs.
   app from a `git://` repo built in its org (175 s cold, incl. the builder
   image), pushed to the local registry, deployed, served v1; a GitLab-style
   webhook deployed v2; rollback to v1 took 19 s with no rebuild.
+- **Phase 4 contract: event kinds.** `Event.kind` (`<subject>.<outcome>`,
+  listed on the type) is what notifications match on; producers emit with
+  `Controller::event(kind, level, stack, service, message)`. A new kind is
+  added to the list on `Event::kind` by whoever emits it.
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
@@ -291,21 +295,21 @@ minime only runs binaries downloaded from our CI runs.
 
 ## Phase 4: day 2
 
-- [ ] P4.1 Database templates (Postgres, MySQL/MariaDB, Redis, MongoDB) with
+- [~] (subagent p4.1) P4.1 Database templates (Postgres, MySQL/MariaDB, Redis, MongoDB) with
   credentials as secrets and scheduled backups to S3-compatible destinations;
   restore. **Verify:** backup and restore a Postgres on the hcloud box.
-- [ ] P4.2 Scheduled jobs (cron) per service/org. **Verify:** a job runs on
+- [~] (subagent p4.1) P4.2 Scheduled jobs (cron) per service/org. **Verify:** a job runs on
   schedule and its logs are visible.
-- [ ] P4.3 Notifications (Slack, Discord, Telegram, email, webhook) on deploy,
+- [~] (subagent p4.3) P4.3 Notifications (Slack, Discord, Telegram, email, webhook) on deploy,
   failure, health, backup events. **Verify:** a webhook receives events.
-- [ ] P4.4 Template catalog (one-click apps). **Stretch goal:** running Dokploy's
+- [~] (subagent p4.4) P4.4 Template catalog (one-click apps). **Stretch goal:** running Dokploy's
   templates (docker-compose + `template.toml`: variables, domains, mounts)
   directly; check the Dokploy/templates repo license before shipping its
   catalog. Only if it fits isb's architecture without bending it.
   **Verify:** deploy two native (and, if done, two Dokploy) templates from the UI.
-- [ ] P4.5 Preview deployments per pull request. **Verify:** a PR on the test
+- [~] (subagent p4.5) P4.5 Preview deployments per pull request. **Verify:** a PR on the test
   repo gets a URL; closing it removes it.
-- [ ] P4.6 Metrics history (retained samples) and monitoring pages.
+- [~] (subagent p4.3) P4.6 Metrics history (retained samples) and monitoring pages.
 
 ## Phase 5: scale-out
 

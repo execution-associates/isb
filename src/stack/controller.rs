@@ -156,6 +156,13 @@ pub struct Event {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance: Option<String>,
     pub message: String,
+    /// What happened, for consumers that act on events (notifications):
+    /// dotted, `<subject>.<outcome>`. In use: `deploy.succeeded`,
+    /// `deploy.failed`, `health.unhealthy`, `health.recovered`,
+    /// `backup.succeeded`, `backup.failed`, `job.succeeded`, `job.failed`,
+    /// `cert.issued`, `cert.failed`. Most events have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
 }
 
 /// Events kept for late readers.
@@ -248,6 +255,18 @@ impl Inner {
         instance: Option<&str>,
         message: String,
     ) {
+        self.emit_kind(None, level, stack, service, instance, message);
+    }
+
+    fn emit_kind(
+        &self,
+        kind: Option<&str>,
+        level: &str,
+        stack: &str,
+        service: &str,
+        instance: Option<&str>,
+        message: String,
+    ) {
         let mut e = self.events.lock().unwrap();
         e.0 += 1;
         let ev = Event {
@@ -258,6 +277,7 @@ impl Inner {
             service: service.into(),
             instance: instance.map(String::from),
             message,
+            kind: kind.map(String::from),
         };
         if e.1.len() == EVENTS_KEPT {
             e.1.pop_front();
@@ -541,6 +561,14 @@ impl Controller {
     }
 
     /// Record an event from outside a worker (a deploy, a removal).
+    /// Record an event of a known kind ([`Event::kind`]) about a stack, or
+    /// one of its services when `service` is not empty.
+    pub fn event(&self, kind: &str, level: &str, stack: &str, service: &str, message: String) {
+        eprintln!("isb serve: {stack}: {message}");
+        self.inner
+            .emit_kind(Some(kind), level, stack, service, None, message);
+    }
+
     pub fn note(&self, level: &str, stack: &str, message: String) {
         eprintln!("isb serve: {stack}: {message}");
         self.inner.emit(level, stack, "", None, message);
