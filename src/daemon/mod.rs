@@ -15,6 +15,7 @@ pub mod builds;
 mod orgs;
 pub mod policy;
 pub mod secrets;
+mod terminal;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -303,6 +304,7 @@ fn visible_orgs(c: &Caller) -> Option<Vec<crate::org::OrgId>> {
 /// Authentication and authorization for every listener.
 fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate::server::Hooks {
     use crate::server::Authenticated;
+    let term = terminal::terminal(d.clone());
     let u = users.clone();
     let authn: crate::server::mcp::Authn = Arc::new(move |req, id| {
         if req.header("authorization").is_some()
@@ -364,6 +366,7 @@ fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate:
         authn: Some(authn),
         authorize: Some(authorize),
         events: Some(events),
+        terminal: Some(term),
     }
 }
 
@@ -717,7 +720,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
                 .scale(&qname(&a.org, &a.name)?, &a.service, a.replicas)?;
             d.ctl.note(
                 "info",
-                &a.name,
+                &qname(&a.org, &a.name)?,
                 format!(
                     "{} scaled to {} by {}",
                     a.service,
@@ -749,7 +752,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             d.ctl.redeploy(&qname(&a.org, &a.name)?, &a.service)?;
             d.ctl.note(
                 "info",
-                &a.name,
+                &qname(&a.org, &a.name)?,
                 format!("{} redeployed by {}", a.service, caller_name(_c)),
             );
             Ok(json!({"ok": true}))
@@ -772,7 +775,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             let changes = d.ctl.rollback(&qname(&a.org, &a.name)?)?;
             d.ctl.note(
                 "info",
-                &a.name,
+                &qname(&a.org, &a.name)?,
                 format!("rolled back by {}", caller_name(_c)),
             );
             Ok(json!({"changes": changes}))
@@ -1187,7 +1190,7 @@ fn stack_deploy(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         .collect();
     d.ctl.note(
         "info",
-        &a.name,
+        &crate::stack::qualified(&org, &a.name),
         format!(
             "deployed by {who}: {}",
             if summary.is_empty() {

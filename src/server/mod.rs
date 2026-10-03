@@ -25,6 +25,7 @@ pub mod client;
 pub mod http;
 pub mod mcp;
 pub mod service;
+pub mod terminal;
 
 use std::path::PathBuf;
 use std::sync::Arc;

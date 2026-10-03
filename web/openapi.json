@@ -19,6 +19,1149 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/tools/app_create": {
+      "post": {
+        "description": "Create an application in a project's environment: an image or a git source (built by a builder), plus its env, domains, volumes, ports, replicas, port, health check, resources and command. Returns the app and its webhook secret (POST <webhook> with it to deploy). Nothing runs until app_deploy (or deploy=true).",
+        "operationId": "app_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "build": {
+                    "description": "Git sources only: {\"builder\": {\"type\": \"railpack\" | \"nixpacks\" | \"dockerfile\" (path, target) | \"buildpacks\" (builder)}, \"args\": {K: V}, \"untrusted\": true (build in a VM)}.",
+                    "type": "object"
+                  },
+                  "command": {
+                    "description": "argv (a list) or a command line."
+                  },
+                  "deploy": {
+                    "description": "Queue a deploy right away.",
+                    "type": "boolean"
+                  },
+                  "domains": {
+                    "description": "[{host, path?, port?, https?, redirect?}] for the ingress; port defaults to the app's port.",
+                    "items": {
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "env": {
+                    "description": ".env text, or a map {KEY: \"value\" | {\"secret\": NAME}}. A secret is an org secret, delivered as the variable."
+                  },
+                  "environment": {
+                    "description": "Default production.",
+                    "type": "string"
+                  },
+                  "healthcheck": {
+                    "description": "A compose healthcheck: {test, interval, timeout, retries, start_period}.",
+                    "type": "object"
+                  },
+                  "name": {
+                    "description": "[a-z0-9-], unique in the org; the service name in its stack.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "port": {
+                    "description": "The port the app listens on.",
+                    "maximum": 65535,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "ports": {
+                    "description": "Published host ports, compose syntax (127.0.0.1:8080:80), load-balanced over healthy replicas.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "project": {
+                    "type": "string"
+                  },
+                  "replicas": {
+                    "maximum": 100,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "resources": {
+                    "description": "{cpus, memory} per replica.",
+                    "type": "object"
+                  },
+                  "source": {
+                    "description": "Exactly one of {\"image\": \"docker:nginx:1.27\"} or {\"git\": {\"url\", \"ref\" (branch, tag or SHA; default main), \"subdir\", \"auth\": {\"token_secret\": NAME, \"username\"} | {\"ssh_key_secret\": NAME}, \"submodules\": false}}.",
+                    "type": "object"
+                  },
+                  "volumes": {
+                    "description": "Named volumes, NAME:/path[:ro]. No host paths.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "name",
+                  "project",
+                  "source"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Create an app"
+      }
+    },
+    "/api/v1/tools/app_delete": {
+      "post": {
+        "description": "Delete an app: its service leaves the stack (the stack is removed with its last app), its deployments, checkout, webhook secret and deploy key go. Named volumes are kept.",
+        "operationId": "app_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Delete an app"
+      }
+    },
+    "/api/v1/tools/app_deploy": {
+      "post": {
+        "description": "Deploy an app's current settings: pull (an image source, pinned to its digest) or fetch and build (a git source), then roll its service in its environment's stack; other apps there are untouched. One deploy runs at a time per app; a new one waits behind it and replaces any other waiting one. Returns the deployment record; follow it with app_deployment_log or the events feed.",
+        "operationId": "app_deploy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "timeout": {
+                    "description": "How long wait may take, e.g. 10m (default 15m).",
+                    "type": "string"
+                  },
+                  "wait": {
+                    "description": "Wait until the deployment finishes (default false).",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Deploy an app"
+      }
+    },
+    "/api/v1/tools/app_deploy_key": {
+      "post": {
+        "description": "Generate an ed25519 deploy key for a git app with an SSH URL: the private key is stored as the org secret app.<name>.deploy-key and becomes the app's credential; the public key is returned to add to the repository's deploy keys (read-only).",
+        "operationId": "app_deploy_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Make a deploy key"
+      }
+    },
+    "/api/v1/tools/app_deployment_log": {
+      "post": {
+        "description": "A deployment's log (git, build and rollout lines) from byte `offset`. Returns the text, the offset to ask from next, and whether the deployment has finished: poll until done. The same lines stream on the events feed as level `log`.",
+        "operationId": "app_deployment_log",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "deployment": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "offset": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "deployment"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "A deployment's log"
+      }
+    },
+    "/api/v1/tools/app_deployments": {
+      "post": {
+        "description": "An app's deployments, newest first: trigger, status (queued, building, deploying, done, failed, superseded), commit, image and digest, timestamps.",
+        "operationId": "app_deployments",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "limit": {
+                    "maximum": 100,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List an app's deployments"
+      }
+    },
+    "/api/v1/tools/app_env_get": {
+      "post": {
+        "description": "An app's environment as .env text (KEY=value lines, comments kept). Secret references read KEY=${{secret.NAME}}; their values are never shown.",
+        "operationId": "app_env_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Get an app's environment"
+      }
+    },
+    "/api/v1/tools/app_env_set": {
+      "post": {
+        "description": "Replace an app's environment with .env text: KEY=value lines (quotes and # comments as in docker compose; comments are kept), KEY=${{secret.NAME}} for an org secret. Takes effect at the next deploy (deploy=true queues one).",
+        "operationId": "app_env_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "deploy": {
+                    "type": "boolean"
+                  },
+                  "env": {
+                    "description": "The .env text.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "env"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Set an app's environment"
+      }
+    },
+    "/api/v1/tools/app_get": {
+      "post": {
+        "description": "An app's settings, stack, service name, current deployment and webhook path. Secrets in its env show as {secret: NAME}, never values.",
+        "operationId": "app_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Get an app"
+      }
+    },
+    "/api/v1/tools/app_list": {
+      "post": {
+        "description": "An org's apps, optionally only one project's (and environment's).",
+        "operationId": "app_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "environment": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "project": {
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List apps"
+      }
+    },
+    "/api/v1/tools/app_rollback": {
+      "post": {
+        "description": "Redeploy a previous successful deployment's image (by digest when known) and settings, without building. The app's saved settings are not changed, so the next deploy applies them again.",
+        "operationId": "app_rollback",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "deployment": {
+                    "description": "The deployment to go back to (default: the last successful one before the current).",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "timeout": {
+                    "description": "How long wait may take, e.g. 10m (default 15m).",
+                    "type": "string"
+                  },
+                  "wait": {
+                    "description": "Wait until the deployment finishes (default false).",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Roll back an app"
+      }
+    },
+    "/api/v1/tools/app_update": {
+      "post": {
+        "description": "Change an app's settings: the fields given replace the current ones (a JSON merge patch: null clears a setting; objects merge). Name, project and environment are fixed. Takes effect at the next deploy (deploy=true queues one).",
+        "operationId": "app_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "build": {
+                    "description": "Git sources only: {\"builder\": {\"type\": \"railpack\" | \"nixpacks\" | \"dockerfile\" (path, target) | \"buildpacks\" (builder)}, \"args\": {K: V}, \"untrusted\": true (build in a VM)}.",
+                    "type": "object"
+                  },
+                  "command": {
+                    "description": "argv (a list) or a command line."
+                  },
+                  "deploy": {
+                    "description": "Queue a deploy after the change.",
+                    "type": "boolean"
+                  },
+                  "domains": {
+                    "description": "[{host, path?, port?, https?, redirect?}] for the ingress; port defaults to the app's port.",
+                    "items": {
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "env": {
+                    "description": ".env text, or a map {KEY: \"value\" | {\"secret\": NAME}}. A secret is an org secret, delivered as the variable."
+                  },
+                  "healthcheck": {
+                    "description": "A compose healthcheck: {test, interval, timeout, retries, start_period}.",
+                    "type": "object"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "port": {
+                    "description": "The port the app listens on.",
+                    "maximum": 65535,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "ports": {
+                    "description": "Published host ports, compose syntax (127.0.0.1:8080:80), load-balanced over healthy replicas.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "replicas": {
+                    "maximum": 100,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "resources": {
+                    "description": "{cpus, memory} per replica.",
+                    "type": "object"
+                  },
+                  "source": {
+                    "description": "Exactly one of {\"image\": \"docker:nginx:1.27\"} or {\"git\": {\"url\", \"ref\" (branch, tag or SHA; default main), \"subdir\", \"auth\": {\"token_secret\": NAME, \"username\"} | {\"ssh_key_secret\": NAME}, \"submodules\": false}}.",
+                    "type": "object"
+                  },
+                  "volumes": {
+                    "description": "Named volumes, NAME:/path[:ro]. No host paths.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Update an app"
+      }
+    },
+    "/api/v1/tools/app_webhook": {
+      "post": {
+        "description": "The app's webhook path and secret, to configure in GitHub (application/json, the secret), Gitea/Forgejo (the secret), GitLab (secret token) or any caller (?token=<secret>). rotate=true makes a new secret first.",
+        "operationId": "app_webhook",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "rotate": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "An app's webhook"
+      }
+    },
+    "/api/v1/tools/build_list": {
+      "post": {
+        "description": "The org's recent builds (running and finished), newest first.",
+        "operationId": "build_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List builds"
+      }
+    },
+    "/api/v1/tools/build_logs": {
+      "post": {
+        "description": "A build's state and its log lines from `since` (a line number; 0 for all). `wait` (seconds, at most 30) holds the call until there are new lines or the build ends. Done when `state` is succeeded (then `image` and `digest`) or failed (`error`).",
+        "operationId": "build_logs",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "since": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "wait": {
+                    "maximum": 30,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Follow a build"
+      }
+    },
+    "/api/v1/tools/build_run": {
+      "post": {
+        "description": "Start a build of a source directory into an image in the org's local registry. It runs in a fresh sandbox in the org (a VM with untrusted=true), never on the host, and is pushed as <org>/<app>:<tag>. Returns an id at once: follow it with build_logs. The result's `image` (registry:APP:TAG@DIGEST) goes in a compose `image:`.",
+        "operationId": "build_run",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "app": {
+                    "description": "The app: names the repository (<org>/<app>) and the build cache. [a-z0-9][a-z0-9._-]*, up to 40 characters.",
+                    "type": "string"
+                  },
+                  "args": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Build arguments (Dockerfile ARGs; environment for railpack and nixpacks).",
+                    "type": "object"
+                  },
+                  "builder": {
+                    "description": "How to build (default railpack, or dockerfile when `dockerfile` is set).",
+                    "enum": [
+                      "railpack",
+                      "nixpacks",
+                      "dockerfile"
+                    ],
+                    "type": "string"
+                  },
+                  "context": {
+                    "description": "Absolute path of the source directory on the host (read, never written). Remote callers: under a --bind-root.",
+                    "type": "string"
+                  },
+                  "dockerfile": {
+                    "description": "Dockerfile path relative to the context (default Dockerfile).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "subdir": {
+                    "description": "Build from this subdirectory of the context.",
+                    "type": "string"
+                  },
+                  "tag": {
+                    "description": "The tag to push (default latest).",
+                    "type": "string"
+                  },
+                  "target": {
+                    "description": "Dockerfile stage to build.",
+                    "type": "string"
+                  },
+                  "timeout": {
+                    "description": "Longest the build may take, e.g. 30m (the default).",
+                    "type": "string"
+                  },
+                  "untrusted": {
+                    "description": "Build in a VM (its own kernel).",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "app",
+                  "context"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Start a build"
+      }
+    },
+    "/api/v1/tools/environment_create": {
+      "post": {
+        "description": "Add an environment (staging, preview, ...) to a project. Its apps run as the stack <project>-<name>.",
+        "operationId": "environment_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "project": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "project",
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Create an environment"
+      }
+    },
+    "/api/v1/tools/environment_delete": {
+      "post": {
+        "description": "Remove an environment that has no apps left from a project.",
+        "operationId": "environment_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "project": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "project",
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Delete an environment"
+      }
+    },
+    "/api/v1/tools/environment_list": {
+      "post": {
+        "description": "A project's environments.",
+        "operationId": "environment_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "project": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "project"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List environments"
+      }
+    },
     "/api/v1/tools/events": {
       "post": {
         "description": "What happened, newest last: deploys, rollouts, health changes, restarts, failures. Pass the last `seq` you saw as `since` to get only newer ones; `wait` (seconds, at most 30) holds the call until one arrives.",
@@ -74,6 +1217,49 @@
           }
         },
         "summary": "Events"
+      }
+    },
+    "/api/v1/tools/ingress_status": {
+      "post": {
+        "description": "The HTTP(S) edge: its listeners, CA and Caddy process; every routed domain with its URL, certificate state (issued, pending, failed, unsupported, cloudflare, none) and live upstreams; domain conflicts and refusals; and each Cloudflare-tunnel org's cloudflared and API sync. Shows the caller's orgs only.",
+        "operationId": "ingress_status",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Ingress status"
       }
     },
     "/api/v1/tools/org_create": {
@@ -410,6 +1596,248 @@
           }
         },
         "summary": "Overview"
+      }
+    },
+    "/api/v1/tools/project_create": {
+      "post": {
+        "description": "Create a project in an org: a group of environments (default: production), each of which runs its apps as one stack named <project>-<env>.",
+        "operationId": "project_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "description": {
+                    "type": "string"
+                  },
+                  "environments": {
+                    "description": "Default [production].",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Create a project"
+      }
+    },
+    "/api/v1/tools/project_delete": {
+      "post": {
+        "description": "Delete a project that has no apps left.",
+        "operationId": "project_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Delete a project"
+      }
+    },
+    "/api/v1/tools/project_list": {
+      "post": {
+        "description": "An org's projects, each with its environments and the apps in each.",
+        "operationId": "project_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List projects"
+      }
+    },
+    "/api/v1/tools/registry_gc": {
+      "post": {
+        "description": "Retention for the whole local registry (platform admins): per repository keep the newest `keep` tags (default 10) and every image a deployed stack runs or would roll back to, delete the rest, and reclaim their storage. dry_run reports only.",
+        "operationId": "registry_gc",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "dry_run": {
+                    "type": "boolean"
+                  },
+                  "keep": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Registry retention"
+      }
+    },
+    "/api/v1/tools/registry_list": {
+      "post": {
+        "description": "The org's images in the local registry: each app's tags with their digests and push times, newest first. Run one with image: registry:APP:TAG (or @DIGEST) in a compose file.",
+        "operationId": "registry_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List images"
       }
     },
     "/api/v1/tools/sandbox_create": {

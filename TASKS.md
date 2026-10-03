@@ -165,6 +165,10 @@ minime only runs binaries downloaded from our CI runs.
   listed on the type) is what notifications match on; producers emit with
   `Controller::event(kind, level, stack, service, message)`. A new kind is
   added to the list on `Event::kind` by whoever emits it.
+- **Web terminal** is a websocket at `/orgs/<org>/api/v1/terminal`, admitted
+  as `sandbox_exec` in that org (same org rules and tool policy;
+  `--deny-tools sandbox_exec` turns it off); cookie upgrades need an Origin
+  matching Host. 16 sessions, 30 min idle, 8 h max.
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
@@ -283,11 +287,11 @@ minime only runs binaries downloaded from our CI runs.
   the binary, served by `isb serve`; auth pages (sign in with SSO, GitHub,
   Google, email/password, passkey; create account; lost password).
   **Verify:** sign-in flows in the browser.
-- [~] (subagent p3.2) P3.2 Dashboard + org/project/environment navigation; service pages with
+- [x] (3f0e441, 567dad2) P3.2 Dashboard + org/project/environment navigation; service pages with
   tabs: General, Environment, Domains, Deployments, Logs, Monitoring,
   Advanced; live updates over SSE. **Verify:** browser walkthrough recorded
   with screenshots.
-- [~] (subagent p3.2) P3.3 Deploy flows: new app from git/image/template, deploy with live
+- [x] (3f0e441, ed4ef6f; templates wait on P4.4) P3.3 Deploy flows: new app from git/image/template, deploy with live
   build logs, rollback, scale, web terminal (xterm.js over websocket exec).
   **Verify:** end to end in the browser.
 - [x] (e7b84ec, d00c451) P3.4 Org admin: members, invitations, roles, API tokens, secrets editor,
