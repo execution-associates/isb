@@ -41,7 +41,10 @@ pub enum ServerCmd {
         isb_binary: Option<PathBuf>,
         /// The isb release to install.
         #[arg(long)]
-        version: Option<String>,
+        isb_version: Option<String>,
+        /// Serve the server's orgs' domains on its own ports 80 and 443.
+        #[arg(long)]
+        public_ingress: bool,
     },
     /// List servers with their health and orgs.
     #[command(alias = "list")]
@@ -69,12 +72,14 @@ pub fn server(cmd: ServerCmd) -> Result<u8> {
             agent_port,
             allow_from,
             isb_binary,
-            version,
+            isb_version,
+            public_ingress,
         } => {
             let abs = |p: PathBuf| std::fs::canonicalize(&p).unwrap_or(p);
             let mut a = json!({
                 "name": name, "ssh": ssh, "ssh_port": port, "key": abs(key),
                 "agent_port": agent_port, "allow_from": allow_from,
+                "public_ingress": public_ingress,
             });
             if let Some(x) = address {
                 a["address"] = json!(x);
@@ -82,7 +87,7 @@ pub fn server(cmd: ServerCmd) -> Result<u8> {
             if let Some(x) = isb_binary {
                 a["isb_binary"] = json!(abs(x));
             }
-            if let Some(x) = version {
+            if let Some(x) = isb_version {
                 a["version"] = json!(x);
             }
             eprintln!(

@@ -105,7 +105,8 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
             "agent_port": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "The agent's mTLS port (default 7443)."},
             "allow_from": {"type": "array", "items": {"type": "string"}, "description": "Addresses or CIDRs that may reach the agent port (this control plane's egress address); the box's firewall then allows only SSH and these."},
             "isb_binary": {"type": "string", "description": "A Linux isb binary on this host to install (local CLI only); default the release of this version."},
-            "version": {"type": "string", "description": "The isb release to install (default this daemon's)."}
+            "version": {"type": "string", "description": "The isb release to install (default this daemon's)."},
+            "public_ingress": {"type": "boolean", "description": "Serve the server's orgs' domains on its own ports 80 and 443 (opened in its firewall)."}
         }, "required": ["name", "ssh"], "additionalProperties": false}),
         write,
         |d: &Daemon, a: Value, c: &Caller| -> Result<Value> {
@@ -123,6 +124,8 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
                 allow_from: Vec<String>,
                 isb_binary: Option<PathBuf>,
                 version: Option<String>,
+                #[serde(default)]
+                public_ingress: bool,
             }
             platform_only(c)?;
             let s = servers(d)?;
@@ -162,6 +165,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
                 allow_from: a.allow_from,
                 isb_binary: a.isb_binary,
                 version: a.version,
+                public_ingress: a.public_ingress,
             };
             let mut log: Vec<String> = Vec::new();
             let r = s.add(&o, Some(&d.ctl), &mut |m: &str| {
@@ -923,6 +927,43 @@ mod tests {
         assert!(
             try_with(wrong_ca).is_err(),
             "an agent with another CA's certificate"
+        );
+    }
+
+    #[test]
+    fn rotation_writes_the_new_leaf_and_swaps_the_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let ca = Ca::open(&dir.path().join("pki")).unwrap();
+        let tls_dir = dir.path().join("tls");
+        std::fs::create_dir_all(&tls_dir).unwrap();
+        std::fs::write(tls_dir.join(pki::AGENT_CA), &ca.cert_pem).unwrap();
+        let old = ca.issue_server("box", "127.0.0.1").unwrap();
+        let cfg = pki::server_config(&ca.cert_pem, &old).unwrap();
+        let st = AgentState {
+            orgs: Arc::new(AgentOrgs::open(dir.path()).unwrap()),
+            tls: Arc::new(std::sync::RwLock::new(cfg.clone())),
+            tls_dir: tls_dir.clone(),
+        };
+        let new = ca.issue_server("box", "127.0.0.1").unwrap();
+        let body = serde_json::to_vec(&json!({"cert": new.cert, "key": new.key})).unwrap();
+        assert_eq!(rotate(&st, &body).unwrap(), new.fingerprint().unwrap());
+        assert_eq!(
+            std::fs::read_to_string(tls_dir.join(pki::AGENT_CERT)).unwrap(),
+            new.cert
+        );
+        use std::os::unix::fs::PermissionsExt;
+        let m = std::fs::metadata(tls_dir.join(pki::AGENT_KEY)).unwrap();
+        assert_eq!(m.permissions().mode() & 0o777, 0o600);
+        assert!(
+            !Arc::ptr_eq(&st.tls.read().unwrap(), &cfg),
+            "new connections get the new config"
+        );
+        let bad = serde_json::to_vec(&json!({"cert": "nope", "key": new.key})).unwrap();
+        assert!(rotate(&st, &bad).is_err());
+        assert_eq!(
+            std::fs::read_to_string(tls_dir.join(pki::AGENT_CERT)).unwrap(),
+            new.cert,
+            "a bad one changes nothing"
         );
     }
 

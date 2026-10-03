@@ -38,6 +38,9 @@ pub struct AddOptions {
     /// A Linux isb binary to install; default the release of this version.
     pub isb_binary: Option<PathBuf>,
     pub version: Option<String>,
+    /// Serve the box's orgs' domains on its own 80 and 443 (`isb host
+    /// setup --public-ingress`, the agent's `--ingress-http/https`).
+    pub public_ingress: bool,
 }
 
 /// Server names: `[a-z0-9-]`, a letter first, at most 32.
@@ -205,7 +208,12 @@ fn shell_quote(s: &str) -> String {
 }
 
 /// The agent's unit.
-pub fn render_unit(port: u16) -> String {
+pub fn render_unit(port: u16, public_ingress: bool) -> String {
+    let ingress = if public_ingress {
+        " --ingress-http 0.0.0.0:80 --ingress-https 0.0.0.0:443"
+    } else {
+        ""
+    };
     format!(
         "[Unit]
 Description=isb agent (isb serve --agent, managed by an isb control plane)
@@ -221,7 +229,7 @@ Environment=HOME={AGENT_HOME}
 Environment=ISB_SERVE_SOCKET=/run/isb/serve.sock
 RuntimeDirectory=isb
 RuntimeDirectoryMode=0700
-ExecStart=/usr/local/bin/isb serve --agent --agent-listen 0.0.0.0:{port} --agent-tls {AGENT_TLS_DIR} --state-dir {AGENT_HOME}/state
+ExecStart=/usr/local/bin/isb serve --agent --agent-listen 0.0.0.0:{port} --agent-tls {AGENT_TLS_DIR} --state-dir {AGENT_HOME}/state{ingress}
 Restart=always
 RestartSec=2
 
@@ -233,6 +241,7 @@ WantedBy=multi-user.target
 
 /// The root script: everything idempotent, so a second `server add` (or a
 /// rerun after a failure) converges.
+#[allow(clippy::too_many_arguments)]
 pub fn render_script(
     upload: &str,
     sha256: &str,
@@ -241,6 +250,7 @@ pub fn render_script(
     port: u16,
     allow_from: &[String],
     ssh_port: u16,
+    public_ingress: bool,
 ) -> String {
     let mut fw = String::new();
     if !allow_from.is_empty() {
@@ -259,7 +269,7 @@ pub fn render_script(
     format!(
         r#"set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
-echo "{sha256}  {upload_q}" | sha256sum -c --quiet -
+echo "{sha256}  {upload}" | sha256sum -c --quiet -
 id -u {user} >/dev/null 2>&1 || useradd --system --create-home --home-dir {home} --shell /usr/sbin/nologin {user}
 uid=$(id -u {user})
 # Containers get their own range, and incus may map the agent's uid 1:1
@@ -295,7 +305,10 @@ fi
 usermod -aG incus-admin {user}
 install -m 0755 {upload_q} /usr/local/bin/isb
 rm -f {upload_q}
-{fw}/usr/local/bin/isb host setup --user {user}
+{fw}# The local registry, for builds; then host setup installs its CA.
+runuser -u {user} -- env HOME={home} /usr/local/bin/isb registry setup --state-dir {home}/state \
+  || echo "isb: the local registry could not be set up; builds on this server will fail" >&2
+/usr/local/bin/isb host setup --user {user}{host_ingress}
 install -d -o {user} -g {user} -m 0700 {tls}
 cat > {tls}/ca.crt <<'ISB_EOF'
 {ca}ISB_EOF
@@ -324,7 +337,12 @@ echo "incus $(incus version 2>/dev/null | tail -n1 | awk '{{print $NF}}')"
         cert = leaf.cert,
         key = leaf.key,
         unit = AGENT_UNIT,
-        unit_text = render_unit(port),
+        unit_text = render_unit(port, public_ingress),
+        host_ingress = if public_ingress {
+            " --public-ingress"
+        } else {
+            ""
+        },
     )
 }
 
@@ -388,7 +406,11 @@ pub fn run(
         )?
         .trim()
         .to_string();
-    if !upload.starts_with("/tmp/isb-agent.") {
+    if !upload.starts_with("/tmp/isb-agent.")
+        || !upload
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'.' | b'-' | b'_'))
+    {
         return Err(Error::invalid(format!(
             "upload isb: unexpected path {upload:?}"
         )));
@@ -402,6 +424,7 @@ pub fn run(
         o.agent_port,
         &o.allow_from,
         o.ssh_port,
+        o.public_ingress,
     );
     let out = ssh.run(
         "install the agent",
@@ -447,14 +470,25 @@ mod tests {
             7443,
             &["198.51.100.1".into()],
             22,
+            true,
         );
-        assert!(s.contains("echo \"abc  '/tmp/isb-agent.x'\" | sha256sum -c"));
+        assert!(s.contains("echo \"abc  /tmp/isb-agent.x\" | sha256sum -c"));
         assert!(s.contains("ufw allow proto tcp from '198.51.100.1' to any port 7443"));
         assert!(s.contains("ufw allow 22/tcp"));
         assert!(s.contains("pkgs.zabbly.com/incus/stable"));
         assert!(s.contains("--agent-listen 0.0.0.0:7443"));
-        let open = render_script("/tmp/isb-agent.x", "abc", "CA\n", &leaf, 7443, &[], 22);
-        assert!(!open.contains("ufw"));
+        assert!(s.contains("--ingress-https 0.0.0.0:443") && s.contains("--public-ingress"));
+        let open = render_script(
+            "/tmp/isb-agent.x",
+            "abc",
+            "CA\n",
+            &leaf,
+            7443,
+            &[],
+            22,
+            false,
+        );
+        assert!(!open.contains("ufw") && !open.contains("ingress"));
         assert_eq!(
             elf_arch(b"\x7fELF\x02\x01\x01\0\0\0\0\0\0\0\0\0\x02\0\x3e\0"),
             Some("x86_64")
