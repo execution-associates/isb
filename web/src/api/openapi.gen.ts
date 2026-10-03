@@ -315,7 +315,7 @@ export interface paths {
         put?: never;
         /**
          * Schedule a backup
-         * @description Back a database up on a cron schedule to a destination: the engine's own dump (pg_dump, mysqldump, mariadb-dump, mongodump, a Redis RDB) runs in the database's instance, is compressed and streamed to the bucket by the daemon, checked with HEAD, and the oldest beyond `keep` are deleted. Emits backup.succeeded / backup.failed events.
+         * @description Back a database (or a named `volume`) up on a cron schedule to a destination. A database: the engine's own dump (pg_dump, mysqldump, mariadb-dump, mongodump, a Redis RDB) runs in the database's instance, is compressed and streamed to the bucket by the daemon, checked with HEAD, and the oldest beyond `keep` are deleted. Emits backup.succeeded / backup.failed events.
          */
         post: operations["backup_create"];
         delete?: never;
@@ -2304,6 +2304,226 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/volume_get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Show a volume
+         * @description One volume: the instances using it, its snapshot schedule and hook settings with the next run, its snapshots (newest first), its staged restores and the backups of it.
+         */
+        post: operations["volume_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List volumes
+         * @description The org's named volumes (an app's <app>_<NAME>, a database's data, a workspace's home): instances using each, its snapshot schedule, and which are staged restores.
+         */
+        post: operations["volume_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore a volume (staged)
+         * @description Restore a volume's `snapshot`, or a volume `backup` (its newest file, or `key`), or a `destination` + `key`, into a NEW volume <name>-restore-<stamp>, mounted read-write at /restore/<stamp> in the instance using the volume (or `instance`); left detached when that instance is stopped. The live volume is never touched: diff and copy back what you need, then discard it with volume_restore_discard. Org admins and owners; audited.
+         */
+        post: operations["volume_restore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_restore_discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discard a staged restore
+         * @description Detach and delete a staged restore of volume `name` (by its `stamp`). Only volumes isb staged can be discarded this way. Org admins and owners.
+         */
+        post: operations["volume_restore_discard"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_restore_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List staged restores
+         * @description Staged restores (of `name`, or every volume): the new volume, what it came from, where it is mounted.
+         */
+        post: operations["volume_restore_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_snapshot_create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Snapshot a volume now
+         * @description Snapshot a volume now. First every running instance using it runs its executable /etc/isb/pre-snapshot (if any; as root, with the volume's hook_timeout; output in the run log). Named `snapshot`, or manual-<stamp>; kept until deleted. wait=true returns when done (at most `timeout`, default 10m). Org admins and owners.
+         */
+        post: operations["volume_snapshot_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_snapshot_delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete a snapshot
+         * @description Delete one snapshot of a volume. Org admins and owners.
+         */
+        post: operations["volume_snapshot_delete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_snapshot_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List snapshots
+         * @description A volume's snapshots, newest first: auto-* (scheduled, pruned to keep), manual-* and named ones (kept until deleted).
+         */
+        post: operations["volume_snapshot_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_snapshot_run_log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Snapshot run log
+         * @description One snapshot run's log (the pre-snapshot hook's output included) from byte `offset`; poll with the returned offset until finished.
+         */
+        post: operations["volume_snapshot_run_log"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_snapshot_runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Snapshot runs
+         * @description A volume's snapshot runs, newest first (status, trigger, the hook's outcome, what was pruned).
+         */
+        post: operations["volume_snapshot_runs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_snapshot_schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Schedule snapshots
+         * @description Set a volume's snapshot schedule and hook (a merge patch): schedule (cron: five fields or @hourly, @daily, ...; empty or null removes it), timezone, keep (auto-* snapshots kept, default 7), enabled, missed_grace, hook_timeout (default 5m, at most 1h), hook_required (a failing hook stops the snapshot; default false: reported, snapshot taken). Org admins and owners.
+         */
+        post: operations["volume_snapshot_schedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2980,8 +3200,8 @@ export interface operations {
                 "application/json": {
                     /** @enum {string} */
                     compression?: "gzip" | "zstd" | "none";
-                    /** @description The database app. */
-                    database: string;
+                    /** @description The database app (or give `volume`). */
+                    database?: string;
                     destination: string;
                     enabled?: boolean;
                     /** @description Backups kept in the bucket (default 7). */
@@ -2995,6 +3215,8 @@ export interface operations {
                     schedule: string;
                     /** @description UTC (default) or a fixed offset such as +02:00. */
                     timezone?: string;
+                    /** @description Or a named volume in the org: its snapshot is exported (incus' tar) and streamed to the bucket; restore with volume_restore. */
+                    volume?: string;
                 };
             };
         };
@@ -3433,7 +3655,7 @@ export interface operations {
                 "application/json": {
                     /** @enum {string} */
                     compression?: "gzip" | "zstd" | "none";
-                    /** @description The database app. */
+                    /** @description The database app (or give `volume`). */
                     database?: string;
                     destination?: string;
                     enabled?: boolean;
@@ -3448,6 +3670,8 @@ export interface operations {
                     schedule?: string;
                     /** @description UTC (default) or a fixed offset such as +02:00. */
                     timezone?: string;
+                    /** @description Or a named volume in the org: its snapshot is exported (incus' tar) and streamed to the bucket; restore with volume_restore. */
+                    volume?: string;
                 };
             };
         };
@@ -7022,6 +7246,436 @@ export interface operations {
                     org?: string;
                     query?: string;
                     tag?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The volume. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_restore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    backup?: string;
+                    destination?: string;
+                    instance?: string;
+                    key?: string;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    snapshot?: string;
+                    timeout?: string;
+                    wait?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_restore_discard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    stamp: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_restore_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_snapshot_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    snapshot?: string;
+                    timeout?: string;
+                    wait?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_snapshot_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    snapshot: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_snapshot_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The volume. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_snapshot_run_log: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    offset?: number;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    run: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_snapshot_runs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    limit?: number;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_snapshot_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled?: boolean;
+                    hook_required?: boolean;
+                    hook_timeout?: string | null;
+                    keep?: number;
+                    missed_grace?: string | null;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    schedule?: string | null;
+                    timezone?: string | null;
                 };
             };
         };

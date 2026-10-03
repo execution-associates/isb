@@ -987,7 +987,7 @@
     },
     "/api/v1/tools/backup_create": {
       "post": {
-        "description": "Back a database up on a cron schedule to a destination: the engine's own dump (pg_dump, mysqldump, mariadb-dump, mongodump, a Redis RDB) runs in the database's instance, is compressed and streamed to the bucket by the daemon, checked with HEAD, and the oldest beyond `keep` are deleted. Emits backup.succeeded / backup.failed events.",
+        "description": "Back a database (or a named `volume`) up on a cron schedule to a destination. A database: the engine's own dump (pg_dump, mysqldump, mariadb-dump, mongodump, a Redis RDB) runs in the database's instance, is compressed and streamed to the bucket by the daemon, checked with HEAD, and the oldest beyond `keep` are deleted. Emits backup.succeeded / backup.failed events.",
         "operationId": "backup_create",
         "requestBody": {
           "content": {
@@ -1004,7 +1004,7 @@
                     "type": "string"
                   },
                   "database": {
-                    "description": "The database app.",
+                    "description": "The database app (or give `volume`).",
                     "type": "string"
                   },
                   "destination": {
@@ -1037,11 +1037,14 @@
                   "timezone": {
                     "description": "UTC (default) or a fixed offset such as +02:00.",
                     "type": "string"
+                  },
+                  "volume": {
+                    "description": "Or a named volume in the org: its snapshot is exported (incus' tar) and streamed to the bucket; restore with volume_restore.",
+                    "type": "string"
                   }
                 },
                 "required": [
                   "name",
-                  "database",
                   "destination",
                   "schedule"
                 ],
@@ -1663,7 +1666,7 @@
                     "type": "string"
                   },
                   "database": {
-                    "description": "The database app.",
+                    "description": "The database app (or give `volume`).",
                     "type": "string"
                   },
                   "destination": {
@@ -1695,6 +1698,10 @@
                   },
                   "timezone": {
                     "description": "UTC (default) or a fixed offset such as +02:00.",
+                    "type": "string"
+                  },
+                  "volume": {
+                    "description": "Or a named volume in the org: its snapshot is exported (incus' tar) and streamed to the bucket; restore with volume_restore.",
                     "type": "string"
                   }
                 },
@@ -6689,6 +6696,616 @@
           }
         },
         "summary": "List templates"
+      }
+    },
+    "/api/v1/tools/volume_get": {
+      "post": {
+        "description": "One volume: the instances using it, its snapshot schedule and hook settings with the next run, its snapshots (newest first), its staged restores and the backups of it.",
+        "operationId": "volume_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The volume.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Show a volume"
+      }
+    },
+    "/api/v1/tools/volume_list": {
+      "post": {
+        "description": "The org's named volumes (an app's <app>_<NAME>, a database's data, a workspace's home): instances using each, its snapshot schedule, and which are staged restores.",
+        "operationId": "volume_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List volumes"
+      }
+    },
+    "/api/v1/tools/volume_restore": {
+      "post": {
+        "description": "Restore a volume's `snapshot`, or a volume `backup` (its newest file, or `key`), or a `destination` + `key`, into a NEW volume <name>-restore-<stamp>, mounted read-write at /restore/<stamp> in the instance using the volume (or `instance`); left detached when that instance is stopped. The live volume is never touched: diff and copy back what you need, then discard it with volume_restore_discard. Org admins and owners; audited.",
+        "operationId": "volume_restore",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "backup": {
+                    "type": "string"
+                  },
+                  "destination": {
+                    "type": "string"
+                  },
+                  "instance": {
+                    "type": "string"
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "snapshot": {
+                    "type": "string"
+                  },
+                  "timeout": {
+                    "type": "string"
+                  },
+                  "wait": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Restore a volume (staged)"
+      }
+    },
+    "/api/v1/tools/volume_restore_discard": {
+      "post": {
+        "description": "Detach and delete a staged restore of volume `name` (by its `stamp`). Only volumes isb staged can be discarded this way. Org admins and owners.",
+        "operationId": "volume_restore_discard",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "stamp": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "stamp"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Discard a staged restore"
+      }
+    },
+    "/api/v1/tools/volume_restore_list": {
+      "post": {
+        "description": "Staged restores (of `name`, or every volume): the new volume, what it came from, where it is mounted.",
+        "operationId": "volume_restore_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List staged restores"
+      }
+    },
+    "/api/v1/tools/volume_snapshot_create": {
+      "post": {
+        "description": "Snapshot a volume now. First every running instance using it runs its executable /etc/isb/pre-snapshot (if any; as root, with the volume's hook_timeout; output in the run log). Named `snapshot`, or manual-<stamp>; kept until deleted. wait=true returns when done (at most `timeout`, default 10m). Org admins and owners.",
+        "operationId": "volume_snapshot_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "snapshot": {
+                    "type": "string"
+                  },
+                  "timeout": {
+                    "type": "string"
+                  },
+                  "wait": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Snapshot a volume now"
+      }
+    },
+    "/api/v1/tools/volume_snapshot_delete": {
+      "post": {
+        "description": "Delete one snapshot of a volume. Org admins and owners.",
+        "operationId": "volume_snapshot_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "snapshot": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "snapshot"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Delete a snapshot"
+      }
+    },
+    "/api/v1/tools/volume_snapshot_list": {
+      "post": {
+        "description": "A volume's snapshots, newest first: auto-* (scheduled, pruned to keep), manual-* and named ones (kept until deleted).",
+        "operationId": "volume_snapshot_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The volume.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List snapshots"
+      }
+    },
+    "/api/v1/tools/volume_snapshot_run_log": {
+      "post": {
+        "description": "One snapshot run's log (the pre-snapshot hook's output included) from byte `offset`; poll with the returned offset until finished.",
+        "operationId": "volume_snapshot_run_log",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "offset": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "run": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "name",
+                  "run"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Snapshot run log"
+      }
+    },
+    "/api/v1/tools/volume_snapshot_runs": {
+      "post": {
+        "description": "A volume's snapshot runs, newest first (status, trigger, the hook's outcome, what was pruned).",
+        "operationId": "volume_snapshot_runs",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "limit": {
+                    "maximum": 1000,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Snapshot runs"
+      }
+    },
+    "/api/v1/tools/volume_snapshot_schedule": {
+      "post": {
+        "description": "Set a volume's snapshot schedule and hook (a merge patch): schedule (cron: five fields or @hourly, @daily, ...; empty or null removes it), timezone, keep (auto-* snapshots kept, default 7), enabled, missed_grace, hook_timeout (default 5m, at most 1h), hook_required (a failing hook stops the snapshot; default false: reported, snapshot taken). Org admins and owners.",
+        "operationId": "volume_snapshot_schedule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "hook_required": {
+                    "type": "boolean"
+                  },
+                  "hook_timeout": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "keep": {
+                    "maximum": 1000,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "missed_grace": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "schedule": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "timezone": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Schedule snapshots"
       }
     }
   },

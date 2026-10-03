@@ -32,6 +32,7 @@ const SECTION: Record<string, string> = {
   projects: "Projects",
   templates: "Templates",
   backups: "Backups",
+  volumes: "Volumes",
   notifications: "Notifications",
   members: "Members",
   agents: "MCP",

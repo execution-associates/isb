@@ -25,16 +25,22 @@ import { type BackupFile, type BackupSpec, type Compression, type Database, dbNa
 
 const invalidate = (qc: ReturnType<typeof useQueryClient>, org: string) => qc.invalidateQueries({ queryKey: keys.org(org) });
 
-/** Create a schedule for `database`, or edit `existing`. */
+/** A backup name from what it backs up: `web_data` → `web-data-daily`. */
+export const defaultBackupName = (source: string) =>
+  `${source.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^[^a-z]+/, "").slice(0, 22).replace(/-+$/, "") || "backup"}-daily`;
+
+/** Create a schedule for `database` (or a named `volume`), or edit `existing`. */
 export function BackupScheduleDialog({
   org,
   database,
+  volume,
   existing,
   open,
   onOpenChange,
 }: {
   org: string;
-  database: string;
+  database?: string;
+  volume?: string;
   existing?: BackupSpec;
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -54,7 +60,7 @@ export function BackupScheduleDialog({
 
   useEffect(() => {
     if (!open) return;
-    setName(existing?.name ?? `${database}-daily`);
+    setName(existing?.name ?? defaultBackupName(database ?? volume ?? ""));
     setDestination(existing?.destination ?? "");
     setSchedule(existing?.schedule ?? "0 3 * * *");
     setTimezone(existing?.timezone ?? "");
@@ -63,7 +69,7 @@ export function BackupScheduleDialog({
     setEnabled(existing?.enabled ?? true);
     setTouched(false);
     setError(null);
-  }, [open, existing, database]);
+  }, [open, existing, database, volume]);
 
   useEffect(() => {
     if (open && !destination && dests.data?.length) setDestination(dests.data[0].name);
@@ -88,7 +94,8 @@ export function BackupScheduleDialog({
     setPending(true);
     setError(null);
     try {
-      const args: Record<string, unknown> = { name, database, destination, schedule: schedule.trim(), keep: keepN, compression, enabled };
+      const source = volume ? { volume } : { database };
+      const args: Record<string, unknown> = { name, ...(existing ? {} : source), destination, schedule: schedule.trim(), keep: keepN, compression, enabled };
       if (timezone.trim() || existing?.timezone) args.timezone = timezone.trim() || null;
       const r = await callTool<{ next_run: string | null }>(existing ? "backup_update" : "backup_create", args, org);
       await invalidate(qc, org);
@@ -106,8 +113,12 @@ export function BackupScheduleDialog({
     <Dialog open={open} onOpenChange={(o) => !pending && onOpenChange(o)}>
       <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>{existing ? `Edit backup ${existing.name}` : `Back up ${database}`}</DialogTitle>
-          <DialogDescription>The engine's own dump runs inside the database and streams, compressed, to the bucket. The oldest beyond the count kept are deleted.</DialogDescription>
+          <DialogTitle>{existing ? `Edit backup ${existing.name}` : `Back up ${database ?? volume}`}</DialogTitle>
+          <DialogDescription>
+            {volume
+              ? "A snapshot of the volume (after its pre-snapshot hook) is exported and streams, compressed, to the bucket. The oldest beyond the count kept are deleted."
+              : "The engine's own dump runs inside the database and streams, compressed, to the bucket. The oldest beyond the count kept are deleted."}
+          </DialogDescription>
         </DialogHeader>
         {noDest ? (
           <div className="rounded-lg border border-dashed">

@@ -218,11 +218,11 @@ fn register_writes(r: &mut Registry, v: &VolumeBackups) -> Result<()> {
             json!({
                 "name": {"type": "string"},
                 "schedule": {"type": ["string", "null"]},
-                "timezone": {"type": "string"},
+                "timezone": {"type": ["string", "null"]},
                 "keep": {"type": "integer", "minimum": 1, "maximum": 1000},
                 "enabled": {"type": "boolean"},
-                "missed_grace": {"type": "string"},
-                "hook_timeout": {"type": "string"},
+                "missed_grace": {"type": ["string", "null"]},
+                "hook_timeout": {"type": ["string", "null"]},
                 "hook_required": {"type": "boolean"}
             }),
             &["name"],
