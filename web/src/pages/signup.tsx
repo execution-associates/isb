@@ -12,7 +12,7 @@ import { useMe, useProviders } from "@/lib/session";
 /**
  * Accounts come from an invitation link, or, when the operator turned on
  * open sign-up, from a provider that vouches for the email address. There
- * is no password sign-up without an invitation (docs/auth.md).
+ * is no password sign-up without an invitation (docs/guides/sign-in.md).
  */
 export function SignupPage() {
   const [params] = useSearchParams();

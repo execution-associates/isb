@@ -31,6 +31,14 @@ jobs:
       - run: bun run test
       - run: bun run build
 
+  # docs/: front matter, and every relative link and anchor resolves.
+  docs:
+    name: docs links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/check-docs.py
+
   check:
     name: fmt, clippy, test
     runs-on: ubuntu-latest

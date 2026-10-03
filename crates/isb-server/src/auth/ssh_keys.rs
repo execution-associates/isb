@@ -1,5 +1,5 @@
 //! SSH public keys on isb accounts: what `isb ssh-proxy` lets into an
-//! instance (docs/ssh.md).
+//! instance (docs/guides/ssh.md).
 //!
 //! A key is stored as its algorithm and base64 blob only, re-validated on
 //! the way in: no `authorized_keys` options (`command=`, `from=`), no

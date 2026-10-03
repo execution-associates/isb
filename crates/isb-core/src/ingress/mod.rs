@@ -1,4 +1,4 @@
-//! Ingress: public hostnames for stack services (docs/ingress.md).
+//! Ingress: public hostnames for stack services (docs/guides/domains.md).
 //!
 //! A service's `domains:` ([`crate::spec::DomainSpec`]) become routes on an
 //! HTTP(S) edge, Caddy ([`caddy`]), run by `isb serve`. The controller tells

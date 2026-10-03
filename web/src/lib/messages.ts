@@ -1,7 +1,7 @@
 import { ApiError } from "@/api/client";
 
 // What the codes the server sends back to /login?error=CODE mean, in words
-// a person can act on (docs/auth.md, "The flow").
+// a person can act on (docs/reference/identity-api.md, "The flow").
 const SIGN_IN_ERRORS: Record<string, string> = {
   unverified_email:
     "Your provider didn't confirm that email address. Verify it with the provider, then try again.",

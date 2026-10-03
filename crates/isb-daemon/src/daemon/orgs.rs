@@ -65,12 +65,12 @@ impl Settings {
             crate::servers::vm::Placement::Local => {}
             crate::servers::vm::Placement::Server(s) => {
                 return Err(Error::invalid(format!(
-                    "server {s}: this daemon places no orgs on servers (only a control plane does: docs/servers.md)"
+                    "server {s}: this daemon places no orgs on servers (only a control plane does: docs/guides/servers.md)"
                 )));
             }
             crate::servers::vm::Placement::Vm(_) => {
                 return Err(Error::invalid(
-                    "a dedicated VM is made by a control plane; this daemon is a server's agent (docs/servers.md)",
+                    "a dedicated VM is made by a control plane; this daemon is a server's agent (docs/guides/servers.md)",
                 ));
             }
         }
@@ -194,7 +194,7 @@ fn settings_props() -> Value {
         "instances": {"type": "integer", "minimum": 1, "description": "Instances in the org."},
         "default_cpus": {"type": "integer", "minimum": 1, "description": "CPUs an instance gets when its spec sets none."},
         "default_memory": {"type": "string", "description": "Memory an instance gets when its spec sets none, e.g. 512MiB."},
-        "egress": {"type": "array", "items": {"type": "string"}, "description": "Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/orgs.md). Replaces the list; [] clears it."},
+        "egress": {"type": "array", "items": {"type": "string"}, "description": "Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/concepts/orgs.md). Replaces the list; [] clears it."},
         "server": {"type": "string", "description": "Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. Same as placement {\"server\": NAME}."},
         "placement": {
             "description": "Where the org runs, set at creation: \"local\" (this host: an incus project sharing its kernel), {\"server\": NAME} (another host, server_list), or {\"vm\": {\"cpus\", \"memory\", \"disk\"}} (a dedicated VM this control plane makes on its own host: the org's own kernel; defaults 2 CPUs, 4GiB, 40GiB). An org is not moved afterwards.",

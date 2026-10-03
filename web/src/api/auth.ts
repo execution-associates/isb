@@ -1,4 +1,4 @@
-// The identity endpoints, /api/v1/auth/* (docs/auth.md). They are hand
+// The identity endpoints, /api/v1/auth/* (docs/reference/identity-api.md). They are hand
 // written, not generated: the OpenAPI document covers the tools.
 import { api, del, get, post } from "./client";
 
@@ -32,7 +32,7 @@ export interface Me {
     | { kind: "api_token"; id: number; org: string | null; name: string; scopes?: string[] }
     | { kind: "access" }
     | { kind: "superadmin"; source: SuperadminVia };
-  /** The unix socket's reach over HTTP (docs/auth.md#superadmins), or null. */
+  /** The unix socket's reach over HTTP (docs/concepts/access.md#superadmins), or null. */
   superadmin?: Superadmin | null;
 }
 
@@ -119,7 +119,7 @@ export interface Passkey {
   last_used: number | null;
 }
 
-/** An SSH public key on the account: what `isb ssh-proxy` lets in (docs/ssh.md). */
+/** An SSH public key on the account: what `isb ssh-proxy` lets in (docs/guides/ssh.md). */
 export interface SshKey {
   id: number;
   user_id: number;

@@ -1,4 +1,4 @@
-// Connecting an agent to the daemon's MCP server (docs/serve.md): the
+// Connecting an agent to the daemon's MCP server (docs/guides/agents.md): the
 // endpoint URLs, who may make an org token, and the install snippets per
 // client. Pure, so the snippets are tested as text.
 import type { Me } from "@/api/auth";
@@ -212,7 +212,7 @@ export interface ToolInfo {
   annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean };
 }
 
-/** Tools only a superadmin gets (docs/serve.md#signing-in-and-what-callers-may-reach). */
+/** Tools only a superadmin gets (docs/concepts/access.md). */
 export const isHostTool = (name: string) => name.startsWith("host_") || name.startsWith("superadmin_");
 
 /** A description's first sentence, for a one-line list. */

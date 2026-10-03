@@ -461,7 +461,7 @@ pub struct SandboxSpec {
     /// Instance environment (`environment.<KEY>`), seen by every exec: a map, or
     /// a list of `KEY=VALUE`. A plain value is instance config, readable by
     /// anyone who can read the instance. `KEY: {secret: NAME}` delivers the
-    /// top-level secret NAME as the variable (docs/secrets.md).
+    /// top-level secret NAME as the variable (docs/guides/secrets.md).
     #[serde(
         default,
         rename = "environment",
@@ -566,7 +566,7 @@ pub struct SandboxSpec {
     pub deploy: Option<Deploy>,
 
     /// Public hostnames `isb serve`'s ingress routes to this service's
-    /// replicas (docs/ingress.md). Only stacks use them; `isb up` ignores
+    /// replicas (docs/guides/domains.md). Only stacks use them; `isb up` ignores
     /// them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub domains: Vec<DomainSpec>,

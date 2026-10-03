@@ -1,5 +1,5 @@
 //! `isb workspace ...`: an org's workspace on the `isb serve` daemon
-//! (docs/workspaces.md), and the sandboxes beside it.
+//! (docs/concepts/workspaces.md), and the sandboxes beside it.
 
 use std::time::Duration;
 
@@ -140,7 +140,7 @@ pub enum WorkspaceCmd {
     },
     /// SSH's stdio to the workspace over isb serve's websocket: the
     /// ProxyCommand `isb workspace ssh-config` writes (`isb ssh-proxy`
-    /// for the org's workspace; docs/ssh.md).
+    /// for the org's workspace; docs/guides/ssh.md).
     Ssh {
         /// The workspace (default: the org's).
         #[arg(long)]

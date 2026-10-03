@@ -12,7 +12,7 @@ export interface RpcErrorObject {
 }
 
 export class IsbError extends Error {
-  /** Stable error code from docs/rpc.md (`not_found`, `connect`, ...). */
+  /** Stable error code from docs/reference/rpc.md (`not_found`, `connect`, ...). */
   readonly code: string;
   /** Extra fields for some codes (`socket`, `timeout_secs`, ...). */
   readonly data: Record<string, unknown> | undefined;

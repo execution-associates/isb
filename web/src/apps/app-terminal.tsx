@@ -1,5 +1,5 @@
 // The Terminal tab: a shell in one of the app's replicas, xterm.js over the
-// daemon's websocket (GET /orgs/<org>/api/v1/terminal, docs/web.md).
+// daemon's websocket (GET /orgs/<org>/api/v1/terminal, docs/reference/http-api.md#the-web-terminal).
 // Loaded on demand: xterm is the biggest thing on this page.
 import { TerminalSquare } from "lucide-react";
 import { useState } from "react";

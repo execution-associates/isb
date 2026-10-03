@@ -1,5 +1,5 @@
 // The Connect tab's SSH section: plain ssh, scp, editors and herdr reach the
-// workspace through isb serve's websocket (docs/ssh.md), with keys from the
+// workspace through isb serve's websocket (docs/guides/ssh.md), with keys from the
 // caller's isb account and no port opened anywhere.
 import { KeySquare } from "lucide-react";
 import { Link } from "react-router";

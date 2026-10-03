@@ -1,5 +1,5 @@
 //! Superadmins: the unix socket's reach (every tool, no remote-spec policy,
-//! any instance) for an HTTP caller. Two sources grant it, and nothing else:
+//! any instance) for an HTTP caller. Three sources grant it, and nothing else:
 //!
 //! - a **superadmin token** (`isb_sa_...`), minted only on the host with
 //!   `isb token create NAME --superadmin`, never over HTTP, so a stolen HTTP

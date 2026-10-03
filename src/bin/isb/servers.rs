@@ -1,5 +1,5 @@
 //! `isb server ...`: the servers a control plane places orgs on
-//! (docs/servers.md), through the local daemon.
+//! (docs/guides/servers.md), through the local daemon.
 
 use std::path::PathBuf;
 use std::time::Duration;

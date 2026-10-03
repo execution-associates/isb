@@ -1,4 +1,4 @@
-//! Workspaces (docs/workspaces.md): an org's long-lived machine, where its
+//! Workspaces (docs/concepts/workspaces.md): an org's long-lived machine, where its
 //! people and agents work, and the rules for the short-lived sandboxes
 //! beside it.
 //!
@@ -517,7 +517,7 @@ pub fn sh_quote(s: &str) -> String {
 /// is read from its file, never written here.
 pub fn profile(url: Option<&str>, org: &OrgId, w: &Workspace) -> String {
     let mut s = String::from(
-        "# Written by isb for this workspace (docs/workspaces.md); rewritten on every start.\n",
+        "# Written by isb for this workspace (docs/concepts/workspaces.md); rewritten on every start.\n",
     );
     for (k, v) in &w.env {
         s.push_str(&format!("export {k}={}\n", sh_quote(v)));

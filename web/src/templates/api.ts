@@ -1,4 +1,4 @@
-// Templates: one-click apps (docs/templates.md). Shapes from
+// Templates: one-click apps (docs/guides/templates.md). Shapes from
 // src/template/{mod,catalog,dokploy}.rs and src/daemon/templates.rs.
 import { useQuery } from "@tanstack/react-query";
 import { callTool } from "@/api/tools";

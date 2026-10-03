@@ -44,7 +44,7 @@ workspace = true
 # The library and CLI are split into crates so an edit recompiles less and
 # independent crates build in parallel: core <- {server, apps, tui} <-
 # daemon <- isb (the CLI, and a library re-exporting the others' modules
-# under their old paths). See docs/development.md.
+# under their old paths). See docs/contributing/index.md.
 [workspace]
 members = ["crates/*"]
 # Plain `cargo test`, `clippy`, `doc` and `build` cover every crate.
@@ -114,7 +114,7 @@ libc = "0.2"
 tempfile = "3"
 
 # The legibility ratchet: thresholds live in clippy.toml, and CI denies
-# warnings. See docs/development.md.
+# warnings. See docs/contributing/index.md.
 [workspace.lints.clippy]
 cognitive_complexity = "warn"
 too_many_lines = "warn"

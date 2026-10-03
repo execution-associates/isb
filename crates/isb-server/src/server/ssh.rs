@@ -1,7 +1,7 @@
 //! SSH without open ports: `GET /orgs/<org>/api/v1/ssh?instance=NAME`
 //! upgrades to a websocket whose binary frames are an SSH connection's
 //! bytes, both ways, to an sshd the embedder starts inside the instance
-//! (`isb serve`: `sshd -i` through incus exec, docs/ssh.md). Nothing in the
+//! (`isb serve`: `sshd -i` through incus exec, docs/guides/ssh.md). Nothing in the
 //! instance listens, and nothing on the host opens a port: the websocket is
 //! the daemon's own, behind its usual authentication.
 //!

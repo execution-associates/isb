@@ -1,5 +1,5 @@
 // The Monitoring tab: the app's metrics history (metrics_query, kept a
-// month: docs/metrics.md) for CPU, memory, network and disk, per replica or
+// month: docs/operations/metrics.md) for CPU, memory, network and disk, per replica or
 // summed, over 1 hour to 30 days; and each replica's state now.
 import { Activity, ArrowDownToLine, ArrowUpFromLine, Cpu, HardDriveDownload, HardDriveUpload, HeartPulse, MemoryStick, RotateCw } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";

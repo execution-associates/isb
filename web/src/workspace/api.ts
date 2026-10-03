@@ -1,4 +1,4 @@
-// The org's workspace (docs/workspaces.md) over the workspace_* and
+// The org's workspace (docs/concepts/workspaces.md) over the workspace_* and
 // sandbox_* tools: result shapes from src/daemon/workspaces.rs (`view`) and
 // the sandbox_list tool, and the queries the pages share.
 import { useQuery } from "@tanstack/react-query";

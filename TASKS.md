@@ -121,7 +121,7 @@ minime only runs binaries downloaded from our CI runs.
   - The app layer renders apps to ordinary stacks: an org's project +
     environment is one stack (`<project>-<env>`), each app one service in
     it, so service names (`<app>.<project>-<env>`) work between apps.
-- **Web UI design system** (docs/web.md#design-system): status colours only
+- **Web UI design system** (docs/contributing/web-ui.md#design-system): status colours only
   through `lib/status.ts`; Inter and JetBrains Mono (OFL 1.1, Latin subsets)
   self-hosted, since the CSP allows no font CDN. A deploy opens its
   deployment in the same frame (record seeded in the query cache) and
@@ -485,7 +485,7 @@ minime only runs binaries downloaded from our CI runs.
   SSH keys per connection, live sessions re-checked every 15 s), `isb key`,
   the Account page's SSH keys, `isb ssh-proxy`, `isb ssh-config` (pinned
   host keys, herdr line), `ssh_host_keys`, `?instance=` on the web
-  terminal, audit `ssh.open/close` and `auth.ssh_key_*` (docs/ssh.md).
+  terminal, audit `ssh.open/close` and `auth.ssh_key_*` (docs/guides/ssh.md).
   **Verified** on titan: ssh, scp (20 MB both ways), a removed key refused
   and its live session ended in 8 s, viewer and `read` tokens refused,
   an instance's own authorized_keys ignored, `herdr machine add` saved and
@@ -499,7 +499,7 @@ minime only runs binaries downloaded from our CI runs.
   at `/restore/<stamp>` (detached when the instance is stopped) and their
   discard, `volume_*` tools, `isb volume snapshot|restore|restores|discard`,
   the Volume panel and Volumes pages, admins-and-owners writes, org
-  projects allowing snapshots and exports (docs/volumes.md).
+  projects allowing snapshots and exports (docs/guides/volumes.md).
   **Verified** on titan (scratch daemon, org `volh`, a dev-base instance
   with a volume, RustFS as the S3 store): hook ran and its output logged; a
   per-minute schedule pruned to keep 2 with the manual snapshot kept; a
@@ -514,7 +514,7 @@ minime only runs binaries downloaded from our CI runs.
   snapshots and backups for orgs placed on a server (tools forward, not
   verified); a restore's byte count in its run record.
 - [x] (workspaces-core) W1 the workspace and its sandboxes, W2 the
-  workspace as an org actor, W7 the web UI (docs/workspaces.md): one
+  workspace as an org actor, W7 the web UI (docs/concepts/workspaces.md): one
   workspace per org (`max_workspaces`), a container with a home volume
   that survives rebuild, `workspace_*` tools, the `workspace` REST resource
   and `isb workspace`, confirmations that name live sessions; its `isb_ws_`

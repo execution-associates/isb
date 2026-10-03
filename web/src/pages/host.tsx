@@ -300,7 +300,7 @@ function PolicyTab() {
   const d = p.data!;
   return (
     <div className="grid gap-6">
-      <Panel title="Listening" icon={<Network />} description="Where the daemon answers. Set by isb serve's flags (docs/serve.md#flags).">
+      <Panel title="Listening" icon={<Network />} description="Where the daemon answers. Set by isb serve's flags (docs/reference/configuration.md#daemon-flags).">
         <div className="divide-y">
           <Row label="Listen addresses" hint="Loopback (behind a tunnel) or a tailnet address.">
             <List items={d.listen} empty="none: the unix socket only" />

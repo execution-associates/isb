@@ -3,13 +3,13 @@
 TypeScript SDK for [isb](https://github.com/execution-associates/isb):
 declarative incus sandboxes (containers and VMs). It is a thin client of
 `isb rpc`, a line-delimited JSON protocol over the isb binary's stdin and
-stdout ([docs/rpc.md](../../docs/rpc.md)). isb does the work; the SDK starts
+stdout ([docs/reference/rpc.md](../../docs/reference/rpc.md)). isb does the work; the SDK starts
 it, sends requests and types the results.
 
 - Bun first; Node 20 or later works too. ESM only.
 - No runtime dependencies.
 - Spec objects use the field names of the compose YAML exactly
-  ([docs/spec.md](../../docs/spec.md)), so a spec can be copied between YAML
+  ([docs/reference/compose.md](../../docs/reference/compose.md)), so a spec can be copied between YAML
   and code. SDK options are camelCase.
 
 ## Install
@@ -260,7 +260,7 @@ methods take. Result field names are as isb sends them
 ## Errors
 
 Every failure isb reports rejects with an `IsbError` carrying `code`,
-`message` and `data` (docs/rpc.md lists them). Subclasses by code:
+`message` and `data` (docs/reference/rpc.md lists them). Subclasses by code:
 
 | class | codes |
 |---|---|

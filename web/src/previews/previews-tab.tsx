@@ -1,5 +1,5 @@
 // A git app's Previews tab: preview deployments per pull request
-// (docs/previews.md): the settings (saved with app_update) and the live
+// (docs/guides/previews.md): the settings (saved with app_update) and the live
 // previews with their URL, commit, status and log. Rows follow the event
 // feed; Redeploy opens the new deployment's log at once and follows it.
 import { useQueryClient } from "@tanstack/react-query";

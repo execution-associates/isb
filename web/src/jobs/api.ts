@@ -1,4 +1,4 @@
-// Scheduled jobs (docs/jobs.md). Shapes from src/jobs/mod.rs and
+// Scheduled jobs (docs/guides/jobs.md). Shapes from src/jobs/mod.rs and
 // src/daemon/data.rs.
 import { useQuery } from "@tanstack/react-query";
 import { callTool } from "@/api/tools";

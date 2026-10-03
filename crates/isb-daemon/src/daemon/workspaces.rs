@@ -1,4 +1,4 @@
-//! Workspaces in the daemon (docs/workspaces.md): the `workspace_*` tools,
+//! Workspaces in the daemon (docs/concepts/workspaces.md): the `workspace_*` tools,
 //! the workspace's token and its delivery into the machine, the per-org MCP
 //! listener on the org's bridge, live sessions, and the sandbox reaper.
 //!
@@ -1981,7 +1981,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
     tool!(
         "workspace_get",
         "Get the workspace",
-        "The org's workspace (its long-lived machine, docs/workspaces.md): image, size, home volume, status, CPU and memory, live sessions (web terminals, SSH), last activity, its token's metadata (never the token) and how to connect; `workspace` is null when the org has none yet. Also the org's workspace settings.",
+        "The org's workspace (its long-lived machine, docs/concepts/workspaces.md): image, size, home volume, status, CPU and memory, live sessions (web terminals, SSH), last activity, its token's metadata (never the token) and how to connect; `workspace` is null when the org has none yet. Also the org's workspace settings.",
         obj(json!({"name": name()}), &[]),
         ro,
         |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {

@@ -32,7 +32,7 @@ use crate::app::{AppSpec, Resources};
 use crate::error::{Error, Result};
 use crate::org::OrgId;
 
-/// A template, as written in YAML (docs/templates.md).
+/// A template, as written in YAML (docs/guides/templates.md).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Template {

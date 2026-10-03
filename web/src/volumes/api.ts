@@ -1,5 +1,5 @@
 // Named volumes: snapshots, their schedule and hook, backups of a volume and
-// staged restores (docs/volumes.md) as typed calls. Result shapes come from
+// staged restores (docs/guides/volumes.md) as typed calls. Result shapes come from
 // src/daemon/volumes.rs and src/volume_backup/ (the OpenAPI document types
 // arguments only).
 import { useQuery } from "@tanstack/react-query";

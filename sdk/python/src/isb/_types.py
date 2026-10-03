@@ -10,7 +10,7 @@ from ._spec import BoolOrString, Scalar
 Action = Dict[str, Any]
 """One plan step: an object tagged by `action` (`create_volume`, `create_instance`,
 `set_config`, `add_device`, `replace_device`, `remove_device`, `start_instance`,
-`add_port`, `fix_owner`, `note`). See docs/rpc.md."""
+`add_port`, `fix_owner`, `note`). See docs/reference/rpc.md."""
 
 
 class ExecDefaults(TypedDict, total=False):

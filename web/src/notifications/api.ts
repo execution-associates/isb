@@ -1,4 +1,4 @@
-// Notification channels (docs/notifications.md). Shapes from
+// Notification channels (docs/guides/notifications.md). Shapes from
 // src/notify/mod.rs and src/notify/provider.rs.
 import { useQuery } from "@tanstack/react-query";
 import { callTool } from "@/api/tools";

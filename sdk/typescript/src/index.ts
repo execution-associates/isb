@@ -1,6 +1,6 @@
 /**
  * TypeScript SDK for isb: declarative incus sandboxes (containers and VMs).
- * A thin client of `isb rpc` (docs/rpc.md): one long-lived subprocess per
+ * A thin client of `isb rpc` (docs/reference/rpc.md): one long-lived subprocess per
  * {@link Client}, line-delimited JSON over its stdin/stdout.
  */
 

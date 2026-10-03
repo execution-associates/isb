@@ -1,4 +1,4 @@
-// metrics_query (docs/metrics.md) shaped for the Monitoring tab's charts:
+// metrics_query (docs/operations/metrics.md) shaped for the Monitoring tab's charts:
 // per-instance series onto one time grid, with gaps kept as gaps, and their
 // bucket-by-bucket sum.
 import { useQuery } from "@tanstack/react-query";

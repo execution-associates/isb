@@ -1,5 +1,5 @@
 // Org administration rules as the UI mirrors them. The server is the
-// authority (docs/auth.md, "Orgs and roles"); these only decide what to
+// authority (docs/concepts/access.md, "Roles"); these only decide what to
 // offer, so a refusal is rare rather than impossible.
 import type { Me, Role } from "@/api/auth";
 
@@ -49,7 +49,7 @@ export function canWrite(me: Me, org: string): boolean {
 /** Who reads an org's audit log: its owners and admins (and platform admins). */
 export const canAudit = (me: Me, org: string) => maxGrant(me, org) !== null;
 
-// ---- API token scopes (docs/auth.md#api-tokens) ----
+// ---- API token scopes (docs/concepts/access.md#api-tokens) ----
 
 export type Access = "full" | "deploy" | "read" | "tools";
 

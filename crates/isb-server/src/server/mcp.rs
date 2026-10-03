@@ -676,7 +676,7 @@ impl Endpoint {
     }
 
     /// `/orgs/<org>/api/v1/workspace[/ACTION]`: the org's workspace as a
-    /// resource, over the `workspace_*` tools (docs/workspaces.md). GET
+    /// resource, over the `workspace_*` tools (docs/concepts/workspaces.md). GET
     /// reads it (`?name=`), POST creates it, PATCH changes it, DELETE
     /// deletes it (`{"confirm": true}`); POST `/start`, `/stop`,
     /// `/restart`, `/rebuild`, `/token/rotate`; GET or PATCH `/settings`.

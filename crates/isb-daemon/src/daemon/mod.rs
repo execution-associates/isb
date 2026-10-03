@@ -117,7 +117,7 @@ pub struct ServeConfig {
     /// How long, and how many, history rows are kept.
     pub history_retention: Duration,
     pub history_max_rows: i64,
-    /// Run as a server's agent for a control plane (docs/servers.md): an
+    /// Run as a server's agent for a control plane (docs/guides/servers.md): an
     /// mTLS listener instead of the identity store, web UI and `--listen`.
     pub agent: Option<AgentConfig>,
     /// `--superadmin-tailnet`: tailnet logins and tags with the unix

@@ -176,7 +176,7 @@ fn setup_key(config: &Path) -> Result<KeySetup> {
         let k = keys::load_identity(&sources)?;
         let mut notes = k.notes;
         notes.push(format!(
-            "systemd-creds here cannot encrypt user credentials ({}; needs systemd 256+), so the daemon reads its secrets key from {}: keep that file out of unencrypted backups, and add a break-glass recipient (docs/secrets.md)",
+            "systemd-creds here cannot encrypt user credentials ({}; needs systemd 256+), so the daemon reads its secrets key from {}: keep that file out of unencrypted backups, and add a break-glass recipient (docs/guides/secrets.md)",
             version.map_or("not found".to_string(), |v| format!("systemd {v}")),
             key_file.display()
         ));

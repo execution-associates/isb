@@ -60,7 +60,7 @@ pub enum ListenerKind {
     Tcp(String),
     Unix(PathBuf),
     /// `host:port` on any address, TLS with required client certificates:
-    /// an agent's listener for its control plane (docs/servers.md).
+    /// an agent's listener for its control plane (docs/guides/servers.md).
     Mtls(String, http::TlsConfig),
 }
 

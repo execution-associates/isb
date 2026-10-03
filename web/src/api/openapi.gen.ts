@@ -1495,7 +1495,7 @@ export interface paths {
         put?: never;
         /**
          * Create a sandbox
-         * @description Create (or reconcile) one sandbox: an incus container or VM to run code in isolation. `spec` is one compose service (docs/spec.md) with container_name set, as an object or YAML text. Remote callers' sandboxes are labelled with their identity, and only managed sandboxes are reachable remotely. Sandboxes are short-lived: each expires (the org's default, 24h, unless `expires` says otherwise; sandbox_extend pushes it out) and is deleted after sitting idle (`idle_timeout`, default 2h; `none` turns it off).
+         * @description Create (or reconcile) one sandbox: an incus container or VM to run code in isolation. `spec` is one compose service (docs/reference/compose.md) with container_name set, as an object or YAML text. Remote callers' sandboxes are labelled with their identity, and only managed sandboxes are reachable remotely. Sandboxes are short-lived: each expires (the org's default, 24h, unless `expires` says otherwise; sandbox_extend pushes it out) and is deleted after sitting idle (`idle_timeout`, default 2h; `none` turns it off).
          */
         post: operations["sandbox_create"];
         delete?: never;
@@ -1975,7 +1975,7 @@ export interface paths {
         put?: never;
         /**
          * Deploy a stack
-         * @description Deploy or update a stack from a docker-compose-style file (isb's format: docs/spec.md). Each service runs `deploy.replicas` incus instances, supervised inside their guests so they survive restarts of this server and of the host. Published ports are load-balanced over healthy replicas. A changed service is rolled out per `deploy.update_config` (stop-first by default; `order: start-first` for no downtime). Returns the change per service; pass wait=true to block until the rollout settles.
+         * @description Deploy or update a stack from a docker-compose-style file (isb's format: docs/reference/compose.md). Each service runs `deploy.replicas` incus instances, supervised inside their guests so they survive restarts of this server and of the host. Published ports are load-balanced over healthy replicas. A changed service is rolled out per `deploy.update_config` (stop-first by default; `order: start-first` for no downtime). Returns the change per service; pass wait=true to block until the rollout settles.
          */
         post: operations["stack_deploy"];
         delete?: never;
@@ -2595,7 +2595,7 @@ export interface paths {
         put?: never;
         /**
          * Get the workspace
-         * @description The org's workspace (its long-lived machine, docs/workspaces.md): image, size, home volume, status, CPU and memory, live sessions (web terminals, SSH), last activity, its token's metadata (never the token) and how to connect; `workspace` is null when the org has none yet. Also the org's workspace settings.
+         * @description The org's workspace (its long-lived machine, docs/concepts/workspaces.md): image, size, home volume, status, CPU and memory, live sessions (web terminals, SSH), last activity, its token's metadata (never the token) and how to connect; `workspace` is null when the org has none yet. Also the org's workspace settings.
          */
         post: operations["workspace_get"];
         delete?: never;
@@ -5256,7 +5256,7 @@ export interface operations {
                     default_memory?: string;
                     /** @description Disk across the org, e.g. 100GiB. */
                     disk?: string;
-                    /** @description Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/orgs.md). Replaces the list; [] clears it. */
+                    /** @description Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/concepts/orgs.md). Replaces the list; [] clears it. */
                     egress?: string[];
                     /** @description Instances in the org. */
                     instances?: number;
@@ -5434,7 +5434,7 @@ export interface operations {
                     default_memory?: string;
                     /** @description Disk across the org, e.g. 100GiB. */
                     disk?: string;
-                    /** @description Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/orgs.md). Replaces the list; [] clears it. */
+                    /** @description Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/concepts/orgs.md). Replaces the list; [] clears it. */
                     egress?: string[];
                     /** @description Instances in the org. */
                     instances?: number;

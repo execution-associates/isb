@@ -1,5 +1,5 @@
 // The one fetch wrapper: same-origin credentials, JSON in and out, and the
-// anti-CSRF header on every state-changing request (docs/auth.md#csrf).
+// anti-CSRF header on every state-changing request (docs/reference/identity-api.md#csrf).
 
 export class ApiError extends Error {
   status: number;

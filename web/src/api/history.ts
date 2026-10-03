@@ -1,4 +1,4 @@
-// The history (docs/history.md): history_query merges the controller's
+// The history (docs/operations/history.md): history_query merges the controller's
 // events, incus lifecycle events, audit rows and markers into one timeline;
 // GET /api/v1/history/stream tails it (server-sent `history` events, only
 // what the viewer may read).

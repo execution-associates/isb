@@ -1,6 +1,6 @@
 //! `isb volume snapshot ...`, `isb volume restore ...` and friends: a named
 //! volume's snapshots and staged restores through the local daemon
-//! (docs/volumes.md). Volume backups are `isb backup create --volume`.
+//! (docs/guides/volumes.md). Volume backups are `isb backup create --volume`.
 
 use std::time::Duration;
 

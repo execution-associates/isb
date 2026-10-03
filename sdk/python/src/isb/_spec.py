@@ -227,7 +227,7 @@ class SandboxSpec(TypedDict, total=False):
     #: Instance environment (`environment.<KEY>`), seen by every exec: a map, or
     #: a list of `KEY=VALUE`. A plain value is instance config, readable by
     #: anyone who can read the instance. `KEY: {secret: NAME}` delivers the
-    #: top-level secret NAME as the variable (docs/secrets.md).
+    #: top-level secret NAME as the variable (docs/guides/secrets.md).
     environment: EnvMapOrList
     #: More exec defaults: an exec-only environment and the login shell.
     exec: ExecSpec
@@ -430,7 +430,7 @@ class SandboxSpecFields(TypedDict, total=False):
     #: Instance environment (`environment.<KEY>`), seen by every exec: a map, or
     #: a list of `KEY=VALUE`. A plain value is instance config, readable by
     #: anyone who can read the instance. `KEY: {secret: NAME}` delivers the
-    #: top-level secret NAME as the variable (docs/secrets.md).
+    #: top-level secret NAME as the variable (docs/guides/secrets.md).
     environment: EnvMapOrList
     #: More exec defaults: an exec-only environment and the login shell.
     exec: ExecSpec

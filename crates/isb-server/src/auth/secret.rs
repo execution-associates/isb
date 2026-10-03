@@ -25,7 +25,7 @@ pub enum TokenKind {
     Api,
     /// A superadmin token: the unix socket's reach over HTTP.
     Superadmin,
-    /// An org's workspace token (docs/workspaces.md).
+    /// An org's workspace token (docs/concepts/workspaces.md).
     Workspace,
     Invitation,
     PasswordReset,

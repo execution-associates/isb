@@ -1,4 +1,4 @@
-// The app tools (docs/apps.md) as typed calls and queries. Results are not in
+// The app tools (docs/guides/deploy-apps.md) as typed calls and queries. Results are not in
 // the OpenAPI document (it types arguments only), so their shapes are written
 // out here from src/daemon/apps.rs and src/app/.
 import { useQueries, useQuery } from "@tanstack/react-query";

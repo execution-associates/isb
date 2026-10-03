@@ -276,7 +276,7 @@ pub enum PrincipalKind {
     Superadmin {
         source: SuperadminSource,
     },
-    /// An org's workspace (docs/workspaces.md): its token (`isb_ws_...`),
+    /// An org's workspace (docs/concepts/workspaces.md): its token (`isb_ws_...`),
     /// held by the agents that live in it. Nobody's account: a synthetic
     /// principal confined to `org` with the role the workspace was given.
     Workspace {

@@ -293,7 +293,7 @@ function KeyValue({ label, value, children, hint }: { label: string; value?: str
   );
 }
 
-const MOVING_DOCS = "https://github.com/execution-associates/isb/blob/main/docs/servers.md#moving-an-org";
+const MOVING_DOCS = "https://github.com/execution-associates/isb/blob/main/docs/concepts/placement.md#moving-an-org";
 
 /** Where the org runs and what keeps it apart from the others. */
 function PlacementPanel({ o }: { o: OrgView }) {

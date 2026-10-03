@@ -1,7 +1,7 @@
 // MCP (/orgs/ORG/agents): how to connect an agent to the daemon's MCP
 // server. The org endpoint for everyone in the org, with a token made here;
 // the unbound /mcp endpoint for superadmins, whose credentials are made on
-// the host only (docs/serve.md, docs/auth.md#superadmins).
+// the host only (docs/guides/agents.md, docs/concepts/access.md#superadmins).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, ChevronRight, Cloud, Crown, ExternalLink, KeyRound, Network, Plug, ShieldAlert, Terminal, Wrench } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
@@ -480,7 +480,7 @@ function Off({ flag, children }: { flag: string; children: ReactNode }) {
       <StatusBadge tone="muted" className="mr-2">
         Off
       </StatusBadge>
-      {children} It is turned on with <code className="font-mono text-xs">{flag}</code> on <code className="font-mono text-xs">isb serve</code> (docs/serve.md).
+      {children} It is turned on with <code className="font-mono text-xs">{flag}</code> on <code className="font-mono text-xs">isb serve</code> (docs/reference/configuration.md).
     </div>
   );
 }
@@ -544,7 +544,7 @@ function ClaudeApps({ org }: { org: string }) {
       description={
         <>
           Their custom connectors sign in with OAuth and can't send a bearer token. isb has no OAuth server of its own: it relies on Cloudflare Access Managed OAuth in front of the public URL. With that set up, add <code className="font-mono text-xs">{"<public URL>"}/orgs/{org}/mcp</code> as a connector; the first connection opens the Access login, and the connector acts as the isb user with that email.{" "}
-          <a href={`${DOCS}/serve.md#remote-mcp-through-cloudflare-tunnel-and-access`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-foreground underline-offset-4 hover:underline">
+          <a href={`${DOCS}/guides/remote-access.md#cloudflare-tunnel-and-access`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-foreground underline-offset-4 hover:underline">
             Setting it up
             <ExternalLink className="size-3" />
           </a>

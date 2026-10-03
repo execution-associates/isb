@@ -53,7 +53,7 @@ pub enum Builder {
         target: Option<String>,
     },
     /// Cloud Native Buildpacks with the given builder image. Not supported
-    /// yet: `pack` drives a docker daemon (see docs/builds.md).
+    /// yet: `pack` drives a docker daemon (see docs/guides/builds.md).
     Buildpacks {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         builder: Option<String>,

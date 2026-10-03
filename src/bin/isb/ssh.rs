@@ -1,6 +1,6 @@
 //! `isb key ...`, `isb ssh-proxy` and `isb ssh-config`: SSH into an org's
 //! instances through isb serve's websocket, with keys from the caller's isb
-//! account (docs/ssh.md).
+//! account (docs/guides/ssh.md).
 //!
 //! Where isb serve is: `--url`/`ISB_URL` with an API token (`ISB_TOKEN`, or
 //! `--token-file`), else the local daemon's unix socket.

@@ -113,7 +113,7 @@ pub enum Source {
     /// `ghcr:org/app:tag`, a local alias).
     Image(String),
     Git(GitSource),
-    /// A database engine's official image (docs/databases.md).
+    /// A database engine's official image (docs/guides/databases.md).
     Database(DatabaseSource),
 }
 

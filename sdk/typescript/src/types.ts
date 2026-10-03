@@ -1,4 +1,4 @@
-/** Result types of the rpc methods (docs/rpc.md). Field names are as sent. */
+/** Result types of the rpc methods (docs/reference/rpc.md). Field names are as sent. */
 
 /** Device or config properties: strings only. */
 export type Props = Record<string, string>;

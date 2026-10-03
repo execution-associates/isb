@@ -1,5 +1,5 @@
 //! `isb db ...`, `isb backup ...` and `isb job ...`: the data tools on the
-//! local daemon (docs/databases.md, docs/jobs.md).
+//! local daemon (docs/guides/databases.md, docs/guides/jobs.md).
 
 use std::io::IsTerminal;
 use std::time::Duration;

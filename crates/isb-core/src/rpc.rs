@@ -1,7 +1,7 @@
 //! `isb rpc`: the protocol the language SDKs speak.
 //!
 //! Line-delimited JSON over stdin/stdout, one object per line, documented in
-//! docs/rpc.md. The server announces itself first, then answers requests:
+//! docs/reference/rpc.md. The server announces itself first, then answers requests:
 //!
 //! ```text
 //! <- {"isb":"0.1.1","protocol":1}

@@ -1,4 +1,4 @@
-// Databases, backups and restores (docs/databases.md) as typed calls. Result
+// Databases, backups and restores (docs/guides/databases.md) as typed calls. Result
 // shapes come from src/daemon/data.rs, src/backup.rs and src/jobs/runs.rs
 // (the OpenAPI document types arguments only).
 import { useQuery } from "@tanstack/react-query";
@@ -74,7 +74,7 @@ export interface BackupSpec {
   name: string;
   /** The database app; absent on a volume backup. */
   database?: string;
-  /** A named volume (docs/volumes.md). */
+  /** A named volume (docs/guides/volumes.md). */
   volume?: string;
   destination: string;
   schedule: string;

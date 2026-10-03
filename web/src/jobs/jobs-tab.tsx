@@ -1,4 +1,4 @@
-// An app's Jobs tab: commands on a cron schedule (docs/jobs.md), in a
+// An app's Jobs tab: commands on a cron schedule (docs/guides/jobs.md), in a
 // running replica (exec) or a fresh one-off instance (run), with their runs.
 import { useQueryClient } from "@tanstack/react-query";
 import { CalendarClock, Loader2, MoreHorizontal, Pause, Pencil, Play, Plus, SquareTerminal, Trash2 } from "lucide-react";

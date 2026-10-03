@@ -122,7 +122,7 @@ pub(crate) struct ServeArgs {
     #[arg(long, env = "ISB_INGRESS_TUNNEL_PORT", default_value_t = isb::ingress::DEFAULT_TUNNEL_PORT)]
     pub(crate) ingress_tunnel_port: u16,
     /// The port each org's workspace reaches isb's MCP on, on its bridge
-    /// address (docs/workspaces.md).
+    /// address (docs/concepts/workspaces.md).
     #[arg(long, env = "ISB_WORKSPACE_MCP_PORT", default_value_t = isb::daemon::workspaces::DEFAULT_PORT)]
     pub(crate) workspace_mcp_port: u16,
     /// The storage pool new workspace homes go in (an org's own setting

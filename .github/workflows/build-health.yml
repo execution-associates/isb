@@ -4,7 +4,7 @@ name: Build health
 # Clippy's ratcheted lints (Cargo.toml [workspace.lints], thresholds in
 # clippy.toml) run in ci.yml's clippy step; this checks the budgets that keep
 # their exemptions and file sizes from growing, and records where a full
-# build spends its time. See docs/development.md.
+# build spends its time. See docs/contributing/index.md.
 
 on:
   push:

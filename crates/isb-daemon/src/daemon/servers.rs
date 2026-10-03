@@ -1,4 +1,4 @@
-//! Remote servers in the daemon (docs/servers.md).
+//! Remote servers in the daemon (docs/guides/servers.md).
 //!
 //! On a **control plane**: the `server_*` tools, and the route that sends
 //! every call for an org placed on a server to that server's agent (after
@@ -638,7 +638,7 @@ fn org_other(
         if want != now {
             return Some(Err(Error::invalid(format!(
                 "org {org} runs on {now}; moving an org is not supported \
-                 (docs/servers.md#moving-an-org: remove its workloads, delete it, create it \
+                 (docs/concepts/placement.md#moving-an-org: remove its workloads, delete it, create it \
                  again where it should run, restore its data)"
             ))));
         }
@@ -874,7 +874,7 @@ pub(super) fn agent_hooks(base: &Hooks, orgs: Arc<crate::servers::store::AgentOr
         authorize: Some(authorize),
         events: base.events.clone(),
         terminal: base.terminal.clone(),
-        // SSH to an org on a server is not forwarded yet (docs/ssh.md).
+        // SSH to an org on a server is not forwarded yet (docs/guides/ssh.md).
         ssh: None,
         audit: base.audit.clone(),
         route: None,

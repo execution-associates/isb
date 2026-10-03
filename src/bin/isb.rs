@@ -285,7 +285,7 @@ enum Cmd {
     #[command(subcommand)]
     Org(OrgCmd),
     /// The ingress of `isb serve`: routed domains, certificates, conflicts,
-    /// tunnels (docs/ingress.md).
+    /// tunnels (docs/guides/domains.md).
     Ingress {
         #[arg(long)]
         json: bool,
@@ -296,49 +296,49 @@ enum Cmd {
     /// macOS: the Lima VM that runs incus and isb serve for isb.
     #[command(subcommand)]
     Machine(MachineCmd),
-    /// Manage an org's secrets on the `isb serve` daemon (docs/secrets.md).
+    /// Manage an org's secrets on the `isb serve` daemon (docs/guides/secrets.md).
     #[command(subcommand)]
     Secret(SecretCmd),
-    /// Projects and their environments, for apps (docs/apps.md).
+    /// Projects and their environments, for apps (docs/guides/deploy-apps.md).
     #[command(subcommand)]
     Project(apps::ProjectCmd),
     /// Apps on the `isb serve` daemon: an image or a repository, deployed
-    /// into its project environment's stack (docs/apps.md).
+    /// into its project environment's stack (docs/guides/deploy-apps.md).
     #[command(subcommand)]
     App(apps::AppCmd),
     /// One-click apps: deploy a template from the catalog into a project
-    /// environment (docs/templates.md).
+    /// environment (docs/guides/templates.md).
     #[command(subcommand)]
     Template(templates::TemplateCmd),
     /// Databases: Postgres, MySQL, MariaDB, MongoDB, Redis as apps with
-    /// generated credentials (docs/databases.md).
+    /// generated credentials (docs/guides/databases.md).
     #[command(subcommand)]
     Db(data::DbCmd),
     /// Database backups to S3-compatible storage, and restores
-    /// (docs/databases.md).
+    /// (docs/guides/databases.md).
     #[command(subcommand)]
     Backup(data::BackupCmd),
-    /// Scheduled jobs: commands on a cron schedule (docs/jobs.md).
+    /// Scheduled jobs: commands on a cron schedule (docs/guides/jobs.md).
     #[command(subcommand)]
     Job(data::JobCmd),
     /// Build a source directory into an image in the org's local registry,
-    /// in a fresh sandbox, through `isb serve` (docs/builds.md).
+    /// in a fresh sandbox, through `isb serve` (docs/guides/builds.md).
     Build(BuildArgs),
     /// The local OCI registry builds push to and stacks pull from
-    /// (docs/builds.md).
+    /// (docs/guides/builds.md).
     #[command(subcommand)]
     Registry(RegistryCmd),
     /// Notification channels of an org on the `isb serve` daemon: webhook,
-    /// Slack, Discord, Telegram, email (docs/notifications.md).
+    /// Slack, Discord, Telegram, email (docs/guides/notifications.md).
     #[command(subcommand)]
     Notify(notify::NotifyCmd),
     /// Servers this control plane places orgs on: add one over SSH, list,
-    /// show, remove, rotate its certificate (docs/servers.md).
+    /// show, remove, rotate its certificate (docs/guides/servers.md).
     #[command(subcommand)]
     Server(servers::ServerCmd),
     /// The org's workspace on the `isb serve` daemon: its long-lived
     /// machine with a home and an org token, and the sandboxes beside it
-    /// (docs/workspaces.md).
+    /// (docs/concepts/workspaces.md).
     #[command(subcommand)]
     Workspace(workspaces::WorkspaceCmd),
     /// A live dashboard of stacks and sandboxes (`isb serve`'s view; with no
@@ -352,7 +352,7 @@ enum Cmd {
     Invite {
         org: String,
         email: String,
-        /// owner, admin or member.
+        /// viewer, member, admin or owner.
         #[arg(long, default_value = "member")]
         role: String,
         #[command(flatten)]
@@ -362,7 +362,7 @@ enum Cmd {
     #[command(subcommand)]
     Token(TokenCmd),
     /// SSH public keys on isb accounts: what `isb ssh-proxy` lets into an
-    /// org's instances (docs/ssh.md).
+    /// org's instances (docs/guides/ssh.md).
     #[command(subcommand)]
     Key(ssh::KeyCmd),
     /// SSH's stdio over isb serve's websocket to an instance of an org, for
@@ -387,7 +387,7 @@ enum Cmd {
     Audit(AuditCmd),
     /// The history of `isb serve`: the controller's events, incus lifecycle
     /// events in every project (with who requested them), audit rows, and
-    /// markers for when nothing was watching (docs/history.md).
+    /// markers for when nothing was watching (docs/operations/history.md).
     History(HistoryArgs),
 }
 

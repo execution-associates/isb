@@ -1,4 +1,4 @@
-// The audit log (docs/audit.md): the audit_list tool, and the live tail at
+// The audit log (docs/operations/audit.md): the audit_list tool, and the live tail at
 // GET /api/v1/audit/stream (server-sent `audit` events, only the entries
 // the viewer may read).
 import { useEffect, useRef, useState } from "react";

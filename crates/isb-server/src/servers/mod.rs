@@ -2,7 +2,7 @@
 //! each running incus and `isb serve --agent`, and forwards their calls over
 //! mutual TLS. Federation, not incus clustering: every server is a whole
 //! isb (controller, ingress, registry, builds, secrets) for the orgs on it.
-//! See docs/servers.md.
+//! See docs/guides/servers.md.
 
 pub mod bootstrap;
 pub mod client;
@@ -245,7 +245,7 @@ impl Servers {
     }
 
     /// Make a dedicated VM for `org` on this host and record it as server
-    /// `vm-<org>` (docs/servers.md#dedicated-vms). Idempotent: a VM or a
+    /// `vm-<org>` (docs/guides/servers.md#dedicated-vms). Idempotent: a VM or a
     /// record left by an earlier attempt is reused.
     pub fn add_vm(
         self: &Arc<Self>,

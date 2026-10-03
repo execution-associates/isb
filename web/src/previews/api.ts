@@ -1,4 +1,4 @@
-// Preview deployments per pull request (docs/previews.md). Shapes from
+// Preview deployments per pull request (docs/guides/previews.md). Shapes from
 // src/app/preview.rs and src/daemon/previews.rs.
 import { useQuery } from "@tanstack/react-query";
 import { callTool } from "@/api/tools";

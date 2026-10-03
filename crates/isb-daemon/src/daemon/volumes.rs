@@ -1,6 +1,6 @@
 //! The volume tools (`volume_*`): an org's named volumes, their snapshots
 //! (now and on a schedule, with the pre-snapshot hook) and staged restores.
-//! Volume backups are `backup_*` with a `volume` (docs/volumes.md).
+//! Volume backups are `backup_*` with a `volume` (docs/guides/volumes.md).
 //!
 //! Members and viewers read; changing anything (snapshots, schedules,
 //! restores) is for the org's admins and owners, checked here because the

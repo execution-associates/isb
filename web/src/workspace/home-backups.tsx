@@ -1,5 +1,5 @@
 // The Home tab's snapshots, backups and staged restores: the Volume panel
-// (docs/volumes.md) on the workspace's home volume, with a warning where
+// (docs/guides/volumes.md) on the workspace's home volume, with a warning where
 // the pool copies the whole home for every snapshot. A host-folder home is
 // the host's to back up.
 import { Archive, TriangleAlert } from "lucide-react";

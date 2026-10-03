@@ -1,4 +1,4 @@
-// /orgs/:org/workspace[/:tab]: the org's workspace (docs/workspaces.md).
+// /orgs/:org/workspace[/:tab]: the org's workspace (docs/concepts/workspaces.md).
 // With none yet, the page is the form that creates it. Viewers read;
 // members start, stop, restart and open terminals; admins do the rest.
 import { useQueryClient } from "@tanstack/react-query";
