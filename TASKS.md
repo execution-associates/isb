@@ -541,6 +541,14 @@ minime only runs binaries downloaded from our CI runs.
   made inside is uid 1000 on the host, the path added to
   `restricted.devices.disk.paths`), and an org opting back to a volume on
   `dir` with no schedule.
+- [x] (ws-fixes) Workspace rough edges: `workspace_*`/`sandbox_*` refuse an
+  unknown org up front; incus project-limit refusals become "org X is at its
+  CPU quota (limits.cpu 2, 2 in use)" with how to raise it, and a failed
+  create removes what it made; host-folder homes are recorded on the project
+  so `isb org create`/`org_update` keep them bindable; the image defaults to
+  `dev-base` where it exists, else `images:ubuntu/24.04`, and the create
+  form picks from the host's images and shows quota headroom. **Verified**
+  on titan with a scratch `isb serve`, before and after.
 - [ ] Workspace follow-ups: `isb host setup` on titan for port 8481 (not
   run: the rule is in the code); titan's `--workspace-home-root
   /srv/workspaces` and migrating clem with `home_bind`; a workspace on an org placed on a server

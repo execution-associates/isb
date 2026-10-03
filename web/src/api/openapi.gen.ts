@@ -2595,7 +2595,7 @@ export interface paths {
         put?: never;
         /**
          * Get the workspace
-         * @description The org's workspace (its long-lived machine, docs/concepts/workspaces.md): image, size, home volume, status, CPU and memory, live sessions (web terminals, SSH), last activity, its token's metadata (never the token) and how to connect; `workspace` is null when the org has none yet. Also the org's workspace settings.
+         * @description The org's workspace (its long-lived machine, docs/concepts/workspaces.md): image, size, home volume, status, CPU and memory, live sessions (web terminals, SSH), last activity, its token's metadata (never the token) and how to connect; `workspace` is null when the org has none yet, and `create` then says what one can be made from (`images`, `default_image`) and the org's quota and usage (`quota`). Also the org's workspace settings.
          */
         post: operations["workspace_get"];
         delete?: never;
@@ -8009,8 +8009,8 @@ export interface operations {
                     home_bind?: string;
                     /** @description The home volume (default 20GiB). */
                     home_size?: string;
-                    /** @description An incus image (dev-base, images:ubuntu/24.04) or registry:APP:TAG. */
-                    image: string;
+                    /** @description An incus image (a local alias such as dev-base, or a remote one such as images:ubuntu/24.04) or registry:APP:TAG. Default: dev-base when this host has it, else images:ubuntu/24.04; workspace_get lists the choices. */
+                    image?: string;
                     labels?: {
                         [key: string]: string;
                     };

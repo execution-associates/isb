@@ -89,7 +89,7 @@ means every member of the org, *member* means members, admins and owners.
 | `ssh_host_keys` | viewer | An instance's SSH host public keys, for pinning, and the user `isb ssh-config` logs in as by default. |
 | `workspace_get` | viewer | The workspace (or `null`) and the org's settings: definition, status, resources, home, live sessions, last activity, token metadata, `connect` (`url`, `mcp_url`), sandbox count. |
 | `workspace_list` | viewer | Every workspace in the org. |
-| `workspace_create` | admin | `image`, `name`, `user`, `cpus`, `memory`, `root_size`, `home_size`, `env`, `secrets`, `labels`, `token_role`; `home_bind` (a host folder as the home) is for superadmins. |
+| `workspace_create` | admin | `image` (default `dev-base` where the host has it, else `images:ubuntu/24.04`), `name`, `user`, `cpus`, `memory`, `root_size`, `home_size`, `env`, `secrets`, `labels`, `token_role`; `home_bind` (a host folder as the home) is for superadmins. |
 | `workspace_update` | admin | Any of those but `name`, `user`, `home_bind`; resizing needs `confirm: true`. |
 | `workspace_start` | member | Start it and deliver its credentials. |
 | `workspace_stop`, `workspace_restart` | member | Without `confirm: true`, only report the live sessions it would end. |

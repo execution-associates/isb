@@ -228,7 +228,7 @@ Platform admins, through the local daemon (the control plane). See
 ## Workspaces
 
 ```text
-isb workspace create --image IMAGE [--name N] [--user dev] [--cpus N] [--memory SIZE]
+isb workspace create [--image IMAGE] [--name N] [--user dev] [--cpus N] [--memory SIZE]
                      [--root-size SIZE] [--home-size 20GiB] [-e KEY=VALUE]... [--secret NAME]...
                      [--token-role viewer|member|admin] [--home-bind DIR]
 isb workspace show [NAME] [--json]      alias get

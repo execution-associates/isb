@@ -123,7 +123,13 @@ host:
 Once a project has limits, incus wants limits on every instance, so the
 org's default profile carries `--default-cpus` (1) and `--default-memory`
 (512MiB) for instances whose spec sets none. The host's images are shared
-with every org.
+with every org. When an instance or volume would pass a limit, isb says
+which (`org lab is at its CPU quota (limits.cpu 2, 2 in use)`) and how to
+raise it: `isb org create lab --cpus N` on the host, or `org_update`.
+
+The project's bind paths are the `--bind-root` directories plus the host
+folders of the org's workspace homes, which are recorded on the project, so
+rewriting the bind roots never takes a home away.
 
 ## The network
 

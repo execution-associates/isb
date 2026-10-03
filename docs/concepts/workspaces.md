@@ -26,7 +26,7 @@ workspace asks the daemon for a sandbox, and the daemon makes it beside the
 workspace.
 
 ```text
-isb workspace create --image IMAGE [--name N] [--user dev] [--cpus N] [--memory 8GiB]
+isb workspace create [--image IMAGE] [--name N] [--user dev] [--cpus N] [--memory 8GiB]
                      [--root-size 30GiB] [--home-size 20GiB] [-e KEY=VALUE]...
                      [--secret NAME]... [--token-role viewer|member|admin] [--home-bind DIR]
 isb workspace show [NAME] [--json]          status, resources, sessions, token metadata, URL
@@ -55,8 +55,15 @@ terminal.
 
 - An unprivileged container in the org's project, named after the workspace
   (`workspace` unless `--name`), from any incus image (`dev-base`,
-  `images:ubuntu/24.04`) or the org's own `registry:APP:TAG`. It starts with
-  the host (`boot.autostart`).
+  `images:ubuntu/24.04`) or the org's own `registry:APP:TAG`. Without
+  `--image` it is `dev-base` when the host has that image, else
+  `images:ubuntu/24.04`; a local image the host lacks is refused with the
+  ones it has. It starts with the host (`boot.autostart`).
+- Creating it in an org that does not exist is refused up front (`org X not
+  found`), as every `workspace_*` and `sandbox_*` tool is. A create that
+  fails (an image, the org's quota) leaves nothing behind: no instance,
+  definition or token, and no home it made. A full quota is named with its
+  usage and how to raise it ([orgs](orgs.md)).
 - **The home** is mounted at the workspace user's home (`--user`, default
   `dev`, made when the image lacks it) and survives rebuilds. It is one of
   two things ([below](#the-home-a-volume-or-a-host-folder)): a managed
@@ -104,9 +111,9 @@ the user's home. The instance maps the daemon's uid 1:1 (`idmap: auto`), and
 a workspace user the image lacks is made with that uid, so files have the
 same owner inside and on the host; other uids show as `nobody` inside. For
 the bind, the org's restricted project is allowed `<root>/<org>`
-(`restricted.devices.disk.paths`, checked again at every build, so an
-`isb org create` that rewrote the bind roots is repaired by the next
-rebuild); nothing else of the host. An org opts out (or in) with its
+(`restricted.devices.disk.paths`), recorded on the project as a workspace
+home (`user.isb.workspace-homes`) so that `isb org create` and `org_update`
+list it whatever bind roots they set; nothing else of the host. An org opts out (or in) with its
 `home_kind` setting, `volume` or `host` (platform admins).
 
 Restoring a host-folder home is the host's job and follows the same rule as
@@ -256,9 +263,9 @@ and `sandbox_remove` of it are refused.
 
 | Tool | Who | Does |
 |---|---|---|
-| `workspace_get` | members | the workspace (or `null`) and the org's settings: definition, status, resources, home, live sessions, last activity, token metadata, `connect` (`url`, `mcp_url`), sandbox count |
+| `workspace_get` | members | the workspace (or `null`) and the org's settings: definition, status, resources, home, live sessions, last activity, token metadata, `connect` (`url`, `mcp_url`), sandbox count; with none yet, `create`: the `images` it can be made from, the `default_image`, and the org's `quota` and usage |
 | `workspace_list` | members | every workspace in the org (one, unless `max_workspaces` was raised) |
-| `workspace_create` | admins | `image`, `name`, `user`, `cpus`, `memory`, `root_size`, `home_size`, `env`, `secrets`, `labels`, `token_role`; `home_bind` (superadmins: a host folder as the home) |
+| `workspace_create` | admins | `image` (default above), `name`, `user`, `cpus`, `memory`, `root_size`, `home_size`, `env`, `secrets`, `labels`, `token_role`; `home_bind` (superadmins: a host folder as the home) |
 | `workspace_update` | admins | any of those but `name`, `user`, `home_bind`; resizing needs `confirm` |
 | `workspace_start`, `workspace_stop`, `workspace_restart` | members | stop and restart need `confirm` |
 | `workspace_rebuild` | admins | `image`, `confirm` |
