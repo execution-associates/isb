@@ -284,6 +284,7 @@ filled in.
 - [docs/cli.md](docs/cli.md): every command and flag
 - [docs/stacks.md](docs/stacks.md): long-running stacks: replicas, health, rollouts
 - [docs/serve.md](docs/serve.md): the `isb serve` daemon and its MCP server behind Cloudflare Access
+- [docs/secrets.md](docs/secrets.md): per-org secrets: the age-encrypted store, break-glass recipients, `isb secret`
 - [docs/tui.md](docs/tui.md): `isb tui`, the live dashboard
 - [docs/rpc.md](docs/rpc.md): the protocol the SDKs speak, for other languages
 - [examples/](examples): a real per-worktree dev setup, and a VM

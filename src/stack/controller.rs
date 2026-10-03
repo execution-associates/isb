@@ -523,6 +523,17 @@ impl Controller {
             .ok_or_else(|| Error::NotFound(format!("stack {name}")))
     }
 
+    /// Every stored definition, without computing status.
+    pub fn definitions(&self) -> Vec<Arc<StackDef>> {
+        self.inner
+            .stacks
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect()
+    }
+
     /// The stored definition of a stack.
     pub fn definition(&self, name: &str) -> Result<StackDef> {
         self.get_def(name).map(|d| (*d).clone())

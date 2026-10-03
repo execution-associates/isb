@@ -37,6 +37,16 @@ isb stack deploy [NAME] [-d] [--timeout D]
 isb stack ls | ps NAME | logs NAME SERVICE | config NAME
 isb stack scale NAME SERVICE=N... | redeploy NAME SERVICE | rollback NAME
 isb stack rm NAME [--volumes]
+
+# secrets, per org, on the isb serve daemon (docs/secrets.md); all take --org ORG
+isb secret create NAME [FILE|-] [--driver D] [-l k=v]   value from FILE or stdin, never argv
+isb secret set NAME [FILE|-]               a new version
+isb secret get NAME                        the raw value, to stdout
+isb secret ls [--json] | inspect NAME [--json]   metadata only
+isb secret rm NAME...                      refused while a deployed stack uses it
+isb secret encrypt [FILE|-] [-r RECIPIENT]...   armored age for a compose `age:` field
+isb secret reencrypt [--all]               to the current recipients
+isb secret refresh NAME                    re-read from an external driver
 isb tui                                    live dashboard (docs/tui.md)
 ```
 

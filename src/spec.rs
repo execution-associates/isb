@@ -53,6 +53,87 @@ pub struct SecretDef {
     /// client calling `isb stack deploy`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<String>,
+
+    /// The secret already exists in the org's secret store (`isb secret
+    /// create`), under `name` (default: the key).
+    #[serde(
+        default,
+        deserialize_with = "flex::bool",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    #[schemars(with = "flex::BoolOrString")]
+    pub external: bool,
+
+    /// With `external`: the store's name for it. With `driver`: the
+    /// driver's reference (a 1Password `op://` path, say).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
+    /// The value, age-encrypted to the daemon's recipients (`isb secret
+    /// encrypt`): ASCII-armored, or base64 of the binary format.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub age: Option<String>,
+
+    /// Read through this secrets driver, from `name`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub driver: Option<String>,
+}
+
+impl SecretDef {
+    /// Check that exactly one source is given: `file`, `environment`,
+    /// `external`, `age`, or `driver` with `name`.
+    pub fn validate(&self) -> std::result::Result<(), String> {
+        let sources = [
+            self.file.is_some(),
+            self.environment.is_some(),
+            self.external,
+            self.age.is_some(),
+            self.driver.is_some(),
+        ];
+        if sources.iter().filter(|s| **s).count() != 1 {
+            return Err(
+                "needs exactly one of file, environment, external, age, or driver (with name)"
+                    .into(),
+            );
+        }
+        if self.name.is_some() && !self.external && self.driver.is_none() {
+            return Err("name goes with external or driver".into());
+        }
+        if self.driver.is_some() && self.name.as_deref().is_none_or(str::is_empty) {
+            return Err("driver needs name: the driver's reference to the secret".into());
+        }
+        if self.external {
+            if let Some(n) = &self.name {
+                crate::secrets::validate_name(n).map_err(|e| e.to_string())?;
+            }
+        }
+        if self.age.as_deref().is_some_and(|a| a.trim().is_empty()) {
+            return Err("age is empty".into());
+        }
+        Ok(())
+    }
+
+    /// The store name of an `external` secret declared under `key`.
+    pub fn store_name<'a>(&'a self, key: &'a str) -> Option<&'a str> {
+        self.external.then(|| self.name.as_deref().unwrap_or(key))
+    }
+
+    /// The source kind, for messages.
+    pub fn source_kind(&self) -> &'static str {
+        if self.file.is_some() {
+            "file"
+        } else if self.environment.is_some() {
+            "environment"
+        } else if self.external {
+            "external"
+        } else if self.age.is_some() {
+            "age"
+        } else if self.driver.is_some() {
+            "driver"
+        } else {
+            "none"
+        }
+    }
 }
 
 /// A named custom storage volume.
