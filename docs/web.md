@@ -177,12 +177,17 @@ Light, dark and system themes; it works down to phone width.
 
 ### Design system
 
-- **Tokens** (`web/src/index.css`): neutrals with a faint cool tint, the
-  logo's emerald as the one brand colour (active navigation, switches,
+- **Tokens** (`web/src/index.css`): neutrals with a faint cool tint,
+  emerald as the one brand colour (active navigation, switches,
   focus rings), and semantic status colours: success (running, done),
   info (building, deploying), warning (degraded), destructive (failed);
   queued and stopped are neutral. Log panels use a dark terminal surface
   in both themes.
+- **Logo**: the Execution Associates (EXA) monogram, a raster mark
+  (`web/src/assets/brand/exa-mark@{1,2,3}x.png`) drawn as a CSS mask
+  filled with `currentColor` (`.exa-mark`, `<Logo>`), so one asset reads
+  on light and dark. The favicons and `apple-touch-icon.png` in
+  `web/public` are the same mark, white on a dark tile.
 - **Status** goes through `lib/status.ts` (status to tone, tone to
   classes) and `<StatusBadge>`/`<StatusDot>` (`components/status.tsx`); a
   pulsing dot means in progress or live. No page picks status colours by

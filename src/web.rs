@@ -144,7 +144,7 @@ mod tests {
     const ASSETS: &[(&str, &[u8])] = &[
         ("/assets/index-abc123.css", b"body{}"),
         ("/assets/index-abc123.js", b"console.log(1)"),
-        ("/favicon.svg", b"<svg/>"),
+        ("/favicon-32.png", b"\x89PNG"),
         ("/index.html", b"<!doctype html><title>isb</title>"),
     ];
 
@@ -184,8 +184,8 @@ mod tests {
             r.get_header("content-type"),
             Some("text/css; charset=utf-8")
         );
-        let r = get("/favicon.svg").unwrap();
-        assert_eq!(r.get_header("content-type"), Some("image/svg+xml"));
+        let r = get("/favicon-32.png").unwrap();
+        assert_eq!(r.get_header("content-type"), Some("image/png"));
         assert_eq!(r.get_header("cache-control"), Some("public, max-age=3600"));
     }
 

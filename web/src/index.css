@@ -6,7 +6,7 @@
 
 /*
  * isb's design tokens. Neutrals carry a faint cool tint (hue 260); the one
- * brand colour is the logo's emerald. Status colours are semantic and used
+ * brand colour is emerald. Status colours are semantic and used
  * only through `lib/status.ts`: success (running, done), info (building,
  * deploying), warning (degraded), destructive (failed), and the neutrals
  * (queued, stopped).
@@ -194,4 +194,21 @@
     radial-gradient(50% 40% at 100% 100%, rgb(56 189 248 / 0.08), transparent 70%);
   background-size: 32px 32px, 32px 32px, 100% 100%, 100% 100%;
   mask-image: linear-gradient(to bottom, black 55%, transparent);
+}
+
+/*
+ * The EXA monogram: one white-on-transparent raster used as a mask and
+ * filled with the current text colour, so it reads on light and dark
+ * without a second asset. <Logo> (components/brand.tsx) sets the colour.
+ */
+.exa-mark {
+  background-color: currentColor;
+  mask-image: image-set(
+    url("./assets/brand/exa-mark@1x.png") 1x,
+    url("./assets/brand/exa-mark@2x.png") 2x,
+    url("./assets/brand/exa-mark@3x.png") 3x
+  );
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
 }
