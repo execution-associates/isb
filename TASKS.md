@@ -157,6 +157,10 @@ minime only runs binaries downloaded from our CI runs.
   Tags are pinned to digests at deploy (`StackDef.images`); retention keeps
   deployed digests with `isb-keep-*` tags. No registry auth: host-local
   processes can read and write every org's images.
+- **The deploy loop works end to end on titan** (2026-10-03): a Dockerfile
+  app from a `git://` repo built in its org (175 s cold, incl. the builder
+  image), pushed to the local registry, deployed, served v1; a GitLab-style
+  webhook deployed v2; rollback to v1 took 19 s with no rebuild.
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
