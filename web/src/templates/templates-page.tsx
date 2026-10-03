@@ -20,7 +20,7 @@ import { relativeTime } from "@/lib/format";
 import { errorMessage } from "@/lib/messages";
 import { useCanWrite, usePlatformAdmin } from "@/lib/use-role";
 import { cn } from "@/lib/utils";
-import { type CatalogConfig, filterTemplates, tagCounts, type TemplateInstance, type TemplateSummary, tkeys, useCatalogs, useInstances, useTemplates } from "./api";
+import { type CatalogConfig, filterTemplates, logoSrc, tagCounts, type TemplateInstance, type TemplateSummary, tkeys, useCatalogs, useInstances, useTemplates } from "./api";
 import { TemplateLogo } from "./logo";
 
 export function TemplatesPage() {
@@ -35,7 +35,7 @@ export function TemplatesPage() {
   const all = useMemo(() => templates.data?.templates ?? [], [templates.data]);
   const hits = useMemo(() => filterTemplates(all, query, tag), [all, query, tag]);
   const tags = useMemo(() => tagCounts(all), [all]);
-  const names = useMemo(() => new Map(all.map((t) => [t.ref, t.name])), [all]);
+  const byRef = useMemo(() => new Map(all.map((t) => [t.ref, t])), [all]);
   const errors = templates.data?.errors;
   const errorList = Array.isArray(errors) ? errors : errors ? Object.entries(errors).map(([k, v]) => `${k}: ${v}`) : [];
   // "New app → Template" passes where to deploy.
@@ -132,7 +132,7 @@ export function TemplatesPage() {
             {hits.length} of {all.length} templates
           </p>
         )}
-        <Instances org={org} instances={instances.data ?? []} error={instances.error} names={names} />
+        <Instances org={org} instances={instances.data ?? []} error={instances.error} byRef={byRef} />
       </div>
       {admin && <CatalogsDialog org={org} open={catalogs} onOpenChange={setCatalogs} />}
     </>
@@ -184,7 +184,7 @@ function TemplateCard({ org, t, dest }: { org: string; t: TemplateSummary; dest:
       className="group relative flex h-full min-w-0 flex-col gap-3 rounded-xl border bg-card p-4 shadow-xs transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-md focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
     >
       <div className="flex items-center gap-3">
-        <TemplateLogo name={t.name} />
+        <TemplateLogo name={t.name} src={logoSrc(t)} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-[15px] font-semibold tracking-tight">{t.name}</p>
           <p className="truncate text-xs text-muted-foreground">
@@ -208,7 +208,7 @@ function TemplateCard({ org, t, dest }: { org: string; t: TemplateSummary; dest:
   );
 }
 
-function Instances({ org, instances, error, names }: { org: string; instances: TemplateInstance[]; error: unknown; names: Map<string, string> }) {
+function Instances({ org, instances, error, byRef }: { org: string; instances: TemplateInstance[]; error: unknown; byRef: Map<string, TemplateSummary> }) {
   const qc = useQueryClient();
   const canWrite = useCanWrite(org);
   const [del, setDel] = useState<TemplateInstance | null>(null);
@@ -223,10 +223,11 @@ function Instances({ org, instances, error, names }: { org: string; instances: T
     >
       <ul className="-mx-5 -mb-5 divide-y border-t">
         {instances.map((i) => {
-          const tname = names.get(i.template) ?? i.template.split("/").pop() ?? i.template;
+          const t = byRef.get(i.template);
+          const tname = t?.name ?? i.template.split("/").pop() ?? i.template;
           return (
             <li key={i.name} className="flex items-start gap-3 px-5 py-3.5 text-sm">
-              <TemplateLogo name={tname} className="size-9 text-xs" />
+              <TemplateLogo name={tname} src={t && logoSrc(t)} className="size-9 text-xs" />
               <div className="min-w-0 flex-1 space-y-1.5">
                 <p className="flex min-w-0 flex-wrap items-baseline gap-x-2">
                   <span className="truncate font-semibold">{i.name}</span>
@@ -365,8 +366,8 @@ function CatalogsDialog({ org, open, onOpenChange }: { org: string; open: boolea
             <p className="font-medium">Dokploy's catalog</p>
             <p className="text-muted-foreground">
               About 530 community templates (MIT, Dokploy and Carlos Ortiz), translated to isb as they are fetched. Anything that would weaken isolation (privileged, host
-              paths, the docker socket, devices) is refused with the reason; about 400 deploy, many with notes on what differs. Their logos are the projects' trademarks
-              and are not shown.
+              paths, the docker socket, devices) is refused with the reason; about 400 deploy, many with notes on what differs. Logos are the projects' trademarks: the
+              daemon fetches and caches them, and the browser only loads isb's copy.
             </p>
             <Button
               type="button"

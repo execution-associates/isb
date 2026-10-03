@@ -2,6 +2,7 @@ id: n8n
 name: n8n
 description: Workflow automation with a visual editor, hundreds of integrations, and code when you need it.
 version: "1"
+logo: https://raw.githubusercontent.com/n8n-io/n8n/ea9f451076722a6784e0f9d78af4410952be9a99/packages/frontend/@n8n/design-system/src/components/N8nLogo/logo-icon.svg
 tags: [automation, workflows]
 links:
   website: https://n8n.io

@@ -188,6 +188,8 @@ struct Daemon {
     /// Who is a superadmin, and what `host_policy` reports.
     gate: Arc<superadmin::Gate>,
     host: Value,
+    /// The template catalogs, shared by the tools and the logo route.
+    catalogs: Arc<crate::template::catalog::Catalogs>,
 }
 
 /// dnsmasq (as `incus`) reads service names from the DNS root. When that
@@ -408,6 +410,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         servers: servers.clone(),
         gate: gate.clone(),
         host: superadmin::host_summary(&cfg, &gate),
+        catalogs: Arc::new(crate::template::catalog::Catalogs::new(&cfg.state_dir)),
     });
     if let Some(s) = &servers {
         s.start(ctl.clone());
@@ -430,6 +433,19 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         };
         audit::audited_webhooks(w, audit_log.clone())
     };
+    // Template logos from isb's own cache, ahead of the web UI.
+    let auth = auth.map(|a| -> crate::server::Routes {
+        let logo = templates::logo::route(
+            d.catalogs.clone(),
+            Arc::new(templates::logo::Logos::new(&cfg.state_dir)),
+            templates::logo::admit(
+                hooks.authn.clone().expect("the daemon authenticates"),
+                access.clone(),
+                cfg.allow_unauthenticated,
+            ),
+        );
+        Arc::new(move |r| logo(r).or_else(|| a(r)))
+    });
     let mut listeners = vec![Listener::unix(&cfg.socket).hooks(hooks.clone())];
     if let Some(ac) = &cfg.agent {
         let tls = crate::servers::pki::agent_server_config(&ac.tls_dir)?;
@@ -1340,15 +1356,14 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
     );
     apps::register(&mut r, d.apps.clone())?;
     previews::register(&mut r, d.apps.clone())?;
-    templates::register(
-        &mut r,
-        templates::Templates::new(
-            &d.state_dir,
-            d.apps.clone(),
-            d.secrets.clone(),
-            d.ingress.as_ref().and_then(|m| m.public_ip()),
-        ),
-    )?;
+    let mut t = templates::Templates::new(
+        &d.state_dir,
+        d.apps.clone(),
+        d.secrets.clone(),
+        d.ingress.as_ref().and_then(|m| m.public_ip()),
+    );
+    t.catalogs = d.catalogs.clone();
+    templates::register(&mut r, t)?;
     data::register(&mut r, d.data.clone())?;
     tool!(
         "server_status",

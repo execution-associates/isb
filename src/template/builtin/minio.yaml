@@ -2,6 +2,7 @@ id: minio
 name: MinIO
 description: S3-compatible object storage, with its web console on the domain and the S3 API inside the org.
 version: "1"
+logo: https://raw.githubusercontent.com/minio/docs/0f20cb5c667a6a5c833e6b369addb9a08f0440a7/source/_static/favicon.png
 tags: [storage, s3]
 links:
   website: https://min.io

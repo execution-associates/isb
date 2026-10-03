@@ -2,6 +2,7 @@ id: gitea
 name: Gitea
 description: A self-hosted Git service (repositories, pull requests, issues, packages, actions), with Postgres.
 version: "1"
+logo: https://raw.githubusercontent.com/go-gitea/gitea/7641fc3a8c908e9399b40c2927c58b4b5d95707e/assets/logo.svg
 tags: [git, devtools]
 links:
   website: https://about.gitea.com
