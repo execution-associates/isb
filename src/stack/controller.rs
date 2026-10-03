@@ -95,6 +95,23 @@ pub struct ServiceStatus {
     pub rollout: Option<RolloutStatus>,
     /// Unix seconds of the last completed reconcile pass.
     pub checked_at: u64,
+    /// The service's domains as the ingress serves them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub domains: Vec<crate::ingress::DomainStatus>,
+}
+
+/// Something that follows which replicas receive traffic: the ingress.
+/// Called from worker threads, never with a controller lock held.
+pub trait Observer: Send + Sync {
+    /// The in-rotation replicas of a service changed. `stack` is qualified.
+    fn rotation(&self, stack: &str, service: &str, ips: &[IpAddr]);
+    /// Wait (at most `timeout`) until requests to `ip` have drained from the
+    /// observer's proxies, before the replica is stopped.
+    fn drain(&self, stack: &str, service: &str, ip: IpAddr, timeout: Duration);
+    /// The deployed definitions changed (deploy, scale, rollback, removal).
+    fn stacks_changed(&self, defs: Vec<Arc<StackDef>>);
+    /// A service's domains for its status.
+    fn domains(&self, stack: &str, service: &str) -> Vec<crate::ingress::DomainStatus>;
 }
 
 /// A rollout in progress.
@@ -219,6 +236,7 @@ struct Inner {
     edit: Mutex<()>,
     /// When driver-backed secrets are next checked for a new version.
     refresh: Mutex<super::secrets::RefreshSchedule>,
+    observer: Option<Arc<dyn Observer>>,
 }
 
 impl Inner {
@@ -268,6 +286,18 @@ impl Controller {
         interval: Duration,
         secrets: Arc<Secrets>,
     ) -> Result<Controller> {
+        Controller::start_with(client, store, interval, secrets, None)
+    }
+
+    /// [`Controller::start`], telling `observer` about rotation changes from
+    /// the first one on.
+    pub fn start_with(
+        client: Client,
+        store: Store,
+        interval: Duration,
+        secrets: Arc<Secrets>,
+        observer: Option<Arc<dyn Observer>>,
+    ) -> Result<Controller> {
         let c = Controller {
             inner: Arc::new(Inner {
                 client,
@@ -282,6 +312,7 @@ impl Controller {
                 secrets,
                 edit: Mutex::new(()),
                 refresh: Mutex::new(Default::default()),
+                observer,
             }),
         };
         // Driver-backed secrets are polled on their refresh intervals; the
@@ -521,6 +552,18 @@ impl Controller {
         self.inner.emit(level, stack, service, None, message);
     }
 
+    /// Record an event about one service (`stack` qualified).
+    pub fn service_event(&self, level: &str, stack: &str, service: &str, message: String) {
+        eprintln!("isb serve: {stack}/{service}: {message}");
+        self.inner.emit(level, stack, service, None, message);
+    }
+
+    fn notify_stacks(&self) {
+        if let Some(o) = &self.inner.observer {
+            o.stacks_changed(self.definitions());
+        }
+    }
+
     /// What deploying `def` would change, without deploying it.
     pub fn plan(&self, def: &StackDef) -> Result<Vec<DeployChange>> {
         self.validate(def)?;
@@ -548,6 +591,7 @@ impl Controller {
             s.name = Some(instance_name(&def.name, svc, 1, "0000")?);
             crate::plan::resolve(&s, &def.file.volumes, &host, &def.base_dir)?;
             published(spec)?;
+            crate::ingress::domain::validate(svc, &spec.domains)?;
         }
         Ok(())
     }
@@ -620,6 +664,8 @@ impl Controller {
                 w.wake.notify_all();
             }
         }
+        drop(workers);
+        self.notify_stacks();
     }
 
     /// Remove a stack: every instance and published port; with `volumes`,
@@ -633,6 +679,7 @@ impl Controller {
             };
             self.inner.store.remove(&def.org, &def.name)?;
         }
+        self.notify_stacks();
         let ws: Vec<Arc<WorkerShared>> = self
             .inner
             .workers
@@ -772,6 +819,13 @@ impl Controller {
                     })
             })
             .collect();
+        drop(st);
+        let mut services = services;
+        if let Some(o) = &self.inner.observer {
+            for s in &mut services {
+                s.domains = o.domains(name, &s.service);
+            }
+        }
         let converged = services.iter().all(|s| s.state == "converged");
         Ok(StackStatus {
             name: def.name.clone(),
@@ -873,6 +927,7 @@ fn instance_spec(
     let mut s = spec.clone();
     s.restart = Some(RestartMode::Always);
     s.ports.retain(|p| p.bind == PortBind::Guest);
+    s.domains.clear();
     if let Some(d) = &s.deploy {
         s.labels.extend(d.labels.clone());
     }
@@ -1090,6 +1145,8 @@ struct Worker {
     /// The addresses last published as the service's name.
     dns_last: Option<Vec<IpAddr>>,
     dns_error: Option<String>,
+    /// The addresses last told to the observer.
+    observed: Option<Vec<IpAddr>>,
 }
 
 fn spawn_worker(inner: Arc<Inner>, def: &StackDef, service: String, shared: Arc<WorkerShared>) {
@@ -1120,6 +1177,7 @@ fn spawn_worker(inner: Arc<Inner>, def: &StackDef, service: String, shared: Arc<
             org,
             dns_last: None,
             dns_error: None,
+            observed: None,
         };
         w.run();
     });
@@ -1209,6 +1267,10 @@ impl Worker {
             }
         }
         self.dns_last = Some(Vec::new());
+        if let Some(o) = &self.inner.observer {
+            o.rotation(&self.q, &self.service, &[]);
+        }
+        self.observed = Some(Vec::new());
         for (k, _) in std::mem::take(&mut self.routes) {
             self.inner.balancer.remove_route(&k);
         }
@@ -1959,10 +2021,15 @@ impl Worker {
         self.set_rotation(name, false);
         self.sync_routes();
         if let Some(ip) = ip {
+            let started = Instant::now();
+            if let Some(o) = &self.inner.observer {
+                o.drain(&self.q, &self.service, ip, DRAIN);
+            }
+            let left = DRAIN.saturating_sub(started.elapsed());
             for (k, p) in &self.routes {
                 self.inner
                     .balancer
-                    .wait_drained(k, SocketAddr::new(ip, p.target), DRAIN);
+                    .wait_drained(k, SocketAddr::new(ip, p.target), left);
             }
         }
         if let Ok(sb) = Sandbox::get(self.client(), name) {
@@ -2033,7 +2100,26 @@ impl Worker {
             }
         }
         self.route_errors = errors;
+        self.sync_observer();
         self.sync_dns();
+    }
+
+    /// Tell the observer (the ingress) when the in-rotation set changed.
+    fn sync_observer(&mut self) {
+        let Some(o) = self.inner.observer.clone() else {
+            return;
+        };
+        let mut ips: Vec<IpAddr> = self
+            .rt
+            .values()
+            .filter(|r| r.in_rotation)
+            .filter_map(|r| r.ip)
+            .collect();
+        ips.sort();
+        if self.observed.as_ref() != Some(&ips) {
+            o.rotation(&self.q, &self.service, &ips);
+            self.observed = Some(ips);
+        }
     }
 
     /// Publish the in-rotation replicas' addresses as the service's name
@@ -2078,6 +2164,7 @@ impl Worker {
 
     fn publish_status(&mut self, def: &StackDef) {
         // An address can change without a rotation change (a restart).
+        self.sync_observer();
         self.sync_dns();
         let Ok(spec) = def.service(&self.service) else {
             return;
@@ -2178,6 +2265,7 @@ impl Worker {
             ports,
             rollout: self.rollout.clone(),
             checked_at: now_secs(),
+            domains: Vec::new(),
         };
         self.inner.status.lock().unwrap().insert(self.key(), st);
     }

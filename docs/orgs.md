@@ -9,10 +9,12 @@ work in the `default` org.
 isb org create NAME [--cpus N] [--memory 16GiB] [--disk 100GiB] [--instances N]
                     [--default-cpus N] [--default-memory 512MiB]
                     [--bind-root DIR]... [--allow-egress DEST]...
+                    [--allow-domain SUFFIX]... [--ingress caddy|cloudflare-tunnel]
+                    [--cloudflare-account ID] [--cloudflare-zone ID]
 isb org ls [--json]
 isb org show NAME [--json]
 isb org rm NAME [--force]
-sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run]
+sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run] [--public-ingress]
 ```
 
 `isb org create` on an existing org updates it to the flags given.
@@ -102,12 +104,44 @@ bridges. `sudo isb host setup` once lets every org bridge (`isbbr+`) through:
 - DHCP to the host, accepted ahead of ufw's conntrack checks (a block in
   `/etc/ufw/before.rules`, backed up first);
 - DNS to the host (`ufw allow in on isbbr+ to any port 53`);
-- egress through the uplink (`ufw route allow in on isbbr+ out on <uplink>`).
+- egress through the uplink (`ufw route allow in on isbbr+ out on <uplink>`);
+- the ingress's tunnel listener on each org's own bridge address (`ufw allow
+  in on isbbr+ to any port 8480 proto tcp`), which a Cloudflare-tunnel org's
+  cloudflared sends its requests to.
+
+`--public-ingress` also opens 80 and 443 (`ufw allow 80/tcp`, `443/tcp`)
+and writes `/etc/sysctl.d/60-isb-ingress.conf` with
+`net.ipv4.ip_unprivileged_port_start = 80`, so the daemon binds them as an
+ordinary user.
 
 ufw's routed default-deny then keeps org bridges apart from each other and
 from the host's other networks. It also creates the service-name directory
 (below). `--dry-run` prints all of it instead; without root, it prints it and
 exits 1.
+
+## Domains
+
+The hostnames an org's stacks may serve through the ingress
+([ingress.md](ingress.md)) are the platform's to decide:
+
+- `--allow-domain SUFFIX` (repeatable) limits them to names at or under each
+  suffix: `example.com` allows `example.com` and `shop.example.com`.
+  `*.example.com` also allows wildcard hosts (`*.example.com`,
+  `*.team.example.com`). Giving the flag replaces the list; `none` clears
+  it. Stored in the project's `user.isb.domains`.
+- Without a list, any concrete name is allowed and no wildcard.
+- Generated names (`host: auto`, under sslip.io) are always allowed.
+- Whatever the lists say, a name one org serves is refused to every other:
+  the first to claim it keeps it.
+
+`--ingress` picks how the org's domains are reached: `caddy` (default) on the
+server's public listeners, or `cloudflare-tunnel` through the org's own
+Cloudflare Tunnel, whose token the org keeps in its secret
+`cloudflare-tunnel-token`. With an API token in `cloudflare-api-token` as
+well, isb manages the tunnel's ingress rules and the hostnames' DNS records;
+`--cloudflare-account` and `--cloudflare-zone` name the account (default:
+the tunnel token's) and zone (default: looked up per hostname). Stored in
+`user.isb.ingress` and `user.isb.ingress.cloudflare.*`.
 
 ## Service names
 

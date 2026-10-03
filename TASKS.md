@@ -127,6 +127,15 @@ minime only runs binaries downloaded from our CI runs.
 - **Webhooks bypass sessions and Access in the daemon** (`public_routes`),
   authenticated by per-app HMAC or token. Behind Cloudflare Access the
   Access app needs a bypass policy for `/api/v1/webhooks/*`.
+- **Ingress** (P2.4): Caddy (pinned 2.11.6, SHA-512 compiled in) is a child
+  of `isb serve`, admin API on a unix socket, whole config reloaded on every
+  change; never adopted across daemon restarts; `install_trust: false`
+  always (it once wrote its root CA into titan's trust store; removed).
+  Hostname claims persist with grant time, first claim wins. cloudflared
+  runs inside the org (never on the host, where a dashboard-edited tunnel
+  could reach host loopback such as the incus socket), reaching Caddy on a
+  per-org listener at the org's bridge address :8480. Domains are left out
+  of the service revision, so editing them never replaces instances.
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
@@ -230,7 +239,7 @@ minime only runs binaries downloaded from our CI runs.
 - [~] (subagent p2.2) P2.3 Local OCI registry as an isb service; builds push, incus pulls;
   image retention. **Verify:** deploy pulls from the local registry; rollback
   to a previous image.
-- [~] (subagent p2.4) P2.4 Ingress: embedded edge proxy (Caddy) with ACME, `domains:` per
+- [x] (0486011; Let's Encrypt cert verified on a cx23 in nbg1; live Cloudflare Tunnel check waits on Stephan's go-ahead) P2.4 Ingress: embedded edge proxy (Caddy) with ACME, `domains:` per
   service (host, path, port, https, redirects), generated hostnames
   (sslip.io-style) for quick starts; Cloudflare Tunnel as an alternative
   provider per org. **Verify:** HTTPS on the hcloud box with a real cert.

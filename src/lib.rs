@@ -42,6 +42,7 @@ pub mod exec;
 mod flex;
 pub mod foreground;
 pub mod idmap;
+pub mod ingress;
 pub mod interp;
 pub mod lock;
 pub mod machine;

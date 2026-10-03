@@ -81,6 +81,7 @@ fn dur(s: &str) -> std::result::Result<Duration, String> {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)] // parsed once per run
 enum Cmd {
     /// Create and start a sandbox from flags (fails if it exists, unless --ensure).
     Create(CreateArgs),
@@ -235,6 +236,12 @@ enum Cmd {
     /// Orgs: isolated tenants, each an incus project with its own network.
     #[command(subcommand)]
     Org(OrgCmd),
+    /// The ingress of `isb serve`: routed domains, certificates, conflicts,
+    /// tunnels (docs/ingress.md).
+    Ingress {
+        #[arg(long)]
+        json: bool,
+    },
     /// One-time host preparation (needs root).
     #[command(subcommand)]
     Host(HostCmd),
@@ -428,6 +435,34 @@ struct ServeArgs {
     /// Let a verified provider email make an account without an invitation.
     #[arg(long, env = "ISB_OPEN_SIGNUP")]
     open_signup: bool,
+    /// Ingress: serve stack domains over plain HTTP here (and redirect
+    /// HTTPS domains), e.g. 0.0.0.0:80. Turns the ingress on.
+    #[arg(long, env = "ISB_INGRESS_HTTP", value_name = "ADDR")]
+    ingress_http: Option<String>,
+    /// Ingress: serve HTTPS domains here, e.g. 0.0.0.0:443. Turns the
+    /// ingress on.
+    #[arg(long, env = "ISB_INGRESS_HTTPS", value_name = "ADDR")]
+    ingress_https: Option<String>,
+    /// Ingress: serve Cloudflare-tunnel orgs even without public listeners.
+    #[arg(long, env = "ISB_INGRESS_TUNNELS")]
+    ingress_tunnels: bool,
+    /// The port each tunnel org's listener takes on its bridge address.
+    #[arg(long, env = "ISB_INGRESS_TUNNEL_PORT", default_value_t = isb::ingress::DEFAULT_TUNNEL_PORT)]
+    ingress_tunnel_port: u16,
+    /// The public IPv4 address `host: auto` names resolve to (sslip.io);
+    /// default: the default route's source address, if it is public.
+    #[arg(long, env = "ISB_INGRESS_PUBLIC_IP", value_name = "IP")]
+    ingress_public_ip: Option<String>,
+    /// Who certificates come from: letsencrypt (default),
+    /// letsencrypt-staging, internal (Caddy's own CA), or an ACME directory URL.
+    #[arg(long, env = "ISB_ACME_CA", default_value = "letsencrypt")]
+    acme_ca: String,
+    /// The ACME account's contact email.
+    #[arg(long, env = "ISB_ACME_EMAIL")]
+    acme_email: Option<String>,
+    /// A Caddy binary to run instead of the pinned release isb downloads.
+    #[arg(long, env = "ISB_CADDY_BIN")]
+    caddy_bin: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -446,6 +481,7 @@ enum ServeAction {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)] // parsed once per run
 enum OrgCmd {
     /// Create an org, or update an existing one's limits.
     Create {
@@ -476,6 +512,25 @@ enum OrgCmd {
         /// (repeatable). Replaces the org's exceptions; `none` clears them.
         #[arg(long, value_name = "DEST")]
         allow_egress: Vec<String>,
+        /// A domain suffix the org's services may serve (repeatable):
+        /// `example.com` allows it and every name under it,
+        /// `*.example.com` wildcard hosts too. Replaces the list; `none`
+        /// clears it (any concrete name, no wildcards).
+        #[arg(long, value_name = "SUFFIX")]
+        allow_domain: Vec<String>,
+        /// How the org's domains are reached: `caddy` (the server's public
+        /// listeners) or `cloudflare-tunnel` (the org's own tunnel, token
+        /// in its secret cloudflare-tunnel-token).
+        #[arg(long, value_name = "PROVIDER")]
+        ingress: Option<String>,
+        /// Cloudflare account id for the tunnel's API calls (default: the
+        /// tunnel token's).
+        #[arg(long, value_name = "ID")]
+        cloudflare_account: Option<String>,
+        /// Cloudflare zone id the org's hostnames are in (default: looked up
+        /// per hostname).
+        #[arg(long, value_name = "ID")]
+        cloudflare_zone: Option<String>,
     },
     /// List orgs.
     #[command(alias = "list")]
@@ -569,6 +624,11 @@ enum HostCmd {
         /// Print the firewall commands instead of running them.
         #[arg(long)]
         dry_run: bool,
+        /// Also prepare a public ingress: open 80 and 443 in ufw, and let
+        /// unprivileged users bind them (net.ipv4.ip_unprivileged_port_start=80),
+        /// so `isb serve --ingress-http :80 --ingress-https :443` runs as you.
+        #[arg(long)]
+        public_ingress: bool,
     },
 }
 
@@ -999,11 +1059,13 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         Cmd::Serve(a) => serve(ctx, a),
         Cmd::Stack(s) => stack(ctx, s),
         Cmd::Org(o) => org(ctx, o),
+        Cmd::Ingress { json } => ingress_status(json),
         Cmd::Host(HostCmd::Setup {
             uplink,
             user,
             dry_run,
-        }) => host_setup(uplink, user, dry_run),
+            public_ingress,
+        }) => host_setup(uplink, user, dry_run, public_ingress),
         Cmd::Machine(m) => machine(ctx, m),
         Cmd::Secret(s) => secret(ctx, s),
         Cmd::Project(p) => apps::project(&ctx.global.org, p),
@@ -1892,9 +1954,70 @@ fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
         }
         .secrets_from_env(),
         open_signup: a.open_signup,
+        ingress: ingress_config(
+            a.ingress_http,
+            a.ingress_https,
+            a.ingress_tunnels,
+            a.ingress_tunnel_port,
+            a.ingress_public_ip,
+            &a.acme_ca,
+            a.acme_email,
+            a.caddy_bin,
+        )?,
     };
     isb::daemon::serve(ctx.client(None), cfg)?;
     Ok(0)
+}
+
+/// The ingress settings from `isb serve`'s flags; `None` when it is off.
+#[allow(clippy::too_many_arguments)]
+fn ingress_config(
+    http: Option<String>,
+    https: Option<String>,
+    tunnels: bool,
+    tunnel_port: u16,
+    public_ip: Option<String>,
+    ca: &str,
+    email: Option<String>,
+    caddy_bin: Option<PathBuf>,
+) -> Result<Option<isb::ingress::IngressConfig>> {
+    let addr = |flag: &str, v: Option<String>| -> Result<Option<std::net::SocketAddr>> {
+        match v.filter(|s| !s.is_empty()) {
+            None => Ok(None),
+            Some(s) => {
+                // `:80` means every address, as Caddy spells it.
+                let full = if s.starts_with(':') {
+                    format!("0.0.0.0{s}")
+                } else {
+                    s
+                };
+                full.parse().map(Some).map_err(|_| {
+                    Error::Invalid(format!("{flag} {full:?}: want IP:PORT, e.g. 0.0.0.0:443"))
+                })
+            }
+        }
+    };
+    let http = addr("--ingress-http", http)?;
+    let https = addr("--ingress-https", https)?;
+    if http.is_none() && https.is_none() && !tunnels {
+        return Ok(None);
+    }
+    let public_ip = match public_ip.filter(|s| !s.is_empty()) {
+        Some(s) => Some(s.parse().map_err(|_| {
+            Error::Invalid(format!("--ingress-public-ip {s:?}: not an IP address"))
+        })?),
+        None => isb::ingress::detect_public_ip(),
+    };
+    Ok(Some(isb::ingress::IngressConfig {
+        http,
+        https,
+        ca: isb::ingress::caddy::Ca::parse(ca)?,
+        email: email.filter(|e| !e.is_empty()),
+        public_ip,
+        tunnel_port,
+        caddy_bin,
+        ..Default::default()
+    }))
 }
 
 /// Call a tool on the local daemon.
@@ -2338,7 +2461,124 @@ fn print_stack(st: &serde_json::Value) {
                     .unwrap_or_default()
             );
         }
+        for d in s["domains"].as_array().into_iter().flatten() {
+            let what = d["url"].as_str().map(String::from).unwrap_or_else(|| {
+                format!(
+                    "{}{}",
+                    d["host"].as_str().unwrap_or(""),
+                    d["path"].as_str().filter(|p| *p != "/").unwrap_or("")
+                )
+            });
+            let n = d["upstreams"].as_array().map(|a| a.len()).unwrap_or(0);
+            eprintln!(
+                "{}: {what} ({}, cert {}, {n} upstreams){}",
+                s["service"].as_str().unwrap_or(""),
+                d["state"].as_str().unwrap_or(""),
+                d["cert"].as_str().unwrap_or(""),
+                d["message"]
+                    .as_str()
+                    .map(|m| format!(": {m}"))
+                    .unwrap_or_default()
+            );
+        }
     }
+}
+
+fn ingress_status(json: bool) -> Result<u8> {
+    let r = call("ingress_status", serde_json::json!({}), SHORT)?;
+    if json {
+        print_json(&r);
+        return Ok(0);
+    }
+    if r["enabled"] != true {
+        println!("{}", r["message"].as_str().unwrap_or("ingress off"));
+        return Ok(0);
+    }
+    let caddy = &r["caddy"];
+    println!(
+        "edge: caddy {} {} (http {}, https {}, ca {}){}",
+        caddy["version"].as_str().unwrap_or("?"),
+        if caddy["running"] == true {
+            "running"
+        } else {
+            "down"
+        },
+        r["http"].as_str().unwrap_or("-"),
+        r["https"].as_str().unwrap_or("-"),
+        r["ca"].as_str().unwrap_or("-"),
+        r["error"]
+            .as_str()
+            .or(caddy["last_error"].as_str())
+            .map(|e| format!(": {e}"))
+            .unwrap_or_default()
+    );
+    let mut rows = vec![vec![
+        "URL".to_string(),
+        "STACK".into(),
+        "SERVICE".into(),
+        "STATE".into(),
+        "CERT".into(),
+        "UPSTREAMS".into(),
+    ]];
+    for x in r["routes"].as_array().into_iter().flatten() {
+        let d = &x["domain"];
+        rows.push(vec![
+            d["url"].as_str().unwrap_or("").to_string(),
+            format!(
+                "{}/{}",
+                x["org"].as_str().unwrap_or(""),
+                x["stack"].as_str().unwrap_or("")
+            ),
+            x["service"].as_str().unwrap_or("").into(),
+            d["state"].as_str().unwrap_or("").into(),
+            d["cert"].as_str().unwrap_or("").into(),
+            d["upstreams"]
+                .as_array()
+                .map(|a| a.len())
+                .unwrap_or(0)
+                .to_string(),
+        ]);
+    }
+    table(rows);
+    for c in r["conflicts"].as_array().into_iter().flatten() {
+        eprintln!(
+            "conflict: {}/{} {}: {}",
+            c["stack"].as_str().unwrap_or(""),
+            c["service"].as_str().unwrap_or(""),
+            c["host"].as_str().unwrap_or(""),
+            c["reason"].as_str().unwrap_or("")
+        );
+    }
+    for c in r["refused"].as_array().into_iter().flatten() {
+        eprintln!(
+            "refused: {}/{}: {}",
+            c["stack"].as_str().unwrap_or(""),
+            c["service"].as_str().unwrap_or(""),
+            c["reason"].as_str().unwrap_or("")
+        );
+    }
+    for t in r["tunnels"].as_array().into_iter().flatten() {
+        eprintln!(
+            "tunnel {}: origin {}, cloudflared {}, {}{}",
+            t["org"].as_str().unwrap_or(""),
+            t["origin"].as_str().unwrap_or("-"),
+            if t["stack"] == true {
+                "deployed"
+            } else {
+                "not deployed"
+            },
+            if t["api_managed"] == true {
+                "rules and DNS managed by isb"
+            } else {
+                "rules and DNS set in the Cloudflare dashboard"
+            },
+            t["error"]
+                .as_str()
+                .map(|e| format!(": {e}"))
+                .unwrap_or_default()
+        );
+    }
+    Ok(0)
 }
 
 fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
@@ -2356,7 +2596,18 @@ fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
             default_memory,
             bind_root,
             allow_egress,
+            allow_domain,
+            ingress,
+            cloudflare_account,
+            cloudflare_zone,
         } => {
+            let domains = if allow_domain.is_empty() {
+                None
+            } else if allow_domain == ["none"] {
+                Some(Vec::new())
+            } else {
+                Some(allow_domain)
+            };
             let id = OrgId::new(name)?;
             let egress = if allow_egress.is_empty() {
                 None
@@ -2389,6 +2640,10 @@ fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
                     default_memory,
                     bind_roots: roots,
                     egress,
+                    domains,
+                    ingress,
+                    cloudflare_account,
+                    cloudflare_zone,
                 },
                 &mut rep,
             )?;
@@ -2476,6 +2731,24 @@ fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
                     }
                 );
                 println!(
+                    "domains    {}",
+                    if o.domains.is_empty() {
+                        "any name, no wildcards".to_string()
+                    } else {
+                        o.domains.join(", ")
+                    }
+                );
+                let mut ing = o.ingress.clone();
+                for (k, v) in [
+                    ("account", &o.cloudflare_account),
+                    ("zone", &o.cloudflare_zone),
+                ] {
+                    if let Some(v) = v {
+                        ing.push_str(&format!(" ({k} {v})"));
+                    }
+                }
+                println!("ingress    {ing}");
+                println!(
                     "names      {}",
                     match &o.dns_dir {
                         Some(d) => format!("<service>.<stack>.{}.isb (from {d})", o.name),
@@ -2502,22 +2775,39 @@ fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
 
 /// The ufw rules org bridges need on a default-deny host, as argv lists.
 /// DHCP is not among them: see [`BEFORE_RULES`].
-fn host_rules(uplink: &str) -> Vec<Vec<String>> {
+fn host_rules(uplink: &str, public_ingress: bool) -> Vec<Vec<String>> {
     let v = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
     let mut out = vec![
         v("ufw allow in on isbbr+ to any port 53 comment"),
         v(&format!(
             "ufw route allow in on isbbr+ out on {uplink} comment"
         )),
+        // A Cloudflare-tunnel org's cloudflared reaches the ingress on its
+        // own bridge address; other orgs' ACLs keep them off it.
+        v(&format!(
+            "ufw allow in on isbbr+ to any port {} proto tcp comment",
+            isb::ingress::DEFAULT_TUNNEL_PORT
+        )),
     ];
-    for (r, c) in out
-        .iter_mut()
-        .zip(["isb org bridges: DNS", "isb org bridges: egress"])
-    {
+    let mut comments = vec![
+        "isb org bridges: DNS",
+        "isb org bridges: egress",
+        "isb org bridges: tunnel ingress",
+    ];
+    if public_ingress {
+        out.push(v("ufw allow 80/tcp comment"));
+        out.push(v("ufw allow 443/tcp comment"));
+        comments.extend(["isb ingress: http", "isb ingress: https"]);
+    }
+    for (r, c) in out.iter_mut().zip(comments) {
         r.push(c.to_string());
     }
     out
 }
+
+/// Lets the daemon's user bind 80 and 443 without root or capabilities.
+const SYSCTL_PATH: &str = "/etc/sysctl.d/60-isb-ingress.conf";
+const SYSCTL_TEXT: &str = "# isb serve's ingress binds 80 and 443 as an ordinary user.\nnet.ipv4.ip_unprivileged_port_start = 80\n";
 
 /// DHCP accepted ahead of ufw's conntrack-INVALID drop. With br_netfilter
 /// on, the bridged copy of a DHCP broadcast is dropped in FORWARD, and once
@@ -2570,7 +2860,12 @@ fn group_exists(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn host_setup(uplink: Option<String>, user: Option<String>, dry_run: bool) -> Result<u8> {
+fn host_setup(
+    uplink: Option<String>,
+    user: Option<String>,
+    dry_run: bool,
+    public_ingress: bool,
+) -> Result<u8> {
     let uplink = match uplink {
         Some(u) => u,
         None => default_route_iface()
@@ -2586,7 +2881,7 @@ fn host_setup(uplink: Option<String>, user: Option<String>, dry_run: bool) -> Re
         .output()
         .ok()
         .is_some_and(|o| String::from_utf8_lossy(&o.stdout).contains("Status: active"));
-    let rules = host_rules(&uplink);
+    let rules = host_rules(&uplink, public_ingress);
     if dry_run || !rustix::process::geteuid().is_root() {
         if !dry_run {
             eprintln!(
@@ -2611,7 +2906,24 @@ fn host_setup(uplink: Option<String>, user: Option<String>, dry_run: bool) -> Re
             );
         }
         println!("ufw reload");
+        if public_ingress {
+            println!("# {SYSCTL_PATH}:");
+            print!("{SYSCTL_TEXT}");
+            println!("sysctl -p {SYSCTL_PATH}");
+        }
         return Ok(if dry_run { 0 } else { 1 });
+    }
+    if public_ingress {
+        std::fs::write(SYSCTL_PATH, SYSCTL_TEXT)?;
+        if !std::process::Command::new("sysctl")
+            .args(["-p", SYSCTL_PATH])
+            .stdout(std::process::Stdio::null())
+            .status()?
+            .success()
+        {
+            return Err(Error::Invalid(format!("sysctl -p {SYSCTL_PATH} failed")));
+        }
+        println!("{SYSCTL_PATH}: ordinary users may bind ports 80 and up");
     }
     if !std::process::Command::new(&dns_cmd[0])
         .args(&dns_cmd[1..])
