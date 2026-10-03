@@ -135,6 +135,10 @@ incus has the machinery. isb makes it declarative and dependable:
   the same one twice.
 - **One engine, four ways in.** The CLI, Rust, Python and TypeScript all drive
   the same core, so they behave identically. It ships as a single static binary.
+- **A web UI in the same binary.** `isb serve` serves a browser UI next to its
+  API: sign in with a password, a passkey, GitHub, Google or your SSO, invite
+  people to an org, make API tokens, and watch stacks update live
+  ([docs/web.md](docs/web.md)).
 
 ## Good for
 
@@ -291,6 +295,7 @@ filled in.
 - [docs/serve.md](docs/serve.md): the `isb serve` daemon and its MCP server behind Cloudflare Access
 - [docs/secrets.md](docs/secrets.md): per-org secrets: the age-encrypted store, break-glass recipients, `isb secret`
 - [docs/auth.md](docs/auth.md): users, roles, sessions, invitations and API tokens for `isb serve`
+- [docs/web.md](docs/web.md): the web UI: how it is built, embedded and served, and how to develop it
 - [docs/tui.md](docs/tui.md): `isb tui`, the live dashboard
 - [docs/macos.md](docs/macos.md): isb on a Mac, with `isb machine`
 - [docs/rpc.md](docs/rpc.md): the protocol the SDKs speak, for other languages

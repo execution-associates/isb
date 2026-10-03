@@ -332,7 +332,7 @@ JSON in and out; every response is `Cache-Control: no-store`. Errors are
 | `POST setup` | anyone, with the setup token | `{setup_token, email, name, password}` | `201` session (below), cookie set |
 | `POST login` | anyone | `{email, password}` | session, cookie set |
 | `POST logout` | anyone | | `204`, cookie cleared |
-| `GET me` | signed in | | `{user, platform_admin, memberships: [{org, role}], auth: {kind: "session", id} \| {kind: "api_token", id, org}}` |
+| `GET me` | signed in | | `{user, platform_admin, memberships: [{org, role}], orgs: [ORG], auth: {kind: "session", id} \| {kind: "api_token", id, org}}`; `orgs` is every org the caller can open (all of them for a platform admin) |
 | `GET sessions` | signed in | | `{sessions: [{id, created_at, last_seen, expires_at, idle_expires_at, user_agent, ip, current}]}` |
 | `DELETE sessions/ID` | signed in | | `204` |
 | `POST invitations` | org owner/admin | `{org, email, role?}` (default member) | `201 {invitation, token, link}` |
