@@ -556,6 +556,19 @@ minime only runs binaries downloaded from our CI runs.
   reattach and ports; SSH to orgs placed on a server; Access credentials in
   `isb ssh-proxy`.
 
+## Release 1.0
+
+Finishing this workstream is isb **1.0.0** (Stephan, 2026-10-03), not another 0.x.
+
+- [ ] Land the in-flight branches on `platform` (default org always `isb-default`, the EA theme and wordmark) and the docs pass that follows.
+- [ ] Workspaces W5 (workspace images/templates) and W6 (the per-org Docker exception), or an explicit decision to ship 1.0 without them.
+- [ ] Remote-server gaps: SSH and volume backups for orgs placed on a server; upgrading server agents and dedicated VMs.
+- [ ] Full CI green on `platform`, integration tests on titan, a fresh-host install test on a new hcloud box (README quick start as written).
+- [ ] PR `platform` → `main` with release notes (the user-visible changes since 0.7, and breaking changes: the default org, the crate split).
+- [ ] Bump to 1.0.0 everywhere the release process lists, for all six crates together; tag; publish (crates.io `cargo publish --workspace`, PyPI, npm) per the release process.
+- [ ] Upgrade titan's `isb.service` from 0.7.0; `isb host setup`; `--workspace-home-root /srv/workspaces`.
+- [ ] Marketing site pulls isb docs from `main` (or the v1.0.0 tag) instead of `platform`.
+
 ## Log
 
 - 2026-10-03: P1.1 done (orgs isolate, verified by integration test
