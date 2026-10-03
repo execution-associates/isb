@@ -132,7 +132,14 @@ A host with a default-deny firewall (ufw) drops DHCP, DNS and forwarding on new
 bridges. `sudo isb host setup` once lets every org bridge (`isbbr+`) through:
 
 - DHCP to the host, accepted ahead of ufw's conntrack checks (a block in
-  `/etc/ufw/before.rules`, backed up first);
+  `/etc/ufw/before.rules`, backed up first; a later version of isb rewrites
+  the block in place);
+- traffic between instances of one org, in the same block: with
+  `br_netfilter` loaded (Docker, Kubernetes), frames bridged within an org's
+  bridge go through ufw's FORWARD chain and its routed default-deny drops
+  them, all but ICMP. The rule matches `--physdev-is-bridged`, traffic that
+  stays on one bridge, so traffic between two orgs (routed between bridges)
+  is still denied;
 - DNS to the host (`ufw allow in on isbbr+ to any port 53`);
 - egress through the uplink (`ufw route allow in on isbbr+ out on <uplink>`);
 - the ingress's tunnel listener on each org's own bridge address (`ufw allow

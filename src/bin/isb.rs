@@ -3033,21 +3033,40 @@ fn host_rules(uplink: &str, public_ingress: bool) -> Vec<Vec<String>> {
 const SYSCTL_PATH: &str = "/etc/sysctl.d/60-isb-ingress.conf";
 const SYSCTL_TEXT: &str = "# isb serve's ingress binds 80 and 443 as an ordinary user.\nnet.ipv4.ip_unprivileged_port_start = 80\n";
 
-/// DHCP accepted ahead of ufw's conntrack-INVALID drop. With br_netfilter
-/// on, the bridged copy of a DHCP broadcast is dropped in FORWARD, and once
-/// the bridge carries an incus ACL the copy meant for dnsmasq then counts as
-/// INVALID; a `ufw allow` rule comes too late to see it.
+/// Rules ufw's own commands cannot express, ahead of its defaults.
+///
+/// - DHCP, ahead of ufw's conntrack-INVALID drop. With br_netfilter on, the
+///   bridged copy of a DHCP broadcast is dropped in FORWARD, and once the
+///   bridge carries an incus ACL the copy meant for dnsmasq then counts as
+///   INVALID; a `ufw allow` rule comes too late to see it.
+/// - Traffic between instances of one org. With br_netfilter on, frames
+///   bridged within an org's bridge traverse FORWARD, where ufw's routed
+///   default-deny drops them (only ICMP got through). `--physdev-is-bridged`
+///   matches only traffic that stays on one bridge; traffic between two org
+///   bridges is routed, so it stays denied (and the org ACLs reject it too).
 const BEFORE_RULES: &str = "# isb org bridges: begin\n\
 -A ufw-before-input -i isbbr+ -p udp --dport 67 -j ACCEPT\n\
+-A ufw-before-forward -i isbbr+ -o isbbr+ -m physdev --physdev-is-bridged -j ACCEPT\n\
 # isb org bridges: end\n";
 
 const BEFORE_RULES_PATH: &str = "/etc/ufw/before.rules";
 
 /// `before.rules` with isb's block inserted before the first
-/// `ufw-before-input` rule, or `None` when it is already there.
+/// `ufw-before-input` rule (or an older block replaced), or `None` when the
+/// current block is already there.
 fn with_before_rules(text: &str) -> Option<String> {
-    if text.contains("# isb org bridges: begin") {
+    if text.contains(BEFORE_RULES) {
         return None;
+    }
+    const END: &str = "# isb org bridges: end\n";
+    if let (Some(a), Some(b)) = (text.find("# isb org bridges: begin"), text.find(END)) {
+        if a < b {
+            return Some(format!(
+                "{}{BEFORE_RULES}{}",
+                &text[..a],
+                &text[b + END.len()..]
+            ));
+        }
     }
     let mut out = String::with_capacity(text.len() + BEFORE_RULES.len());
     let mut done = false;
@@ -3216,7 +3235,7 @@ fn host_setup(
         std::fs::write(format!("{BEFORE_RULES_PATH}.isb-backup"), &text)?;
         std::fs::write(BEFORE_RULES_PATH, new)?;
         println!(
-            "{BEFORE_RULES_PATH}: added isb's DHCP rule (backup at {BEFORE_RULES_PATH}.isb-backup)"
+            "{BEFORE_RULES_PATH}: wrote isb's DHCP and same-org rules (backup at {BEFORE_RULES_PATH}.isb-backup)"
         );
     }
     for r in rules {
@@ -3613,5 +3632,12 @@ mod tests {
         assert!(block < out.find("-A ufw-before-input -i lo").unwrap());
         assert!(with_before_rules(&out).is_none());
         assert!(with_before_rules("no rules here\n").is_none());
+        // An older block (DHCP only) is replaced in place, once.
+        let old = "*filter\n# isb org bridges: begin\n-A ufw-before-input -i isbbr+ -p udp --dport 67 -j ACCEPT\n# isb org bridges: end\n-A ufw-before-input -i lo -j ACCEPT\nCOMMIT\n";
+        let up = with_before_rules(old).unwrap();
+        assert!(up.contains("--physdev-is-bridged"));
+        assert_eq!(up.matches("# isb org bridges: begin").count(), 1);
+        assert!(up.ends_with("-A ufw-before-input -i lo -j ACCEPT\nCOMMIT\n"));
+        assert!(with_before_rules(&up).is_none());
     }
 }

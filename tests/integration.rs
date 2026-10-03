@@ -1292,7 +1292,7 @@ fn orgs_isolate() {
         Sandbox::create(c, &spec).unwrap()
     };
     let web = mk(&ca, "web");
-    let _db = mk(&ca, "db");
+    let db = mk(&ca, "db");
     let other = mk(&cb, "other");
     // Visibility: org b cannot see org a's instances.
     assert!(Sandbox::get(&cb, "web").is_err());
@@ -1313,6 +1313,39 @@ fn orgs_isolate() {
     assert!(ping(&web, &format!("db.{a}.isb")), "same-org name");
     assert!(!ping(&web, &other_ip), "cross-org reachable");
     assert!(!ping(&other, &ip(&web)), "cross-org reachable (b to a)");
+    // TCP too: ICMP alone passes a host firewall that drops bridged TCP
+    // (br_netfilter with ufw's routed default-deny; `isb host setup` fixes it).
+    let serve = db
+        .exec([
+            "systemd-run",
+            "--unit",
+            "isbtest-http",
+            "python3",
+            "-m",
+            "http.server",
+            "8000",
+        ])
+        .unwrap();
+    assert!(serve.success(), "{}", serve.stderr_text());
+    let tcp = |sb: &Sandbox, target: &str| {
+        let probe = format!("exec 3<>/dev/tcp/{target}/8000");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let ok = sb
+                .exec(["timeout", "3", "bash", "-c", &probe])
+                .unwrap()
+                .success();
+            if ok || Instant::now() > deadline {
+                return ok;
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+    };
+    assert!(
+        tcp(&web, &ip(&db)),
+        "same-org TCP refused: run `sudo isb host setup`"
+    );
+    assert!(!tcp(&other, &ip(&db)), "cross-org TCP reachable");
     // A restricted org refuses what would reach the host.
     let bad = SandboxSpec::new("bad", image()).privileged(true);
     assert!(Sandbox::create(&ca, &bad).is_err());
