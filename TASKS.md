@@ -213,6 +213,13 @@ minime only runs binaries downloaded from our CI runs.
 - **Scheduler** (P4.2): one thread for jobs and backups; cron is isb's own
   parser, UTC or a fixed offset only; a missed slot runs once at startup if
   within `missed_grace` (1h).
+- **isb keeps a persistent history of everything** (Stephan, 2026-10-03):
+  the controller's events, every incus lifecycle event in every project
+  (including changes made outside isb, with incus's requestor), and the
+  audit rows, in one append-only, hash-chained store, queryable per object
+  (`isb history <name>`), so "how did we get here" and "who deleted this"
+  are one query. Gaps while no daemon ran are recorded as markers, never
+  silent. Built as part of P5.3.
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
@@ -367,7 +374,7 @@ minime only runs binaries downloaded from our CI runs.
 - [ ] P5.2 Placement: orgs on servers; MCP/REST calls proxied to the owning
   server; secrets delivered only to servers that run their consumers.
   **Verify:** deploy to an org placed on the hcloud box from titan's UI.
-- [~] (subagent p5.3) P5.3 Audit log and finer roles. **Verify:** actions appear in the log
+- [~] (subagent p5.3; scope extended 2026-10-03 with the persistent history) P5.3 Audit log and finer roles. **Verify:** actions appear in the log
   with the acting user or agent.
 
 ## Log
