@@ -38,6 +38,5 @@ lint:excessive_nesting 11
 lint:too_many_arguments 13
 lint:too_many_lines 78
 lint:type_complexity 0
-src/bin/isb.rs 4311
 src/bin/isb/data.rs 1061
 tests/integration.rs 2355
