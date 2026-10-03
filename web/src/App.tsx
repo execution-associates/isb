@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Link, Route, BrowserRouter, Routes } from "react-router";
 import { ApiError } from "@/api/client";
 import { appRoutes } from "@/apps/routes";
+import { day2Routes } from "@/day2-routes";
 import { Home, RequireAuth } from "@/components/app-shell";
 import { AuthLayout } from "@/components/auth-layout";
 import { Button } from "@/components/ui/button";
@@ -56,6 +57,7 @@ export function App() {
               <Route index element={<Home />} />
               <Route path="/orgs/:org" element={<OrgPage />} />
               {appRoutes()}
+              {day2Routes()}
               <Route path="/orgs/:org/members" element={<MembersPage />} />
               <Route path="/orgs/:org/secrets" element={<SecretsPage />} />
               <Route path="/orgs/:org/settings" element={<SettingsPage />} />

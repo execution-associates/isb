@@ -1,7 +1,7 @@
 // /orgs/:org/apps/:app/:tab: one app, with its header (state, Deploy, Stop)
 // and tabs. Deployment logs live under the Deployments tab.
 import { useQueryClient } from "@tanstack/react-query";
-import { Activity, Boxes, Globe, History, Loader2, Play, Rocket, ScrollText, Settings2, SlidersHorizontal, Square, TerminalSquare, Variable } from "lucide-react";
+import { Activity, Boxes, CalendarClock, Database, DatabaseBackup, GitPullRequest, Globe, History, Loader2, Play, Rocket, ScrollText, Settings2, SlidersHorizontal, Square, TerminalSquare, Variable } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
@@ -22,22 +22,42 @@ import { AppStateBadge, ConfirmDialog, Crumbs, EmptyState, LiveIndicator, QueryE
 import { DeploymentPage } from "./deployment-page";
 import { DeploymentsTab } from "./deployments-tab";
 import { useOrgLive } from "./live";
+import { engineLabel, isDatabase } from "@/data/api";
 import { useDeploy } from "./use-deploy";
 import { imageName } from "./util";
 
 const TABS = [
+  { id: "database", label: "Database", icon: Database },
+  { id: "backups", label: "Backups", icon: DatabaseBackup },
   { id: "general", label: "General", icon: Settings2 },
   { id: "environment", label: "Environment", icon: Variable },
   { id: "domains", label: "Domains", icon: Globe },
   { id: "deployments", label: "Deployments", icon: History },
+  { id: "previews", label: "Previews", icon: GitPullRequest },
   { id: "logs", label: "Logs", icon: ScrollText },
   { id: "monitoring", label: "Monitoring", icon: Activity },
+  { id: "jobs", label: "Jobs", icon: CalendarClock },
   { id: "terminal", label: "Terminal", icon: TerminalSquare },
   { id: "advanced", label: "Advanced", icon: SlidersHorizontal },
 ] as const;
 
-// xterm.js is loaded only when the Terminal tab opens.
+/** The tabs an app has: a database has no General or Domains; previews need git. */
+function tabsOf(a: App) {
+  const db = isDatabase(a);
+  return TABS.filter((t) => {
+    if (t.id === "database" || t.id === "backups") return db;
+    if (t.id === "general" || t.id === "domains") return !db;
+    if (t.id === "previews") return isGit(a.source);
+    return true;
+  });
+}
+
+// xterm.js is loaded only when the Terminal tab opens; the day-2 tabs too.
 const TerminalTab = lazy(() => import("./app-terminal"));
+const DatabaseTab = lazy(() => import("@/data/database-tab").then((m) => ({ default: m.DatabaseTab })));
+const BackupsTab = lazy(() => import("@/data/backups-tab").then((m) => ({ default: m.BackupsTab })));
+const JobsTab = lazy(() => import("@/jobs/jobs-tab").then((m) => ({ default: m.JobsTab })));
+const PreviewsTab = lazy(() => import("@/previews/previews-tab").then((m) => ({ default: m.PreviewsTab })));
 
 export type TabId = (typeof TABS)[number]["id"];
 
@@ -76,7 +96,8 @@ export function AppPage() {
     );
   }
   const a = app.data;
-  const active = (TABS.some((t) => t.id === tab) ? tab : "general") as TabId;
+  const tabs = tabsOf(a);
+  const active = (tabs.some((t) => t.id === tab) ? tab : tabs[0].id) as TabId;
   return (
     <>
       <Crumbs
@@ -88,7 +109,13 @@ export function AppPage() {
         ]}
       />
       <AppHeader org={org} app={a} live={<LiveIndicator state={live} />} />
-      <TabLinks active={active} tabs={TABS.map((t) => ({ ...t, to: `/orgs/${o}/apps/${a.name}/${t.id}` }))} />
+      <TabLinks active={active} tabs={tabs.map((t) => ({ ...t, to: `/orgs/${o}/apps/${a.name}/${t.id}` }))} />
+      <Suspense fallback={<Skeleton className="h-64" />}>
+        {active === "database" && <DatabaseTab org={org} app={a} />}
+        {active === "backups" && <BackupsTab org={org} app={a} />}
+        {active === "previews" && <PreviewsTab org={org} app={a} />}
+        {active === "jobs" && <JobsTab org={org} app={a} />}
+      </Suspense>
       {active === "general" && <GeneralTab org={org} app={a} />}
       {active === "environment" && <EnvironmentTab org={org} app={a} />}
       {active === "domains" && <DomainsTab org={org} app={a} />}
@@ -115,7 +142,12 @@ function AppHeader({ org, app, live }: { org: string; app: App; live: React.Reac
   const svc = serviceOf(stack.data, app.name);
   const latest = deps.data?.deployments[0];
   const state = appState(svc, latest);
-  const src = isGit(app.source) ? `${app.source.git.url} @ ${app.source.git.ref}` : imageName(app.source.image);
+  const db = (app.source as { database?: { engine: string; version?: string } }).database;
+  const src = isGit(app.source)
+    ? `${app.source.git.url} @ ${app.source.git.ref}`
+    : db
+      ? `${engineLabel(db.engine)} ${db.version ?? ""}`.trim()
+      : imageName(app.source.image);
 
   const start = async () => {
     setStarting(true);
