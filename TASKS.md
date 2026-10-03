@@ -254,11 +254,11 @@ minime only runs binaries downloaded from our CI runs.
   the binary, served by `isb serve`; auth pages (sign in with SSO, GitHub,
   Google, email/password, passkey; create account; lost password).
   **Verify:** sign-in flows in the browser.
-- [ ] P3.2 Dashboard + org/project/environment navigation; service pages with
+- [~] (subagent p3.2) P3.2 Dashboard + org/project/environment navigation; service pages with
   tabs: General, Environment, Domains, Deployments, Logs, Monitoring,
   Advanced; live updates over SSE. **Verify:** browser walkthrough recorded
   with screenshots.
-- [ ] P3.3 Deploy flows: new app from git/image/template, deploy with live
+- [~] (subagent p3.2) P3.3 Deploy flows: new app from git/image/template, deploy with live
   build logs, rollback, scale, web terminal (xterm.js over websocket exec).
   **Verify:** end to end in the browser.
 - [~] (subagent p3.4) P3.4 Org admin: members, invitations, roles, API tokens, secrets editor,
