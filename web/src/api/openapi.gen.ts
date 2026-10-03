@@ -4,6 +4,826 @@
  */
 
 export interface paths {
+    "/api/v1/audit/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Audit log tail
+         * @description Server-sent `audit` events: new audit entries the caller may read (org owners and admins, platform admins). `audit_list` with `after` is the same, polled.
+         */
+        get: operations["get_api_v1_audit_stream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every user
+         * @description Who: platform admins.
+         */
+        get: operations["auth_get_admin_users"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/admin/users/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Disable a user, or grant platform admin
+         * @description Who: platform admins.
+         */
+        patch: operations["auth_patch_admin_users_id"];
+        trace?: never;
+    };
+    "/api/v1/auth/identities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Your linked sign-in identities
+         * @description Who: signed in.
+         */
+        get: operations["auth_get_identities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/identities/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Unlink a sign-in identity
+         * @description Who: signed in with a session.
+         */
+        delete: operations["auth_delete_identities_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Invite someone to an org
+         * @description Who: org owners and admins.
+         */
+        post: operations["auth_post_invitations"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/invitations/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept an invitation
+         * @description Who: anyone with the token.
+         */
+        post: operations["auth_post_invitations_accept"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/invitations/inspect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What an invitation is for
+         * @description Who: anyone with the token.
+         */
+        post: operations["auth_post_invitations_inspect"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign in with a password
+         * @description Who: anyone.
+         */
+        post: operations["auth_post_login"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign out
+         * @description Who: anyone.
+         */
+        post: operations["auth_post_logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Who is calling
+         * @description Who: signed in.
+         */
+        get: operations["auth_get_me"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/oauth/{provider}/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The provider's redirect back
+         * @description Who: the provider's redirect.
+         */
+        get: operations["auth_get_oauth_provider_callback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/oauth/{provider}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Start a provider sign-in (redirect)
+         * @description Who: anyone.
+         */
+        get: operations["auth_get_oauth_provider_start"];
+        put?: never;
+        /**
+         * Start a provider sign-in
+         * @description Who: anyone.
+         */
+        post: operations["auth_post_oauth_provider_start"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/orgs/{org}/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An org's pending invitations
+         * @description Who: org owners and admins.
+         */
+        get: operations["auth_get_orgs_org_invitations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/orgs/{org}/invitations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke an invitation
+         * @description Who: org owners and admins.
+         */
+        delete: operations["auth_delete_orgs_org_invitations_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/orgs/{org}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An org's members
+         * @description Who: org members.
+         */
+        get: operations["auth_get_orgs_org_members"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/orgs/{org}/members/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Change a member's role
+         * @description Who: org owners and admins.
+         */
+        put: operations["auth_put_orgs_org_members_user_id"];
+        post?: never;
+        /**
+         * Remove a member (or leave)
+         * @description Who: org owners and admins, or the member leaving.
+         */
+        delete: operations["auth_delete_orgs_org_members_user_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/orgs/{org}/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every API token in an org
+         * @description Who: org owners and admins.
+         */
+        get: operations["auth_get_orgs_org_tokens"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/passkeys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Your passkeys
+         * @description Who: signed in.
+         */
+        get: operations["auth_get_passkeys"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/passkeys/login/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Begin a passkey sign-in
+         * @description Who: anyone.
+         */
+        post: operations["auth_post_passkeys_login_options"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/passkeys/login/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Finish a passkey sign-in
+         * @description Who: anyone.
+         */
+        post: operations["auth_post_passkeys_login_verify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/passkeys/register/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Begin adding a passkey
+         * @description Who: signed in with a session.
+         */
+        post: operations["auth_post_passkeys_register_options"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/passkeys/register/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Finish adding a passkey
+         * @description Who: signed in with a session.
+         */
+        post: operations["auth_post_passkeys_register_verify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/passkeys/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a passkey
+         * @description Who: signed in with a session.
+         */
+        delete: operations["auth_delete_passkeys_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change your password
+         * @description Who: signed in with a session.
+         */
+        post: operations["auth_post_password"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/password-reset/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set a password with a reset token
+         * @description Who: anyone with the token.
+         */
+        post: operations["auth_post_password_reset_confirm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/password-reset/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask for a password reset
+         * @description Who: anyone.
+         */
+        post: operations["auth_post_password_reset_request"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * How one can sign in here
+         * @description Who: anyone.
+         */
+        get: operations["auth_get_providers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Your sessions
+         * @description Who: signed in.
+         */
+        get: operations["auth_get_sessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sessions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * End a session
+         * @description Who: signed in.
+         */
+        delete: operations["auth_delete_sessions_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Is first-run setup needed
+         * @description Who: anyone.
+         */
+        get: operations["auth_get_setup"];
+        put?: never;
+        /**
+         * Create the first platform admin
+         * @description Who: anyone, with the setup token.
+         */
+        post: operations["auth_post_setup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/ssh-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Your SSH keys
+         * @description Who: signed in.
+         */
+        get: operations["auth_get_ssh_keys"];
+        put?: never;
+        /**
+         * Add an SSH key
+         * @description Who: signed in, with an account.
+         */
+        post: operations["auth_post_ssh_keys"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/ssh-keys/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove an SSH key
+         * @description Who: signed in, with an account.
+         */
+        delete: operations["auth_delete_ssh_keys_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Your API tokens
+         * @description Who: signed in.
+         */
+        get: operations["auth_get_tokens"];
+        put?: never;
+        /**
+         * Create an API token
+         * @description Who: signed in with a session or an Access or tailnet identity; never with a token.
+         */
+        post: operations["auth_post_tokens"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/tokens/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke an API token
+         * @description Who: its user, or the org's owners and admins.
+         */
+        delete: operations["auth_delete_tokens_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Event stream
+         * @description Server-sent events: deploys, rollouts, health, restarts, failures, backups, jobs, certificates and deployment log lines in the caller's orgs. `id: <seq>`, `event: <level>`, JSON data; resumes from Last-Event-ID or ?since. The `events` tool is the same feed, polled.
+         */
+        get: operations["get_api_v1_events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/history/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * History tail
+         * @description Server-sent `history` events: new history items the caller may read; the event id is the cursor. `history_query` is the same, polled.
+         */
+        get: operations["get_api_v1_history_stream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/openapi.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * This document
+         * @description The whole HTTP surface, generated from the tool registry and the route tables.
+         */
+        get: operations["get_api_v1_openapi_json"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/templates/{catalog}/{id}/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A template's logo
+         * @description The logo image from isb's cached copy (SVG, PNG, JPEG or WebP).
+         */
+        get: operations["get_api_v1_templates_catalog_id_logo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The tools this listener offers
+         * @description Each tool's name, title, description, input schema and annotations: MCP's tools/list over REST.
+         */
+        get: operations["get_api_v1_tools"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/app_create": {
         parameters: {
             query?: never;
@@ -824,6 +1644,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/invitation_create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Invite someone
+         * @description Invite an email address to the org with a role (default member; at most your own). Owners and admins. Returns the invitation, its token (shown once) and, when the server knows its public URL, the link to send (<public-url>/invite#<token>). Inviting the same address again replaces the invitation. isb sends no mail: hand the link over yourself.
+         */
+        post: operations["invitation_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/invitation_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List invitations
+         * @description The org's pending invitations (id, email, role, expiry). Owners and admins.
+         */
+        post: operations["invitation_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/invitation_revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke an invitation
+         * @description Withdraw a pending invitation by id (invitation_list). Owners and admins.
+         */
+        post: operations["invitation_revoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/job_create": {
         parameters: {
             query?: never;
@@ -978,6 +1858,66 @@ export interface paths {
          * @description Change a job's settings (a merge patch; the name is fixed). A changed schedule counts from now.
          */
         post: operations["job_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/member_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List members
+         * @description The org's members: each user (id, email, name), their role (owner, admin, member, viewer) and when they were last active (unix seconds). Any member may list; others get not_found.
+         */
+        post: operations["member_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/member_remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove a member
+         * @description Remove a member from the org (their account stays; their tokens for the org stop working). Owners and admins remove others; anyone may remove themselves (leave).
+         */
+        post: operations["member_remove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/member_update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change a member's role
+         * @description Set a member's role in the org. Owners and admins; only an owner changes an owner or makes one.
+         */
+        post: operations["member_update"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1924,6 +2864,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/session_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List your sessions
+         * @description Your signed-in browser sessions: created, last seen, expiry, user agent and address.
+         */
+        post: operations["session_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/session_revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End a session
+         * @description Sign one of your browser sessions out, by id (session_list).
+         */
+        post: operations["session_revoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/ssh_host_keys": {
         parameters: {
             query?: never;
@@ -1938,6 +2918,66 @@ export interface paths {
          * @description An instance's SSH host public keys (from /etc/ssh), for pinning in known_hosts, and the user `isb ssh-config` logs in as by default (the first ordinary user, else root). Empty keys: no host keys yet (the first `isb ssh-proxy` connection generates them) or no OpenSSH server installed.
          */
         post: operations["ssh_host_keys"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/ssh_key_add": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add an SSH key
+         * @description Add an SSH public key (an OpenSSH line: ssh-ed25519, ecdsa-sha2-*, ssh-rsa of 2048 bits or more) to your account.
+         */
+        post: operations["ssh_key_add"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/ssh_key_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List your SSH keys
+         * @description The SSH public keys on your account: what `isb ssh-proxy` lets in to your orgs' workspaces and sandboxes (id, name, algorithm, fingerprint, last use).
+         */
+        post: operations["ssh_key_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/ssh_key_remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove an SSH key
+         * @description Remove one of your SSH keys by id; sessions it opened end within seconds.
+         */
+        post: operations["ssh_key_remove"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2324,6 +3364,106 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/token_create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create an API token
+         * @description Mint an API token for yourself, confined to the org, optionally narrowed by scopes (read, deploy, admin, tool:GLOB; none: your whole role there) and with an expiry (90d, 12h; none: never). Returns {token, info}; the token is shown only this once. A token cannot mint tokens: this needs a signed-in browser session or an Access or tailnet identity (or `isb token create` on the host), so revoking a leaked token always ends it. Superadmin tokens are minted on the host only.
+         */
+        post: operations["token_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/token_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List API tokens
+         * @description Your API tokens' metadata (id, name, org, scopes, created, last used, expiry; never the secret), only one org's when `org` is given (an org token sees only its org's). With all=true, every token in `org`, with who holds each: owners and admins.
+         */
+        post: operations["token_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/token_revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke an API token
+         * @description Revoke an API token by id: your own, or any token in an org you own or administer. It stops working at once.
+         */
+        post: operations["token_revoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/user_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List users
+         * @description Platform admins: every user (id, email, name, platform admin, disabled, password or not), with their orgs and when they were last active.
+         */
+        post: operations["user_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/user_update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change a user
+         * @description Platform admins: disable or enable a user (disabling ends their sessions), or grant or revoke platform admin. Nobody does either to themselves, and the last enabled platform admin stays one.
+         */
+        post: operations["user_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/volume_get": {
         parameters: {
             query?: never;
@@ -2538,6 +3678,26 @@ export interface paths {
          * @description Set a volume's snapshot schedule and hook (a merge patch): schedule (cron: five fields or @hourly, @daily, ...; empty or null removes it), timezone, keep (auto-* snapshots kept, default 7), enabled, missed_grace, hook_timeout (default 5m, at most 1h), hook_required (a failing hook stops the snapshot; default false: reported, snapshot taken). Org admins and owners.
          */
         post: operations["volume_snapshot_schedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/whoami": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Who am I
+         * @description The caller: its user, platform admin flag, orgs and roles, how it signed in (session, API token with its org and scopes, workspace, superadmin), and the orgs it can open. Every caller may ask, a workspace included.
+         */
+        post: operations["whoami"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2764,10 +3924,481 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/webhooks/{org}/{app}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * An app's push and pull request webhook
+         * @description GitHub, GitLab, Gitea or generic deliveries, authenticated by the app's webhook secret (signature or token), not a session. A matching push deploys; a pull request opens, updates or closes a preview. `app_webhook` shows the URL and secret.
+         */
+        post: operations["post_api_v1_webhooks_org_app"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/healthz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Health
+         * @description {ok, isb, stacks: [{name, converged}]}, without authentication.
+         */
+        get: operations["get_healthz"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * MCP (Streamable HTTP)
+         * @description JSON-RPC 2.0: initialize, ping, tools/list, tools/call; stateless, plain JSON answers. Every tool takes an `org` argument. docs/reference/http-api.md#mcp.
+         */
+        post: operations["post_mcp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orgs/{org}/api/v1/ssh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * SSH over a websocket
+         * @description Upgrades to a websocket carrying an SSH connection to `sshd -i` in an instance, for `isb ssh-proxy`. Admitted as the web terminal is. docs/reference/http-api.md#the-ssh-websocket.
+         */
+        get: operations["get_orgs_org_api_v1_ssh"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orgs/{org}/api/v1/terminal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Web terminal (websocket)
+         * @description Upgrades to a websocket bridged to a login shell in an app replica (?app, ?slot) or an instance (?instance), with a pseudo-terminal. Binary frames are terminal bytes; text frames are JSON resize/exit/error messages. Admitted as `sandbox_exec` in the org. docs/reference/http-api.md#the-web-terminal.
+         */
+        get: operations["get_orgs_org_api_v1_terminal"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orgs/{org}/api/v1/tools/{tool}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A REST tool call in one org
+         * @description As POST /api/v1/tools/{tool}, with `org` pinned.
+         */
+        post: operations["post_orgs_org_api_v1_tools_tool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orgs/{org}/api/v1/workspace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the workspace
+         * @description The `workspace_get` tool as a resource. The org's workspace (its long-lived machine, docs/concepts/workspaces.md): image, size, home volume, status, CPU and memory, live sessions (web terminals, SSH), last activity, its token's metadata (never the token) and how to connect; `workspace` is null when the org has none yet, and `create` then says what one can be made from (`images`, `default_image`) and the org's quota and usage (`quota`). Also the org's workspace settings.
+         */
+        get: operations["workspace_resource_get"];
+        put?: never;
+        /**
+         * Create the workspace
+         * @description The `workspace_create` tool as a resource. Create the org's workspace: an unprivileged container from `image` with a managed home volume (`home_size`, counted against the org's disk quota) at the workspace user's home, and an org token (role `token_role`, default admin) delivered inside as /run/isb/token and $ISB_TOKEN, with $ISB_URL and $ISB_ORG, so the isb CLI and MCP clients inside work with no setup. One per org. Org admins and above.
+         */
+        post: operations["workspace_resource_post"];
+        /**
+         * Delete the workspace
+         * @description The `workspace_delete` tool as a resource. Delete the workspace: its machine, its token (revoked at once) and, unless keep_home, its home volume. Needs confirm: true. Org admins and above.
+         */
+        delete: operations["workspace_resource_delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Change the workspace
+         * @description The `workspace_update` tool as a resource. Change the workspace: cpus, memory, root_size and home_size apply at once (resizing needs confirm: true, since it can end sessions); env and secrets are delivered again (new login shells see them); image applies on the next rebuild; labels; token_role. Fields left out are kept. Org admins and above.
+         */
+        patch: operations["workspace_resource_patch"];
+        trace?: never;
+    };
+    "/orgs/{org}/api/v1/workspace/rebuild": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rebuild the workspace
+         * @description The `workspace_rebuild` tool as a resource. Replace the workspace's machine with a fresh one from its image (or `image`), keeping its home volume and token: what to do when the root is damaged. Ends every session; needs confirm: true. Software installed outside the home is gone. Org admins and above.
+         */
+        post: operations["workspace_resource_post_rebuild"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orgs/{org}/api/v1/workspace/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restart the workspace
+         * @description The `workspace_restart` tool as a resource. Restart the workspace. This ends every session on it: without confirm: true it only reports the live sessions. Org members and above.
+         */
+        post: operations["workspace_resource_post_restart"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orgs/{org}/api/v1/workspace/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Workspace settings
+         * @description The `workspace_settings` tool as a resource. The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none). Without changes it reads them; org admins change the sandbox defaults.
+         */
+        get: operations["workspace_resource_get_settings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Workspace settings
+         * @description The `workspace_settings` tool as a resource. The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none). Without changes it reads them; org admins change the sandbox defaults.
+         */
+        patch: operations["workspace_resource_patch_settings"];
+        trace?: never;
+    };
+    "/orgs/{org}/api/v1/workspace/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start the workspace
+         * @description The `workspace_start` tool as a resource. Start the workspace and deliver its credentials. Org members and above.
+         */
+        post: operations["workspace_resource_post_start"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orgs/{org}/api/v1/workspace/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop the workspace
+         * @description The `workspace_stop` tool as a resource. Stop the workspace. This ends every session on it (terminals, SSH, the agents running there): without confirm: true it only reports the live sessions. Org members and above.
+         */
+        post: operations["workspace_resource_post_stop"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orgs/{org}/api/v1/workspace/token/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate the workspace's token
+         * @description The `workspace_token_rotate` tool as a resource. Mint the workspace a new token and deliver it inside; the old one stops working at once. The token is never returned. Org admins and above.
+         */
+        post: operations["workspace_resource_post_token_rotate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orgs/{org}/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * MCP bound to one org
+         * @description As /mcp, with `org` filled in; any other value is refused.
+         */
+        post: operations["post_orgs_org_mcp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
-    schemas: never;
+    schemas: {
+        AdminUser: {
+            created_at: number;
+            disabled: boolean;
+            email: string;
+            has_password: boolean;
+            id: number;
+            last_active: number | null;
+            memberships: components["schemas"]["Membership"][];
+            name: string;
+            platform_admin: boolean;
+        };
+        ApiToken: {
+            created_at: number;
+            expires_at: number | null;
+            id: number;
+            last_used: number | null;
+            name: string;
+            org: string | null;
+            scopes: string[];
+            user_id: number;
+        };
+        AuthError: {
+            error: string;
+            message: string;
+        };
+        Identity: {
+            created_at: number;
+            email: string | null;
+            email_verified: boolean;
+            id: number;
+            label: string;
+            last_used: number | null;
+            provider: string;
+            provider_id: string | null;
+            subject: string;
+            user_id: number;
+        };
+        Invitation: {
+            accepted_at: number | null;
+            created_at: number;
+            email: string;
+            expires_at: number;
+            id: number;
+            invited_by: number | null;
+            org: string;
+            role: components["schemas"]["Role"];
+        };
+        InvitationInfo: {
+            account_exists: boolean;
+            email: string;
+            expires_at: number;
+            org: string;
+            role: components["schemas"]["Role"];
+        };
+        Me: {
+            /** @description How the caller signed in: {kind: session, id}, {kind: api_token, id, org, name, scopes?}, {kind: access}, {kind: superadmin, source}, {kind: workspace, org, name}. */
+            auth: {
+                /** @enum {string} */
+                kind: "session" | "api_token" | "access" | "superadmin" | "workspace";
+            } & {
+                [key: string]: unknown;
+            };
+            memberships: components["schemas"]["Membership"][];
+            /** @description Every org this caller can open. */
+            orgs: string[];
+            platform_admin: boolean;
+            superadmin: null | {
+                account: boolean;
+                source: string;
+                via: {
+                    /** @enum {string} */
+                    kind: "token" | "tailnet" | "access";
+                } & {
+                    [key: string]: unknown;
+                };
+            };
+            user: components["schemas"]["User"];
+        };
+        Member: {
+            last_active: number | null;
+            role: components["schemas"]["Role"];
+            user: components["schemas"]["User"];
+        };
+        Membership: {
+            org: string;
+            role: components["schemas"]["Role"];
+        };
+        OrgToken: {
+            created_at: number;
+            expires_at: number | null;
+            id: number;
+            last_used: number | null;
+            name: string;
+            org: string | null;
+            scopes: string[];
+            user: {
+                email: string;
+                id: number;
+                name: string;
+            };
+            user_id: number;
+        };
+        Passkey: {
+            aaguid: string | null;
+            alg: number;
+            created_at: number;
+            credential_id: string;
+            id: number;
+            last_used: number | null;
+            name: string;
+            sign_count: number;
+            transports: string[];
+            user_id: number;
+        };
+        Provider: {
+            id: string;
+            /** @enum {string} */
+            kind: "oauth2" | "oidc";
+            label: string;
+            start: string;
+        };
+        Providers: {
+            open_signup: boolean;
+            passkeys: boolean;
+            password: boolean;
+            providers: components["schemas"]["Provider"][];
+        };
+        /** @enum {string} */
+        Role: "owner" | "admin" | "member" | "viewer";
+        Session: {
+            created_at: number;
+            current: boolean;
+            expires_at: number;
+            id: number;
+            idle_expires_at: number;
+            ip: string | null;
+            last_seen: number;
+            user_agent: string | null;
+            user_id: number;
+        };
+        SessionAnswer: {
+            memberships: components["schemas"]["Membership"][];
+            session: {
+                expires_at: number;
+                id: number;
+                idle_expires_at: number;
+            };
+            user: components["schemas"]["User"];
+        };
+        SshKey: {
+            algorithm: string;
+            created_at: number;
+            fingerprint: string;
+            id: number;
+            last_used: number | null;
+            name: string;
+            public_key: string;
+            user_id: number;
+        };
+        ToolError: {
+            data?: unknown;
+            /** @description invalid, unauthorized, forbidden, not_found, already_exists, ... */
+            error: string;
+            message: string;
+        };
+        User: {
+            created_at: number;
+            disabled: boolean;
+            email: string;
+            has_password: boolean;
+            id: number;
+            name: string;
+            platform_admin: boolean;
+        };
+    };
     responses: never;
     parameters: never;
     requestBodies: never;
@@ -2776,6 +4407,1450 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_api_v1_audit_stream: {
+        parameters: {
+            query?: {
+                /** @description One org's entries. */
+                org?: string;
+                /** @description Resume after this entry id. */
+                after?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A stream of server-sent events */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+        };
+    };
+    auth_get_admin_users: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        users: components["schemas"]["AdminUser"][];
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_patch_admin_users_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    disabled?: boolean;
+                    platform_admin?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        user: components["schemas"]["User"];
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_get_identities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        identities: components["schemas"]["Identity"][];
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_delete_identities_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_post_invitations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                    org: string;
+                    role?: components["schemas"]["Role"];
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        invitation: components["schemas"]["Invitation"];
+                        link: string | null;
+                        token: string;
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_post_invitations_accept: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    password?: string;
+                    token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        created: boolean;
+                        membership: components["schemas"]["Membership"];
+                        user: components["schemas"]["User"];
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_post_invitations_inspect: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationInfo"];
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_post_login: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                    password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionAnswer"];
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_post_logout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_get_me: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Me"];
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_get_oauth_provider_callback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A redirect (Location) */
+            303: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_get_oauth_provider_start: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A redirect (Location) */
+            303: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_post_oauth_provider_start: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    intent?: "login" | "link";
+                    invite?: string;
+                    next?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        url: string;
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_get_orgs_org_invitations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        invitations: components["schemas"]["Invitation"][];
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_delete_orgs_org_invitations_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_get_orgs_org_members: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        members: components["schemas"]["Member"][];
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_put_orgs_org_members_user_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                user_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    role: components["schemas"]["Role"];
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        role: components["schemas"]["Role"];
+                        user_id: number;
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_delete_orgs_org_members_user_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                user_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_get_orgs_org_tokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        tokens: components["schemas"]["OrgToken"][];
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_get_passkeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        passkeys: components["schemas"]["Passkey"][];
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_post_passkeys_login_options: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description WebAuthn options, in the JSON form of PublicKeyCredential.parse*OptionsFromJSON(). */
+                        publicKey: Record<string, never>;
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_post_passkeys_login_verify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The browser's credential.toJSON(). */
+                    credential: Record<string, never>;
+                    name?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionAnswer"];
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_post_passkeys_register_options: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description WebAuthn options, in the JSON form of PublicKeyCredential.parse*OptionsFromJSON(). */
+                        publicKey: Record<string, never>;
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_post_passkeys_register_verify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The browser's credential.toJSON(). */
+                    credential: Record<string, never>;
+                    name?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        passkey: components["schemas"]["Passkey"];
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_delete_passkeys_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_post_password: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    current_password: string;
+                    new_password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_post_password_reset_confirm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    password: string;
+                    token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_post_password_reset_request: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        ok: boolean;
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_get_providers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Providers"];
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_get_sessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sessions: components["schemas"]["Session"][];
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_delete_sessions_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_get_setup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        needed: boolean;
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_post_setup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                    name?: string;
+                    password: string;
+                    setup_token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionAnswer"];
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_get_ssh_keys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        ssh_keys: components["schemas"]["SshKey"][];
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_post_ssh_keys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    public_key: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        ssh_key: components["schemas"]["SshKey"];
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_delete_ssh_keys_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_get_tokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        tokens: components["schemas"]["ApiToken"][];
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_post_tokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description 90d, 12h; absent: never. */
+                    expires?: string | null;
+                    name: string;
+                    org?: string | null;
+                    /** @description read, deploy, admin, tool:GLOB. */
+                    scopes?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        info: components["schemas"]["ApiToken"];
+                        token: string;
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_delete_tokens_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    get_api_v1_events: {
+        parameters: {
+            query?: {
+                /** @description Resume after this sequence number. */
+                since?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A stream of server-sent events */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+        };
+    };
+    get_api_v1_history_stream: {
+        parameters: {
+            query?: {
+                /** @description One org's history. */
+                org?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A stream of server-sent events */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+        };
+    };
+    get_api_v1_openapi_json: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    get_api_v1_templates_catalog_id_logo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                catalog: string;
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The image */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/*": string;
+                };
+            };
+        };
+    };
+    get_api_v1_tools: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
     app_create: {
         parameters: {
             query?: never;
@@ -2834,7 +5909,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -2843,7 +5918,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -2871,7 +5948,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -2880,7 +5957,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -2912,7 +5991,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -2921,7 +6000,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -2949,7 +6030,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -2958,7 +6039,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -2988,7 +6071,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -2997,7 +6080,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3026,7 +6111,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3035,7 +6120,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3063,7 +6150,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3072,7 +6159,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3103,7 +6192,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3112,7 +6201,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3140,7 +6231,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3149,7 +6240,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3178,7 +6271,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3187,7 +6280,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3221,7 +6316,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3230,7 +6325,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3288,7 +6385,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3297,7 +6394,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3326,7 +6425,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3335,7 +6434,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3382,7 +6483,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3391,7 +6492,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3415,7 +6518,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3424,7 +6527,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3468,7 +6573,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3477,7 +6582,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3505,7 +6612,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3514,7 +6621,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3554,7 +6663,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3563,7 +6672,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3591,7 +6702,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3600,7 +6711,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3627,7 +6740,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3636,7 +6749,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3664,7 +6779,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3673,7 +6788,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3702,7 +6819,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3711,7 +6828,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3751,7 +6870,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3760,7 +6879,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3790,7 +6911,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3799,7 +6920,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3831,7 +6954,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3840,7 +6963,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3870,7 +6995,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3879,7 +7004,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3923,7 +7050,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3932,7 +7059,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3959,7 +7088,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -3968,7 +7097,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -3998,7 +7129,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4007,7 +7138,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4059,7 +7192,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4068,7 +7201,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4117,7 +7252,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4126,7 +7261,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4155,7 +7292,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4164,7 +7301,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4192,7 +7331,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4201,7 +7340,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4230,7 +7371,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4239,7 +7380,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4268,7 +7411,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4277,7 +7420,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4305,7 +7450,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4314,7 +7459,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4344,7 +7491,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4353,7 +7500,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4398,7 +7547,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4407,7 +7556,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4433,7 +7584,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4442,7 +7593,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4468,7 +7621,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4477,7 +7630,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4504,7 +7659,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4513,7 +7668,130 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    invitation_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                    /** @description The org (default: default). */
+                    org?: string;
+                    /**
+                     * @description Default member.
+                     * @enum {string}
+                     */
+                    role?: "owner" | "admin" | "member" | "viewer";
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    invitation_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The org (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    invitation_revoke: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    id: number;
+                    /** @description The org (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4571,7 +7849,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4580,7 +7858,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4608,7 +7888,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4617,7 +7897,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4645,7 +7927,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4654,7 +7936,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4681,7 +7965,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4690,7 +7974,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4720,7 +8006,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4729,7 +8015,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4759,7 +8047,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4768,7 +8056,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4797,7 +8087,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4806,7 +8096,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4864,7 +8156,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4873,7 +8165,133 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    member_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The org (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    member_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Or the member's email. */
+                    email?: string;
+                    /** @description The org (default: default). */
+                    org?: string;
+                    /** @description The member's user id (member_list shows it). */
+                    user_id?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    member_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Or the member's email. */
+                    email?: string;
+                    /** @description The org (default: default). */
+                    org?: string;
+                    /** @enum {string} */
+                    role: "owner" | "admin" | "member" | "viewer";
+                    /** @description The member's user id (member_list shows it). */
+                    user_id?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4917,7 +8335,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4926,7 +8344,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4961,7 +8381,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -4970,7 +8390,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -4998,7 +8420,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5007,7 +8429,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5035,7 +8459,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5044,7 +8468,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5071,7 +8497,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5080,7 +8506,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5113,7 +8541,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5122,7 +8550,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5151,7 +8581,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5160,7 +8590,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5188,7 +8620,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5197,7 +8629,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5225,7 +8659,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5234,7 +8668,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5291,7 +8727,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5300,7 +8736,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5331,7 +8769,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5340,7 +8778,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5367,7 +8807,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5376,7 +8816,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5403,7 +8845,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5412,7 +8854,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5469,7 +8913,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5478,7 +8922,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5505,7 +8951,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5514,7 +8960,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5549,7 +8997,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5558,7 +9006,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5589,7 +9039,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5598,7 +9048,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5627,7 +9079,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5636,7 +9088,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5669,7 +9123,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5678,7 +9132,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5713,7 +9169,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5722,7 +9178,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5753,7 +9211,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5762,7 +9220,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5790,7 +9250,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5799,7 +9259,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5826,7 +9288,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5835,7 +9297,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5864,7 +9328,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5873,7 +9337,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5900,7 +9366,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5909,7 +9375,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5944,7 +9412,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -5953,7 +9421,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -5991,7 +9461,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6000,7 +9470,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6032,7 +9504,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6041,7 +9513,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6074,7 +9548,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6083,7 +9557,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6111,7 +9587,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6120,7 +9596,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6156,7 +9634,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6165,7 +9643,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6194,7 +9674,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6203,7 +9683,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6232,7 +9714,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6241,7 +9723,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6270,7 +9754,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6279,7 +9763,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6306,7 +9792,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6315,7 +9801,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6342,7 +9830,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6351,7 +9839,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6380,7 +9870,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6389,7 +9879,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6418,7 +9910,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6427,7 +9919,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6456,7 +9950,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6465,7 +9959,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6496,7 +9992,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6505,7 +10001,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6555,7 +10053,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6564,7 +10062,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6588,7 +10088,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6597,7 +10097,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6623,7 +10125,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6632,7 +10134,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6658,7 +10162,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6667,7 +10171,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6693,7 +10199,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6702,7 +10208,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6728,7 +10236,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6737,7 +10245,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6764,7 +10274,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6773,7 +10283,86 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    session_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Ignored: this is about the caller, not an org. */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    session_revoke: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    id: number;
+                    /** @description Ignored: this is about the caller, not an org. */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6801,7 +10390,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6810,7 +10399,128 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    ssh_key_add: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Default: the key's comment. */
+                    name?: string;
+                    /** @description Ignored: this is about the caller, not an org. */
+                    org?: string;
+                    /** @description One OpenSSH public key line. */
+                    public_key: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    ssh_key_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Ignored: this is about the caller, not an org. */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    ssh_key_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    id: number;
+                    /** @description Ignored: this is about the caller, not an org. */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6838,7 +10548,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6847,7 +10557,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6894,7 +10606,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6903,7 +10615,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6930,7 +10644,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6939,7 +10653,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -6972,7 +10688,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -6981,7 +10697,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7010,7 +10728,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7019,7 +10737,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7048,7 +10768,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7057,7 +10777,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7085,7 +10807,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7094,7 +10816,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7124,7 +10848,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7133,7 +10857,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7161,7 +10887,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7170,7 +10896,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7196,7 +10924,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7205,7 +10933,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7232,7 +10962,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7241,7 +10971,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7272,7 +11004,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7281,7 +11013,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7308,7 +11042,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7317,7 +11051,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7345,7 +11081,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7354,7 +11090,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7397,7 +11135,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7406,7 +11144,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7435,7 +11175,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7444,7 +11184,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7472,7 +11214,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7481,7 +11223,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7508,7 +11252,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7517,7 +11261,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7547,7 +11293,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7556,7 +11302,214 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    token_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A lifetime such as 90d or 12h; omit for none. */
+                    expires?: string;
+                    /** @description 1 to 100 characters. */
+                    name: string;
+                    /** @description The org the token is confined to (default: default). */
+                    org?: string;
+                    /** @description read, deploy, admin, or tool:GLOB (e.g. tool:app_*). */
+                    scopes?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    token_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Every token in the org, not just yours (owners and admins). */
+                    all?: boolean;
+                    /** @description Only this org's tokens (all: the org to list; default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    token_revoke: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    id: number;
+                    /** @description Ignored: this is about the caller, not an org. */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    user_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Ignored: this is about the caller, not an org. */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    user_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    disabled?: boolean;
+                    /** @description Or the user's email. */
+                    email?: string;
+                    /** @description Ignored: this is about the caller, not an org. */
+                    org?: string;
+                    platform_admin?: boolean;
+                    /** @description The user's id (user_list shows it). */
+                    user_id?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7585,7 +11538,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7594,7 +11547,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7621,7 +11576,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7630,7 +11585,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7665,7 +11622,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7674,7 +11631,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7703,7 +11662,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7712,7 +11671,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7740,7 +11701,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7749,7 +11710,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7780,7 +11743,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7789,7 +11752,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7818,7 +11783,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7827,7 +11792,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7856,7 +11823,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7865,7 +11832,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7895,7 +11864,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7904,7 +11873,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7933,7 +11904,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7942,7 +11913,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -7977,7 +11950,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -7986,7 +11959,47 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    whoami: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Ignored: this is about the caller, not an org. */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -8042,7 +12055,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -8051,7 +12064,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -8084,7 +12099,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -8093,7 +12108,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -8122,7 +12139,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -8131,7 +12148,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -8158,7 +12177,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -8167,7 +12186,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -8200,7 +12221,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -8209,7 +12230,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -8240,7 +12263,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -8249,7 +12272,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -8288,7 +12313,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -8297,7 +12322,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -8326,7 +12353,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -8335,7 +12362,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -8366,7 +12395,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -8375,7 +12404,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -8404,7 +12435,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -8413,7 +12444,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
             };
         };
     };
@@ -8462,7 +12495,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        result?: unknown;
+                        result: unknown;
                     };
                 };
             };
@@ -8471,7 +12504,706 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    post_api_v1_webhooks_org_app: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                app: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    get_healthz: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    post_mcp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    get_orgs_org_api_v1_ssh: {
+        parameters: {
+            query?: {
+                /** @description The instance to reach. */
+                instance?: string;
+                /** @description Whose SSH keys to let in (the unix socket and superadmin tokens only). */
+                as?: string;
+            };
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Switching protocols: a websocket */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
                 content?: never;
+            };
+        };
+    };
+    get_orgs_org_api_v1_terminal: {
+        parameters: {
+            query?: {
+                /** @description An app to open a shell in. */
+                app?: string;
+                /** @description Which replica (default: one in rotation). */
+                slot?: number;
+                /** @description Or an instance of the org (a workspace, a sandbox). */
+                instance?: string;
+                /** @description Initial columns. */
+                cols?: number;
+                /** @description Initial rows. */
+                rows?: number;
+            };
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Switching protocols: a websocket */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    post_orgs_org_api_v1_tools_tool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                tool: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    workspace_resource_get: {
+        parameters: {
+            query?: {
+                name?: string;
+            };
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    workspace_resource_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    cpus?: number;
+                    /** @description Plain variables for login shells. */
+                    env?: {
+                        [key: string]: string;
+                    };
+                    /** @description Superadmins only: this host directory as the home (an existing box's, when migrating), instead of the default home. */
+                    home_bind?: string;
+                    /** @description The home volume (default 20GiB). */
+                    home_size?: string;
+                    /** @description An incus image (a local alias such as dev-base, or a remote one such as images:ubuntu/24.04) or registry:APP:TAG. Default: dev-base when this host has it, else images:ubuntu/24.04; workspace_get lists the choices. */
+                    image?: string;
+                    labels?: {
+                        [key: string]: string;
+                    };
+                    /** @description e.g. 8GiB. */
+                    memory?: string;
+                    /** @description Default: workspace. */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description The root disk, e.g. 30GiB (default: the pool's). */
+                    root_size?: string;
+                    /** @description Org secrets delivered as /run/isb/secrets/NAME. */
+                    secrets?: string[];
+                    /**
+                     * @description The workspace token's role in the org (default admin).
+                     * @enum {string}
+                     */
+                    token_role?: "viewer" | "member" | "admin";
+                    /** @description The workspace user (default dev); created when the image lacks it. */
+                    user?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    workspace_resource_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Required: this ends live sessions on the workspace. Without it the call only says what would end. */
+                    confirm?: boolean;
+                    /** @description Keep the home volume (it can be attached to a new workspace of the same name). */
+                    keep_home?: boolean;
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    workspace_resource_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Required: this ends live sessions on the workspace. Without it the call only says what would end. */
+                    confirm?: boolean;
+                    cpus?: number;
+                    /** @description Replaces the variables. */
+                    env?: {
+                        [key: string]: string;
+                    };
+                    /** @description Grow the home volume. */
+                    home_size?: string;
+                    image?: string;
+                    /** @description Replaces the labels. */
+                    labels?: {
+                        [key: string]: string;
+                    };
+                    memory?: string;
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    root_size?: string;
+                    /** @description Replaces the delivered secrets. */
+                    secrets?: string[];
+                    /** @enum {string} */
+                    token_role?: "viewer" | "member" | "admin";
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    workspace_resource_post_rebuild: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Required: this ends live sessions on the workspace. Without it the call only says what would end. */
+                    confirm?: boolean;
+                    /** @description Rebuild from this image instead (it becomes the workspace's). */
+                    image?: string;
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    workspace_resource_post_restart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Required: this ends live sessions on the workspace. Without it the call only says what would end. */
+                    confirm?: boolean;
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    workspace_resource_get_settings: {
+        parameters: {
+            query?: {
+                name?: string;
+            };
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    workspace_resource_patch_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Platform admins: where new workspace homes go: a managed volume, or a host folder under isb serve's --workspace-home-root ("": the daemon's default).
+                     * @enum {string}
+                     */
+                    home_kind?: "" | "volume" | "host";
+                    /** @description Platform admins: the storage pool new workspace homes go in ("" clears it: the daemon's --workspace-pool, else the org's default pool). */
+                    home_pool?: string;
+                    max_workspaces?: number;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description e.g. 24h, 7d. */
+                    sandbox_expiry?: string;
+                    /** @description e.g. 2h, or none. */
+                    sandbox_idle?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    workspace_resource_post_start: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    workspace_resource_post_stop: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Required: this ends live sessions on the workspace. Without it the call only says what would end. */
+                    confirm?: boolean;
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    workspace_resource_post_token_rotate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    post_orgs_org_mcp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
             };
         };
     };

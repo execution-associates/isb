@@ -26,6 +26,7 @@ pub use isb_core::serve_client as client;
 mod client_tests;
 pub mod http;
 pub mod mcp;
+pub mod openapi;
 pub mod service;
 pub mod ssh;
 pub mod ssh_config;

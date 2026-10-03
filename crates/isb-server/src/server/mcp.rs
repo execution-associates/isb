@@ -681,25 +681,15 @@ impl Endpoint {
     /// deletes it (`{"confirm": true}`); POST `/start`, `/stop`,
     /// `/restart`, `/rebuild`, `/token/rotate`; GET or PATCH `/settings`.
     fn workspace_rest(&self, req: &Request, rest: &str, org: &crate::org::OrgId) -> Response {
-        let tool = match (rest, req.method.as_str()) {
-            ("" | "/", "GET") => "workspace_get",
-            ("" | "/", "POST") => "workspace_create",
-            ("" | "/", "PATCH") => "workspace_update",
-            ("" | "/", "DELETE") => "workspace_delete",
-            ("/start", "POST") => "workspace_start",
-            ("/stop", "POST") => "workspace_stop",
-            ("/restart", "POST") => "workspace_restart",
-            ("/rebuild", "POST") => "workspace_rebuild",
-            ("/token/rotate", "POST") => "workspace_token_rotate",
-            ("/settings", "GET" | "PATCH") => "workspace_settings",
-            ("" | "/", _) => {
+        let tool = match super::openapi::workspace_tool(rest, &req.method) {
+            Ok(t) => t,
+            Err(allowed) if allowed.is_empty() => {
+                return rest_error(404, "not_found", "no such workspace action");
+            }
+            Err(allowed) => {
                 return Response::text(405, "method not allowed")
-                    .header("Allow", "GET, POST, PATCH, DELETE");
+                    .header("Allow", allowed.join(", "));
             }
-            ("/start" | "/stop" | "/restart" | "/rebuild" | "/token/rotate" | "/settings", _) => {
-                return Response::text(405, "method not allowed");
-            }
-            _ => return rest_error(404, "not_found", "no such workspace action"),
         };
         if req.method == "GET" {
             // Arguments from the query string.
@@ -978,40 +968,16 @@ impl Endpoint {
         }
     }
 
-    /// An OpenAPI 3.1 document for the REST surface, generated from the
-    /// tool registry: one POST operation per tool this listener offers.
+    /// The OpenAPI document of this listener's whole HTTP surface
+    /// ([`super::openapi`]).
     fn openapi(&self) -> Value {
-        let mut paths = serde_json::Map::new();
-        for t in self
+        let tools: Vec<&Tool> = self
             .registry
             .tools()
             .iter()
             .filter(|t| self.policy.allows(&t.name))
-        {
-            paths.insert(
-                format!("/api/v1/tools/{}", t.name),
-                json!({"post": {
-                    "operationId": t.name,
-                    "summary": t.title.clone().unwrap_or_else(|| t.name.clone()),
-                    "description": t.description,
-                    "requestBody": {"required": true, "content": {"application/json": {"schema": t.input_schema}}},
-                    "responses": {
-                        "200": {"description": "The tool's result", "content": {"application/json": {"schema": {"type": "object", "properties": {"result": {}}}}}},
-                        "default": {"description": "An error: {error, message, data}"},
-                    },
-                }}),
-            );
-        }
-        json!({
-            "openapi": "3.1.0",
-            "info": {"title": "isb", "version": env!("CARGO_PKG_VERSION")},
-            "components": {"securitySchemes": {
-                "token": {"type": "http", "scheme": "bearer", "description": "An API token (isb token create)"},
-                "session": {"type": "apiKey", "in": "cookie", "name": "isb_session"},
-            }},
-            "security": [{"token": []}, {"session": []}],
-            "paths": paths,
-        })
+            .collect();
+        super::openapi::document(&tools)
     }
 
     /// The embedder's routes. They authenticate their own callers, but sit

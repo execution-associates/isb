@@ -1124,6 +1124,7 @@ fn org_405(seg: &[&str]) -> Response {
 }
 
 mod external;
+pub mod spec;
 pub use external::{LOGIN_PAGE, OAUTH_COOKIE, safe_next};
 
 #[cfg(test)]
