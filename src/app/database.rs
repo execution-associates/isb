@@ -268,12 +268,11 @@ impl DatabaseSource {
             self.version = self.engine.default_version().into();
         }
         if self.engine.has_database() {
-            let base = app.replace('-', "_");
             if self.database.is_none() {
-                self.database = Some(base.clone());
+                self.database = Some(app.replace('-', "_"));
             }
             if self.user.is_none() {
-                self.user = Some(base);
+                self.user = Some(default_user(app));
             }
         }
     }
@@ -285,7 +284,7 @@ impl DatabaseSource {
     }
 
     pub fn user_name(&self, app: &str) -> String {
-        self.user.clone().unwrap_or_else(|| app.replace('-', "_"))
+        self.user.clone().unwrap_or_else(|| default_user(app))
     }
 
     pub fn validate(&self, app: &str) -> Result<()> {
@@ -293,6 +292,12 @@ impl DatabaseSource {
         if self.engine.has_database() {
             validate_ident("database", &self.database_name(app))?;
             validate_ident("user", &self.user_name(app))?;
+            if self.engine == Engine::Postgres && self.user_name(app).starts_with("pg_") {
+                return Err(Error::invalid(format!(
+                    "user {:?}: Postgres reserves role names starting with pg_",
+                    self.user_name(app)
+                )));
+            }
             if self.engine.has_root_password() && self.user_name(app) == "root" {
                 return Err(Error::invalid(
                     "user: root is the engine's own administrator; pick another name",
@@ -322,6 +327,18 @@ pub fn root_password_secret(app: &str) -> String {
 /// apps: `DATABASE_URL=${{secret.db.<app>.url}}`.
 pub fn url_secret(app: &str) -> String {
     format!("db.{app}.url")
+}
+
+/// The user a database gets when none is given: the app's name with `_`
+/// for `-`, and `app_` in front of a name Postgres reserves (`pg_...`: an
+/// app named `pg-main` would otherwise never initialize).
+fn default_user(app: &str) -> String {
+    let base = app.replace('-', "_");
+    if base.starts_with("pg_") {
+        format!("app_{base}")
+    } else {
+        base
+    }
 }
 
 /// The secrets isb made for a database (and removes with it).
@@ -545,6 +562,22 @@ pub fn internal_url(spec: &AppSpec, db: &DatabaseSource, password: &str) -> Stri
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn postgres_users_never_start_with_pg() {
+        let mut d: DatabaseSource =
+            serde_json::from_value(serde_json::json!({"engine": "postgres"})).unwrap();
+        assert_eq!(d.user_name("pg-main"), "app_pg_main");
+        assert_eq!(
+            d.database_name("pg-main"),
+            "pg_main",
+            "databases may start with pg_"
+        );
+        assert_eq!(d.user_name("pgcopy"), "pgcopy");
+        assert!(d.validate("pg-main").is_ok());
+        d.user = Some("pg_admin".into());
+        assert!(d.validate("x").is_err());
+    }
     use super::*;
     use crate::app::{Rendered, Source, render};
 

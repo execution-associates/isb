@@ -244,9 +244,18 @@ minime only runs binaries downloaded from our CI runs.
   orgs placed there). An org is placed once; the default org is local. The
   SSH key is used only for bootstrap. A remote org's secrets and history
   live on its server; `audit_list` stays on the control plane.
-- **Known bug: database names with `-` crash-loop** (`pg-dash` fails with
-  "Failed to retrieve PID"; `pg`, `pgcopy` work). Found by the Phase 4 UI
-  agent; the restore dialog suggests `<db>copy` until it is fixed.
+- **GitHub sign-in on titan:** the OAuth app "isb (titan)" (owner
+  knowsuchagency, client id `Ov23liG4tb3bUknJiwrt`) has callbacks for
+  `http://localhost:8192` (titan's isb.service) and `http://localhost:18990`
+  (scratch tests). Its id and secret are in 1Password as
+  `ISB_GITHUB_CLIENT_ID` / `ISB_GITHUB_CLIENT_SECRET`. A public hostname for
+  isb needs its callback added to the app. Google sign-in is not set up.
+- **Postgres reserves `pg_` role names:** a database app's default user is
+  `app_<name>` when its name starts with `pg-`/`pg_` (it was the cause of
+  "hyphenated databases never start").
+- **CLI wart:** `isb db create` takes the app project as `--project`, which
+  clashes with the global incus `--project`; `-P/--project-name` errors.
+  Untangle when the CLI flags get a pass.
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
@@ -308,7 +317,7 @@ minime only runs binaries downloaded from our CI runs.
   argon2id passwords, sessions with secure cookies, first-run admin setup,
   invitations, roles (platform admin; org admin/member), API tokens (hashed,
   org-scoped). **Verify:** unit tests + login over HTTP.
-- [!] (97da457; needs Stephan to register GitHub/Google OAuth apps for the live check) P1.5 OAuth/OIDC: GitHub, Google, generic OIDC (discovery, PKCE),
+- [x] (97da457; GitHub sign-in verified end to end 2026-10-03; Google left out by Stephan's call) P1.5 OAuth/OIDC: GitHub, Google, generic OIDC (discovery, PKCE),
   account linking by verified email. **Verify:** GitHub login end to end in a
   browser against the hcloud box.
 - [x] (97da457, 9f568c6: passkey register + sign-in in lasso's browser with a CDP virtual authenticator) P1.6 Passkeys (WebAuthn): register and sign in. **Verify:** browser on
