@@ -1062,14 +1062,8 @@ pub fn translate(meta: &Meta, compose: &str, toml_text: &str) -> (Option<Templat
     )
 }
 
-#[expect(
-    clippy::too_many_lines,
-    clippy::cognitive_complexity,
-    clippy::excessive_nesting,
-    reason = "predates the lint ratchet; split it when next changed"
-)]
-fn translate_inner(meta: &Meta, compose: &str, toml_text: &str, tx: &mut Tx) -> Option<Template> {
-    let toml = parse_toml(toml_text, tx)?;
+/// Each Dokploy variable as a native one; returns the Dokploy variables.
+fn native_vars(toml: &Toml, tx: &mut Tx) -> BTreeMap<String, String> {
     // Variables first: each Dokploy variable becomes a native one.
     for k in toml.vars.keys() {
         let n = tx.fresh_name(k);
@@ -1124,23 +1118,11 @@ fn translate_inner(meta: &Meta, compose: &str, toml_text: &str, tx: &mut Tx) -> 
             .expect("reserved");
         tx.vars[i] = v;
     }
-    // The .env: each entry a native expression.
-    let mut env: BTreeMap<String, String> = BTreeMap::new();
-    let mut env_order: Vec<String> = Vec::new();
-    for (k, v) in &toml.env {
-        let e = tx.expr(v, &format!("env_{k}"), &dvars);
-        if !env.contains_key(k) {
-            env_order.push(k.clone());
-        }
-        env.insert(k.clone(), e);
-    }
-    let mounts: BTreeMap<String, String> = toml
-        .mounts
-        .iter()
-        .map(|(p, c)| (p.clone(), tx.expr(c, "file", &dvars)))
-        .collect();
+    dvars
+}
 
-    // The compose file.
+/// The compose file, parsed with its merge keys applied.
+fn parse_compose(compose: &str, tx: &mut Tx) -> Option<Y> {
     let mut doc: Y = match serde_yaml_ng::from_str(compose) {
         Ok(v) => v,
         Err(e) => {
@@ -1152,10 +1134,11 @@ fn translate_inner(meta: &Meta, compose: &str, toml_text: &str, tx: &mut Tx) -> 
         tx.refuse(format!("docker-compose.yml merge keys: {e}"));
         return None;
     }
-    let Some(top) = ymap(&doc) else {
-        tx.refuse("docker-compose.yml is not a mapping");
-        return None;
-    };
+    Some(doc)
+}
+
+/// Refuse or note top-level compose keys isb does not use.
+fn check_top_level(top: &serde_yaml_ng::Mapping, tx: &mut Tx) {
     for (k, _) in top {
         let k = yscalar(k).unwrap_or_default();
         if !matches!(
@@ -1170,6 +1153,10 @@ fn translate_inner(meta: &Meta, compose: &str, toml_text: &str, tx: &mut Tx) -> 
             }
         }
     }
+}
+
+/// The top-level volumes; a volume isb cannot make is refused.
+fn declared_volumes(top: &serde_yaml_ng::Mapping, tx: &mut Tx) -> serde_yaml_ng::Mapping {
     let declared_vols = yget(top, "volumes")
         .and_then(ymap)
         .cloned()
@@ -1190,10 +1177,15 @@ fn translate_inner(meta: &Meta, compose: &str, toml_text: &str, tx: &mut Tx) -> 
             }
         }
     }
-    let Some(services) = yget(top, "services").and_then(ymap) else {
-        tx.refuse("docker-compose.yml has no services");
-        return None;
-    };
+    declared_vols
+}
+
+/// Each service's app name, and every name a service answers to, longest
+/// first (so `db-replica` is not matched as `db`).
+fn service_names(
+    services: &serde_yaml_ng::Mapping,
+    tx: &mut Tx,
+) -> (BTreeMap<String, String>, Vec<(String, String)>) {
     // Service names, keys, and every name a service answers to.
     let mut keys: BTreeMap<String, String> = BTreeMap::new();
     let mut aliases: Vec<(String, String)> = Vec::new();
@@ -1212,628 +1204,36 @@ fn translate_inner(meta: &Meta, compose: &str, toml_text: &str, tx: &mut Tx) -> 
         keys.insert(name.clone(), key.clone());
         aliases.push((name.clone(), key.clone()));
         if let Some(m) = ymap(s) {
-            for k in ["hostname", "container_name"] {
-                if let Some(h) = yget(m, k).and_then(yscalar) {
-                    if h != name && !h.contains('$') {
-                        aliases.push((h, key.clone()));
-                    }
-                }
-            }
-            if let Some(Y::Mapping(nets)) = yget(m, "networks") {
-                for (_, n) in nets {
-                    if let Some(Y::Sequence(al)) = ymap(n).and_then(|n| yget(n, "aliases")) {
-                        for a in al.iter().filter_map(yscalar) {
-                            aliases.push((a, key.clone()));
-                        }
-                    }
-                }
-            }
+            aliases.extend(other_names(m, &name).into_iter().map(|h| (h, key.clone())));
         }
     }
     // Longest names first, so `db-replica` is not matched as `db`.
     aliases.sort_by_key(|a| std::cmp::Reverse(a.0.len()));
-    // A volume used by two services cannot be two apps' own volumes.
-    let mut vol_users: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    (keys, aliases)
+}
 
-    let mut unset = BTreeSet::new();
-    let mut apps = Vec::new();
-    for (name, s) in services {
-        let name = yscalar(name).unwrap_or_default();
-        let Some(key) = keys.get(&name).cloned() else {
-            continue;
-        };
-        let Some(m) = ymap(s) else {
-            tx.refuse(format!("service {name} is not a mapping"));
-            continue;
-        };
-        let mut ip = |s: &str, tx: &mut Tx| -> String {
-            match interpolate(s, &env, &mut unset) {
-                Ok(v) => v,
-                Err(e) => {
-                    tx.refuse(format!("{name}: {e}"));
-                    String::new()
-                }
-            }
-        };
-        for (k, v) in m {
-            let k = yscalar(k).unwrap_or_default();
-            if k.starts_with("x-") || IGNORED_KEYS.contains(&k.as_str()) {
-                continue;
-            }
-            if let Some((_, why)) = REFUSED_KEYS.iter().find(|(r, _)| *r == k) {
-                let harmless = match k.as_str() {
-                    "privileged" => v.as_bool() == Some(false),
-                    "pid" | "ipc" | "uts" | "userns_mode" | "cgroup" => yscalar(v)
-                        .is_some_and(|s| s.is_empty() || s == "private" || s == "shareable"),
-                    "devices" | "cap_add" | "sysctls" | "extra_hosts" | "dns" | "dns_search" => {
-                        matches!(v, Y::Sequence(s) if s.is_empty())
-                            || matches!(v, Y::Mapping(m) if m.is_empty())
-                            || v.is_null()
-                    }
-                    _ => false,
-                };
-                if !harmless {
-                    tx.refuse(format!("{name}: {why}"));
-                }
-            } else if let Some((_, why)) = NOTED_KEYS.iter().find(|(r, _)| *r == k) {
-                tx.note(format!("{name}: {why}"));
-            } else {
-                tx.note(format!("{name}: compose key {k} is ignored"));
-            }
+/// The .env: each entry a native expression, and the order they came in.
+fn native_env(
+    toml: &Toml,
+    dvars: &BTreeMap<String, String>,
+    tx: &mut Tx,
+) -> (BTreeMap<String, String>, Vec<String>) {
+    let mut env: BTreeMap<String, String> = BTreeMap::new();
+    let mut env_order: Vec<String> = Vec::new();
+    for (k, v) in &toml.env {
+        let e = tx.expr(v, &format!("env_{k}"), dvars);
+        if !env.contains_key(k) {
+            env_order.push(k.clone());
         }
-        // Image.
-        let image = match yget(m, "image").and_then(yscalar) {
-            Some(i) => image_ref(&ip(&i, tx)),
-            None => {
-                if yget(m, "build").is_none() {
-                    tx.refuse(format!("{name}: no image"));
-                }
-                continue;
-            }
-        };
-        // Network mode.
-        if let Some(nm) = yget(m, "network_mode").and_then(yscalar) {
-            if !matches!(nm.as_str(), "" | "bridge" | "default") {
-                tx.refuse(format!("{name}: network_mode {nm}"));
-            }
-        }
-        // Restart: a one-shot job would be restarted for ever.
-        match yget(m, "restart").and_then(yscalar).as_deref() {
-            Some("no") | Some("\"no\"") => {
-                tx.refuse(format!(
-                    "{name}: restart \"no\" (a one-shot job; apps are kept running)"
-                ));
-            }
-            Some("on-failure") => tx.note(format!(
-                "{name}: restart on-failure becomes always (apps are kept running)"
-            )),
-            None => tx.note(format!("{name}: no restart policy; isb keeps it running")),
-            _ => {}
-        }
-        if let Some(sc) = yget(m, "scale").and_then(yscalar) {
-            if sc == "0" {
-                tx.note(format!("{name}: scale 0; it is not deployed"));
-                continue;
-            }
-        }
-        // Environment: env_file .env first, environment over it.
-        let mut senv: BTreeMap<String, String> = BTreeMap::new();
-        if let Some(ef) = yget(m, "env_file") {
-            let files: Vec<String> = match ef {
-                Y::String(s) => vec![s.clone()],
-                Y::Sequence(s) => s
-                    .iter()
-                    .filter_map(|e| {
-                        yscalar(e)
-                            .or_else(|| ymap(e).and_then(|m| yget(m, "path")).and_then(yscalar))
-                    })
-                    .collect(),
-                _ => vec![],
-            };
-            for f in files {
-                if matches!(f.as_str(), ".env" | "./.env") {
-                    for k in &env_order {
-                        senv.insert(k.clone(), env[k].clone());
-                    }
-                } else {
-                    tx.refuse(format!("{name}: env_file {f} (only Dokploy's .env exists)"));
-                }
-            }
-        }
-        if let Some(e) = yget(m, "environment") {
-            for (k, v) in pairs(e) {
-                match v {
-                    Some(v) => {
-                        let x = ip(&v, tx);
-                        senv.insert(k, x);
-                    }
-                    None => match env.get(&k) {
-                        Some(x) => {
-                            senv.insert(k, x.clone());
-                        }
-                        None => tx.note(format!(
-                            "{name}: environment {k} has no value (it is left out, as docker does)"
-                        )),
-                    },
-                }
-            }
-        }
-        // Volumes.
-        let mut volumes = Vec::new();
-        let mut files = Vec::new();
-        let mut anon = 0;
-        for v in yget(m, "volumes")
-            .and_then(Y::as_sequence)
-            .cloned()
-            .unwrap_or_default()
-        {
-            let (kind, source, target, ro) = match &v {
-                Y::String(s) => {
-                    let s = ip(s, tx);
-                    let parts: Vec<&str> = s.split(':').collect();
-                    match parts.as_slice() {
-                        [t] => ("anon", String::new(), t.to_string(), false),
-                        [src, t] => ("auto", src.to_string(), t.to_string(), false),
-                        [src, t, o] => (
-                            "auto",
-                            src.to_string(),
-                            t.to_string(),
-                            o.split(',').any(|x| x == "ro"),
-                        ),
-                        _ => {
-                            tx.refuse(format!("{name}: volume {s:?} does not parse"));
-                            continue;
-                        }
-                    }
-                }
-                Y::Mapping(vm) => {
-                    let raw = |k: &str| yget(vm, k).and_then(yscalar);
-                    let t = raw("type").unwrap_or_else(|| "volume".into());
-                    let src = raw("source").map(|x| ip(&x, tx)).unwrap_or_default();
-                    let tgt = raw("target").map(|x| ip(&x, tx)).unwrap_or_default();
-                    let ro = yget(vm, "read_only").and_then(Y::as_bool).unwrap_or(false);
-                    match t.as_str() {
-                        "tmpfs" => {
-                            tx.note(format!(
-                                "{name}: tmpfs {tgt} is not made; it is on the root filesystem"
-                            ));
-                            continue;
-                        }
-                        "bind" | "volume" => {}
-                        other => {
-                            tx.refuse(format!("{name}: a {other} mount"));
-                            continue;
-                        }
-                    }
-                    let kind = if src.is_empty() {
-                        "anon"
-                    } else if t == "bind" {
-                        "bind"
-                    } else {
-                        "auto"
-                    };
-                    (kind, src, tgt, ro)
-                }
-                _ => {
-                    tx.refuse(format!("{name}: a volume entry does not parse"));
-                    continue;
-                }
-            };
-            if target.contains('$') || !target.starts_with('/') {
-                tx.refuse(format!(
-                    "{name}: mount target {target:?} is not an absolute path"
-                ));
-                continue;
-            }
-            let is_path = source.starts_with('/')
-                || source.starts_with('.')
-                || source.starts_with('~')
-                || kind == "bind";
-            if kind == "anon" {
-                anon += 1;
-                let n = format!("anon-{anon}");
-                tx.note(format!(
-                    "{name}: anonymous volume {target} becomes the named volume {n}"
-                ));
-                volumes.push(format!("{n}:{target}{}", if ro { ":ro" } else { "" }));
-            } else if !is_path {
-                let vn = key_name(&source);
-                vol_users
-                    .entry(source.clone())
-                    .or_default()
-                    .insert(name.clone());
-                if !declared_vols.contains_key(Y::String(source.clone())) {
-                    tx.note(format!(
-                        "{name}: volume {source} is not declared at the top level"
-                    ));
-                }
-                volumes.push(format!("{vn}:{target}{}", if ro { ":ro" } else { "" }));
-            } else if let Some(rel) = source
-                .strip_prefix("../files/")
-                .or_else(|| source.strip_prefix("./files/"))
-                .or_else(|| source.strip_prefix("files/"))
-            {
-                let rel = rel.trim_end_matches('/');
-                let mut found = false;
-                for (p, content) in &mounts {
-                    let tgt = if p == rel {
-                        Some(target.clone())
-                    } else {
-                        p.strip_prefix(&format!("{rel}/"))
-                            .map(|sub| format!("{}/{sub}", target.trim_end_matches('/')))
-                    };
-                    if let Some(tgt) = tgt {
-                        found = true;
-                        files.push(FileTemplate {
-                            path: tgt,
-                            content: content.clone(),
-                            mode: None,
-                        });
-                    }
-                }
-                if !found {
-                    // A directory Dokploy makes in the deployment's files:
-                    // persistent storage, as a named volume.
-                    let vn = key_name(rel);
-                    vol_users
-                        .entry(format!("files/{vn}"))
-                        .or_default()
-                        .insert(name.clone());
-                    tx.note(format!(
-                        "{name}: {source} (no content given) becomes the named volume {vn}"
-                    ));
-                    volumes.push(format!("{vn}:{target}{}", if ro { ":ro" } else { "" }));
-                }
-            } else if source.contains("docker.sock") {
-                tx.refuse(format!("{name}: the docker socket ({source})"));
-            } else if matches!(
-                source.trim_end_matches('/'),
-                "/etc/localtime" | "/etc/timezone" | "/usr/share/zoneinfo"
-            ) {
-                // The host's clock settings: not mounted (no host path is),
-                // which only changes the default time zone.
-                tx.note(format!(
-                    "{name}: the host's {source} is not mounted; the app keeps its image's time zone (set TZ)"
-                ));
-            } else if source.starts_with('/') || source.starts_with('~') {
-                tx.refuse(format!("{name}: host path {source}"));
-            } else {
-                // A path in the compose project: per deployment, persistent.
-                let vn = key_name(source.trim_start_matches("./").trim_start_matches("../"));
-                vol_users
-                    .entry(format!("./{vn}"))
-                    .or_default()
-                    .insert(name.clone());
-                tx.note(format!(
-                    "{name}: bind {source} becomes the named volume {vn} (it starts as a copy of the image's {target})"
-                ));
-                volumes.push(format!("{vn}:{target}{}", if ro { ":ro" } else { "" }));
-            }
-        }
-        // Ports.
-        let mut ports = Vec::new();
-        for p in yget(m, "ports")
-            .and_then(Y::as_sequence)
-            .cloned()
-            .unwrap_or_default()
-        {
-            let (published, target, proto) = match &p {
-                Y::Mapping(pm) => (
-                    yget(pm, "published").and_then(yscalar).map(|x| ip(&x, tx)),
-                    yget(pm, "target").and_then(yscalar).unwrap_or_default(),
-                    yget(pm, "protocol")
-                        .and_then(yscalar)
-                        .unwrap_or_else(|| "tcp".into()),
-                ),
-                other => {
-                    let s = ip(&yscalar(other).unwrap_or_default(), tx);
-                    let (s, proto) = match s.split_once('/') {
-                        Some((a, b)) => (a.to_string(), b.to_string()),
-                        None => (s, "tcp".into()),
-                    };
-                    let parts: Vec<&str> = s.rsplitn(2, ':').collect();
-                    match parts.as_slice() {
-                        [t] => (None, t.to_string(), proto),
-                        [t, rest] => (
-                            Some(rest.rsplit(':').next().unwrap_or(rest).to_string()),
-                            t.to_string(),
-                            proto,
-                        ),
-                        _ => (None, String::new(), proto),
-                    }
-                }
-            };
-            let ok_port = |s: &str| s.parse::<u16>().is_ok_and(|p| p > 0);
-            match published.filter(|x| !x.is_empty()) {
-                None => tx.note(format!(
-                    "{name}: port {target} without a host port is not published (docker would pick a random one)"
-                )),
-                Some(_) if proto != "tcp" => {
-                    tx.refuse(format!("{name}: a published {proto} port ({target}/{proto})"));
-                }
-                Some(h) if ok_port(&h) && ok_port(&target) => {
-                    tx.note(format!(
-                        "{name}: port {h}:{target} is published on 127.0.0.1 only (isb's default)"
-                    ));
-                    ports.push(format!("127.0.0.1:{h}:{target}"));
-                }
-                Some(h) => tx.refuse(format!("{name}: port {h}:{target} (ranges are not supported)")),
-            }
-        }
-        // Command line.
-        let entrypoint = yget(m, "entrypoint").map(words);
-        let cmd = yget(m, "command").map(words);
-        let mut command = None;
-        let mut args = None;
-        match (entrypoint, cmd) {
-            (Some(None), _) | (_, Some(None)) => {
-                tx.refuse(format!("{name}: command/entrypoint does not parse"));
-            }
-            (Some(Some(e)), c) => {
-                let mut line: Vec<String> = e.iter().map(|w| ip(w, tx)).collect();
-                if let Some(Some(c)) = c {
-                    line.extend(c.iter().map(|w| ip(w, tx)));
-                }
-                if !line.is_empty() {
-                    command = Some(json!(line));
-                }
-            }
-            (None, Some(Some(c))) => {
-                args = Some(json!(c.iter().map(|w| ip(w, tx)).collect::<Vec<_>>()));
-            }
-            (None, None) => {}
-        }
-        // Health check.
-        let mut healthcheck = None;
-        if let Some(Y::Mapping(h)) = yget(m, "healthcheck") {
-            let disabled = yget(h, "disable").and_then(Y::as_bool) == Some(true);
-            let test = yget(h, "test");
-            let none = matches!(test, Some(Y::Sequence(s)) if s.first().and_then(yscalar).as_deref() == Some("NONE"));
-            if !disabled && !none {
-                let mut out = serde_json::Map::new();
-                match test {
-                    Some(Y::String(s)) => {
-                        out.insert("test".into(), json!(ip(s, tx)));
-                    }
-                    Some(Y::Sequence(s)) => {
-                        let w: Vec<String> =
-                            s.iter().filter_map(yscalar).map(|x| ip(&x, tx)).collect();
-                        out.insert("test".into(), json!(w));
-                    }
-                    _ => {}
-                }
-                for f in ["interval", "timeout", "start_period", "start_interval"] {
-                    if let Some(v) = yget(h, f).and_then(yscalar) {
-                        out.insert(f.into(), json!(ip(&v, tx)));
-                    }
-                }
-                if let Some(r) = yget(h, "retries").and_then(Y::as_u64) {
-                    out.insert("retries".into(), json!(r));
-                }
-                if out.contains_key("test") {
-                    healthcheck = Some(Value::Object(out));
-                }
-            }
-        }
-        // Dependencies.
-        let mut depends = Vec::new();
-        match yget(m, "depends_on") {
-            Some(Y::Sequence(s)) => depends.extend(s.iter().filter_map(yscalar)),
-            Some(Y::Mapping(dm)) => {
-                for (d, c) in dm {
-                    let d = yscalar(d).unwrap_or_default();
-                    let cond = ymap(c).and_then(|c| yget(c, "condition")).and_then(yscalar);
-                    if cond.as_deref() == Some("service_completed_successfully") {
-                        tx.refuse(format!(
-                            "{name}: waits for {d} to complete (a one-shot job)"
-                        ));
-                    }
-                    depends.push(d);
-                }
-            }
-            _ => {}
-        }
-        if let Some(Y::Sequence(l)) = yget(m, "links") {
-            tx.note(format!(
-                "{name}: links become dependencies; names resolve as <app>.<stack>"
-            ));
-            for x in l.iter().filter_map(yscalar) {
-                depends.push(x.split(':').next().unwrap_or(&x).to_string());
-            }
-        }
-        let mut dep_keys = Vec::new();
-        for d in depends {
-            match keys.get(&d) {
-                Some(k) if !dep_keys.contains(k) && k != &key => dep_keys.push(k.clone()),
-                Some(_) => {}
-                None => tx.note(format!("{name}: depends on {d}, which is not deployed")),
-            }
-        }
-        // User.
-        let user = yget(m, "user")
-            .and_then(yscalar)
-            .map(|u| ip(&u, tx))
-            .and_then(|u| {
-                let (a, b) = u.split_once(':').unwrap_or((&u, ""));
-                let num = |s: &str| s.is_empty() || s.parse::<u32>().is_ok();
-                if a == "root" && (b.is_empty() || b == "root") {
-                    Some("0".to_string())
-                } else if num(a) && num(b) && !a.is_empty() {
-                    Some(u.clone())
-                } else {
-                    tx.refuse(format!(
-                        "{name}: user {u:?} is a name; an OCI image's user must be numeric here"
-                    ));
-                    None
-                }
-            });
-        let working_dir = yget(m, "working_dir").and_then(yscalar).map(|w| ip(&w, tx));
-        // Resources and replicas.
-        let mut replicas = None;
-        let mut res = Resources::default();
-        if let Some(Y::Mapping(d)) = yget(m, "deploy") {
-            if let Some(r) = yget(d, "replicas").and_then(Y::as_u64) {
-                replicas = Some(r as u32);
-            }
-            if yget(d, "mode").and_then(yscalar).as_deref() == Some("global") {
-                tx.note(format!("{name}: deploy mode global runs one replica"));
-            }
-            if let Some(lim) = yget(d, "resources")
-                .and_then(ymap)
-                .and_then(|r| yget(r, "limits"))
-                .and_then(ymap)
-            {
-                if let Some(c) = yget(lim, "cpus").and_then(yscalar) {
-                    res.cpus = Some(ip(&c, tx));
-                }
-                if let Some(mm) = yget(lim, "memory").and_then(yscalar) {
-                    res.memory = Some(ip(&mm, tx));
-                }
-            }
-            for k in d.keys().filter_map(yscalar) {
-                if !matches!(k.as_str(), "replicas" | "resources" | "mode") {
-                    tx.note(format!("{name}: deploy.{k} is ignored"));
-                }
-            }
-        }
-        if let Some(c) = yget(m, "cpus").and_then(yscalar) {
-            res.cpus = Some(ip(&c, tx));
-        }
-        if let Some(mm) = yget(m, "mem_limit").and_then(yscalar) {
-            res.memory = Some(ip(&mm, tx));
-        }
-        if let Some(c) = res.cpus.clone().filter(|c| !c.contains("${")) {
-            match c.parse::<f64>() {
-                Ok(f) if f > 0.0 => {
-                    let whole = f.ceil() as u64;
-                    if (whole as f64 - f).abs() > f64::EPSILON {
-                        tx.note(format!(
-                            "{name}: cpus {c} is rounded up to {whole} (isb pins whole CPUs)"
-                        ));
-                    }
-                    res.cpus = Some(whole.to_string());
-                }
-                _ => {
-                    tx.refuse(format!("{name}: cpus {c:?}"));
-                    res.cpus = None;
-                }
-            }
-        }
-        if let Some(mm) = &res.memory {
-            // docker's lower-case units; isb takes 512m, 2g, 1GiB.
-            let t = mm.trim().to_ascii_lowercase();
-            let t = t.trim_end_matches('b').to_string();
-            res.memory = Some(t);
-        }
-        // Traefik labels.
-        let labels: Vec<(String, String)> = yget(m, "labels")
-            .map(pairs)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(k, v)| {
-                let v = v.unwrap_or_default();
-                (k, ip(&v, tx))
-            })
-            .collect();
-        let mut domains = traefik_domains(&name, &labels, tx);
-        if labels.iter().any(|(k, _)| !k.starts_with("traefik.")) {
-            tx.note(format!("{name}: its labels are not applied"));
-        }
-        for (svc, port, host, path) in &toml.domains {
-            if svc == &name {
-                let mut d = serde_json::Map::new();
-                d.insert("host".into(), json!(tx.expr(host, "domain", &dvars)));
-                d.insert("port".into(), json!(port));
-                if path != "/" {
-                    d.insert("path".into(), json!(path));
-                }
-                domains.push(d);
-            }
-        }
-        // Domains on the same host and path once.
-        let mut seen = BTreeSet::new();
-        domains.retain(|d| {
-            seen.insert((
-                d.get("host").cloned().unwrap_or_default().to_string(),
-                d.get("path").cloned().unwrap_or_default().to_string(),
-            ))
-        });
-        let port = domains
-            .first()
-            .and_then(|d| d.get("port"))
-            .and_then(Value::as_u64)
-            .map(|p| p as u16);
-        // Other services named in values: rewrite to isb's service names.
-        let others: Vec<(String, String)> =
-            aliases.iter().filter(|(_, k)| k != &key).cloned().collect();
-        let mut rewritten = BTreeSet::new();
-        let mut fix = |e: &str, whole: bool| -> String {
-            let (out, hits) = rewrite_hosts(e, &others, whole);
-            rewritten.extend(hits);
-            out
-        };
-        let senv: BTreeMap<String, String> = senv
-            .into_iter()
-            .map(|(k, v)| {
-                let w = hostish_key(&k);
-                (k, fix(&v, w))
-            })
-            .collect();
-        let fix_args = |v: &Option<Value>, fix: &mut dyn FnMut(&str, bool) -> String| {
-            v.as_ref().map(|v| match v {
-                Value::Array(a) => json!(
-                    a.iter()
-                        .map(|x| fix(x.as_str().unwrap_or(""), false))
-                        .collect::<Vec<_>>()
-                ),
-                other => other.clone(),
-            })
-        };
-        let command = fix_args(&command, &mut fix);
-        let args = fix_args(&args, &mut fix);
-        let healthcheck = healthcheck.map(|mut h| {
-            if let Some(t) = h.get("test").cloned() {
-                h["test"] = match t {
-                    Value::String(s) => json!(fix(&s, false)),
-                    Value::Array(a) => json!(
-                        a.iter()
-                            .map(|x| fix(x.as_str().unwrap_or(""), false))
-                            .collect::<Vec<_>>()
-                    ),
-                    o => o,
-                };
-            }
-            h
-        });
-        for f in files.iter_mut() {
-            f.content = fix(&f.content, false);
-        }
-        if !rewritten.is_empty() {
-            tx.note(format!(
-                "{name}: references to {} are rewritten to isb's service names (<app>.<stack>); names an image uses by default are not",
-                rewritten.into_iter().collect::<Vec<_>>().join(", ")
-            ));
-        }
-        apps.push(AppTemplate {
-            name: key.clone(),
-            image,
-            env: senv,
-            port,
-            domains,
-            volumes,
-            ports,
-            replicas,
-            command,
-            args,
-            healthcheck,
-            resources: (res.cpus.is_some() || res.memory.is_some()).then_some(res),
-            files,
-            user,
-            working_dir,
-            depends_on: dep_keys,
-        });
+        env.insert(k.clone(), e);
     }
-    for (v, users) in &vol_users {
+    (env, env_order)
+}
+
+/// What only shows once every service is translated: shared volumes,
+/// variables nothing sets, and domains for services the compose file lacks.
+fn check_services(acc: service::Acc, toml: &Toml, keys: &BTreeMap<String, String>, tx: &mut Tx) {
+    for (v, users) in &acc.vol_users {
         if users.len() > 1 {
             tx.refuse(format!(
                 "volume {v} is shared by {} (an app's volumes are its own)",
@@ -1841,7 +1241,7 @@ fn translate_inner(meta: &Meta, compose: &str, toml_text: &str, tx: &mut Tx) -> 
             ));
         }
     }
-    for v in unset {
+    for v in acc.unset {
         tx.note(format!(
             "${{{v}}} is not set in the template; it is empty, as in docker compose"
         ));
@@ -1853,6 +1253,82 @@ fn translate_inner(meta: &Meta, compose: &str, toml_text: &str, tx: &mut Tx) -> 
             ));
         }
     }
+}
+
+/// The other names a service answers to: its hostname, container name and
+/// network aliases.
+fn other_names(m: &serde_yaml_ng::Mapping, name: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for k in ["hostname", "container_name"] {
+        if let Some(h) = yget(m, k).and_then(yscalar) {
+            if h != name && !h.contains('$') {
+                out.push(h);
+            }
+        }
+    }
+    if let Some(Y::Mapping(nets)) = yget(m, "networks") {
+        for (_, n) in nets {
+            if let Some(Y::Sequence(al)) = ymap(n).and_then(|n| yget(n, "aliases")) {
+                out.extend(al.iter().filter_map(yscalar));
+            }
+        }
+    }
+    out
+}
+
+fn translate_inner(meta: &Meta, compose: &str, toml_text: &str, tx: &mut Tx) -> Option<Template> {
+    let toml = parse_toml(toml_text, tx)?;
+    let dvars = native_vars(&toml, tx);
+    let (env, env_order) = native_env(&toml, &dvars, tx);
+    let mounts: BTreeMap<String, String> = toml
+        .mounts
+        .iter()
+        .map(|(p, c)| (p.clone(), tx.expr(c, "file", &dvars)))
+        .collect();
+
+    // The compose file.
+    let doc = parse_compose(compose, tx)?;
+    let Some(top) = ymap(&doc) else {
+        tx.refuse("docker-compose.yml is not a mapping");
+        return None;
+    };
+    check_top_level(top, tx);
+    let declared_vols = declared_volumes(top, tx);
+    let Some(services) = yget(top, "services").and_then(ymap) else {
+        tx.refuse("docker-compose.yml has no services");
+        return None;
+    };
+    let (keys, aliases) = service_names(services, tx);
+    let sh = service::Shared {
+        env: &env,
+        env_order: &env_order,
+        mounts: &mounts,
+        declared_vols: &declared_vols,
+        keys: &keys,
+        aliases: &aliases,
+        domains: &toml.domains,
+        dvars: &dvars,
+    };
+    // A volume used by two services cannot be two apps' own volumes.
+    let mut acc = service::Acc {
+        unset: BTreeSet::new(),
+        vol_users: BTreeMap::new(),
+    };
+    let mut apps = Vec::new();
+    for (name, s) in services {
+        let name = yscalar(name).unwrap_or_default();
+        let Some(key) = keys.get(&name).cloned() else {
+            continue;
+        };
+        let Some(m) = ymap(s) else {
+            tx.refuse(format!("service {name} is not a mapping"));
+            continue;
+        };
+        if let Some(app) = service::translate(&sh, &mut acc, &name, key, m, tx) {
+            apps.push(app);
+        }
+    }
+    check_services(acc, &toml, &keys, tx);
     if apps.is_empty() {
         tx.refuse("no service to deploy");
         return None;
@@ -1887,5 +1363,6 @@ fn translate_inner(meta: &Meta, compose: &str, toml_text: &str, tx: &mut Tx) -> 
     })
 }
 
+mod service;
 #[cfg(test)]
 mod tests;
