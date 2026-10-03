@@ -15,7 +15,7 @@ endpoint has neither a tool nor a documented reason in the
 
 | Category | Count |
 |---|---|
-| Tools in the web UI and MCP | 132 |
+| Tools in the web UI and MCP | 133 |
 | Account tools, the web UI through the identity endpoints | 17 |
 | Tools for MCP and the CLI only | 18 |
 | Identity endpoints with a tool | 18 |
@@ -141,6 +141,7 @@ a person on the web does not need it.
 | Server status | Admin, Servers | `server_status` |
 | Servers: list, add, follow, remove | Admin, Servers | `server_list`, `server_add`, `server_provision_get`, `server_remove` |
 | Rotate a server's certificate | Admin, Servers, a server: Rotate certificate | `server_rotate_cert` |
+| Upgrade a server's agent | Admin, Servers, a server: Upgrade (shown when its build differs) | `server_upgrade` |
 | One server | The server sheet on Admin, Servers (from `server_list`) | `server_show` |
 
 ### Audit, history and the host

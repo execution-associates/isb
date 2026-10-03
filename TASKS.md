@@ -510,9 +510,8 @@ minime only runs binaries downloaded from our CI runs.
   bucket staged and diffed; restore while stopped left detached; discard
   refused a volume that was not a staged restore; the UI restored a backup
   file staged.
-- [ ] W4 follow-ups: volume
-  snapshots and backups for orgs placed on a server (tools forward, not
-  verified); a restore's byte count in its run record.
+- [ ] W4 follow-ups: a restore's byte count in its run record. (Volumes for
+  orgs on a server: done under Release 1.0, remote-server gaps.)
 - [x] (workspaces-core) W1 the workspace and its sandboxes, W2 the
   workspace as an org actor, W7 the web UI (docs/concepts/workspaces.md): one
   workspace per org (`max_workspaces`), a container with a home volume
@@ -604,13 +603,12 @@ minime only runs binaries downloaded from our CI runs.
   superadmin identity; the CLI and API were used).
 - [ ] Workspace follow-ups: `isb host setup` on titan for port 8481 (not
   run: the rule is in the code); titan's `--workspace-home-root
-  /srv/workspaces` and migrating clem with `home_bind`; a workspace on an org placed on a server
-  (the agent runs it and serves the bridge; untested); ports and nesting for
+  /srv/workspaces` and migrating clem with `home_bind`; ports and nesting for
   orgs placed on a server (org_nesting runs on that server's host); workspace
   images on a server-placed org's server (the image tools build on the control
   plane's host); a Setup panel on the workspace page (re-run, edit; today the
-  CLI and tools); SSH to orgs placed on a server; Access credentials in
-  `isb ssh-proxy`.
+  CLI and tools); Access credentials in `isb ssh-proxy`. (Workspaces and SSH
+  on orgs placed on a server: done under Release 1.0.)
 
 ## Release 1.0
 
@@ -618,7 +616,36 @@ Finishing this workstream is isb **1.0.0** (Stephan, 2026-10-03), not another 0.
 
 - [ ] Land the in-flight branches on `platform` (default org always `isb-default`, the EA theme and wordmark) and the docs pass that follows.
 - [ ] Workspaces: an explicit decision to ship 1.0 without anything left over. W5 (recipe images, the default image, first-boot scripts), herdr-backed terminal reattach and W6 (the per-org Docker exception) and ports are built.
-- [ ] Remote-server gaps: SSH and volume backups for orgs placed on a server; upgrading server agents and dedicated VMs.
+- [x] (remote-gaps) Remote-server gaps: SSH to orgs on a server (the
+  control plane bridges the SSH websocket to the agent with the caller's
+  keys in `X-Isb-Ssh-Keys`, re-checks the grant every 15 s and ends the
+  bridge; the agent reports the key sshd took; audit on both sides);
+  `isb server upgrade NAME|--all` / `server_upgrade` (an SSH server over the
+  agent's mTLS connection in chunks, a dedicated VM through incus; a root
+  helper `isb-agent-upgrade.path/.service` installed by the bootstrap checks
+  the hash, keeps `isb.prev`, swaps, restarts and rolls back without the
+  control plane's confirmation in 120 s); agent protocol 2 with `build`,
+  `arch` and the helper in the heartbeat, calls to an incompatible agent
+  refused with the reason; version skew and an Upgrade button on the Servers
+  page; `ssh_host_keys` answers a workspace's own user. **Verified** on
+  titan (scratch control plane, a dedicated-VM org `rgvm` and a throwaway VM
+  added with `isb server add` as `rgssh`/org `rgsrv`): SSH to the old agent
+  refused naming protocol 1; VM upgraded from the origin/platform build
+  through incus in 6 s, helper installed on the way; SSH server upgraded
+  A→B over mTLS in 12 s; a binary that never answers rolled back by the box
+  in 2.4 min and reported; `upgrade --all` both in 19 s; the UI's Upgrade
+  button; on both servers: workspace created, token and `$ISB_URL` inside,
+  bridge MCP/REST through the box's firewall (401 without token, 404 for
+  another org), a sibling sandbox reaped by the agent, ssh and scp (20 MB
+  both ways, hashes equal), a removed key ended a live session in 1 s and
+  a demotion to viewer in 3 s, `ssh.open/close` with fingerprint on the
+  control plane and the agent; RustFS in the org as the S3 store: hook ran,
+  snapshot, volume backup uploaded and verified, staged restores from the
+  snapshot and from the bucket at `/restore/<stamp>` (ownership kept, live
+  untouched), discard; the web terminal on the VM's workspace.
+  Left: an SSH session's own processes outlive a revoked bridge (sshd
+  ends; a non-tty command it started is orphaned, as for local instances);
+  servers added by an isb without the helper are upgraded by hand once.
 - [ ] Full CI green on `platform`, integration tests on titan, a fresh-host install test on a new hcloud box (README quick start as written).
 - [ ] PR `platform` → `main` with release notes (the user-visible changes since 0.7, and breaking changes: the default org, the crate split).
 - [ ] Bump to 1.0.0 everywhere the release process lists, for all six crates together; tag; publish (crates.io `cargo publish --workspace`, PyPI, npm) per the release process.

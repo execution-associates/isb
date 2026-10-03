@@ -313,7 +313,7 @@ function VersionPanel({ s }: { s: ServerView }) {
         onConfirm={async () => {
           setBusy(true);
           try {
-            const r = await callTool<ServerUpgrade, string>("server_upgrade", { name: s.name });
+            const r = await callTool<ServerUpgrade>("server_upgrade", { name: s.name });
             toast.success(r.upgraded ? `${s.name} upgraded` : `${s.name} unchanged`, {
               description: r.upgraded ? `isb ${r.to?.isb} (build ${shortBuild(r.to?.build)})` : r.note,
             });

@@ -292,10 +292,16 @@ impl AgentClient {
                     .as_ref()
                     .map(|b| String::from_utf8_lossy(b).into_owned())
                     .unwrap_or_default();
+                let status = r.status().as_u16();
                 let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
-                let message = v["message"].as_str().unwrap_or(&body).to_string();
+                let message = match v["message"].as_str().unwrap_or(&body) {
+                    // The handshake can end before the body is read.
+                    "" => format!("server {} refused it (HTTP {status})", self.name),
+                    m => m.to_string(),
+                };
                 match v["error"].as_str() {
                     Some("forbidden") => Error::Forbidden(message),
+                    None if matches!(status, 401 | 403) => Error::Forbidden(message),
                     code => Error::Remote {
                         code: code.unwrap_or("server_error").into(),
                         message,

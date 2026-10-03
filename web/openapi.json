@@ -10416,6 +10416,74 @@
         "x-isb-tool": "server_status"
       }
     },
+    "/api/v1/tools/server_upgrade": {
+      "post": {
+        "description": "Platform admins: upgrade a server's agent (name) or every server's (all: true) to this control plane's own build, a release (version, checked against its SHA256SUMS) or a Linux binary on this host (isb_binary, local CLI only). The binary goes over the agent's mTLS connection (a dedicated VM: through incus); a root helper on the box checks its SHA-256, installs it with the old one kept, restarts the agent, and puts the old one back unless this control plane sees the new build answer within 120 s. Each takes a minute or two; calls for the server's orgs fail while its agent restarts, its workloads keep running.",
+        "operationId": "server_upgrade",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "all": {
+                    "description": "Every server, one after another.",
+                    "type": "boolean"
+                  },
+                  "isb_binary": {
+                    "description": "A Linux isb binary on this host (local CLI only).",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "The server.",
+                    "type": "string"
+                  },
+                  "version": {
+                    "description": "The isb release to install (default: this control plane's own binary).",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Upgrade servers",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "server_upgrade"
+      }
+    },
     "/api/v1/tools/session_list": {
       "post": {
         "description": "Your signed-in browser sessions: created, last seen, expiry, user agent and address.",

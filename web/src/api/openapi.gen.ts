@@ -2884,6 +2884,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/server_upgrade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upgrade servers
+         * @description Platform admins: upgrade a server's agent (name) or every server's (all: true) to this control plane's own build, a release (version, checked against its SHA256SUMS) or a Linux binary on this host (isb_binary, local CLI only). The binary goes over the agent's mTLS connection (a dedicated VM: through incus); a root helper on the box checks its SHA-256, installs it with the old one kept, restarts the agent, and puts the old one back unless this control plane sees the new build answer within 120 s. Each takes a minute or two; calls for the server's orgs fail while its agent restarts, its workloads keep running.
+         */
+        post: operations["server_upgrade"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/session_list": {
         parameters: {
             query?: never;
@@ -10551,6 +10571,50 @@ export interface operations {
                 "application/json": {
                     /** @description The org to act in (default: default). */
                     org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    server_upgrade: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Every server, one after another. */
+                    all?: boolean;
+                    /** @description A Linux isb binary on this host (local CLI only). */
+                    isb_binary?: string;
+                    /** @description The server. */
+                    name?: string;
+                    /** @description The isb release to install (default: this control plane's own binary). */
+                    version?: string;
                 };
             };
         };
