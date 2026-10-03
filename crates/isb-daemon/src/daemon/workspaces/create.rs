@@ -134,6 +134,7 @@ fn checked(a: CreateArgs, c: &Caller) -> Result<Workspace> {
         token: None,
         setup,
         setup_state,
+        ports: vec![],
     })
 }
 

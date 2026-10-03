@@ -128,6 +128,8 @@ export interface OrgView {
   /** The server it runs on (`local` for this daemon), on a control plane. */
   server?: string;
   placement?: Placement;
+  /** Its workspace may run Docker (security.nesting): set by superadmins (org_nesting). */
+  allow_nesting?: boolean;
 }
 
 /** Where an org runs and how it is kept apart (src/daemon/servers.rs placement_view). */

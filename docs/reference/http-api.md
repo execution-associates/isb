@@ -38,6 +38,7 @@ calling REST, something following the event stream.
 | `GET /api/v1/templates/<catalog>/<id>/logo` | a template's logo, from isb's cached copy ([Templates](../guides/templates.md#logos)) |
 | `/api/v1/auth/*` | identity: sign-in, sessions, invitations, tokens, keys ([Identity API](identity-api.md)) |
 | `GET /healthz` | `{"ok": true, "isb": VERSION, "stacks": [{name, converged}]}`, without authentication |
+| any request for `<port>-<workspace>-<org>.<preview domain>` | a published workspace port's preview, proxied to the workspace; taken by `Host` ahead of everything above ([Previews through isb](../concepts/workspaces.md#previews-through-isb)) |
 | every other `GET` | the [web UI](../getting-started/web-ui.md), embedded in the binary; it never answers an API path |
 
 ## Signing in
@@ -130,8 +131,7 @@ surface, generated from what serves it rather than written by hand:
   `/healthz` (`surface`).
 
 Each operation says where agents get the same capability: `x-isb-tool`
-names the tool, and `x-isb-browser-only` says why there is none
-([API parity](parity.md)). The web UI's typed client is generated from the
+names the tool, and `x-isb-browser-only` says why there is none. The web UI's typed client is generated from the
 snapshot in `web/openapi.json`, and the tool calls and identity calls both
 go through it.
 

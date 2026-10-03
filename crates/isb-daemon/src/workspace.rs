@@ -107,6 +107,9 @@ pub struct Workspace {
     /// Where the setup script is: pending, running, succeeded or failed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub setup_state: Option<SetupState>,
+    /// The ports it publishes (`workspace_port_add`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ports: Vec<PublishedPort>,
 }
 
 /// The largest setup script accepted.
@@ -216,6 +219,25 @@ pub fn setup_due(w: &Workspace) -> bool {
             .as_ref()
             .is_some_and(|s| s.status == SetupStatus::Pending)
 }
+
+/// A port the workspace publishes: always through isb's own preview proxy
+/// (for members, on a preview origin of its own), and on `host` through
+/// the org's ingress when one is given (docs/concepts/workspaces.md#ports).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublishedPort {
+    pub port: u16,
+    /// The hostname the org's ingress serves it on, like an app's domain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    /// `host` was generated (`auto`, under sslip.io): outside the allowlist.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto: bool,
+    pub added_by: String,
+    pub added_at: u64,
+}
+
+/// How many ports one workspace may publish.
+pub const MAX_PORTS: usize = 20;
 
 /// What is kept of the workspace's token: never the token.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -796,6 +818,7 @@ mod tests {
             token: None,
             setup: None,
             setup_state: None,
+            ports: vec![],
         };
         st.put(&org, &w).unwrap();
         st.put_settings(&org, &Settings::default()).unwrap();

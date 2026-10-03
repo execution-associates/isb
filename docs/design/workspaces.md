@@ -85,8 +85,6 @@ stated in one place.
 - **No nested incus in workspaces.** Agents get sibling sandboxes through
   the org MCP instead: under the org's quota, ACL and audit, visible in the
   UI, with no incus socket inside anything.
-- **Docker inside a workspace is an exception**: `security.nesting` stays
-  refused, and only a superadmin can allow it, per org, as an org setting.
 - **The workspace's token defaults to full admin of its org** (`admin`),
   matching titan-iac's `org-admin`. The create dialog shows it and can
   narrow it.
@@ -97,22 +95,12 @@ stated in one place.
 ## Pieces
 
 W1 (the workspace and its sandboxes), W2 (the workspace as an org actor),
-W5 (workspace images) and W7 (the web UI) have shipped:
+W3 (doors and published ports), W5 (workspace images), W6 (Docker in the
+workspace) and W7 (the web UI) have shipped:
 [workspaces.md](../concepts/workspaces.md),
-[workspace-images.md](../guides/workspace-images.md) and
+[workspace-images.md](../guides/workspace-images.md),
+[security.md](../concepts/security.md#the-docker-exception) and
 [web-ui.md](../getting-started/web-ui.md#the-workspace).
-
-### W3. Doors
-
-SSH over the daemon's websocket ([ssh.md](../guides/ssh.md)), `isb workspace ssh`
-and `ssh-config`, the web terminal on any instance with tabs, terminal
-reattach through herdr when the image has it, and the Connect panel's SSH
-and herdr lines have shipped. Left:
-
-- **Ports**: the workspace can publish ports through the org's ingress (a dev
-  server preview at `<port>.workspace.<domain>`), with the same Access and
-  domain rules as apps; the workspace gains a `ports` field and the page a
-  Ports tab.
 
 ### W4. The home: snapshots, backups, restore
 
@@ -132,12 +120,6 @@ Recipe-script images, isb's default recipe (`isb-workspace`) and first-boot
 scripts have shipped. Left: a recipe kept in a repository and rebuilt on
 push, and workspace templates (a recipe plus a first-boot script) in the
 template catalog.
-
-### W6. The Docker exception
-
-An org setting `allow_nesting` (superadmin only, audited) lets the
-workspace, and only the workspace, run with `security.nesting=true` for
-Docker. Sandboxes never get it. The org page shows it as a warning badge.
 
 ## Migrating a titan-iac org
 
@@ -191,5 +173,5 @@ Per org, attended, one at a time:
 
 ## Order of work
 
-W6, then W3's ports. Each lands with its docs,
+W5's recipe repositories and templates, then W4. Each lands with its docs,
 tests and a live check on titan, like the platform phases did.

@@ -37,7 +37,7 @@ use crate::client::{Client, encode_segment};
 use crate::error::{Error, Result};
 use crate::org::OrgId;
 use crate::sandbox::Sandbox;
-use crate::server::http::{Handler, Peer, Request, Response, Shutdown};
+use crate::server::http::Shutdown;
 use crate::server::{Caller, Healthz, Listener, Registry, Tool};
 use crate::workspace::{self as ws, Settings, Store, TokenMeta, Workspace};
 
@@ -46,10 +46,18 @@ mod create;
 mod herdr;
 mod image_tools;
 mod images;
+mod nesting;
+mod ports;
+mod preview;
+mod proxy;
+mod settings;
 mod setup;
 use bridge::{bridge_handler, gateway};
 use create::{check_fields, check_size, token_role, workspace_create};
 pub(super) use herdr::{Herdr, attach_argv};
+pub(super) use ports::start as start_ports;
+pub(super) use preview::route as preview_route;
+pub use preview::{PreviewBase, Previews};
 
 /// The bridge listener's port when `--workspace-mcp-port` is not given.
 pub const DEFAULT_PORT: u16 = 8481;
@@ -170,6 +178,8 @@ pub struct Workspaces {
     /// Create, rebuild and delete one at a time.
     lock: Mutex<()>,
     started: u64,
+    /// Published ports' previews through isb.
+    pub previews: Previews,
 }
 
 impl Workspaces {
@@ -201,6 +211,7 @@ impl Workspaces {
             serve: OnceLock::new(),
             lock: Mutex::new(()),
             started: now(),
+            previews: Previews::default(),
         });
         w.load_tokens();
         w
@@ -537,7 +548,10 @@ impl Workspaces {
             w.root_size = Some(DEFAULT_ROOT_SIZE.into());
         }
         let w = &w;
-        let spec = Self::spec(org, w, &pool)?;
+        let mut spec = Self::spec(org, w, &pool)?;
+        if nesting::org_allows(&self.client, org) {
+            nesting::apply(&mut spec);
+        }
         let base = std::env::temp_dir();
         let (_sb, _) = Sandbox::connect_or_create_with_base(
             &oc,
@@ -1105,6 +1119,12 @@ fn view(d: &Daemon, org: &OrgId, w: &Workspace, sessions: bool) -> Value {
         "env": ["ISB_URL", "ISB_ORG", "ISB_TOKEN", "ISB_WORKSPACE"],
     });
     v["sandboxes"] = json!(sandboxes);
+    let allowed = nesting::org_allows(&d.client, org);
+    v["nesting"] = json!({
+        "allowed": allowed,
+        "active": info.as_ref().is_some_and(|i| nesting::nests(&i.config)),
+        "warning": allowed.then_some(nesting::WARNING),
+    });
     v
 }
 
@@ -1534,93 +1554,6 @@ fn workspace_token_rotate(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     }))
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SettingsArgs {
-    #[serde(default)]
-    #[allow(dead_code)]
-    org: Option<String>,
-    #[serde(default)]
-    max_workspaces: Option<u32>,
-    #[serde(default)]
-    sandbox_expiry: Option<String>,
-    #[serde(default)]
-    sandbox_idle: Option<String>,
-    /// `""` clears it.
-    #[serde(default)]
-    home_pool: Option<String>,
-    /// `volume`, `host`, or `""` (the daemon's default).
-    #[serde(default)]
-    home_kind: Option<String>,
-}
-
-fn workspace_settings(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
-    let org = super::arg_org(&a)?;
-    let a: SettingsArgs = args(a)?;
-    let wsm = &d.workspaces;
-    let mut s = wsm.store.settings(&org)?;
-    let changes = a.max_workspaces.is_some()
-        || a.sandbox_expiry.is_some()
-        || a.sandbox_idle.is_some()
-        || a.home_pool.is_some()
-        || a.home_kind.is_some();
-    if changes {
-        let pool_change = a
-            .home_pool
-            .as_ref()
-            .is_some_and(|p| Some(p.as_str()).filter(|p| !p.is_empty()) != s.home_pool.as_deref());
-        let kind_change = a
-            .home_kind
-            .as_ref()
-            .is_some_and(|k| Some(k.as_str()).filter(|k| !k.is_empty()) != s.home_kind.as_deref());
-        if a.max_workspaces.is_some_and(|m| m != s.max_workspaces) || pool_change || kind_change {
-            let platform = match c {
-                Caller::Local { .. } | Caller::Superadmin(_) => true,
-                Caller::User { principal } => principal.platform_admin,
-                _ => false,
-            };
-            if !platform {
-                return Err(Error::Forbidden(
-                    "max_workspaces, home_pool and home_kind are for platform admins".into(),
-                ));
-            }
-        }
-        require(c, &org, Role::Admin, "changing workspace settings")?;
-        if let Some(m) = a.max_workspaces {
-            s.max_workspaces = m;
-        }
-        if let Some(e) = a.sandbox_expiry {
-            s.sandbox_expiry = e.trim().to_string();
-        }
-        if let Some(i) = a.sandbox_idle {
-            s.sandbox_idle = i.trim().to_string();
-        }
-        if let Some(k) = a.home_kind {
-            s.home_kind = match k.trim() {
-                "" => None,
-                "volume" | "host" => Some(k.trim().to_string()),
-                other => {
-                    return Err(Error::invalid(format!(
-                        "home_kind {other:?}: volume, host, or \"\" for the daemon's default"
-                    )));
-                }
-            };
-        }
-        if let Some(p) = a.home_pool {
-            let p = p.trim().to_string();
-            if p.is_empty() {
-                s.home_pool = None;
-            } else {
-                pool_driver(&d.client, &p)
-                    .map_err(|e| Error::invalid(format!("home_pool {p}: {e}")))?;
-                s.home_pool = Some(p);
-            }
-        }
-        wsm.store.put_settings(&org, &s)?;
-    }
-    Ok(json!({"org": org.as_str(), "settings": s}))
-}
-
 #[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
@@ -1817,7 +1750,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
             &[]
         ),
         write,
-        workspace_settings
+        settings::workspace_settings
     );
     tool!(
         "workspace_setup_run",
@@ -1852,6 +1785,8 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
         herdr::workspace_terminal_update
     );
     image_tools::register(r, d.clone())?;
+    nesting::register(r, d.clone())?;
+    ports::register(r, d)?;
     Ok(())
 }
 
@@ -1918,6 +1853,7 @@ mod tests {
             serve: OnceLock::new(),
             lock: Mutex::new(()),
             started: 0,
+            previews: Previews::default(),
         }
     }
 

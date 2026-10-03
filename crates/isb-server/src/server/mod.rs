@@ -19,6 +19,10 @@
 //!   callers; with Access configured they sit behind it, as `/mcp` does.
 //! - [`Listener::public_routes`] are served ahead of Access, for requests
 //!   that carry their own credential (app webhooks, signed by the sender).
+//! - [`Listener::preview`] sees every request first, and takes the ones
+//!   addressed to a preview host (a workspace port's own origin), which it
+//!   authenticates itself; nothing of isb's (UI, API, headers) is served
+//!   on those hosts.
 
 pub mod access;
 pub use isb_core::serve_client as client;
@@ -91,6 +95,8 @@ pub struct Listener {
     /// Routes that authenticate every request themselves and are served
     /// even with Access configured (webhooks, signed by their sender).
     pub public_routes: Option<Routes>,
+    /// Requests for preview hosts, by `Host`, ahead of everything else.
+    pub preview: Option<Routes>,
     /// Authentication and authorization the embedder supplies.
     pub hooks: mcp::Hooks,
 }
@@ -131,6 +137,7 @@ impl Listener {
             tailnet: false,
             routes: None,
             public_routes: None,
+            preview: None,
             hooks: mcp::Hooks::default(),
         }
     }
@@ -150,6 +157,13 @@ impl Listener {
     /// carries its own credential.
     pub fn public_routes(mut self, r: Routes) -> Self {
         self.public_routes = Some(r);
+        self
+    }
+
+    /// Let `r` take requests by their `Host` before anything else: it
+    /// answers only for hosts that are its own.
+    pub fn preview(mut self, r: Routes) -> Self {
+        self.preview = Some(r);
         self
     }
 
@@ -284,7 +298,13 @@ pub fn handler(l: &Listener, registry: Arc<Registry>, healthz: Healthz) -> Handl
         public_routes: l.public_routes.clone(),
         hooks: l.hooks.clone(),
     };
-    Arc::new(move |r: &http::Request| ep.handle(r))
+    let preview = l.preview.clone();
+    Arc::new(move |r: &http::Request| {
+        if let Some(resp) = preview.as_ref().and_then(|p| p(r)) {
+            return resp;
+        }
+        ep.handle(r)
+    })
 }
 
 /// Serve `handler` on a private (RFC 1918) address that is not loopback,

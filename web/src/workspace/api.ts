@@ -67,6 +67,33 @@ export interface Workspace {
   /** The first-boot script, run once as root after each create or rebuild. */
   setup?: string | null;
   setup_state?: { status: "pending" | "running" | "succeeded" | "failed"; at: number; runs: number; exit_code?: number | null; message?: string | null } | null;
+  /** Published ports (workspace_port_add). */
+  ports?: { port: number; host?: string | null; auto?: boolean; added_by: string; added_at: number }[];
+  /** Whether its org lets it run Docker (security.nesting), and whether the machine has it now. */
+  nesting?: { allowed: boolean; active: boolean; warning: string | null };
+}
+
+/** One published port as workspace_port_list shows it. */
+export interface WorkspacePort {
+  port: number;
+  /** The ingress hostname, when it has one. */
+  host?: string | null;
+  auto?: boolean;
+  added_by: string;
+  added_at: number;
+  /** The preview's own host label, `<port>-<workspace>-<org>`. */
+  preview_host: string;
+  url?: string | null;
+  domain?: { host: string; state: string; cert: string; url?: string | null; message?: string | null }[];
+}
+
+export interface PortList {
+  org: string;
+  name: string;
+  ports: WorkspacePort[];
+  /** This server runs an ingress, so ports can have hostnames. */
+  ingress: boolean;
+  preview_domain: boolean;
 }
 
 /** An image a workspace can be made from: local to this host, or remote. */

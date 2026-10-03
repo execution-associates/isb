@@ -491,9 +491,17 @@ pub fn parse_disk_metrics(text: &str) -> BTreeMap<(String, String), (u64, u64)> 
 }
 
 /// First global address, IPv4 preferred, on any interface but loopback.
+/// The instance's address: `eth0`'s first (its NIC on the org's bridge),
+/// then any other interface's. A bridge made inside the instance, such as
+/// Docker's `docker0`, sorts before `eth0` but reaches nothing.
 fn first_ip(state: &Value) -> Option<String> {
     let mut v6 = None;
-    for (ifname, n) in state["network"].as_object()? {
+    let nets = state["network"].as_object()?;
+    let eth0 = nets.get_key_value("eth0");
+    for (ifname, n) in eth0
+        .into_iter()
+        .chain(nets.iter().filter(|(k, _)| *k != "eth0"))
+    {
         if ifname == "lo" {
             continue;
         }
@@ -546,6 +554,19 @@ fn parse_meminfo(s: &str) -> (u64, u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_address_is_eth0s_even_with_docker_inside() {
+        let addr = |a: &str| serde_json::json!({"addresses": [{"family": "inet", "scope": "global", "address": a}]});
+        let state = serde_json::json!({"network": {
+            "docker0": addr("172.17.0.1"),
+            "eth0": addr("10.81.189.151"),
+            "lo": addr("127.0.0.1"),
+        }});
+        assert_eq!(first_ip(&state).as_deref(), Some("10.81.189.151"));
+        let other = serde_json::json!({"network": {"enp5s0": addr("10.0.0.9")}});
+        assert_eq!(first_ip(&other).as_deref(), Some("10.0.0.9"));
+    }
     use serde_json::json;
 
     #[test]

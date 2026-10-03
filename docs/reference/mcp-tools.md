@@ -47,8 +47,8 @@ fills it in and refuses any other value. Then, in order:
   `ingress_status`) are open to anyone signed in and show only the caller's
   orgs. `audit_list` and `history_query` filter themselves the same way.
 - **Superadmin tools** (`host_inventory`, `host_policy`,
-  `superadmin_token_list`, `superadmin_token_revoke`) are refused to
-  everyone else, platform admins included.
+  `superadmin_token_list`, `superadmin_token_revoke`, `org_nesting`) are
+  refused to everyone else, platform admins included.
 - **API token scopes** narrow a token below its role: `read` (read-only
   tools), `deploy` (`read` plus `stack_deploy`, `stack_redeploy`,
   `stack_rollback`, `stack_scale`, `app_deploy`, `app_rollback`,
@@ -108,6 +108,10 @@ means every member of the org, *member* means members, admins and owners.
 | `workspace_image_logs` | platform admin | A build's state and log lines (`since`, `wait`). |
 | `workspace_image_list` | platform admin | The images isb built, recent builds, and whether the default image is current. |
 | `workspace_image_remove` | platform admin | Remove an image isb built (never another). |
+| `workspace_port_list` | member | The published ports: each with its preview host, and its ingress hostname, URL and state. |
+| `workspace_port_add` | member | Publish `port`; with `host` (a hostname, `default` or `auto`) also through the org's ingress. |
+| `workspace_port_remove` | member | Stop publishing `port`. |
+| `workspace_port_open` | member | A one-time link (60 s) to the port's preview; `origin` when the daemon has no `--preview-domain`. |
 
 ## Secrets
 
@@ -320,8 +324,7 @@ platform admin) touches an owner or makes one.
 
 Signing in (passwords, passkeys, providers), sign-up, password resets,
 accepting an invitation and changing a way in stay in the browser, and
-superadmin tokens are minted on the host only; [API parity](parity.md)
-says why for each.
+superadmin tokens are minted on the host only.
 
 ## Superadmins
 
@@ -333,3 +336,4 @@ says why for each.
 | `host_policy` | How the daemon serves: listen addresses, Access, the remote tool policy, what remote specs may ask for, and each superadmin source with its allow list and token count. |
 | `superadmin_token_list` | Superadmin tokens' metadata, never the token. |
 | `superadmin_token_revoke` | Revoke one by `id`. Minting is `isb token create NAME --superadmin`, on the host only. |
+| `org_nesting` | Read (`org`) or set (`allow_nesting`) whether the org's workspace may run Docker with `security.nesting` ([The Docker exception](../concepts/security.md#the-docker-exception)). Turning it off is refused while the workspace runs with nesting. |

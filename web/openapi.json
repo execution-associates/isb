@@ -8011,6 +8011,69 @@
         "x-isb-tool": "org_list"
       }
     },
+    "/api/v1/tools/org_nesting": {
+      "post": {
+        "description": "Superadmins only: whether the org's workspace (and nothing else in the org) may run with security.nesting, so Docker works inside it. allow_nesting true or false changes it; leaving it out reads it. Turning it on applies at the workspace's next start (restart_needed says so); turning it off is refused while the workspace runs with nesting: stop it first. Sandboxes, apps and builds never get nesting. It exposes more of the host kernel to the workspace (docs/concepts/security.md#the-docker-exception).",
+        "operationId": "org_nesting",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "allow_nesting": {
+                    "description": "true allows it, false blocks it; leave it out to read.",
+                    "type": "boolean"
+                  },
+                  "org": {
+                    "description": "The org.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "org"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Allow Docker in an org's workspace",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "org_nesting"
+      }
+    },
     "/api/v1/tools/org_update": {
       "post": {
         "description": "Platform admins: change an org's limits, per-instance defaults or egress exceptions. Fields left out keep their value; `egress` replaces the list. A limit cannot be lifted once set (as with `isb org create`).",
@@ -13715,6 +13778,282 @@
           "tools"
         ],
         "x-isb-tool": "workspace_list"
+      }
+    },
+    "/api/v1/tools/workspace_port_add": {
+      "post": {
+        "description": "Publish a port of the workspace (a dev server). Every published port can be previewed through isb (workspace_port_open). With `host` it is also served through the org's ingress like an app's domain, under the same allowlist, claims, certificates and Cloudflare Tunnel: a hostname, `default` (<port>-<workspace>.<the org's first domain>) or `auto` (a generated sslip.io name). A host is public unless something like Cloudflare Access guards it. Publishing a port again replaces its host. Org members and above.",
+        "operationId": "workspace_port_add",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "host": {
+                    "description": "A hostname within the org's domains, default, or auto. Leave it out to preview through isb only.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "port": {
+                    "description": "The port a server listens on inside the workspace (on 0.0.0.0, not 127.0.0.1).",
+                    "maximum": 65535,
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "port"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Publish a workspace port",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "workspace_port_add"
+      }
+    },
+    "/api/v1/tools/workspace_port_list": {
+      "post": {
+        "description": "The ports the workspace publishes: each with its preview host, and its ingress hostname, URL and state when it has one. Org members and above.",
+        "operationId": "workspace_port_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List the workspace's ports",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "workspace_port_list"
+      }
+    },
+    "/api/v1/tools/workspace_port_open": {
+      "post": {
+        "description": "A one-time link (good for 60 seconds) that opens a published port's preview in the caller's browser, on the preview's own origin behind isb's sign-in. Needs isb serve --preview-domain, or `origin` naming a loopback isb URL (the previews are then <port>-<workspace>-<org>.localhost). Org members and above.",
+        "operationId": "workspace_port_open",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "origin": {
+                    "description": "The isb URL the browser uses (window.location.origin), when isb has no --preview-domain.",
+                    "type": "string"
+                  },
+                  "port": {
+                    "description": "The port a server listens on inside the workspace (on 0.0.0.0, not 127.0.0.1).",
+                    "maximum": 65535,
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "port"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Open a workspace port's preview",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "workspace_port_open"
+      }
+    },
+    "/api/v1/tools/workspace_port_remove": {
+      "post": {
+        "description": "Stop publishing a port: its ingress route and its previews end at once. Org members and above.",
+        "operationId": "workspace_port_remove",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "port": {
+                    "description": "The port a server listens on inside the workspace (on 0.0.0.0, not 127.0.0.1).",
+                    "maximum": 65535,
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "port"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Unpublish a workspace port",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "workspace_port_remove"
       }
     },
     "/api/v1/tools/workspace_rebuild": {

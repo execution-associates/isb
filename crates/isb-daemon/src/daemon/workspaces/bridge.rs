@@ -2,6 +2,7 @@
 //! bearer tokens, `/orgs/<org>/...`), and the gateway address it listens on.
 
 use super::*;
+use crate::server::http::{Handler, Peer, Request, Response};
 
 /// `10.64.3.1/24` -> the gateway and the subnet as (network, mask).
 pub(super) fn gateway(cidr: &str) -> Option<(Ipv4Addr, (u32, u32))> {
@@ -69,6 +70,7 @@ pub(super) fn bridge_handler(org: OrgId, (net, mask): (u32, u32), inner: Handler
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     fn req(peer: &str, path: &str, auth: Option<&str>) -> Request {
         let mut headers = vec![("Host".to_string(), "10.1.2.1:8481".to_string())];

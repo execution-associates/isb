@@ -33,6 +33,9 @@ web: https://web-shop-default.203-0-113-7.sslip.io/ (serving, cert issued, 2 ups
 
 Apps take the same list (the Domains tab in the web UI, or `--domain` on
 `isb app create`; [Deploy apps](deploy-apps.md)). `isb up` ignores `domains`.
+A workspace's published ports can have hostnames too, under the same rules
+([Ports](../concepts/workspaces.md#hostnames-through-the-ingress)): they
+show in `isb ingress` as stack `workspace:<name>`, service `port-<port>`.
 
 ## `domains:`
 

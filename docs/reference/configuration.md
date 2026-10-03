@@ -100,6 +100,7 @@ See [Domains and ingress](../guides/domains.md).
 | `--workspace-mcp-port` | `ISB_WORKSPACE_MCP_PORT` | `8481` | where each org's workspace reaches the org-bound MCP, on its bridge address; must differ from the tunnel port |
 | `--workspace-pool` | `ISB_WORKSPACE_POOL` | the org's default pool | the storage pool new workspace home volumes go in (an org's `home_pool` wins) |
 | `--workspace-home-root` | `ISB_WORKSPACE_HOME_ROOT` | off | make workspace homes host folders, `<DIR>/<org>/home`, instead of volumes |
+| `--preview-domain` | `ISB_PREVIEW_DOMAIN` | off (`.localhost` when isb is reached on loopback) | `[http(s)://]DOMAIN[:PORT]` whose subdomains reach the listener: workspace port previews get `<port>-<workspace>-<org>.DOMAIN` |
 
 See [Workspaces](../concepts/workspaces.md).
 

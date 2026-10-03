@@ -193,6 +193,12 @@ pub enum WorkspaceCmd {
         #[arg(long)]
         json: bool,
     },
+    /// The ports the workspace publishes: previews through isb, and
+    /// hostnames through the org's ingress (docs/concepts/workspaces.md#ports).
+    Port {
+        #[command(subcommand)]
+        cmd: PortCmd,
+    },
     /// Push a sandbox's expiry out.
     Extend {
         sandbox: String,
@@ -203,6 +209,105 @@ pub enum WorkspaceCmd {
         #[arg(long)]
         idle_timeout: Option<String>,
     },
+}
+
+#[derive(Subcommand)]
+pub enum PortCmd {
+    /// The published ports.
+    #[command(alias = "list")]
+    Ls {
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Publish a port: previewed through isb, and with --host served
+    /// through the org's ingress (a hostname, `default` or `auto`).
+    Add {
+        port: u16,
+        #[arg(long)]
+        host: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Stop publishing a port.
+    #[command(alias = "remove")]
+    Rm {
+        port: u16,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// A one-time link that opens the port's preview in a browser (60 s).
+    Open {
+        port: u16,
+        /// isb's URL as the browser reaches it (when isb serve has no
+        /// --preview-domain), e.g. http://127.0.0.1:8192.
+        #[arg(long)]
+        origin: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+    },
+}
+
+fn port(org: &Option<String>, cmd: PortCmd) -> Result<u8> {
+    let c = |tool: &str, args: Value| call(tool, with_org(org, args), SHORT);
+    match cmd {
+        PortCmd::Ls { name, json } => {
+            let mut a = json!({});
+            opt(&mut a, "name", name);
+            let v = c("workspace_port_list", a)?;
+            if json {
+                print_json(&v);
+                return Ok(0);
+            }
+            let mut rows = vec![vec![
+                "PORT".into(),
+                "PREVIEW HOST".into(),
+                "URL".into(),
+                "STATE".into(),
+            ]];
+            for p in v["ports"].as_array().into_iter().flatten() {
+                rows.push(vec![
+                    p["port"].to_string(),
+                    p["preview_host"].as_str().unwrap_or("-").into(),
+                    p["url"].as_str().unwrap_or("-").into(),
+                    p["domain"][0]["state"].as_str().unwrap_or("-").into(),
+                ]);
+            }
+            table(rows);
+        }
+        PortCmd::Add { port, host, name } => {
+            let mut a = json!({"port": port});
+            opt(&mut a, "host", host);
+            opt(&mut a, "name", name);
+            println!(
+                "{}",
+                c("workspace_port_add", a)?["message"]
+                    .as_str()
+                    .unwrap_or("published")
+            );
+        }
+        PortCmd::Rm { port, name } => {
+            let mut a = json!({"port": port});
+            opt(&mut a, "name", name);
+            println!(
+                "{}",
+                c("workspace_port_remove", a)?["message"]
+                    .as_str()
+                    .unwrap_or("unpublished")
+            );
+        }
+        PortCmd::Open { port, origin, name } => {
+            let mut a = json!({"port": port});
+            opt(&mut a, "origin", origin);
+            opt(&mut a, "name", name);
+            println!(
+                "{}",
+                c("workspace_port_open", a)?["url"].as_str().unwrap_or("")
+            );
+        }
+    }
+    Ok(0)
 }
 
 /// The org and instance of the org's workspace (the one named, else its
@@ -612,6 +717,7 @@ pub fn workspace(org: &Option<String>, cmd: WorkspaceCmd) -> Result<u8> {
             args.targets = vec![format!("{o}/{w}")];
             super::ssh::config(&None, args)
         }
+        WorkspaceCmd::Port { cmd } => port(org, cmd),
         WorkspaceCmd::Extend {
             sandbox,
             by,

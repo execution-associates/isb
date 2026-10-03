@@ -23,7 +23,8 @@ org's MCP and reach nothing outside it. Heavy or risky work goes to
 Both live in the org's incus project, on its network, under its quotas and
 ACL ([Orgs](orgs.md)). There is no nested incus anywhere: an agent in the
 workspace asks the daemon for a sandbox, and the daemon makes it beside the
-workspace.
+workspace. Docker inside the workspace is an exception a superadmin can
+allow per org ([below](#docker-in-the-workspace)).
 
 ```text
 isb workspace create [--image IMAGE] [--name N] [--user dev] [--cpus N] [--memory 8GiB]
@@ -44,6 +45,11 @@ isb workspace settings [--max-workspaces N] [--sandbox-expiry 24h] [--sandbox-id
                        [--home-kind volume|host] [--home-pool POOL]
 isb workspace sandboxes [--json]             creator, age, expiry, resources
 isb workspace extend SANDBOX [--by 24h] [--idle-timeout 4h|none]
+isb workspace port ls [--json]                published ports, preview hosts, URLs
+isb workspace port add PORT [--host HOST|default|auto]
+isb workspace port rm PORT
+isb workspace port open PORT [--origin URL]   a one-time preview link
+isb org nesting ORG [on|off]                  superadmins: Docker in the workspace
 isb workspace ssh-config [--name N] ...      the Host block (isb ssh-config for it)
 isb workspace ssh [--name N] ...             the ProxyCommand (isb ssh-proxy for it)
 ```
@@ -212,8 +218,10 @@ asked at most every 30 seconds).
 | Start, stop, restart; the terminal and SSH (attach) | | yes | yes |
 | Create, change, rebuild, delete; rotate the token | | | yes |
 | Sandbox defaults (`workspace_settings`) | | | yes |
+| Publish, list, remove and open ports | | yes | yes |
 | `max_workspaces`, `home_kind`, `home_pool` | platform admins only | | |
 | `home_bind` (a host path per workspace) | superadmins only | | |
+| `allow_nesting` (Docker in the workspace) | superadmins only | | |
 
 ## The workspace is an org actor
 
@@ -274,6 +282,99 @@ forwards the `workspace_*` tools like any org call.
 A `default` org that is incus' own `default` project (no org network) has no
 workspace: create one in an org of its own.
 
+## Ports
+
+A dev server in the workspace (a Vite app, `python3 -m http.server`)
+becomes reachable by publishing its port. It must listen on `0.0.0.0`
+inside the workspace (`vite --host`), since isb reaches it on the
+workspace's address on the org's bridge, not on its loopback.
+
+```sh
+isb --org acme workspace port add 5173                   # preview through isb
+isb --org acme workspace port add 3000 --host default    # also 3000-workspace.<the org's first domain>
+isb --org acme workspace port ls
+```
+
+Every published port can be **previewed through isb**, for the org's
+members; a port with a **host** is also served through the org's ingress,
+like an app's domain. Members and above publish, list, remove and open
+ports; each add and remove is in the audit log and the history.
+
+### Hostnames through the ingress
+
+`--host` (`host` on `workspace_port_add`) puts the port on a hostname
+through the org's ingress, with everything an app's domain gets
+([Domains and ingress](../guides/domains.md)): the org's domain allowlist,
+first claim wins (a hostname an app or another org holds is refused),
+HTTPS with a certificate from Caddy, or the org's Cloudflare Tunnel with
+its rules and DNS records kept by isb. `host` is a hostname, `default`
+(`<port>-<workspace>.<the first suffix in the org's --allow-domain>`) or
+`auto` (`<port>-<workspace>-<org>.<a-b-c-d>.sslip.io`). It needs an
+ingress on the server (`--ingress-http`, `--ingress-https` or
+`--ingress-tunnels`). Publishing a port again replaces its host.
+
+**Such a hostname is public**, as an app's is: anyone who knows it reaches
+the dev server. Put Cloudflare Access in front of it (the tunnel provider)
+for a private preview, or use the preview through isb, which needs an isb
+sign-in.
+
+The route follows the workspace's address, so a restart or rebuild keeps
+it working; a stopped workspace's hostname answers 503.
+
+### Previews through isb
+
+`isb workspace port open PORT` (the **Open** button on the Ports tab,
+`workspace_port_open`) gives a one-time link to the port's preview, served
+by `isb serve` itself and proxied to the workspace: it works on a host with
+no domain and no ingress, and only for the org's members.
+
+Each preview has an origin of its own, the host
+`<port>-<workspace>-<org>` under the preview domain:
+
+- `isb serve --preview-domain DOMAIN` (`ISB_PREVIEW_DOMAIN`): a domain
+  whose subdomains reach the daemon's listener, such as a wildcard DNS name
+  routed through the tunnel to it (`*.preview.example.com`): previews are
+  `https://<port>-<workspace>-<org>.preview.example.com`;
+- without it, when isb is reached on loopback (`http://127.0.0.1:8192`,
+  `http://localhost:8192`), previews are
+  `http://<port>-<workspace>-<org>.localhost:8192`: browsers resolve
+  `*.localhost` to loopback by themselves, so nothing needs setting up.
+  Elsewhere `workspace_port_open` refuses and names the flag.
+
+Opening a preview: the link carries a random token, good once and for 60
+seconds, for that preview's host and the caller. Spending it sets a cookie
+for that host alone (`isb_preview`: HttpOnly, `SameSite=Strict`, 8 hours)
+and moves on to the app. Every request then needs the cookie; the caller's
+membership is checked again every minute, and unpublishing the port ends
+its previews at once. Websocket upgrades pass through, so dev servers' hot
+reload works. Why it is built this way:
+[Security](security.md#workspace-port-previews).
+
+Limits: one request per connection (isb's server closes each), request
+bodies up to 4 MiB, no chunked uploads. A dev server that checks the
+`Host` header must allow the preview host: Vite allows `*.localhost` by
+itself; with `--preview-domain`, add it to `server.allowedHosts`.
+
+## Docker in the workspace
+
+The workspace runs unprivileged without nesting, like everything else in
+the org, so Docker does not work in it. A superadmin can allow it per org:
+
+```sh
+isb org nesting acme on          # on the host (the unix socket), or a superadmin token
+isb --org acme workspace restart --yes
+```
+
+The org's workspace, and nothing else in the org, then runs with
+`security.nesting` and the system-call interception unprivileged Docker
+needs; sandboxes, apps, builds and stack replicas are refused it whoever
+asks. Turning it on applies from the workspace's next start; a workspace
+created or rebuilt meanwhile has it from the start. Turning it off is
+refused while the workspace runs with nesting (its containers live on it):
+stop it, turn nesting off, start it. The workspace and org settings pages
+show the warning badge **Nesting allowed**. What it costs:
+[The Docker exception](security.md#the-docker-exception).
+
 ## Sandboxes are short-lived
 
 Every sandbox made through `isb serve` (`sandbox_create`) gets deadlines,
@@ -323,6 +424,11 @@ and `sandbox_remove` of it are refused.
 | `workspace_settings` | members read, admins change | `sandbox_expiry`, `sandbox_idle`; `max_workspaces`, `home_kind`, `home_pool` (platform admins) |
 | `sandbox_create` | members | takes `expires`, `idle_timeout` |
 | `sandbox_extend` | the creator, admins | `name`, `by`, `idle_timeout` |
+| `workspace_port_list` | members | the published ports: preview host, ingress hostname, URL and state |
+| `workspace_port_add` | members | `port`, `host` (a hostname, `default`, `auto`; none: a preview through isb only) |
+| `workspace_port_remove` | members | `port` |
+| `workspace_port_open` | members | `port`, `origin` (the isb URL the browser uses, without `--preview-domain`): a one-time link |
+| `org_nesting` | superadmins | `org`, `allow_nesting` (left out: reads it) |
 
 The same as a REST resource, per org:
 
@@ -341,5 +447,5 @@ Under the org's state directory (`<state>/workspaces/` for the default org,
 `<state>/orgs/<org>/workspaces/` for the others), 0600: `<name>.json` (the
 definition, the token's id and hash, the home's pool or host folder),
 `<name>.token.age` (the token, encrypted to the daemon's key),
-`settings.json`. A volume home's snapshot schedule and backups are the
+`settings.json`. A workspace's published ports are in its definition. A volume home's snapshot schedule and backups are the
 volume's ([Volumes](../guides/volumes.md)).

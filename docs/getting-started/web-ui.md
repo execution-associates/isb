@@ -150,6 +150,8 @@ what an event in its org touches.
   an org in a dedicated VM, a switch deletes the VM too); everyone else sees
   them read-only. Moving an org is not supported, and the page says so with
   the manual procedure ([moving an org](../concepts/placement.md#moving-an-org)).
+  **Docker in the workspace** shows whether the org's workspace may nest,
+  with the warning badge when it may; superadmins get the switch.
 - **History** (`/orgs/ORG/history`, every member): what happened in the org
   ([history](../operations/history.md)): the controller's events, incus
   changes made through isb or not (with who requested them), and, for owners
@@ -174,7 +176,9 @@ build's log and picks the image when it is published ([Workspace
 images](../guides/workspace-images.md)). Members and viewers see the form
 read-only with why.
 
-The header shows the status, image, user, live sessions and sandbox count.
+The header shows the status, image, user, live sessions and sandbox count,
+and the warning badge **Nesting allowed** when a superadmin lets the
+workspace run Docker ([The Docker exception](../concepts/security.md#the-docker-exception)).
 Members get Start, Stop and Restart; admins also Rebuild (type the name) and
 Delete (type the name; a switch keeps the home volume). Each disruptive
 action first asks the daemon without `confirm` and shows its answer, the
@@ -185,6 +189,7 @@ live sessions it would end, in the dialog; confirming calls again with
 |---|---|
 | **Terminal** | Shells as tabs: **New** opens another as the workspace user in its home; tabs you are not looking at stay connected. With herdr in the workspace each tab is a herdr session: a reload or a dropped connection reattaches to the same shell, and closing a tab asks whether to detach or end it; without herdr, closing a tab or leaving the page ends its shell. The tab says which ([The web terminal](../concepts/workspaces.md#the-web-terminal)). A sandbox's **Shell** (Sandboxes tab) opens as its own tab, as root. Not for viewers. |
 | **Connect** | The workspace's MCP credential: role, created, last used, path inside (`/run/isb/token`), id, audit actor `workspace`, and Rotate for admins (no token value is ever shown); the variables login shells get; MCP client snippets for use inside the workspace (`$ISB_URL/orgs/ORG/mcp`, `$ISB_TOKEN`); SSH and herdr: `isb key add`, `isb workspace ssh-config`, `ssh NAME.ORG.isb` and the `herdr machine add` line ([SSH](../guides/ssh.md)). |
+| **Ports** | The published ports: each with its preview host, and its hostname, URL and ingress state when it has one; **Open** opens the preview through isb in a new tab (a one-time link, [Previews through isb](../concepts/workspaces.md#previews-through-isb)), the bin unpublishes it, and the form publishes a port, with an optional hostname (`default`, `auto` or a name) when the server runs an ingress. Not for viewers. |
 | **Resources** | CPU, memory, disk, address, last activity, sessions, a CPU sparkline; admins resize CPUs, memory and the root disk (confirmed). |
 | **Home** | The volume, pool and its driver, size, mount path (or the host folder); admins grow it (confirmed). For a volume home, the Volume panel: snapshots, backups and staged restores, with a warning on a pool where every snapshot is a full copy. |
 | **Environment** | `KEY=VALUE` variables for login shells (`ISB_*` refused) and the org secrets delivered as files; admins save, which delivers them again. |

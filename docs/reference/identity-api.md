@@ -205,8 +205,7 @@ token) cannot change accounts, tokens, keys, invitations or members.
 
 The same operations are [account tools](mcp-tools.md#accounts) for agents
 (`whoami`, `member_*`, `invitation_*`, `token_*`, `ssh_key_*`, `session_*`,
-`user_*`), with the same rules; the sign-in flows stay browser-only
-([API parity](parity.md)). Every endpoint below is in `GET
+`user_*`), with the same rules; the sign-in flows stay browser-only. Every endpoint below is in `GET
 /api/v1/openapi.json` with its body and answer schemas, generated from the
 router's own route table.
 

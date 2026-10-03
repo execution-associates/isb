@@ -114,6 +114,8 @@ pub struct ServeConfig {
     /// `--workspace-home-root`: workspace homes are host folders
     /// `<root>/<org>/home` instead of managed volumes.
     pub workspace_home_root: Option<PathBuf>,
+    /// `--preview-domain`: where workspace ports' previews get their origins.
+    pub preview_domain: Option<workspaces::PreviewBase>,
     /// How long audit rows are kept.
     pub audit_retention: Duration,
     /// Record read-only tool calls too (secret reads always are).
@@ -135,8 +137,7 @@ pub struct ServeConfig {
 /// `isb serve --agent`.
 #[derive(Debug, Clone)]
 pub struct AgentConfig {
-    /// `host:port` on any address; only the control plane's client
-    /// certificate gets through.
+    /// `host:port` on any address; only the control plane's client certificate gets through.
     pub listen: String,
     /// `ca.crt`, `tls.crt`, `tls.key` from the control plane.
     pub tls_dir: PathBuf,
@@ -396,8 +397,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     });
     let notifier = crate::notify::Notifier::new(&cfg.state_dir, secrets.clone(), resolve)?;
     notifier.start(ctl.clone());
-    // Every controller event goes to the history (the ones already
-    // emitted at startup first).
+    // Every controller event goes to the history (the ones already emitted at startup first).
     ctl.set_event_sink(recorder.controller_sink());
     // Every metrics sample also goes to the history.
     let history = crate::metrics_history::History::new(&cfg.state_dir);
@@ -434,6 +434,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         cfg.workspace_pool.clone(),
         cfg.workspace_home_root.clone(),
     );
+    workspaces.previews.set_base(cfg.preview_domain.clone());
     let d = Arc::new(Daemon {
         client,
         ctl: ctl.clone(),
@@ -470,8 +471,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         hooks.route = Some(servers::route(d.clone()));
     }
     // Webhooks carry their own credential (a signature), and come from
-    // senders that hold no session; a control plane hands those for orgs on
-    // servers to the server.
+    // senders that hold no session; a control plane hands those for orgs on servers to the server.
     let webhooks = {
         let w = apps::webhook_routes(apps.clone());
         let w = match &servers {
@@ -525,6 +525,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
             .policy(cfg.remote_tools.clone())
             .hooks(hooks.clone())
             .public_routes(webhooks.clone())
+            .preview(workspaces::preview_route(d.clone()))
             .tailnet(tailnet);
         if let Some(r) = &auth {
             l = l.routes(r.clone());
@@ -568,6 +569,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         Arc::new(move |o: &crate::org::OrgId| d.remote(o).is_none())
     };
     workspaces.start(ctl.clone(), local);
+    workspaces::start_ports(d.clone());
     let r = crate::server::serve_shared(listeners, registry, healthz);
     workspaces.shutdown();
     stop_history.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -637,8 +639,7 @@ fn history_start(
         .spawn(move || crate::history::watch_incus(c, r, s));
 }
 
-/// The external secret drivers, each reading its credentials from the org's
-/// own `local` secrets.
+/// The external secret drivers, each reading its credentials from the org's own `local` secrets.
 fn with_external_drivers(
     secrets: crate::secrets::Secrets,
     state_dir: &std::path::Path,
@@ -1080,8 +1081,7 @@ fn stack_deploy(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         deployed_by: caller_name(c),
         previous: None,
     };
-    // Checked before any value is stored, so a deploy that cannot happen
-    // bumps no secret's version.
+    // Checked before any value is stored, so a deploy that cannot happen bumps no secret's version.
     d.ctl.validate(&def)?;
     if let Some(m) = &d.ingress {
         m.check(&def)?;

@@ -1,25 +1,21 @@
----
-title: API parity
-description: What the web UI can do and what agents can do over MCP, side by side, with the reason for every capability that only one of them has.
-order: 9
----
+# API parity
 
 The web UI and agents reach `isb serve` through the same
-[tools](mcp-tools.md): a page that deploys an app calls `app_deploy`, as an
+[tools](../docs/reference/mcp-tools.md): a page that deploys an app calls `app_deploy`, as an
 agent does. This page lists every capability with where a person finds it
 in the web UI and which tool an agent calls, and says why when one side
 deliberately has no equivalent. It is checked: the web UI's parity test
 (`web/src/lib/parity.test.ts`) fails when a tool is missing here, when the
 UI calls a tool or endpoint that does not exist, or when an identity
 endpoint has neither a tool nor a documented reason in the
-[OpenAPI document](http-api.md#the-openapi-document) (`x-isb-tool`,
+[OpenAPI document](../docs/reference/http-api.md#the-openapi-document) (`x-isb-tool`,
 `x-isb-browser-only`).
 
 ## Summary
 
 | Category | Count |
 |---|---|
-| Tools in the web UI and MCP | 127 |
+| Tools in the web UI and MCP | 132 |
 | Account tools, the web UI through the identity endpoints | 17 |
 | Tools for MCP and the CLI only | 18 |
 | Identity endpoints with a tool | 18 |
@@ -66,6 +62,8 @@ a person on the web does not need it.
 | Create, change, delete it | Workspace: Create; Resources, Home, Environment tabs; Delete | `workspace_create`, `workspace_update`, `workspace_delete` |
 | Start, stop, restart, rebuild | Workspace header actions | `workspace_start`, `workspace_stop`, `workspace_restart`, `workspace_rebuild` |
 | Rotate its token | Workspace, Connect: Rotate token | `workspace_token_rotate` |
+| Publish, list and remove ports; open a port's preview | Workspace, Ports: Publish, the bin, Open | `workspace_port_add`, `workspace_port_list`, `workspace_port_remove`, `workspace_port_open` |
+| Docker in the workspace (superadmins) | Org settings, Docker in the workspace; the Nesting allowed badge | `org_nesting` |
 | List an org's workspaces | *MCP/CLI only*: an org has one workspace unless a platform admin raised `max_workspaces`, and the page shows it | `workspace_list` |
 | SSH host keys for `known_hosts` | *MCP/CLI only*: `isb ssh config` pins them for the SSH client; a browser has no use for them | `ssh_host_keys` |
 
@@ -157,7 +155,7 @@ a person on the web does not need it.
 
 ### Accounts
 
-The web UI's account pages call the [identity endpoints](identity-api.md);
+The web UI's account pages call the [identity endpoints](../docs/reference/identity-api.md);
 agents call these tools, which run the same code with the same rules.
 
 | Capability | Web UI | MCP |

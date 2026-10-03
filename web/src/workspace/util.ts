@@ -5,6 +5,7 @@ import type { Tone } from "@/lib/status";
 export const TABS = [
   { id: "terminal", label: "Terminal" },
   { id: "connect", label: "Connect" },
+  { id: "ports", label: "Ports" },
   { id: "resources", label: "Resources" },
   { id: "home", label: "Home" },
   { id: "environment", label: "Environment" },
@@ -14,9 +15,17 @@ export const TABS = [
 
 export type TabId = (typeof TABS)[number]["id"];
 
-/** The tabs a caller sees: viewers get no terminal (the server refuses them one). */
+/** The tabs a caller sees: viewers get no terminal and no ports (the server refuses them both). */
 export function tabsFor(writer: boolean): TabId[] {
-  return TABS.map((t) => t.id).filter((t) => writer || t !== "terminal");
+  return TABS.map((t) => t.id).filter((t) => writer || (t !== "terminal" && t !== "ports"));
+}
+
+/** A published port's ingress state (DomainStatus.state) as a tone. */
+export function portStateTone(state: string): Tone {
+  if (state === "serving") return "success";
+  if (state === "conflict" || state === "refused") return "danger";
+  if (state === "off" || state === "no-replicas") return "warning";
+  return "info";
 }
 
 /** The tab a URL segment names, else the first the caller sees. */

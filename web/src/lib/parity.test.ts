@@ -1,4 +1,4 @@
-// The parity check (docs/reference/parity.md): every tool is on the parity
+// The parity check (notes/parity.md): every tool is on the parity
 // page, every API call the web UI makes is a tool or an endpoint the OpenAPI
 // document knows, every identity endpoint has a tool or a documented reason
 // for having none, and the page's summary counts are the real ones.
@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const web = fileURLToPath(new URL("../..", import.meta.url));
-const doc = readFileSync(join(web, "../docs/reference/parity.md"), "utf8");
+const doc = readFileSync(join(web, "../notes/parity.md"), "utf8");
 
 interface Op {
   operationId: string;
@@ -50,7 +50,7 @@ const mcpOnly = new Set(
 describe("API parity", () => {
   it("lists every tool on the parity page", () => {
     const missing = [...tools].filter((t) => !documented.has(t));
-    expect(missing, "add these tools to docs/reference/parity.md").toEqual([]);
+    expect(missing, "add these tools to notes/parity.md").toEqual([]);
   });
 
   it("only names tools that exist", () => {

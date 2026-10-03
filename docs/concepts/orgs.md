@@ -24,6 +24,7 @@ isb org create NAME [--cpus N] [--memory 16GiB] [--disk 100GiB] [--instances N]
 isb org ls [--json]
 isb org show NAME [--json]
 isb org rm NAME [--force] [--delete-vm]
+isb org nesting NAME [on|off]
 sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run] [--public-ingress]
 ```
 
@@ -66,6 +67,7 @@ and the web UI's org Settings and Platform pages use them:
 | `org_create` | platform admins | `isb org create` without `--bind-root`; `placement` puts it on a server or in a dedicated VM |
 | `org_update` | platform admins | limits, per-instance defaults, egress exceptions (a different `server` or `placement` is refused) |
 | `org_delete` | platform admins | `isb org rm`, refused while stacks are deployed in the org, and while it has sandboxes unless `force`; `delete_vm` also deletes a dedicated VM |
+| `org_nesting` | superadmins | whether the org's workspace may run Docker (`isb org nesting ORG on\|off`); `org_get` shows it as `allow_nesting` |
 
 Limits and egress exceptions are what keep one org from the others and from
 the host's networks, so changing them is for platform admins, not the org's
@@ -111,7 +113,8 @@ The project is **restricted**, so incus itself refuses what would reach the
 host:
 
 - unprivileged containers only; no nesting, no `raw.lxc`, no `raw.idmap` of
-  root, no proxy devices;
+  root, no proxy devices (a superadmin can allow nesting for the org's
+  workspace alone: [The Docker exception](security.md#the-docker-exception));
 - disks are managed volumes only, or bind mounts from the org's
   `--bind-root` directories;
 - the org's own bridge is the only network;
