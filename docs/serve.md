@@ -31,6 +31,12 @@ tools. It listens in two places:
   live dashboard, built on the same API ([web.md](web.md)). It never answers
   an API path.
 
+`/orgs/<org>/api/v1/workspace` is the org's workspace as a REST resource
+over the `workspace_*` tools ([workspaces.md](workspaces.md#the-tools)).
+Each org with a workspace is also served on its own bridge address, to
+that org's subnet only, with bearer tokens only, for the agents inside it
+([workspaces.md](workspaces.md#reaching-isb-from-inside-the-bridge-listener)).
+
 `--listen` takes one or more addresses (comma-separated) and refuses
 anything but loopback, or a tailnet address (100.64.0.0/10,
 fd7a:115c:a1e0::/48) when `--superadmin-tailnet` is set: put a tunnel (or a
@@ -297,8 +303,10 @@ its listener offers.
 | `stack_redeploy` | Replace a service's replicas though nothing changed. |
 | `stack_rollback` | Back to the previous deployment. |
 | `stack_remove` | Delete a stack's instances and ports (volumes with `volumes: true`), and the `<stack>_<key>` secrets it stored that no other stack uses. |
-| `sandbox_create` | Create or reconcile one sandbox from a service spec (object or YAML). |
-| `sandbox_list` | Instances, filtered by labels. |
+| `sandbox_create` | Create or reconcile one sandbox from a service spec (object or YAML), with an expiry and idle timeout (`expires`, `idle_timeout`; the org's defaults otherwise, 24h and 2h). |
+| `sandbox_list` | Instances, filtered by labels and kind: creator, age, expiry, idle timeout, last activity, limits and use. |
+| `sandbox_extend` | Push a sandbox's expiry out, or change its idle timeout; its creator or the org's admins. |
+| `workspace_get`, `workspace_list`, `workspace_create`, `workspace_update`, `workspace_start`, `workspace_stop`, `workspace_restart`, `workspace_rebuild`, `workspace_delete`, `workspace_token_rotate`, `workspace_settings` | The org's workspace: its machine, home volume and org token, and the sandbox defaults. Disruptive ones need `confirm: true`. See [workspaces.md](workspaces.md). |
 | `sandbox_exec` | Run argv in a sandbox: exit code, stdout, stderr (each capped at 256 KiB, keeping the end), optional stdin text and timeout (default 10m). |
 | `sandbox_remove` | Delete a sandbox (not a stack replica). |
 | `secret_create`, `secret_set`, `secret_get`, `secret_list`, `secret_inspect`, `secret_delete`, `secret_refresh`, `secret_reencrypt`, `secret_recipients`, `secret_resolve` | An org's secret store; values base64. `secret_list` says which stacks use each secret. `secret_set` and `secret_refresh` roll the stacks using the secret. `secret_resolve` (local callers only) is how `isb up` reads store-backed secrets. See [secrets.md](secrets.md). Remote callers reach every org's secrets, values included, unless `--deny-tools 'secret_*'`. |
@@ -375,6 +383,7 @@ prior `initialize`, and there is no session id.
 | `--ingress-http`, `--ingress-https` | `ISB_INGRESS_HTTP`, `ISB_INGRESS_HTTPS` | off; `IP:PORT` (`:80` is every address). Either turns the ingress on ([ingress.md](ingress.md)) |
 | `--ingress-tunnels` | `ISB_INGRESS_TUNNELS` | off: turns the ingress on for Cloudflare-tunnel orgs without public listeners |
 | `--ingress-tunnel-port` | `ISB_INGRESS_TUNNEL_PORT` | `8480`: tunnel orgs' listener port on their bridge address |
+| `--workspace-mcp-port` | `ISB_WORKSPACE_MCP_PORT` | `8481`: where each org's workspace reaches the org-bound MCP, on its bridge address ([workspaces.md](workspaces.md#reaching-isb-from-inside-the-bridge-listener)) |
 | `--ingress-public-ip` | `ISB_INGRESS_PUBLIC_IP` | the default route's source address, if public: what `host: auto` names resolve to |
 | `--acme-ca` | `ISB_ACME_CA` | `letsencrypt`; or `letsencrypt-staging`, `internal`, an ACME directory URL |
 | `--acme-email` | `ISB_ACME_EMAIL` | none: the ACME account's contact |

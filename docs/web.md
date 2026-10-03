@@ -20,7 +20,7 @@ of it) in a browser:
 - **Signed in**: a sidebar with an org switcher (the orgs you can open: your
   memberships, or every org for a platform admin; switching keeps the
   section you are in), a search button, the selected org's sections (Org:
-  Overview, Projects, Templates, Backups, Notifications; Manage: Members,
+  Workspace, Overview, Projects, Templates, Backups, Notifications; Manage: Members,
   MCP, Secrets, Settings, History), Platform for platform admins, and your
   account menu (account, theme, sign out). The page sits in a panel with a
   top bar that holds its breadcrumbs (the last two on a phone) and the
@@ -31,7 +31,7 @@ of it) in a browser:
   you typed ranks first; letters in order still match). Typing "deploy"
   lists Deploy/Redeploy for each app (writers only), which opens the
   deployment live. `G` then a letter jumps to a section anywhere outside a
-  text field: `G O` Overview, `G P` Projects, `G T` Templates, `G B`
+  text field: `G W` Workspace, `G O` Overview, `G P` Projects, `G T` Templates, `G B`
   Backups, `G N` Notifications, `G M` Members, `G A` MCP, `G S` Secrets, `G ,`
   Settings, `G H` History. **Account** changes your password, links and
   unlinks providers, adds and deletes passkeys and SSH keys
@@ -40,7 +40,11 @@ of it) in a browser:
 
 Each org has these sections:
 
-- **Overview** (`/orgs/ORG`): its projects with their health, the latest
+- **Workspace** (`/orgs/ORG/workspace`): the org's machine and its
+  sandboxes ([below](#the-workspace)).
+- **Overview** (`/orgs/ORG`): the workspace first (status, live sessions,
+  CPU and memory with a sparkline, last activity, sandbox count; or a
+  "Create the workspace" button for admins), then its projects with their health, the latest
   deployments of every app, its stacks and a live activity feed.
 - **Projects** (`/orgs/ORG/projects`): projects, their environments and the
   apps in each, with every app's pages (see below).
@@ -207,6 +211,36 @@ Light, dark and system themes; it works down to phone width.
   typed confirmation for destructive actions, toasts for outcomes.
 - **Motion** is short and optional: content fades up as it appears, live
   dots pulse; `prefers-reduced-motion` turns animation off.
+
+## The workspace
+
+`/orgs/ORG/workspace[/TAB]`, over the `workspace_*` tools
+([workspaces.md](workspaces.md)). With no workspace yet, the page is the
+create form: image (suggestions `dev-base`, `images:ubuntu/24.04`), name,
+user, CPUs, memory, root size, home size, the token's role (viewer, member,
+admin; admin by default, with what each grants) and environment, with the
+org's placement (where it runs, its project, network and limits) shown
+read-only. Members and viewers see the form read-only with why.
+
+The header shows the status, image, user, live sessions and sandbox count.
+Members get Start, Stop and Restart; admins also Rebuild (type the name)
+and Delete (type the name; a switch keeps the home volume). Each
+disruptive action first asks the daemon without `confirm` and shows its
+answer, the live sessions it would end, in the dialog; confirming calls
+again with `confirm: true`. The tabs:
+
+| Tab | Shows |
+|---|---|
+| **Terminal** | Shells as tabs: **New** opens another as the workspace user in its home (`?instance=`); hidden tabs stay connected, closing one ends its shell. A sandbox's **Shell** (Sandboxes tab, or `?sandbox=NAME`) opens as its own tab, as root. Not for viewers. |
+| **Connect** | The workspace's MCP credential: role, created, last used, path inside (`/run/isb/token`), id, audit actor `workspace`, and Rotate for admins (no token value is ever shown); the variables login shells get; MCP client snippets for use inside the workspace (`$ISB_URL/orgs/ORG/mcp`, `$ISB_TOKEN`); SSH and herdr: `isb key add`, `isb workspace ssh-config`, `ssh NAME.ORG.isb` and the `herdr machine add` line ([ssh.md](ssh.md)). |
+| **Resources** | CPU, memory, disk, address, last activity, sessions, a CPU sparkline; admins resize CPUs, memory and the root disk (confirmed). |
+| **Home** | The volume, pool, size, mount path (or the bind); admins grow it (confirmed). Snapshots, backups and staged restore come here. |
+| **Environment** | `KEY=VALUE` variables for login shells (`ISB_*` refused) and the org secrets delivered as files; admins save, which delivers them again. |
+| **Sandboxes** | Each sandbox: status, creator, age, expiry (highlighted in its last hour), idle limit, last activity, limits and use; Shell, Extend by 4h, 24h or 7d (its creator, or admins) and Delete; the org's expiry and idle defaults. |
+| **History** | The history panel, filtered to the workspace. |
+
+Viewers see Connect, Resources, Home, Environment, Sandboxes and History,
+without actions.
 
 ## Projects and apps
 

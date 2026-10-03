@@ -96,53 +96,21 @@ stated in one place.
 
 ## Pieces
 
-### W1. The workspace and its sandboxes
-
-- Workspace tools: `workspace_create/get/update/start/stop/restart/rebuild/delete`,
-  `/api/v1/workspace` REST (singular, per org), `isb workspace ...` CLI.
-  Org admins and above create, rebuild and delete; members start, stop and
-  attach. Creating a second workspace in an org is refused (one per org,
-  enforced by a single setting so it can be lifted later).
-- Fields: image, cpus, memory, root size, home size, environment, secrets by
-  name, ports to publish, labels.
-- **Rebuild** replaces the instance from the image and reattaches the home:
-  titan-iac's "a damaged root is a replaced guest" as one button.
-- Status reports live sessions where it can tell (attached terminals, SSH
-  connections), so "restart" can say what it will end.
-- Sandboxes: the existing `sandbox_*` tools gain `expires_at`, an idle
-  timeout and `sandbox_extend`; a reaper in the daemon deletes expired ones
-  and records it. `sandbox_list` reports creator, age, expiry and resources.
-- Built on the existing sandbox machinery (it already creates instances in an
-  org project); `isb.owner` and history events as today.
-
-### W2. The workspace is an org actor
-
-- Creating the workspace mints an org token bound to it (`token:workspace`
-  in that org), role `admin` by default. Revoked when the workspace is
-  deleted; rotatable from the UI.
-- It arrives inside as a file (`/run/isb/token`, 0400, owned by the
-  workspace user) and as `ISB_TOKEN` in login shells, with `ISB_URL` and
-  `ISB_ORG`. The `isb` CLI inside works with no setup; `claude mcp add` and
-  the MCP page's snippets work as written.
-- **Reaching the control plane from inside the org:** a per-org MCP listener
-  on the org's bridge address, beside the ingress's `:8480`, so the
-  workspace never needs the host's loopback or a public URL. For an org on a
-  server, the server's agent serves it and forwards like any org call.
-- Audit and history show `workspace` (in its org) as the actor; sandboxes
-  its agents create carry `isb.owner=workspace`.
+W1 (the workspace and its sandboxes), W2 (the workspace as an org actor)
+and W7 (the web UI) have shipped: [workspaces.md](../workspaces.md) and
+[web.md](../web.md#the-workspace).
 
 ### W3. Doors
 
-- **Web terminal**: opens on any instance of the org (`?instance=`); the UI
-  still needs several tabs and reattach.
-- **SSH without opening ports** ships generic over an org's instances
-  ([ssh.md](../ssh.md)): `isb ssh-proxy`, `isb ssh-config`, keys on the isb
-  account. Left: `isb workspace ssh` and `isb workspace ssh-config` as
-  aliases that name the org's workspace.
+SSH over the daemon's websocket ([ssh.md](../ssh.md)), `isb workspace ssh`
+and `ssh-config`, the web terminal on any instance with tabs, and the
+Connect panel's SSH and herdr lines have shipped. Left:
+
+- **Terminal reattach**: a shell that survives closing its tab.
 - **Ports**: the workspace can publish ports through the org's ingress (a dev
   server preview at `<port>.workspace.<domain>`), with the same Access and
-  domain rules as apps.
-- The UI shows a ready `herdr machine add` line next to the SSH config.
+  domain rules as apps; the workspace gains a `ports` field and the page a
+  Ports tab.
 
 ### W4. The home: snapshots, backups, restore
 
@@ -179,21 +147,6 @@ An org setting `allow_nesting` (superadmin only, audited) lets the
 workspace, and only the workspace, run with `security.nesting=true` for
 Docker. Sandboxes never get it. The org page shows it as a warning badge.
 
-### W7. The web UI
-
-- **Sidebar**: "Workspace" (singular) at the top of the org section.
-- **Org overview**: the workspace first (status, attached sessions, CPU and
-  memory, last activity, its sandboxes), then apps.
-- **Workspace page**: Terminal (tabs), Connect (SSH config, herdr line, MCP
-  credential with rotate and revoke), Resources, Home (size, snapshots,
-  backups, staged restore), Environment and secrets, Ports, Sandboxes
-  (creator, age, expiry, extend, delete), History.
-- **No workspace yet**: the page is a create form (image or workspace
-  template, size, home size, the token's role defaulting to admin), placement
-  shown read-only from the org.
-- The superadmin Host page keeps showing every instance on the host,
-  including ones no org owns.
-
 ## Migrating a titan-iac org
 
 Per org, attended, one at a time:
@@ -222,17 +175,20 @@ Per org, attended, one at a time:
   host, as superadmin, the way it does today.
 - Kubernetes compatibility.
 
-## Open questions
+## Decided while building
 
-1. **Home size and quota**: does the home count against the org's `--disk`
-   quota? (Proposed: yes; it is the org's data.)
-2. **Who may attach**: every org member? (Proposed: yes; viewers may not.)
-3. **Sandbox defaults**: 24 h expiry and 2 h idle, or other numbers?
-4. **Home bind for migration**: allow binding a host directory as the home
-   permanently for superadmins, or only during migration?
+- **The home counts against the org's `--disk` quota**: it is the org's data.
+- **Who may attach**: every org member; viewers may not (the terminal and SSH
+  are admitted as `sandbox_exec`).
+- **Sandbox defaults**: 24 h expiry and 2 h idle, per org
+  (`workspace_settings`).
+- **Home bind**: superadmins only (`home_bind`), meant for migration; the
+  lasting home is a volume.
+- **Plain `isb create` and `isb up` sandboxes get no deadlines**: only
+  sandboxes made through `isb serve` expire, so the reaper never takes a
+  developer's long-running `isb up` on the host.
 
 ## Order of work
 
-W1 and the W7 pages first (the split brain goes away in the UI), then W2
-(the reason the workspace exists), W3, W4, W6, W5. Each lands with its docs,
+W4, then W6, W5, and W3's ports. Each lands with its docs,
 tests and a live check on titan, like the platform phases did.

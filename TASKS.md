@@ -490,10 +490,6 @@ minime only runs binaries downloaded from our CI runs.
   and its live session ended in 8 s, viewer and `read` tokens refused,
   an instance's own authorized_keys ignored, `herdr machine add` saved and
   reached the host (isolated HOME).
-- [ ] W3 follow-ups: `isb workspace ssh`/`ssh-config` aliases once W1
-  lands; the Connect panel (SSH config, herdr line) on the workspace page;
-  terminal tabs and reattach in the UI; SSH to orgs placed on a server;
-  Access credentials in `isb ssh-proxy`.
 - [x] (workspaces-home) W4 the home, generic over an org's named volumes:
   snapshots now and on a schedule (`auto-*` pruned to keep, manual kept),
   volume backups as `backup_*` with a `volume` (snapshot, temporary copy,
@@ -518,6 +514,31 @@ minime only runs binaries downloaded from our CI runs.
   `<org>_workspace_home` with a default schedule once W1 lands; volume
   snapshots and backups for orgs placed on a server (tools forward, not
   verified); a restore's byte count in its run record.
+- [x] (workspaces-core) W1 the workspace and its sandboxes, W2 the
+  workspace as an org actor, W7 the web UI (docs/workspaces.md): one
+  workspace per org (`max_workspaces`), a container with a home volume
+  that survives rebuild, `workspace_*` tools, the `workspace` REST resource
+  and `isb workspace`, confirmations that name live sessions; its `isb_ws_`
+  token (role admin by default) delivered as /run/isb/token and $ISB_TOKEN
+  with $ISB_URL and $ISB_ORG, rotated and revoked, actor `workspace`; the
+  org-bound MCP on each org's bridge (port 8481, the org's subnet and bearer
+  tokens only); sandbox expiry and idle timeout, `sandbox_extend`, the
+  reaper; `isb workspace ssh`/`ssh-config`; the Workspace page, org
+  overview card and create form. **Verified** on titan (scratch daemon,
+  bridge port 8480 since titan's ufw has no 8481 rule): workspace from
+  dev-base, token and env inside, tools/list and the isb CLI over the
+  bridge, another org's path 404, no token 401, another org's instance
+  cannot connect, a rotated token refused at once, rebuild keeps the home
+  and drops the root, a sibling sandbox through the MCP labelled
+  `isb.owner=workspace`, reaped on expiry (2m) and on idle (1m) with
+  `sandbox.reaped` in the history, the audit actor `workspace`, the web
+  terminal as `dev` counted as a live session, UI light/dark,
+  desktop/phone.
+- [ ] Workspace follow-ups: `isb host setup` on titan for port 8481 (not
+  run: the rule is in the code); a workspace on an org placed on a server
+  (the agent runs it and serves the bridge; untested); W3's terminal
+  reattach and ports; SSH to orgs placed on a server; Access credentials in
+  `isb ssh-proxy`.
 
 ## Log
 

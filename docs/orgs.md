@@ -182,7 +182,11 @@ bridges. `sudo isb host setup` once lets every org bridge (`isbbr+`) through:
 - egress through the uplink (`ufw route allow in on isbbr+ out on <uplink>`);
 - the ingress's tunnel listener on each org's own bridge address (`ufw allow
   in on isbbr+ to any port 8480 proto tcp`), which a Cloudflare-tunnel org's
-  cloudflared sends its requests to.
+  cloudflared sends its requests to;
+- the org-bound MCP for each org's workspace on its own bridge address
+  (`ufw allow in on isbbr+ to any port 8481 proto tcp`;
+  [workspaces.md](workspaces.md#reaching-isb-from-inside-the-bridge-listener)).
+  The daemon answers only the org's own subnet there.
 
 `--public-ingress` also opens 80 and 443 (`ufw allow 80/tcp`, `443/tcp`)
 and writes `/etc/sysctl.d/60-isb-ingress.conf` with
