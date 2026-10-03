@@ -174,7 +174,31 @@ EOF
 fi
 usermod -aG incus-admin {user}
 if [ ! -e {marker} ]; then
-  incus admin init --auto
+  # Not --auto: behind Lima's NAT every probed subnet answers, so incus
+  # finds no free one. The bridge subnet only has to be private to the VM.
+  incus admin init --preseed <<EOF
+networks:
+- name: incusbr0
+  type: bridge
+  config:
+    ipv4.address: {bridge}
+    ipv4.nat: "true"
+    ipv6.address: none
+storage_pools:
+- name: default
+  driver: dir
+profiles:
+- name: default
+  devices:
+    root:
+      type: disk
+      path: /
+      pool: default
+    eth0:
+      type: nic
+      name: eth0
+      network: incusbr0
+EOF
   mkdir -p "$(dirname {marker})"
   touch {marker}
 fi
@@ -183,8 +207,12 @@ fi
         gid = c.gid,
         user = c.user,
         marker = PROVISIONED_MARKER,
+        bridge = BRIDGE_ADDRESS,
     )
 }
+
+/// incusbr0's address in the VM.
+const BRIDGE_ADDRESS: &str = "10.177.0.1/24";
 
 /// The Lima instance definition `isb machine init` starts.
 pub fn render_lima_yaml(c: &LimaConfig) -> String {
@@ -1031,6 +1059,7 @@ mod tests {
         assert!(script.contains("root:20:1"));
         assert!(script.contains("SocketUser=me"));
         assert!(script.contains("pkgs.zabbly.com/incus/stable"));
+        assert!(script.contains("ipv4.address: 10.177.0.1/24"));
         assert!(
             v["probes"][0]["script"]
                 .as_str()
