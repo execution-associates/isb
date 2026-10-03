@@ -814,9 +814,13 @@ impl Apps {
             }
         };
         let r = self.pipeline(org, name, &mut dep, &mut log);
-        let (level, msg) = match &r {
-            Ok(()) => ("info", format!("deployment {id} done")),
-            Err(e) => ("error", format!("deployment {id} failed: {e}")),
+        let (kind, level, msg) = match &r {
+            Ok(()) => ("deploy.succeeded", "info", format!("deployment {id} done")),
+            Err(e) => (
+                "deploy.failed",
+                "error",
+                format!("deployment {id} failed: {e}"),
+            ),
         };
         log.line(&msg);
         if let Err(e) = r {
@@ -826,7 +830,7 @@ impl Apps {
         if let Err(e) = self.save_dep(org, &dep) {
             eprintln!("isb serve: app {name}: deployment {id}: {e}");
         }
-        self.event(org, name, level, msg);
+        self.kind_event(org, name, kind, level, msg);
     }
 
     fn set_status(&self, org: &OrgId, dep: &mut Deployment, s: Status) -> Result<()> {
@@ -1112,6 +1116,19 @@ impl Apps {
         self.inner
             .ctl
             .note_service(level, &q, app, format!("app {app}: {message}"));
+    }
+
+    /// [`Apps::event`] with a kind ([`crate::stack::controller::Event::kind`]).
+    fn kind_event(&self, org: &OrgId, app: &str, kind: &str, level: &str, message: String) {
+        let stack = self
+            .get(org, app)
+            .ok()
+            .and_then(|a| a.spec.stack().ok())
+            .unwrap_or_default();
+        let q = crate::stack::qualified(org, &stack);
+        self.inner
+            .ctl
+            .event(kind, level, &q, app, format!("app {app}: {message}"));
     }
 
     // --- webhooks --------------------------------------------------------

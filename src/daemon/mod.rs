@@ -12,6 +12,7 @@
 
 pub mod apps;
 pub mod builds;
+mod notify;
 mod orgs;
 pub mod policy;
 pub mod secrets;
@@ -130,6 +131,8 @@ struct Daemon {
     ingress: Option<Arc<crate::ingress::Manager>>,
     /// The identity store: the org list memberships hang off.
     users: Arc<AuthStore>,
+    notifier: crate::notify::Notifier,
+    history: crate::metrics_history::History,
 }
 
 /// Run the daemon until SIGINT/SIGTERM. Apps keep running when it stops.
@@ -198,6 +201,17 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         m.start(ctl.clone())?;
     }
     let apps = crate::app::Apps::new(&cfg.state_dir, client.clone(), ctl.clone(), secrets.clone());
+    // Notifications follow the event feed from the start of this run.
+    let ra = apps.clone();
+    let resolve: crate::notify::Resolve = Arc::new(move |org, stack, service| {
+        let a = ra.get(org, service).ok()?;
+        (a.spec.stack().ok()? == stack).then_some(a.spec.project)
+    });
+    let notifier = crate::notify::Notifier::new(&cfg.state_dir, secrets.clone(), resolve)?;
+    notifier.start(ctl.clone());
+    // Every metrics sample also goes to the history.
+    let history = crate::metrics_history::History::new(&cfg.state_dir);
+    ctl.set_metrics_sink(history.start());
     let d = Arc::new(Daemon {
         client,
         ctl: ctl.clone(),
@@ -207,6 +221,8 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         apps: apps.clone(),
         ingress: ingress.clone(),
         users: users.clone(),
+        notifier: notifier.clone(),
+        history,
     });
     let registry = registry(d.clone())?;
     let hooks = hooks(d.clone(), users.clone(), cfg.allow_unauthenticated);
@@ -242,6 +258,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         )
     });
     let r = crate::server::serve(listeners, registry, healthz);
+    notifier.shutdown();
     ctl.shutdown();
     if let Some(m) = &ingress {
         m.shutdown();
@@ -279,6 +296,7 @@ const PLATFORM_TOOLS: &[&str] = &[
     "org_update",
     "org_delete",
     "registry_gc",
+    "notification_settings",
 ];
 
 /// Read-only tools that span orgs: any signed-in user, filtered to their
@@ -1012,6 +1030,12 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
         }
     );
     orgs::register(&mut r, d.clone())?;
+    notify::register(
+        &mut r,
+        d.notifier.clone(),
+        d.history.clone(),
+        d.apps.clone(),
+    )?;
     Ok(r)
 }
 
@@ -1457,6 +1481,34 @@ mod tests {
         assert!(authorize(&owner, "org_update", json!({}), Some(&scope), false).is_err());
         // The local socket is the daemon's own user.
         assert!(ok(&Caller::Local { uid: None }, "org_delete", acme));
+    }
+
+    #[test]
+    fn notifications_and_metrics_stay_in_their_org() {
+        let member = user(&[("acme", Role::Member)], false);
+        for t in [
+            "notification_channel_create",
+            "notification_channel_list",
+            "notification_test",
+            "notification_deliveries",
+            "metrics_query",
+        ] {
+            assert!(ok(&member, t, json!({"org": "acme", "name": "x"})), "{t}");
+            assert!(!ok(&member, t, json!({"org": "beta", "name": "x"})), "{t}");
+            assert!(!ok(&member, t, json!({"name": "x"})), "{t}: default org");
+        }
+        // Opening private targets is server-wide: platform admins only.
+        let owner = user(&[("acme", Role::Owner)], false);
+        let e = authorize(
+            &owner,
+            "notification_settings",
+            json!({"org": "acme"}),
+            None,
+            false,
+        )
+        .unwrap_err();
+        assert!(e.to_string().contains("platform admins"), "{e}");
+        assert!(ok(&user(&[], true), "notification_settings", json!({})));
     }
 
     #[test]

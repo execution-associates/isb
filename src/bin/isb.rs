@@ -17,6 +17,8 @@ use isb::{Client, Error, ExecOptions, Result, Stdin, Timeouts};
 
 #[path = "isb/apps.rs"]
 mod apps;
+#[path = "isb/notify.rs"]
+mod notify;
 
 /// Declarative incus sandboxes.
 ///
@@ -265,6 +267,10 @@ enum Cmd {
     /// (docs/builds.md).
     #[command(subcommand)]
     Registry(RegistryCmd),
+    /// Notification channels of an org on the `isb serve` daemon: webhook,
+    /// Slack, Discord, Telegram, email (docs/notifications.md).
+    #[command(subcommand)]
+    Notify(notify::NotifyCmd),
     /// A live dashboard of stacks and sandboxes (`isb serve`'s view; with no
     /// daemon, sandboxes only).
     Tui,
@@ -1146,6 +1152,7 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         Cmd::App(a) => apps::app(&ctx.global.org, a),
         Cmd::Build(a) => build_cmd(ctx, a),
         Cmd::Registry(r) => registry_cmd(ctx, r),
+        Cmd::Notify(n) => notify::notify(&ctx.global.org, n),
         Cmd::Tui => {
             isb::tui::run(ctx.client(None), isb::server::default_socket_path())?;
             Ok(0)

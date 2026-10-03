@@ -169,6 +169,16 @@ minime only runs binaries downloaded from our CI runs.
   as `sandbox_exec` in that org (same org rules and tool policy;
   `--deny-tools sandbox_exec` turns it off); cookie upgrades need an Origin
   matching Host. 16 sessions, 30 min idle, 8 h max.
+- **Notifications** (P4.3): per-org channels with secrets by name; the
+  dispatcher follows the in-memory event ring from the start of each daemon
+  run (nothing persisted, so nothing re-sent; queued deliveries are lost on
+  restart). Private/loopback targets are refused unless a platform admin
+  allows them server-wide (`notification_settings`); every resolved and
+  connected address is checked, redirects never followed. SMTP is a minimal
+  client over rustls. `health.unhealthy` fires after 20 s without a healthy
+  replica, only for services healthy once in this run, never mid-rollout.
+- **Metrics history** (P4.6): SQLite per org (`orgs/<org>/metrics.db`), tiers
+  10 s/24 h, 1 min/7 d, 10 min/30 d; ~20 MiB for 20 instances over 31 days.
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
@@ -304,7 +314,7 @@ minime only runs binaries downloaded from our CI runs.
   restore. **Verify:** backup and restore a Postgres on the hcloud box.
 - [~] (subagent p4.1) P4.2 Scheduled jobs (cron) per service/org. **Verify:** a job runs on
   schedule and its logs are visible.
-- [~] (subagent p4.3) P4.3 Notifications (Slack, Discord, Telegram, email, webhook) on deploy,
+- [x] (6d71ea9) P4.3 Notifications (Slack, Discord, Telegram, email, webhook) on deploy,
   failure, health, backup events. **Verify:** a webhook receives events.
 - [~] (subagent p4.4) P4.4 Template catalog (one-click apps). **Stretch goal:** running Dokploy's
   templates (docker-compose + `template.toml`: variables, domains, mounts)
@@ -313,7 +323,7 @@ minime only runs binaries downloaded from our CI runs.
   **Verify:** deploy two native (and, if done, two Dokploy) templates from the UI.
 - [~] (subagent p4.5) P4.5 Preview deployments per pull request. **Verify:** a PR on the test
   repo gets a URL; closing it removes it.
-- [~] (subagent p4.3) P4.6 Metrics history (retained samples) and monitoring pages.
+- [~] (6d71ea9: history + `metrics_query` done; the web Monitoring tab still reads live samples only) P4.6 Metrics history (retained samples) and monitoring pages.
 
 ## Phase 5: scale-out
 

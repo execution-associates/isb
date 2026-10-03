@@ -302,7 +302,7 @@ impl Manager {
 
     fn cert_event(&self, ev: caddy::LogEvent) {
         let issuer_key = self.cfg.ca.issuer_key();
-        let (host, cs, level, msg) = match ev {
+        let (host, cs, kind, level, msg) = match ev {
             caddy::LogEvent::Obtained { host, issuer } => {
                 if !issuer.is_empty() && issuer != issuer_key {
                     return;
@@ -316,6 +316,7 @@ impl Manager {
                         issuer,
                         at: crate::stack::now_secs(),
                     },
+                    "cert.issued",
                     "info",
                     msg,
                 )
@@ -330,6 +331,7 @@ impl Manager {
                         issuer: issuer_key,
                         at: crate::stack::now_secs(),
                     },
+                    "cert.failed",
                     "warn",
                     msg,
                 )
@@ -355,7 +357,7 @@ impl Manager {
         };
         if let Some(ctl) = self.ctl.get() {
             for (q, svc) in owners {
-                ctl.service_event(level, &q, &svc, msg.clone());
+                ctl.event(kind, level, &q, &svc, msg.clone());
             }
         }
     }

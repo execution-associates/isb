@@ -18,6 +18,10 @@ use crate::error::Result;
 /// Samples of history kept per series.
 pub const HISTORY: usize = 40;
 
+/// Disk counters come from `/1.0/metrics`, a heavier call: every this many
+/// samples.
+pub const DISK_EVERY: u32 = 5;
+
 #[derive(Debug, Clone, Serialize, Default, PartialEq)]
 pub struct HostSample {
     pub hostname: String,
@@ -54,6 +58,18 @@ pub struct InstanceSample {
     pub created_at: String,
     /// The incus project; with isb's orgs, `isb-<org>` (or `default`).
     pub project: String,
+    /// Bytes received and sent on every interface but loopback, since the
+    /// instance started (counters: the history turns them into rates).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub net_rx_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub net_tx_bytes: Option<u64>,
+    /// Bytes read from and written to disks (counters), from incus'
+    /// `/1.0/metrics`, taken every [`DISK_EVERY`]th sample only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disk_read_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disk_write_bytes: Option<u64>,
 }
 
 impl InstanceSample {
@@ -76,6 +92,8 @@ pub struct Sampler {
     /// Pool usage moves slowly and costs a request per pool: refreshed every
     /// [`POOLS_EVERY`].
     pools: Option<(Instant, (u64, u64))>,
+    /// Samples taken, for [`DISK_EVERY`].
+    n: u32,
 }
 
 /// How often storage pool usage is re-read.
@@ -103,6 +121,21 @@ impl Sampler {
         for i in v.as_array().into_iter().flatten() {
             out.push(self.instance(i, now));
         }
+        if self.n % DISK_EVERY == 0 {
+            // Disk I/O is optional: the rest of the sample stands without it.
+            if let Ok(text) = client.get_raw("/1.0/metrics") {
+                let io = parse_disk_metrics(&String::from_utf8_lossy(&text));
+                for i in out.iter_mut().filter(|i| i.running()) {
+                    let (r, w) = io
+                        .get(&(i.project.clone(), i.name.clone()))
+                        .copied()
+                        .unwrap_or((0, 0));
+                    i.disk_read_bytes = Some(r);
+                    i.disk_write_bytes = Some(w);
+                }
+            }
+        }
+        self.n = self.n.wrapping_add(1);
         out.sort_by(|a, b| (&a.project, &a.name).cmp(&(&b.project, &b.name)));
         let keys: Vec<String> = out
             .iter()
@@ -181,7 +214,12 @@ impl Sampler {
             let d = cfg("image.description");
             if d.is_empty() { cfg("image.id") } else { d }
         };
+        let (rx, tx) = net_counters(state);
         InstanceSample {
+            net_rx_bytes: rx.filter(|_| running),
+            net_tx_bytes: tx.filter(|_| running),
+            disk_read_bytes: None,
+            disk_write_bytes: None,
             ip: running.then(|| first_ip(state)).flatten(),
             cpu_pct,
             cpu_history: h.iter().copied().collect(),
@@ -390,6 +428,68 @@ mod sys {
     }
 }
 
+/// Bytes received and sent, summed over every interface but loopback.
+fn net_counters(state: &Value) -> (Option<u64>, Option<u64>) {
+    let Some(ifs) = state["network"].as_object() else {
+        return (None, None);
+    };
+    let (mut rx, mut tx, mut any) = (0u64, 0u64, false);
+    for (name, n) in ifs {
+        if name == "lo" {
+            continue;
+        }
+        let c = &n["counters"];
+        if let (Some(r), Some(t)) = (c["bytes_received"].as_u64(), c["bytes_sent"].as_u64()) {
+            rx = rx.saturating_add(r);
+            tx = tx.saturating_add(t);
+            any = true;
+        }
+    }
+    if any {
+        (Some(rx), Some(tx))
+    } else {
+        (None, None)
+    }
+}
+
+/// Per `(project, instance)`: disk bytes read and written, summed over its
+/// devices, from incus' OpenMetrics text.
+pub fn parse_disk_metrics(text: &str) -> BTreeMap<(String, String), (u64, u64)> {
+    let mut out: BTreeMap<(String, String), (u64, u64)> = BTreeMap::new();
+    for line in text.lines() {
+        let (read, rest) = if let Some(r) = line.strip_prefix("incus_disk_read_bytes_total{") {
+            (true, r)
+        } else if let Some(r) = line.strip_prefix("incus_disk_written_bytes_total{") {
+            (false, r)
+        } else {
+            continue;
+        };
+        let Some((labels, value)) = rest.rsplit_once('}') else {
+            continue;
+        };
+        let label = |k: &str| {
+            labels.split(',').find_map(|kv| {
+                let (a, b) = kv.split_once('=')?;
+                (a.trim() == k).then(|| b.trim().trim_matches('"').to_string())
+            })
+        };
+        let (Some(name), Some(project)) = (label("name"), label("project")) else {
+            continue;
+        };
+        let Ok(v) = value.trim().parse::<f64>() else {
+            continue;
+        };
+        let e = out.entry((project, name)).or_default();
+        let v = v.max(0.0) as u64;
+        if read {
+            e.0 = e.0.saturating_add(v);
+        } else {
+            e.1 = e.1.saturating_add(v);
+        }
+    }
+    out
+}
+
 /// First global address, IPv4 preferred, on any interface but loopback.
 fn first_ip(state: &Value) -> Option<String> {
     let mut v6 = None;
@@ -472,6 +572,18 @@ mod tests {
     }
 
     #[test]
+    fn disk_metrics() {
+        let t = "# HELP x\n\
+                 incus_disk_read_bytes_total{device=\"vda\",name=\"web\",project=\"isb-acme\",type=\"container\"} 4096\n\
+                 incus_disk_read_bytes_total{device=\"vdb\",name=\"web\",project=\"isb-acme\",type=\"container\"} 1.5e+03\n\
+                 incus_disk_written_bytes_total{device=\"vda\",name=\"web\",project=\"isb-acme\",type=\"container\"} 10\n\
+                 incus_cpu_seconds_total{cpu=\"0\",mode=\"user\",name=\"web\",project=\"isb-acme\",type=\"container\"} 1\n";
+        let m = parse_disk_metrics(t);
+        assert_eq!(m[&("isb-acme".to_string(), "web".to_string())], (5596, 10));
+        assert_eq!(m.len(), 1);
+    }
+
+    #[test]
     fn instance_rates_and_kinds() {
         let mut s = Sampler::new();
         let inst = |usage: u64| {
@@ -480,7 +592,7 @@ mod tests {
                 "config": {"volatile.container.oci": "true", "user.isb.stack": "app", "user.isb.create-token": "x"},
                 "state": {"cpu": {"usage": usage}, "memory": {"usage": 1024},
                           "network": {"lo": {"addresses": [{"family": "inet", "address": "127.0.0.1", "scope": "local"}]},
-                                      "eth0": {"addresses": [{"family": "inet6", "address": "fd42::1", "scope": "global"},
+                                      "eth0": {"counters": {"bytes_received": 100, "bytes_sent": 50}, "addresses": [{"family": "inet6", "address": "fd42::1", "scope": "global"},
                                                              {"family": "inet", "address": "10.0.0.2", "scope": "global"}]}}}
             })
         };
@@ -490,6 +602,7 @@ mod tests {
         assert_eq!(a.kind, "oci");
         assert_eq!(a.ip.as_deref(), Some("10.0.0.2"));
         assert_eq!(a.stack(), Some("app"));
+        assert_eq!((a.net_rx_bytes, a.net_tx_bytes), (Some(100), Some(50)));
         assert!(!a.labels.contains_key("isb.create-token"));
         let b = s.instance(&inst(1_500_000_000), t0 + std::time::Duration::from_secs(1));
         assert!((b.cpu_pct.unwrap() - 50.0).abs() < 0.1, "{b:?}");

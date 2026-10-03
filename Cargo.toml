@@ -37,6 +37,11 @@ signal-hook = "0.4"
 base64 = { version = "0.23", default-features = false, features = ["alloc"] }
 ring = { version = "0.17", default-features = false, features = ["alloc"] }
 ureq = { version = "3", default-features = false, features = ["rustls"] }
+# Notifications (src/notify): direct TLS for SMTP and for webhooks sent to an
+# address checked against the SSRF policy. The same rustls (on ring) and
+# Mozilla roots ureq already uses: no new crates.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+webpki-roots = "1"
 ratatui = "0.29.0"
 # The secrets store: age encryption to the daemon's key plus break-glass
 # recipients (age X25519 keys, or ssh-ed25519/ssh-rsa public keys).
