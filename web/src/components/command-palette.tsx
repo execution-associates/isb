@@ -209,6 +209,9 @@ function Palette({ me, org, close }: { me: Me; org: string | null; close: () => 
       out.push({ id: "admin:users", group: "Platform", title: "All users", icon: ShieldCheck, keywords: ["platform", "admin"], run: go("/admin/users") });
       out.push({ id: "admin:server", group: "Platform", title: "Server status", icon: ShieldCheck, keywords: ["platform", "admin"], run: go("/admin/server") });
     }
+    if (me.superadmin) {
+      out.push({ id: "host", group: "Platform", title: "Host: instances, policy, superadmin tokens", icon: ShieldCheck, keywords: ["superadmin", "incus", "host", "policy"], run: go("/host") });
+    }
     out.push({ id: "account", group: "You", title: "Account and API tokens", icon: UserRound, keywords: ["passkey", "password", "token", "profile"], run: go("/account") });
     out.push({ id: "theme:light", group: "You", title: "Light theme", icon: Sun, keywords: ["theme", "appearance"], run: () => setTheme("light") });
     out.push({ id: "theme:dark", group: "You", title: "Dark theme", icon: Moon, keywords: ["theme", "appearance"], run: () => setTheme("dark") });

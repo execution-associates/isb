@@ -151,6 +151,20 @@ export function AccountPage() {
   const session = me.auth.kind === "session";
   const providers = useProviders();
 
+  if (me.superadmin && !me.superadmin.account) {
+    return (
+      <>
+        <PageHeader title="Account" description="How you are signed in." />
+        <AppSection title="Superadmin" description="This identity has no isb account, so it has no profile, sessions, passkeys or API tokens of its own.">
+          <p className="text-[13px] leading-relaxed text-muted-foreground">
+            Signed in as <span className="font-mono text-foreground">{me.superadmin.source}</span>: the host's unix socket's reach, granted by{" "}
+            {me.superadmin.via.kind === "token" ? "a superadmin token" : me.superadmin.via.kind === "tailnet" ? "the daemon's --superadmin-tailnet list" : "the daemon's --superadmin-access list"}.
+          </p>
+        </AppSection>
+      </>
+    );
+  }
+
   return (
     <>
       <PageHeader title="Account" description="Your profile, how you sign in, and the tokens your scripts and agents use." />

@@ -57,6 +57,15 @@ minime only runs binaries downloaded from our CI runs.
 - **Identity: built-in.** Email + password, passkeys, OAuth (GitHub, Google)
   and generic OIDC SSO, invitations, API tokens. Cloudflare Access stays as an
   optional front door, mapped to users.
+- **Superadmin = the unix socket's reach, from four sources only:** the
+  socket, superadmin tokens, `--superadmin-tailnet`, `--superadmin-access`.
+  Superadmin tokens are minted by the host CLI (which writes `isb.db` as the
+  daemon's user) and never over HTTP, so a stolen HTTP credential cannot
+  become a durable one. Tailnet and Access identities are ambient (like a
+  cookie), so they get the CSRF/Origin/Content-Type/Host checks.
+  `Caller::is_trusted` means superadmin; `is_local` is the literal socket
+  (deploy triggers labelled `manual`, `sandbox_create` resolving relative
+  paths in the daemon's cwd).
 - **Secrets: pluggable drivers, Swarm UX.** Stacks hold references, never
   values; a version change is a new revision (rolling update). Drivers:
   `local` (age-encrypted, default), inline `age:` (safe in git),
@@ -351,6 +360,15 @@ minime only runs binaries downloaded from our CI runs.
   working; per-org MCP endpoint `/orgs/<org>/mcp` bound to the caller's org.
   Cloudflare Access identities map to users. **Verify:** the same call via
   MCP, REST and CLI; an org token cannot touch another org.
+- [x] (superadmin branch; tailnet and tokens verified live on titan, Access by unit tests with signed test JWTs, no live Cloudflare change) P1.9 Superadmins: the unix socket's
+  reach (every tool, no remote-spec policy, any instance, the host tools)
+  over HTTP from superadmin tokens (minted on the host only), tailnet
+  identities (`--superadmin-tailnet`, whois from tailscaled) and verified
+  Access identities (`--superadmin-access`); CSRF, Origin, Content-Type and
+  Host checks for the ambient ones; audited by source; the web UI's Host
+  page and badge. **Verify:** a listed tailnet identity is a superadmin and
+  an unlisted one is not; a superadmin token makes a bind-mount sandbox a
+  platform-admin token is refused; nobody mints a superadmin token over HTTP.
 
 ### Secrets
 - [x] (a10c6fc, 1ee402b) P1.8 age store + driver trait + `isb secret create|set|get|ls|inspect|rm|

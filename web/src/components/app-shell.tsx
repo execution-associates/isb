@@ -1,4 +1,4 @@
-import { Check, ChevronsUpDown, LogOut, Menu, Monitor, Moon, Search, ShieldCheck, Sun, UserRound } from "lucide-react";
+import { Check, ChevronsUpDown, Crown, HardDrive, LogOut, Menu, Monitor, Moon, Search, ShieldCheck, Sun, UserRound } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
@@ -30,7 +30,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { crumbsFor, useCrumbs } from "@/lib/crumbs";
 import { initials } from "@/lib/format";
 import { setTheme, type Theme, useTheme } from "@/lib/theme";
-import { defaultOrg, roleIn, useMe, useSetupNeeded, useSignOut } from "@/lib/session";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ambientSuperadmin, defaultOrg, roleIn, superadminVia, useMe, useSetupNeeded, useSignOut } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
 /** Signed-in pages: redirects to /login (with `next`) or /setup otherwise. */
@@ -234,19 +235,37 @@ function UserMenu({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
         <DropdownMenuLabel className="font-normal">
           <div className="flex items-center gap-2">
             <span className="truncate text-xs text-muted-foreground">{me.user.email}</span>
-            {me.platform_admin && <span className="ml-auto shrink-0 rounded-full bg-brand/15 px-1.5 py-0.5 text-[10px] font-medium text-brand">admin</span>}
+            {me.superadmin ? (
+              <span className="ml-auto shrink-0 rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-[color-mix(in_oklch,var(--warning)_75%,var(--foreground))]">superadmin</span>
+            ) : (
+              me.platform_admin && <span className="ml-auto shrink-0 rounded-full bg-brand/15 px-1.5 py-0.5 text-[10px] font-medium text-brand">admin</span>
+            )}
           </div>
+          {me.superadmin && <div className="mt-1 text-[11px] leading-snug text-muted-foreground">Signed in by {superadminVia(me)}</div>}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onSelect={() => {
-            navigate("/account");
-            onNavigate?.();
-          }}
-        >
-          <UserRound />
-          Account
-        </DropdownMenuItem>
+        {(!me.superadmin || me.superadmin.account) && (
+          <DropdownMenuItem
+            onSelect={() => {
+              navigate("/account");
+              onNavigate?.();
+            }}
+          >
+            <UserRound />
+            Account
+          </DropdownMenuItem>
+        )}
+        {me.superadmin && (
+          <DropdownMenuItem
+            onSelect={() => {
+              navigate("/host");
+              onNavigate?.();
+            }}
+          >
+            <HardDrive />
+            Host
+          </DropdownMenuItem>
+        )}
         {me.platform_admin && (
           <DropdownMenuItem
             onSelect={() => {
@@ -271,11 +290,15 @@ function UserMenu({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
             </DropdownMenuRadioGroup>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={signOut}>
-          <LogOut />
-          Sign out
-        </DropdownMenuItem>
+        {!ambientSuperadmin(me) && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={signOut}>
+              <LogOut />
+              Sign out
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -337,6 +360,11 @@ function SidebarContent({ me, onNavigate }: { me: Me; onNavigate?: () => void })
             <NavItem to="/admin" icon={ShieldCheck} onNavigate={onNavigate}>
               Orgs, users, server
             </NavItem>
+            {me.superadmin && (
+              <NavItem to="/host" icon={HardDrive} onNavigate={onNavigate}>
+                Host
+              </NavItem>
+            )}
           </NavSection>
         )}
       </nav>
@@ -413,7 +441,7 @@ export function AppShell({ me }: { me: Me }) {
               <Logo className="size-6" />
             </Link>
             <TopCrumbs />
-            <TopRight />
+            <TopRight me={me} />
           </header>
           <main className="mx-auto w-full max-w-6xl flex-1 px-4 pt-6 pb-16 sm:px-6 lg:px-10 lg:pt-8">
             <Outlet />
@@ -425,12 +453,35 @@ export function AppShell({ me }: { me: Me }) {
   );
 }
 
-function TopRight() {
+/** The top bar's mark for a caller with the unix socket's reach. */
+function SuperadminBadge({ me }: { me: Me }) {
+  if (!me.superadmin) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Link
+          to="/host"
+          className="inline-flex h-6 items-center gap-1.5 rounded-full border border-warning/35 bg-warning/12 px-2 text-[11px] font-semibold text-[color-mix(in_oklch,var(--warning)_75%,var(--foreground))] transition-colors hover:bg-warning/20 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+          aria-label={`Superadmin: ${superadminVia(me)}`}
+        >
+          <Crown className="size-3.5" />
+          <span className="hidden sm:inline">Superadmin</span>
+        </Link>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="max-w-64">
+        Every tool, no remote-spec policy, any instance: what the host's unix socket can do. Signed in by {superadminVia(me)}.
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function TopRight({ me }: { me: Me }) {
   const open = usePalette();
   const state = useLiveEvents(() => {});
   const live = state === "live";
   return (
     <div className="flex shrink-0 items-center gap-1">
+      <SuperadminBadge me={me} />
       <span
         className="hidden items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-medium text-muted-foreground sm:inline-flex"
         title={live ? "Receiving live updates" : "Connecting to live updates"}

@@ -764,6 +764,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/host_inventory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Host inventory
+         * @description Every incus project and instance on the host, isb's or not: projects with the org each one is (if any); instances with project, type, status, addresses, and isb's labels (stack, owner). Superadmins only.
+         */
+        post: operations["host_inventory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/host_policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Host policy
+         * @description How this daemon serves: listen addresses, Cloudflare Access, the tools remote callers see, what a remote caller's specs may ask for (bind roots, publish addresses, privileged, raw, any instance), and every superadmin source with its allow lists. Superadmins only.
+         */
+        post: operations["host_policy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/ingress_status": {
         parameters: {
             query?: never;
@@ -2018,6 +2058,46 @@ export interface paths {
          * @description One stack in detail: per service its revision, state (converged, updating, paused, waiting, failing), message, every replica (status, health, IP, in rotation, restarts, last probe output) and published ports with their live backends.
          */
         post: operations["stack_status"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/superadmin_token_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Superadmin tokens
+         * @description Superadmin tokens: id, name, created, last used, expiry (never the token). They are minted only on the host: isb token create NAME --superadmin. Superadmins only.
+         */
+        post: operations["superadmin_token_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/superadmin_token_revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke a superadmin token
+         * @description Revoke a superadmin token by id; it stops working at once. Superadmins only.
+         */
+        post: operations["superadmin_token_revoke"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3803,6 +3883,76 @@ export interface operations {
                     source?: string;
                     /** @description Unix milliseconds, exclusive. */
                     until?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    host_inventory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    host_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    org?: string;
                 };
             };
         };
@@ -6339,6 +6489,77 @@ export interface operations {
                 "application/json": {
                     name: string;
                     /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    superadmin_token_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    superadmin_token_revoke: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    id: number;
                     org?: string;
                 };
             };

@@ -12,6 +12,7 @@ import { AccountPage } from "@/pages/account";
 import { InvitePage } from "@/pages/invite";
 import { LoginPage } from "@/pages/login";
 import { AdminPage } from "@/pages/admin";
+import { HostPage } from "@/pages/host";
 import { OrgHistoryPage } from "@/pages/history";
 import { OrgPage } from "@/pages/org";
 import { MembersPage } from "@/pages/org-members";
@@ -71,6 +72,8 @@ export function App() {
               <Route path="/orgs/:org/audit" element={<AuditRedirect />} />
               <Route path="/admin" element={<AdminPage />} />
               <Route path="/admin/:tab" element={<AdminPage />} />
+              <Route path="/host" element={<HostPage />} />
+              <Route path="/host/:tab" element={<HostPage />} />
               <Route path="/account" element={<AccountPage />} />
             </Route>
             <Route path="*" element={<NotFound />} />

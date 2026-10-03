@@ -48,6 +48,7 @@ export function crumbsFor(path: string): Crumb[] {
     return section ? [{ label: section, to: `/orgs/${m[1]}/${m[2]}` }] : [{ label: "Overview" }];
   }
   if (path.startsWith("/admin")) return [{ label: "Platform", to: "/admin" }];
+  if (path.startsWith("/host")) return [{ label: "Host", to: "/host" }];
   if (path.startsWith("/account")) return [{ label: "Account" }];
   return [];
 }

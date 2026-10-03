@@ -30,8 +30,12 @@ tools. It listens in two places:
   live dashboard, built on the same API ([web.md](web.md)). It never answers
   an API path.
 
-`--listen` refuses anything but a loopback address: put a tunnel (or a
-reverse proxy) in front of it, never an open port.
+`--listen` takes one or more addresses (comma-separated) and refuses
+anything but loopback, or a tailnet address (100.64.0.0/10,
+fd7a:115c:a1e0::/48) when `--superadmin-tailnet` is set: put a tunnel (or a
+reverse proxy) in front of loopback, never an open port. Cloudflare Access
+guards the loopback listeners; a tailnet listener is reached only by
+tailnet peers and has no Access in front.
 
 A daemon can be the **control plane** for other hosts: `isb server add`
 bootstraps one over SSH, `isb org create --server` places an org on it, and
@@ -60,6 +64,14 @@ org. API tokens can be narrowed with scopes (`read`, `deploy`, `admin`,
 - **Cloudflare Access** (optional; below) puts SSO in front of everything. An
   Access identity whose email belongs to an isb user acts as that user; one
   that does not gets "ask an org admin to invite you".
+- **Superadmins** have the unix socket's reach over HTTP: every tool, no
+  remote-spec policy, any instance, and the host tools. A superadmin token
+  (`isb token create NAME --superadmin`, on the host only), a tailnet
+  identity on `--superadmin-tailnet`, or a verified Access identity on
+  `--superadmin-access`; nothing else. Tailnet and Access identities ride
+  along like cookies, so their writes need `X-Isb-Csrf: 1`, their `/mcp`
+  calls `Content-Type: application/json`, and their `Origin` and `Host`
+  must be this server's. See [auth.md](auth.md#superadmins).
 - **Anonymous** calls are refused, unless `--allow-unauthenticated` (local
   testing only).
 - `overview`, `events` and `stack_list` show only the caller's orgs.
@@ -71,7 +83,11 @@ org. API tokens can be narrowed with scopes (`read`, `deploy`, `admin`,
   platform admins everything; `audit_verify` is for platform admins.
 - The `server_*` tools are for platform admins. A call for an org placed on
   a server is judged here, then again by the server's agent.
-- The unix socket is the daemon's own user and reaches everything.
+- The unix socket is the daemon's own user and reaches everything; so does
+  a superadmin. `host_inventory`, `host_policy`, `superadmin_token_list` and
+  `superadmin_token_revoke` are for superadmins only, platform admins
+  included in the refusal. `isb serve` logs at start-up which superadmin
+  sources are on.
 - Every call that changes something, every refusal, every secret read,
   sign-in, webhook delivery and terminal session is recorded in the audit
   log ([audit.md](audit.md)), and every controller event and incus
@@ -198,6 +214,36 @@ Every call is logged to the daemon's stderr (the journal) with the caller's
 identity, the tool, its duration and whether it failed, never its arguments.
 Stacks record who deployed them (`deployed_by`).
 
+### 5. Superadmins through Access (optional)
+
+`--superadmin-access alice@example.com,abc123.access` (or
+`ISB_SUPERADMIN_ACCESS`) gives the listed Access identities, users by email
+and service tokens by client id, the unix socket's reach. Only a verified
+assertion counts, so the flag is refused without both `CF_ACCESS_*` values,
+and it needs `--public-url` (an Access superadmin's `Host` must be it). The
+`CF_Authorization` cookie makes it ambient, so the same CSRF, `Origin`,
+`Content-Type` and `Host` checks as for tailnet superadmins apply
+([auth.md](auth.md#superadmins)); an MCP client that sends a foreign
+`Origin` is refused as a superadmin.
+
+## A tailnet as the trust boundary
+
+To give people and agents on a Tailscale network superadmin access:
+
+```dotenv
+# ~/.config/isb/serve.env
+ISB_SERVE_LISTEN=127.0.0.1:8092,100.86.22.100:8092
+ISB_SUPERADMIN_TAILNET=someone@example.com,tag:agents
+```
+
+The tailnet address is this host's own (`tailscale ip -4`). A request from a
+tailnet peer is a superadmin when tailscaled says its user's login, or one of
+its node's tags, is on the list (a tagged node only by its tags). Everyone
+else on that listener signs in as on any other (tokens, sessions). The
+`Host` a browser sends must be the listen address, the node's MagicDNS name
+(`host` or `host.tailnet.ts.net`) or the public URL's host. An empty list is
+refused, and so is a tailnet `--listen` address without the flag.
+
 ## What a remote caller's specs may ask for
 
 The incus socket is root on the host. A remote caller is trusted to run
@@ -229,7 +275,8 @@ And always:
 `--allow-tools` and `--deny-tools` (names or globs such as `sandbox_*`,
 comma-separated; deny wins) choose which tools remote callers see at all. The
 local socket always has every tool and no policy: its caller could run `isb`
-directly.
+directly. A superadmin has no remote-spec policy either, but sees the tools
+its listener offers.
 
 ## Tools
 
@@ -283,6 +330,9 @@ directly.
 | `audit_verify` | Walk the audit log's and the history's hash chains. Platform admins. |
 | `history_query` | The history ([history.md](history.md)): controller events, incus lifecycle events in every project with their requestor, audit rows and markers, merged; filter by org, object, kind, source, actor, time; `correlate` links incus changes to the audit row that likely caused them. Members see their orgs; host-level rows are for platform admins. |
 | `server_add`, `server_list`, `server_show`, `server_remove`, `server_rotate_cert` | The servers orgs can be placed on: bootstrap one over SSH, list them with their health and orgs, show one, forget one (refused while it holds orgs), issue its agent a new certificate. Platform admins. See [servers.md](servers.md). |
+| `host_inventory` | Every incus project and instance on the host, isb's or not: project, org, type, status, addresses, isb's stack and owner labels. Superadmins. |
+| `host_policy` | How the daemon serves: listen addresses, Access, the remote tool policy, what remote specs may ask for, and each superadmin source with its allow list and token count. Superadmins. |
+| `superadmin_token_list`, `superadmin_token_revoke` | Superadmin tokens' metadata, and revoking one by id. Minting is `isb token create NAME --superadmin` on the host only. Superadmins. |
 
 `stack_deploy` also takes `dry_run: true`, which returns the per-service
 changes without deploying. `isb tui` ([tui.md](tui.md)) is built on
@@ -296,7 +346,7 @@ prior `initialize`, and there is no session id.
 
 | Flag | Environment | Default |
 |---|---|---|
-| `--listen` | `ISB_SERVE_LISTEN` | none: the socket only |
+| `--listen` | `ISB_SERVE_LISTEN` | none: the socket only; comma-separated loopback addresses, and tailnet ones with `--superadmin-tailnet` |
 | `--serve-socket` | `ISB_SERVE_SOCKET` | `$XDG_RUNTIME_DIR/isb/serve.sock` |
 | `--state-dir` | `ISB_SERVE_STATE_DIR` | `$XDG_STATE_HOME/isb` |
 | `--interval` | | `5s`: how often each service is reconciled |
@@ -307,6 +357,8 @@ prior `initialize`, and there is no session id.
 | `--bind-root` | `ISB_SERVE_BIND_ROOTS` (comma-separated) | none |
 | `--publish-address` | `ISB_SERVE_PUBLISH_ADDRESSES` (comma-separated) | none: loopback only |
 | `--allow-privileged`, `--allow-raw`, `--any-instance` | `ISB_SERVE_ALLOW_PRIVILEGED`, `ISB_SERVE_ALLOW_RAW`, `ISB_SERVE_ANY_INSTANCE` | off |
+| `--superadmin-tailnet` | `ISB_SUPERADMIN_TAILNET` | off; tailnet login names and `tag:` node tags, comma-separated, that are superadmins ([above](#a-tailnet-as-the-trust-boundary)) |
+| `--superadmin-access` | `ISB_SUPERADMIN_ACCESS` | off; Access emails and service token client ids, comma-separated, that are superadmins; needs Access and `--public-url` |
 | `--public-url` | `ISB_PUBLIC_URL` | none: invitation and reset links are bare tokens, and provider sign-in and passkeys are off |
 | `--session-max-age` | `ISB_SESSION_MAX_AGE` | `30d` |
 | `--session-idle` | `ISB_SESSION_IDLE` | `7d` |

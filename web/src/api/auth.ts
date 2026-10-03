@@ -30,7 +30,24 @@ export interface Me {
   auth:
     | { kind: "session"; id: number }
     | { kind: "api_token"; id: number; org: string | null; name: string; scopes?: string[] }
-    | { kind: "access" };
+    | { kind: "access" }
+    | { kind: "superadmin"; source: SuperadminVia };
+  /** The unix socket's reach over HTTP (docs/auth.md#superadmins), or null. */
+  superadmin?: Superadmin | null;
+}
+
+/** Where a superadmin's power comes from. */
+export type SuperadminVia =
+  | { kind: "token"; id: number; name: string }
+  | { kind: "tailnet"; login: string; node: string; tags?: string[] }
+  | { kind: "access"; name: string; service_token?: boolean };
+
+export interface Superadmin {
+  /** `token:<name>`, `tailnet:<login>` or `access:<name>`. */
+  source: string;
+  via: SuperadminVia;
+  /** Has an isb account of its own (sessions, passkeys, tokens). */
+  account: boolean;
 }
 
 export interface SessionAnswer {

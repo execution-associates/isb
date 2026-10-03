@@ -43,6 +43,62 @@ platform admin always remains.
 - Roles are stored as text and mapped to permissions in one table in code
   (`Role::permissions`), so a new role or a finer permission needs no migration.
 
+## Superadmins
+
+A platform admin reaches every org but is still a remote caller: its specs
+are held to the remote-spec policy ([serve.md](serve.md#what-a-remote-callers-specs-may-ask-for))
+and it cannot reach instances isb does not manage. A **superadmin** has
+what the daemon's unix socket has: every tool, no remote-spec policy, any
+instance, plus the host tools (`host_inventory`, `host_policy`,
+`superadmin_token_list`, `superadmin_token_revoke`), which nobody else gets,
+platform admins included. Four sources grant it, and nothing else:
+
+| Source | Who | Audit name |
+|---|---|---|
+| the unix socket | the daemon's own user | `local(uid N)` |
+| a superadmin token | `Authorization: Bearer isb_sa_...` | `token:<name>` |
+| a tailnet identity | a peer on a tailnet `--listen` address whose login or node tag is on `--superadmin-tailnet` | `tailnet:<login>` (a tagged node: `tailnet:<node>`) |
+| a Cloudflare Access identity | a verified `Cf-Access-Jwt-Assertion` whose email or service token client id is on `--superadmin-access` | `access:<name>` |
+
+- **Superadmin tokens** belong to nobody. They are minted only on the host,
+  `isb token create NAME --superadmin [--expires 30d]` (no `--org`, `--user`
+  or `--scope`), which writes `isb.db` as the daemon's user. No HTTP caller
+  can mint one, a superadmin included (`POST tokens` with `"superadmin": true`
+  is `403`), so a stolen HTTP credential never turns into a durable one.
+  `isb token ls` lists them as `sa-ID` with `SUPERADMIN` for a user;
+  `isb token revoke sa-ID`, the web UI's Host page or `superadmin_token_revoke`
+  revoke them. Names are unique, `[A-Za-z0-9._-]`, up to 64.
+- A **tailnet** or **Access** superadmin whose login or email is an enabled isb
+  user acts as that user (its memberships, its account pages) plus
+  superadmin; anyone else, a superadmin token and a tagged node or service
+  token included, is a synthetic principal named after its source, with no
+  account of its own (no sessions, passkeys or tokens; `POST tokens` is `403`).
+- Both are **ambient**, like a cookie: a browser on a tailnet machine, or one
+  holding the `CF_Authorization` cookie, sends them with any page's request.
+  So, for them, writes must carry `X-Isb-Csrf: 1`, `/mcp` must be
+  `Content-Type: application/json` (a cross-site page sends that only after a
+  CORS preflight, which isb never grants), an `Origin`, when sent, must name
+  the request's `Host`, and the `Host` must be one of this server's names
+  (the listen addresses, the public URL's host, the node's MagicDNS names),
+  which blocks DNS rebinding. The web terminal's `Origin` check applies as
+  for a session. A request that fails these is refused and recorded
+  (`superadmin.refused`).
+- A **tailnet** identity comes only from the TCP peer address, asked of the
+  local tailscaled (`whois` over its LocalAPI socket, else the `tailscale`
+  CLI on macOS), cached for a minute per address. Forwarded headers
+  (`X-Forwarded-For`, `Tailscale-User-Login`) are never read. A tagged node
+  is its tags, never its owner's login. When tailscaled does not answer,
+  nobody is a tailnet superadmin, and the daemon says why once.
+- An **Access** identity counts only from an assertion the daemon verified,
+  on the loopback listeners Access guards; emails match case-insensitively
+  and exactly, service tokens by client id, with no wildcards or domains.
+- A request carrying a bearer token is judged by the token alone; a tailnet
+  or Access superadmin is signed in ahead of any session cookie, and signing
+  out does not change who it is.
+- Every call a superadmin makes over HTTP is recorded, reads included, with
+  actor kind `superadmin` and its source as the actor; refusals too. A
+  sandbox it creates is labelled `isb.owner=<source>`.
+
 ## The first admin
 
 While no user exists, either:
@@ -290,7 +346,8 @@ A request carrying `Authorization` is judged by it alone: a bad token is a
 
 ## Secrets at rest
 
-Every bearer secret (session `isb_sess_`, API token `isb_tok_`, invitation
+Every bearer secret (session `isb_sess_`, API token `isb_tok_`, superadmin
+token `isb_sa_`, invitation
 `isb_inv_`, password reset `isb_rst_`, setup token `isb_setup_`) is 32 random
 bytes from the OS, base64url behind its prefix, shown exactly once. The
 database keeps only the SHA-256 of each; the row found by that hash is
@@ -346,8 +403,10 @@ Over the limit is `429` with `Retry-After`. The client IP is
 ## Cloudflare Access
 
 With Access configured (`CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD`), it stays the
-front door: `/api/v1/auth/*` also needs a valid `Cf-Access-Jwt-Assertion`, as
-`/mcp` does, and then isb's own sign-in applies behind it. Without Access the
+front door of the loopback listeners: `/api/v1/auth/*` also needs a valid
+`Cf-Access-Jwt-Assertion`, as `/mcp` does, and then isb's own sign-in applies
+behind it. `--superadmin-access` makes listed Access identities superadmins
+([above](#superadmins)); it needs Access and `--public-url`. Without Access the
 identity endpoints are still served (they authenticate their own callers);
 remote MCP stays off unless explicitly enabled.
 
@@ -366,14 +425,14 @@ JSON in and out; every response is `Cache-Control: no-store`. Errors are
 | `POST setup` | anyone, with the setup token | `{setup_token, email, name, password}` | `201` session (below), cookie set |
 | `POST login` | anyone | `{email, password}` | session, cookie set |
 | `POST logout` | anyone | | `204`, cookie cleared |
-| `GET me` | signed in | | `{user, platform_admin, memberships: [{org, role}], orgs: [ORG], auth: {kind: "session", id} \| {kind: "api_token", id, org, name, scopes?}}`; `orgs` is every org the caller can open (all of them for a platform admin) |
+| `GET me` | signed in | | `{user, platform_admin, memberships: [{org, role}], orgs: [ORG], auth: {kind: "session", id} \| {kind: "api_token", id, org, name, scopes?} \| {kind: "superadmin", source}, superadmin}`; `orgs` is every org the caller can open (all of them for a platform admin); `superadmin` is `null`, or `{source: "tailnet:...", via: {kind: "token" \| "tailnet" \| "access", ...}, account: bool}` |
 | `GET sessions` | signed in | | `{sessions: [{id, created_at, last_seen, expires_at, idle_expires_at, user_agent, ip, current}]}` |
 | `DELETE sessions/ID` | signed in | | `204` |
 | `POST invitations` | org owner/admin | `{org, email, role?}` (default member) | `201 {invitation, token, link}` |
 | `POST invitations/inspect` | anyone with the token | `{token}` | `{org, email, role, expires_at, account_exists}` |
 | `POST invitations/accept` | anyone with the token | `{token, name?, password?}` | `{user, membership, created}`, cookie set unless already signed in |
 | `GET tokens` | signed in | | `{tokens: [{id, name, user_id, org, created_at, last_used, expires_at, scopes}]}` |
-| `POST tokens` | signed in | `{name, org?, expires?, scopes?}` | `201 {token, info}` |
+| `POST tokens` | signed in, with an account | `{name, org?, expires?, scopes?}` | `201 {token, info}`; `"superadmin": true` is always `403` |
 | `DELETE tokens/ID` | its user, or the org's owners/admins | | `204` |
 | `POST password` | signed in with a session | `{current_password, new_password}` | `204` |
 | `POST password-reset/request` | anyone | `{email}` | `202 {"ok": true}` |
@@ -421,8 +480,10 @@ isb user passwd EMAIL                         set a password, end their sessions
 isb invite ORG EMAIL [--role member]          viewer, member, admin or owner; prints the token, or the link with ISB_PUBLIC_URL
 isb token create NAME [--org ORG] [--expires 90d] [--user EMAIL] [--scope S]...
                                               prints the token once; --user defaults to the only platform admin
-isb token ls [--json]                         metadata only
-isb token revoke ID...
+isb token create NAME --superadmin [--expires 30d]
+                                              a superadmin token (nobody's); only here, on the host
+isb token ls [--json]                         metadata only; superadmin tokens as sa-ID
+isb token revoke ID|sa-ID...
 ```
 
 Passwords never come from argv, where they would show in `ps` and shell
@@ -438,5 +499,6 @@ sign-in: provider, subject, email, email_verified), `passkeys` (credential id,
 user, user handle, COSE public key, algorithm, sign count, transports,
 AAGUID, name, created_at, last_used), `orgs`, `memberships`, `sessions`,
 `invitations`, `api_tokens` (with `scopes`, a JSON array, NULL for none),
-`password_resets`, and `schema_version`. Migrations run at open, each in its own transaction; a
+`superadmin_tokens` (name unique, no user), `password_resets`, and
+`schema_version`. Migrations run at open, each in its own transaction; a
 database from a newer isb is refused rather than downgraded.

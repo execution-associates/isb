@@ -12,7 +12,7 @@ export interface AuditEntry {
   /** null: platform level (sign-ins, users, org changes). */
   org: string | null;
   actor: string;
-  actor_kind: "person" | "agent" | "local" | "webhook" | "anonymous";
+  actor_kind: "person" | "agent" | "local" | "webhook" | "anonymous" | "superadmin";
   user_id: number | null;
   user_email: string | null;
   token_id: number | null;

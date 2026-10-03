@@ -80,7 +80,28 @@ export function defaultOrg(me: Me): string | null {
 }
 
 export function roleIn(me: Me, org: string): string | null {
-  return me.memberships.find((m) => m.org === org)?.role ?? (me.platform_admin ? "platform admin" : null);
+  return me.memberships.find((m) => m.org === org)?.role ?? (me.superadmin ? "superadmin" : me.platform_admin ? "platform admin" : null);
+}
+
+/** Signed in by where the request comes from (a tailnet or Access
+ * identity), not by a session: signing out changes nothing. */
+export function ambientSuperadmin(me: Me): boolean {
+  const k = me.superadmin?.via.kind;
+  return k === "tailnet" || k === "access";
+}
+
+/** How a superadmin is signed in, in a few words. */
+export function superadminVia(me: Me): string | null {
+  const s = me.superadmin;
+  if (!s) return null;
+  switch (s.via.kind) {
+    case "token":
+      return `superadmin token ${s.via.name}`;
+    case "tailnet":
+      return s.via.tags?.length ? `tailnet node ${s.via.node} (${s.via.tags.join(", ")})` : `tailnet login ${s.via.login}`;
+    case "access":
+      return s.via.service_token ? `Access service token ${s.via.name}` : `Cloudflare Access as ${s.via.name}`;
+  }
 }
 
 export function canManage(me: Me, org: string): boolean {

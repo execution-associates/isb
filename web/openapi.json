@@ -2412,6 +2412,88 @@
         "summary": "History"
       }
     },
+    "/api/v1/tools/host_inventory": {
+      "post": {
+        "description": "Every incus project and instance on the host, isb's or not: projects with the org each one is (if any); instances with project, type, status, addresses, and isb's labels (stack, owner). Superadmins only.",
+        "operationId": "host_inventory",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Host inventory"
+      }
+    },
+    "/api/v1/tools/host_policy": {
+      "post": {
+        "description": "How this daemon serves: listen addresses, Cloudflare Access, the tools remote callers see, what a remote caller's specs may ask for (bind roots, publish addresses, privileged, raw, any instance), and every superadmin source with its allow lists. Superadmins only.",
+        "operationId": "host_policy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Host policy"
+      }
+    },
     "/api/v1/tools/ingress_status": {
       "post": {
         "description": "The HTTP(S) edge: its listeners, CA and Caddy process; every routed domain with its URL, certificate state (issued, pending, failed, unsupported, cloudflare, none) and live upstreams; domain conflicts and refusals; and each Cloudflare-tunnel org's cloudflared and API sync. Shows the caller's orgs only.",
@@ -5883,6 +5965,94 @@
           }
         },
         "summary": "Stack status"
+      }
+    },
+    "/api/v1/tools/superadmin_token_list": {
+      "post": {
+        "description": "Superadmin tokens: id, name, created, last used, expiry (never the token). They are minted only on the host: isb token create NAME --superadmin. Superadmins only.",
+        "operationId": "superadmin_token_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Superadmin tokens"
+      }
+    },
+    "/api/v1/tools/superadmin_token_revoke": {
+      "post": {
+        "description": "Revoke a superadmin token by id; it stops working at once. Superadmins only.",
+        "operationId": "superadmin_token_revoke",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "integer"
+                  },
+                  "org": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Revoke a superadmin token"
       }
     },
     "/api/v1/tools/template_catalog_add": {

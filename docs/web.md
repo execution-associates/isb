@@ -87,6 +87,29 @@ Platform admins also get **Platform** (`/admin/orgs`, `/admin/users`,
 the whole history (every org and the host, host-level rows only, or one
 org).
 
+**Superadmins** ([auth.md](auth.md#superadmins)) carry a **Superadmin**
+badge in the top bar (its tooltip says how they are signed in) and get
+**Host** (`/host`, `/host/policy`, `/host/superadmins`), under Platform:
+
+- **Instances**: every incus project (isb orgs marked) and every container
+  and VM on the host, isb's or not, with project, org, image, address,
+  isb's stack and owner labels and status; filter by text or project.
+- **Serve policy**: the listen addresses, socket, public URL, Access and
+  `--allow-unauthenticated`, and what remote callers' specs may ask for
+  (privileged, raw, bind roots, publish addresses, any instance, the tool
+  allow and deny lists), from `host_policy`.
+- **Superadmins**: the sources that grant it (the socket, the token count,
+  the `--superadmin-tailnet` and `--superadmin-access` lists, read-only:
+  they are flags), and the superadmin tokens with last use and expiry,
+  each revocable. Minting stays `isb token create NAME --superadmin` on the
+  host; the page says so.
+
+A tailnet or Access superadmin needs no sign-in: the app opens signed in as
+its isb user, or as its source when it has no account (then Account shows
+only how it is signed in, and there is no Sign out, since the next request
+would sign it in again). The UI offers no privileged, raw or bind-mount
+form fields to anyone; superadmins use the tools for those.
+
 Viewers see an app's pages without Deploy, Start, Stop or the Terminal
 tab, and the Projects pages without New project, New app and project
 actions; the server refuses those to them regardless.
