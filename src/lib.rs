@@ -41,6 +41,7 @@ pub mod idmap;
 pub mod interp;
 pub mod lock;
 pub mod metrics;
+pub mod org;
 pub mod plan;
 pub mod rpc;
 pub mod sandbox;

@@ -39,6 +39,13 @@ any `proprietary/` directory is read at all).
 
 Installed for testing: (none yet)
 
+**minime is 93% full (14 GiB free on 2026-10-03).** Keep the Lima VM disk
+≤ 15 GiB, delete test VMs and downloaded binaries when done.
+
+**Nothing untrusted builds on minime** (it holds Stephan's Apple session):
+macOS binaries are built and unit-tested by GitHub Actions macOS runners;
+minime only runs binaries downloaded from our CI runs.
+
 ## Decisions
 
 - **Org = trust boundary = incus project.** An org's people and agents fully
@@ -67,6 +74,8 @@ Installed for testing: (none yet)
   the web UI, TUI, CLI and agents all use it.
 - **Web UI:** React + Vite + Tailwind + shadcn, built with bun, embedded in
   the binary; served by `isb serve`.
+- **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
+  `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
   and `isb serve` as an agent; the control plane places orgs on servers and
   proxies to them over mTLS.
