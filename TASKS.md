@@ -36,6 +36,7 @@ condenses what it does.
 | titan (Linux, incus 7.5) | integration tests, daemon | the dev host |
 | minime (macOS 27, arm64, 16 GB) | macOS support: `isb machine`, CLI, TUI, web UI in Safari/Chrome | `ssh minime`; installs go through mise or brew, and anything installed for testing is listed here |
 | hcloud EU box (Linux, cheapest that runs incus) | a clean-install target: installer, remote server, public ingress + ACME, federation | `hcloud` with `HCLOUD_TOKEN`; label `owner=isb-platform`; delete when idle |
+| isb-test (hcloud cx23, nbg1, 2.28.124.127) | Stephan's standing test box: incus 7.5.1 (Zabbly stable), isb at `/usr/local/bin/isb`, `isb host setup` applied, ufw SSH-only | `ssh isb-test` (root); herdr machine `isb-test`; kept, not deleted when idle |
 | browser | web UI end to end | lasso's shared browser (titan-local URLs) or minime-chrome (tailnet/public URLs); close every page opened |
 
 Installed for testing: lima 2.2.0 on minime (`brew install lima`).
