@@ -1790,3 +1790,305 @@ fn stack_env_secret_delivery() {
     wait_file(&sys2, "/tmp/t");
     assert_eq!(read(&sys2, "/tmp/t"), "rotated");
 }
+
+/// Runs a command in `dir`, panicking with its output on failure.
+fn run_in(dir: &std::path::Path, argv: &[&str]) -> String {
+    let out = Command::new(argv[0])
+        .args(&argv[1..])
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{argv:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// A `git daemon` serving `base` read-only on a loopback port, killed on
+/// drop: the app layer refuses file:// and local paths, so the test repo
+/// is fetched over git://.
+struct GitDaemon(std::process::Child, u16);
+
+impl GitDaemon {
+    fn start(base: &std::path::Path) -> GitDaemon {
+        let port = free_port();
+        let child = Command::new("git")
+            .args([
+                "daemon",
+                "--export-all",
+                "--reuseaddr",
+                "--listen=127.0.0.1",
+                &format!("--port={port}"),
+                &format!("--base-path={}", base.display()),
+            ])
+            .arg(base)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
+            assert!(Instant::now() < deadline, "git daemon did not start");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        GitDaemon(child, port)
+    }
+}
+
+impl Drop for GitDaemon {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// The app layer end to end on incusd: an image app deployed (pinned to
+/// its digest), its env edited and redeployed with only its own service
+/// rolling, rolled back; a git app fetched from a served repository and
+/// "built" by a stand-in builder; a signed webhook deploying it and a
+/// forged one refused.
+#[test]
+fn apps_deploy_edit_rollback_git_webhook() {
+    if !enabled() {
+        return;
+    }
+    use isb::app::deploy::{Status, Trigger};
+    use std::sync::Arc;
+    let client = Client::new();
+    let state = tempfile::tempdir().unwrap();
+    let store = isb::stack::Store::open(state.path()).unwrap();
+    let secrets = test_secrets(state.path());
+    let ctl = isb::stack::Controller::start(
+        client.clone(),
+        store,
+        Duration::from_secs(2),
+        secrets.clone(),
+    )
+    .unwrap();
+    let builds = Arc::new(std::sync::Mutex::new(Vec::<(PathBuf, String)>::new()));
+    let seen = builds.clone();
+    let build: isb::app::BuildFn = Arc::new(
+        move |_c: &Client, r: &isb::build::BuildRequest, log: &mut dyn FnMut(&str)| {
+            log("fake build");
+            seen.lock()
+                .unwrap()
+                .push((r.context.clone(), r.tag.clone()));
+            Ok(isb::build::BuiltImage {
+                image: "docker:traefik/whoami".into(),
+                digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                    .into(),
+            })
+        },
+    );
+    let apps = isb::app::Apps::new(state.path(), client.clone(), ctl.clone(), secrets.clone())
+        .with_build(build)
+        .with_timeout(Duration::from_secs(400));
+    let org = isb::org::OrgId::default_org();
+    let project = format!("isbt{}", std::process::id() % 100000);
+    let stack = format!("{project}-test");
+    struct Rm(isb::app::Apps, isb::stack::Controller, String);
+    impl Drop for Rm {
+        fn drop(&mut self) {
+            let org = isb::org::OrgId::default_org();
+            for a in ["web", "other", "src"] {
+                let _ = self.0.delete(&org, a);
+            }
+            let _ = self.1.remove(&self.2, true, Duration::from_secs(120));
+            self.1.shutdown();
+        }
+    }
+    let _rm = Rm(apps.clone(), ctl.clone(), stack.clone());
+    apps.project_create(&org, &project, "", &["test".into()])
+        .unwrap();
+    let port = free_port();
+    let spec = |v: serde_json::Value| serde_json::from_value::<isb::app::AppSpec>(v).unwrap();
+    apps.create(
+        &org,
+        spec(serde_json::json!({
+            "name": "web", "project": project, "environment": "test",
+            "source": {"image": "docker:traefik/whoami"},
+            "env": "# first\nA=1\n", "port": 80,
+            "ports": [format!("127.0.0.1:{port}:80")],
+        })),
+    )
+    .unwrap();
+    apps.create(
+        &org,
+        spec(serde_json::json!({
+            "name": "other", "project": project, "environment": "test",
+            "source": {"image": "docker:traefik/whoami"},
+        })),
+    )
+    .unwrap();
+    let deploy = |app: &str| {
+        let d = apps.deploy(&org, app, Trigger::Api, "test", None).unwrap();
+        let d = apps
+            .wait(&org, app, d.id, Duration::from_secs(600))
+            .unwrap();
+        let log = apps.log(&org, app, d.id, 0).unwrap().0;
+        assert_eq!(d.status, Status::Done, "{d:?}\n{log}");
+        d
+    };
+    let instances = |svc: &str| -> Vec<String> {
+        let st = ctl.status(&stack).unwrap();
+        let s = st.services.iter().find(|s| s.service == svc).unwrap();
+        let mut v: Vec<String> = s.instances.iter().map(|i| i.name.clone()).collect();
+        v.sort();
+        v
+    };
+    let env_a = |svc: &str| -> Option<String> {
+        let n = &instances(svc)[0];
+        Sandbox::get(&client, n)
+            .unwrap()
+            .info()
+            .unwrap()
+            .config
+            .get("environment.A")
+            .cloned()
+    };
+
+    let d1 = deploy("web");
+    // Pinned to the digest when the registry tells it (skopeo on the host).
+    if let Some(dg) = &d1.digest {
+        assert!(d1.image.as_deref().unwrap().ends_with(dg), "{d1:?}");
+    }
+    assert!(
+        http_get(&format!("127.0.0.1:{port}"))
+            .unwrap()
+            .contains("Hostname")
+    );
+    deploy("other");
+    let other = instances("other");
+    let web1 = instances("web");
+    assert_eq!(env_a("web").as_deref(), Some("1"));
+
+    // Edit the env and redeploy: web rolls, other does not.
+    apps.env_set(&org, "web", "# first\nA=2\n").unwrap();
+    assert_eq!(apps.env_get(&org, "web").unwrap(), "# first\nA=2\n");
+    deploy("web");
+    let web2 = instances("web");
+    assert_ne!(web1, web2);
+    assert_eq!(env_a("web").as_deref(), Some("2"));
+    assert_eq!(instances("other"), other, "only the deployed app rolls");
+
+    // Roll back: deployment 1's image and settings, no build.
+    let rb = apps
+        .rollback(&org, "web", Some(d1.id), Trigger::Manual, "test")
+        .unwrap();
+    let rb = apps
+        .wait(&org, "web", rb.id, Duration::from_secs(600))
+        .unwrap();
+    assert_eq!(rb.status, Status::Done, "{rb:?}");
+    assert_eq!(rb.rollback_of, Some(d1.id));
+    assert_eq!(rb.image, d1.image);
+    assert_eq!(env_a("web").as_deref(), Some("1"));
+    assert_eq!(instances("other"), other);
+    assert_eq!(apps.get(&org, "web").unwrap().current, Some(rb.id));
+
+    // A git app, from a repository served over git://.
+    let repos = tempdir();
+    let work = repos.path().join("work");
+    std::fs::create_dir(&work).unwrap();
+    run_in(&work, &["git", "init", "-q", "-b", "main"]);
+    std::fs::write(work.join("hello.txt"), "one\n").unwrap();
+    run_in(&work, &["git", "add", "."]);
+    let commit = |msg: &str| {
+        run_in(
+            &work,
+            &[
+                "git",
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-qam",
+                msg,
+            ],
+        )
+    };
+    commit("first commit");
+    run_in(
+        repos.path(),
+        &["git", "clone", "-q", "--bare", "work", "repo.git"],
+    );
+    let daemon = GitDaemon::start(repos.path());
+    let (_, secret) = apps
+        .create(
+            &org,
+            spec(serde_json::json!({
+                "name": "src", "project": project, "environment": "test",
+                "source": {"git": {"url": format!("git://127.0.0.1:{}/repo.git", daemon.1), "ref": "main"}},
+                "build": {"builder": {"type": "railpack"}},
+            })),
+        )
+        .unwrap();
+    let g1 = deploy("src");
+    let c = g1.commit.clone().unwrap();
+    assert_eq!(c.message, "first commit");
+    let (ctx, tag) = builds.lock().unwrap().last().cloned().unwrap();
+    assert_eq!(tag, c.sha);
+    assert_eq!(
+        std::fs::read_to_string(ctx.join("hello.txt")).unwrap(),
+        "one\n"
+    );
+
+    // A new commit, pushed; a webhook signed with the app's secret deploys
+    // it, a forged one does nothing.
+    std::fs::write(work.join("hello.txt"), "two\n").unwrap();
+    commit("second commit");
+    run_in(&work, &["git", "push", "-q", "../repo.git", "main"]);
+    let body =
+        br#"{"ref":"refs/heads/main","after":"x","head_commit":{"message":"second commit"}}"#;
+    let hdr = |sig: String| {
+        move |n: &str| match n {
+            "x-hub-signature-256" => Some(sig.clone()),
+            "x-github-event" => Some("push".to_string()),
+            _ => None,
+        }
+    };
+    let bad = hdr(format!(
+        "sha256={}",
+        isb::app::webhook::sign(b"guess", body)
+    ));
+    let (st, _) = apps.webhook("default", "src", &bad, None, body);
+    assert_eq!(st, 401);
+    assert_eq!(apps.deployments(&org, "src").unwrap().len(), 1);
+    let good = hdr(format!(
+        "sha256={}",
+        isb::app::webhook::sign(secret.as_bytes(), body)
+    ));
+    let (st, v) = apps.webhook("default", "src", &good, None, body);
+    assert_eq!(st, 202, "{v}");
+    let id = v["deployment"].as_u64().unwrap();
+    let g2 = apps
+        .wait(&org, "src", id, Duration::from_secs(600))
+        .unwrap();
+    assert_eq!(g2.status, Status::Done, "{g2:?}");
+    assert_eq!(g2.trigger, Trigger::Webhook);
+    assert_eq!(g2.commit.as_ref().unwrap().message, "second commit");
+    assert_ne!(g2.commit.unwrap().sha, c.sha);
+    assert_eq!(apps.deployments(&org, "src").unwrap().len(), 2);
+
+    // Deleting the apps takes their services, and the stack with the last.
+    apps.delete(&org, "src").unwrap();
+    assert!(
+        ctl.status(&stack)
+            .unwrap()
+            .services
+            .iter()
+            .all(|s| s.service != "src")
+    );
+    apps.delete(&org, "other").unwrap();
+    apps.delete(&org, "web").unwrap();
+    assert!(
+        ctl.status(&stack).is_err(),
+        "the stack went with its last app"
+    );
+    apps.project_delete(&org, &project).unwrap();
+}

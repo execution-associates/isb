@@ -384,6 +384,7 @@ pub(crate) struct Endpoint {
     pub access: Option<Arc<AccessValidator>>,
     pub healthz: Healthz,
     pub routes: Option<super::Routes>,
+    pub public_routes: Option<super::Routes>,
     pub hooks: Hooks,
 }
 
@@ -408,6 +409,9 @@ impl Endpoint {
             "/api/v1/tools" => self.rest_list(req),
             "/api/v1/events" => self.events(req),
             p => {
+                if let Some(r) = self.public_routes.as_ref().and_then(|f| f(req)) {
+                    return r;
+                }
                 if let Some(rest) = p.strip_prefix("/api/v1/tools/") {
                     return self.rest_call(req, rest, None);
                 }
@@ -934,6 +938,7 @@ mod tests {
             access: access.map(Arc::new),
             healthz: Arc::new(|| (true, json!({"ok": true}))),
             routes: None,
+            public_routes: None,
             hooks: Hooks::default(),
         }
     }
@@ -1272,6 +1277,7 @@ mod tests {
         // No Access: the routes answer their own paths; the rest is a 404.
         let open = Endpoint {
             routes: Some(routes.clone()),
+            public_routes: None,
             ..endpoint(ToolPolicy::default(), None)
         };
         let get = |ep: &Endpoint, path: &str, h: &[(&str, &str)]| {
@@ -1284,6 +1290,7 @@ mod tests {
         let (v, _) = at::validator();
         let gated = Endpoint {
             routes: Some(routes),
+            public_routes: None,
             ..endpoint(ToolPolicy::default(), Some(v))
         };
         assert_eq!(get(&gated, "/api/x", &[]), 401);
