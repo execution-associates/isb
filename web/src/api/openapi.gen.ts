@@ -264,6 +264,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/audit_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Audit log
+         * @description Who did what: audit log entries, newest first (or oldest first after `after`, for tailing). Org owners and admins see their org's entries; platform admins see every org and platform-level entries (sign-ins, users, org changes). Filters: actor (glob on name or email), action (glob: `secret_*`, `auth.*`), target (glob), outcome (`ok`, `error`, or a code), surface, since/until (unix ms). Page with `before` = the last id you got.
+         */
+        post: operations["audit_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/audit_verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify the audit log
+         * @description Walk the audit log's hash chain: ok, how many rows, the head (id and hash: keep a copy elsewhere to pin the log), and the first row that does not check out. Platform admins.
+         */
+        post: operations["audit_verify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/build_list": {
         parameters: {
             query?: never;
@@ -1662,6 +1702,95 @@ export interface operations {
                     org?: string;
                     rotate?: boolean;
                 };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    audit_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    action?: string;
+                    actor?: string;
+                    /** @description Entries newer than this id, oldest first. */
+                    after?: number;
+                    /** @description Entries older than this id. */
+                    before?: number;
+                    /** @description Default 100. */
+                    limit?: number;
+                    /** @description One org's entries (an org admin's own when omitted). */
+                    org?: string;
+                    outcome?: string;
+                    /** @description Only platform-level entries (platform admins). */
+                    platform?: boolean;
+                    /** @description Unix milliseconds, inclusive. */
+                    since?: number;
+                    /** @enum {string} */
+                    surface?: "mcp" | "rest" | "cli" | "web" | "webhook";
+                    target?: string;
+                    token_id?: number;
+                    /** @description Unix milliseconds, exclusive. */
+                    until?: number;
+                    user_id?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    audit_verify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
             };
         };
         responses: {

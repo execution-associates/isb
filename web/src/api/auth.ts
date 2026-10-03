@@ -4,7 +4,7 @@ import { api, del, get, post } from "./client";
 
 const A = "/api/v1/auth";
 
-export type Role = "owner" | "admin" | "member";
+export type Role = "owner" | "admin" | "member" | "viewer";
 
 export interface User {
   id: number;
@@ -27,7 +27,10 @@ export interface Me {
   memberships: Membership[];
   /** Every org this caller can open. */
   orgs: string[];
-  auth: { kind: "session"; id: number } | { kind: "api_token"; id: number; org: string | null };
+  auth:
+    | { kind: "session"; id: number }
+    | { kind: "api_token"; id: number; org: string | null; name: string; scopes?: string[] }
+    | { kind: "access" };
 }
 
 export interface SessionAnswer {
@@ -69,6 +72,8 @@ export interface ApiToken {
   created_at: number;
   last_used: number | null;
   expires_at: number | null;
+  /** read, deploy, admin, tool:GLOB; empty: the holder's whole role. */
+  scopes: string[];
 }
 
 export interface Identity {
@@ -151,7 +156,7 @@ export const auth = {
     post<void>(`${A}/password-reset/confirm`, { token, password }),
 
   tokens: () => get<{ tokens: ApiToken[] }>(`${A}/tokens`),
-  createToken: (b: { name: string; org?: string; expires?: string }) =>
+  createToken: (b: { name: string; org?: string; expires?: string; scopes?: string[] }) =>
     post<{ token: string; info: ApiToken }>(`${A}/tokens`, b),
   revokeToken: (id: number) => del(`${A}/tokens/${id}`),
 

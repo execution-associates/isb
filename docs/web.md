@@ -24,7 +24,7 @@ of it) in a browser:
   unlinks providers, adds and deletes passkeys, makes and revokes API tokens
   (shown once), and lists your sessions.
 
-Each org has five sections:
+Each org has five sections, and a sixth for its owners and admins:
 
 - **Overview** (`/orgs/ORG`): its projects with their health, the latest
   deployments of every app, its stacks and a live activity feed.
@@ -33,10 +33,11 @@ Each org has five sections:
 - **Members** (`/orgs/ORG/members`): who is in the org, their role and when
   they were last active. Owners and admins also invite people (a link,
   shown once), change roles, remove members, make a new link for or revoke a
-  pending invitation, and see and revoke every API token in the org. The
-  role choices follow the server's rules: an admin hands out member and
-  admin, only an owner touches an owner, and the last owner stays. Anyone
-  can leave.
+  pending invitation, and see and revoke every API token in the org (with
+  its scopes). The role choices follow the server's rules: an admin hands
+  out viewer, member and admin, only an owner touches an owner, and the
+  last owner stays. Anyone can leave. A viewer sees the org but changes
+  nothing; the server refuses what the UI still offers them.
 - **Secrets** (`/orgs/ORG/secrets`): the org's secrets with driver, version,
   update time, labels and the stacks using each, plus the driver references
   stacks read (refresh one to check it now). Create one or give it a new
@@ -51,10 +52,21 @@ Each org has five sections:
   network (bridge, subnet, service-name domain, bind roots) and egress
   exceptions. Platform admins edit the quota and egress exceptions and
   delete the org (typing its name); everyone else sees them read-only.
+- **Audit** (`/orgs/ORG/audit`, owners and admins): the org's audit log
+  ([audit.md](audit.md)) newest first, filtered by actor, action and target
+  (globs), outcome and time, with older entries on demand, a live tail over
+  `/api/v1/audit/stream`, each entry's details (address, agent, request id,
+  whitelisted arguments, its hash) on a click, and **Export JSONL** of
+  everything matching.
 
 Platform admins also get **Platform** (`/admin/orgs`, `/admin/users`,
-`/admin/server`): every org (create, delete), every user (disable, enable,
-make or unmake platform admin) and the server's status.
+`/admin/server`, `/admin/audit`): every org (create, delete), every user
+(disable, enable, make or unmake platform admin), the server's status, and
+the whole audit log (every org, platform-level entries only, or one org).
+
+New API tokens (Account) pick an org, an expiry and an **Access**: full (the
+role's reach, what an agent gets by default), deploy, read only, or only
+some tools (globs); see [auth.md](auth.md#scopes).
 
 The UI hides what a role may not do; the server decides ([auth.md](auth.md),
 [orgs.md](orgs.md)), and its refusals are shown as it words them.

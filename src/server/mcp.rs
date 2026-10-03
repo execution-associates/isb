@@ -588,7 +588,15 @@ impl Endpoint {
         scope: Option<&crate::org::OrgId>,
         origin: &crate::audit::Origin,
     ) -> Option<crate::Result<Value>> {
-        let sent = self.hooks.audit.as_ref().map(|_| args.clone());
+        // As sent, but in the org an org-bound endpoint acts in, so a
+        // refusal is filed under the org it was aimed at.
+        let sent = self.hooks.audit.as_ref().map(|_| {
+            let mut a = args.clone();
+            if let (Some(o), Some(m)) = (scope, a.as_object_mut()) {
+                m.insert("org".into(), json!(o.as_str()));
+            }
+            a
+        });
         let (tool, args) = match self.admit(name, args, caller, scope) {
             Ok(x) => x,
             Err(Admit::Unknown) => return None,

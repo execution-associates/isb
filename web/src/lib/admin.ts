@@ -3,8 +3,8 @@
 // offer, so a refusal is rare rather than impossible.
 import type { Me, Role } from "@/api/auth";
 
-const RANK: Record<Role, number> = { member: 0, admin: 1, owner: 2 };
-export const ROLES: Role[] = ["member", "admin", "owner"];
+const RANK: Record<Role, number> = { viewer: 0, member: 1, admin: 2, owner: 3 };
+export const ROLES: Role[] = ["viewer", "member", "admin", "owner"];
 
 /** The highest role `me` may hand out in `org`, or null when it may not manage it. */
 export function maxGrant(me: Me, org: string): Role | null {
@@ -37,6 +37,47 @@ export function memberLock(
 /** Can `me` reveal secret values in `org`? The UI offers it to admins only. */
 export function canReveal(me: Me, org: string): boolean {
   return maxGrant(me, org) !== null;
+}
+
+/** Can `me` change things in `org` (deploy, edit, exec)? Viewers only read. */
+export function canWrite(me: Me, org: string): boolean {
+  if (me.platform_admin) return true;
+  const r = me.memberships.find((m) => m.org === org)?.role;
+  return !!r && r !== "viewer";
+}
+
+/** Who reads an org's audit log: its owners and admins (and platform admins). */
+export const canAudit = (me: Me, org: string) => maxGrant(me, org) !== null;
+
+// ---- API token scopes (docs/auth.md#api-tokens) ----
+
+export type Access = "full" | "deploy" | "read" | "tools";
+
+export const ACCESS: { value: Access; label: string; hint: string }[] = [
+  { value: "full", label: "Full (your role)", hint: "Everything your role allows in the org: what an agent gets by default." },
+  { value: "deploy", label: "Deploy", hint: "Reads, plus deploys, rollbacks, scaling and builds. No secret values, no exec." },
+  { value: "read", label: "Read only", hint: "Lists and inspects. No secret values, no changes." },
+  { value: "tools", label: "Only some tools", hint: "Tools whose names match, e.g. app_* stack_status." },
+];
+
+/** The scopes for a choice, or a problem with the tool list. */
+export function scopesFor(access: Access, tools: string): { scopes: string[] } | { error: string } {
+  if (access === "full") return { scopes: [] };
+  if (access !== "tools") return { scopes: [access] };
+  const globs = tools.split(/[\s,]+/).filter(Boolean);
+  if (!globs.length) return { error: "Name at least one tool, e.g. app_*." };
+  const bad = globs.find((g) => !/^[A-Za-z0-9_.*?[\]!^-]{1,128}$/.test(g));
+  if (bad) return { error: `“${bad}” isn't a tool name or glob.` };
+  return { scopes: globs.map((g) => `tool:${g}`) };
+}
+
+/** A token's scopes in a few words. */
+export function describeScopes(scopes: string[] | undefined): string {
+  if (!scopes?.length || scopes.includes("admin")) return "full access";
+  const tools = scopes.filter((s) => s.startsWith("tool:")).map((s) => s.slice(5));
+  const named = scopes.filter((s) => !s.startsWith("tool:"));
+  const parts = [...named.map((s) => (s === "read" ? "read only" : s)), ...(tools.length ? [`tools ${tools.join(" ")}`] : [])];
+  return parts.join(" + ");
 }
 
 // ---- secret values: base64 on the wire ----

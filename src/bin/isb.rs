@@ -3709,6 +3709,7 @@ fn token_cmd(c: TokenCmd) -> Result<u8> {
                 "CREATED".into(),
                 "LAST USED".into(),
                 "EXPIRES".into(),
+                "SCOPES".into(),
             ]];
             for t in tokens {
                 rows.push(vec![
@@ -3719,6 +3720,11 @@ fn token_cmd(c: TokenCmd) -> Result<u8> {
                     fmt_time((t.created_at).max(0) as u64),
                     when(t.last_used),
                     when(t.expires_at),
+                    if t.scopes.is_empty() {
+                        "-".into()
+                    } else {
+                        t.scopes.join(",")
+                    },
                 ]);
             }
             table(rows);

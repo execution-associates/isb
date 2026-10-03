@@ -816,6 +816,139 @@
         "summary": "An app's webhook"
       }
     },
+    "/api/v1/tools/audit_list": {
+      "post": {
+        "description": "Who did what: audit log entries, newest first (or oldest first after `after`, for tailing). Org owners and admins see their org's entries; platform admins see every org and platform-level entries (sign-ins, users, org changes). Filters: actor (glob on name or email), action (glob: `secret_*`, `auth.*`), target (glob), outcome (`ok`, `error`, or a code), surface, since/until (unix ms). Page with `before` = the last id you got.",
+        "operationId": "audit_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
+                    "type": "string"
+                  },
+                  "actor": {
+                    "type": "string"
+                  },
+                  "after": {
+                    "description": "Entries newer than this id, oldest first.",
+                    "type": "integer"
+                  },
+                  "before": {
+                    "description": "Entries older than this id.",
+                    "type": "integer"
+                  },
+                  "limit": {
+                    "description": "Default 100.",
+                    "maximum": 1000,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "org": {
+                    "description": "One org's entries (an org admin's own when omitted).",
+                    "type": "string"
+                  },
+                  "outcome": {
+                    "type": "string"
+                  },
+                  "platform": {
+                    "description": "Only platform-level entries (platform admins).",
+                    "type": "boolean"
+                  },
+                  "since": {
+                    "description": "Unix milliseconds, inclusive.",
+                    "type": "integer"
+                  },
+                  "surface": {
+                    "enum": [
+                      "mcp",
+                      "rest",
+                      "cli",
+                      "web",
+                      "webhook"
+                    ],
+                    "type": "string"
+                  },
+                  "target": {
+                    "type": "string"
+                  },
+                  "token_id": {
+                    "type": "integer"
+                  },
+                  "until": {
+                    "description": "Unix milliseconds, exclusive.",
+                    "type": "integer"
+                  },
+                  "user_id": {
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Audit log"
+      }
+    },
+    "/api/v1/tools/audit_verify": {
+      "post": {
+        "description": "Walk the audit log's hash chain: ok, how many rows, the head (id and hash: keep a copy elsewhere to pin the log), and the first row that does not check out. Platform admins.",
+        "operationId": "audit_verify",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {},
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Verify the audit log"
+      }
+    },
     "/api/v1/tools/build_list": {
       "post": {
         "description": "The org's recent builds (running and finished), newest first.",

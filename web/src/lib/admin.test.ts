@@ -39,10 +39,10 @@ describe("roles mirror the server", () => {
   });
   it("offers only roles the actor may set", () => {
     expect(roleChoices(me("member"), "acme", "member")).toEqual([]);
-    expect(roleChoices(me("admin"), "acme", "member")).toEqual(["member", "admin"]);
+    expect(roleChoices(me("admin"), "acme", "member")).toEqual(["viewer", "member", "admin"]);
     // An admin can't touch an owner at all.
     expect(roleChoices(me("admin"), "acme", "owner")).toEqual([]);
-    expect(roleChoices(me("owner"), "acme", "admin")).toEqual(["member", "admin", "owner"]);
+    expect(roleChoices(me("owner"), "acme", "admin")).toEqual(["viewer", "member", "admin", "owner"]);
   });
   it("locks the last owner and owners for admins", () => {
     const owner = { role: "owner" as Role, userId: 9 };

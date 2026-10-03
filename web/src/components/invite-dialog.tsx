@@ -12,6 +12,7 @@ import { errorMessage } from "@/lib/messages";
 import { useMe } from "@/lib/session";
 
 const ROLE_HINT: Record<Role, string> = {
+  viewer: "Viewers see the org's apps, stacks and logs, but change nothing and never see secret values.",
   member: "Members run and manage the org's apps, stacks and secrets.",
   admin: "Admins also manage members, invitations and the org's API tokens.",
   owner: "Owners can do everything, including changing other owners.",

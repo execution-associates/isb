@@ -14,11 +14,19 @@ An org is the trust boundary: its members administer what is in it (apps,
 stacks, sandboxes, secrets), and nothing crosses orgs. Each membership has a
 role:
 
-| Role | Administer the org's apps and secrets | Manage members, invitations, every token in the org | Make and change owners |
-|---|---|---|---|
-| `member` | yes | | |
-| `admin` | yes | yes | |
-| `owner` | yes | yes | yes |
+| Role | List and inspect (read-only tools, logs, events) | Administer the org's apps and secrets: deploys, exec and the terminal, secret values | Manage members, invitations, every token in the org; read its audit log | Make and change owners |
+|---|---|---|---|---|
+| `viewer` | yes | | | |
+| `member` | yes | yes | | |
+| `admin` | yes | yes | yes | |
+| `owner` | yes | yes | yes | yes |
+
+A viewer runs only tools annotated read-only (`readOnlyHint`) that hand out
+no secret material: it can list and inspect stacks, apps, deployments,
+logs, secret names and the org, and is refused writes, deploys,
+`sandbox_exec` (and so the web terminal), `secret_get`, `secret_resolve` and
+`app_webhook`. The check is the one authorizer every surface goes through,
+so new tools are covered by their annotation.
 
 A **platform admin** (a flag on the user) can do everything in every org,
 and alone creates and deletes orgs and changes their limits and egress
@@ -28,8 +36,8 @@ page or the `admin/users` endpoints: disable and enable them, and make or
 unmake platform admins. Nobody does either to themselves, and an enabled
 platform admin always remains.
 
-- An actor grants roles up to its own: an admin can add members and admins,
-  only an owner (or platform admin) can make or change an owner.
+- An actor grants roles up to its own: an admin can add viewers, members and
+  admins, only an owner (or platform admin) can make or change an owner.
 - An org always keeps one owner: the last one cannot be demoted or removed.
 - Anyone can leave an org.
 - Roles are stored as text and mapped to permissions in one table in code
@@ -257,6 +265,26 @@ when it was last used. Users list and revoke their own; an org's owners and
 admins list and revoke any token in it. An org token cannot mint a token for
 another org or a platform token.
 
+### Scopes
+
+A token with no scopes has its user's whole role: an agent in an org
+administers the org's apps, as its people do. Scopes are an opt-in
+narrowing, checked in the same authorizer as roles, and never widen a role
+(a viewer's `admin` token still only reads):
+
+| Scope | Allows |
+|---|---|
+| `read` | read-only tools, never secret material (as a viewer) |
+| `deploy` | `read`, plus `stack_deploy`, `stack_redeploy`, `stack_rollback`, `stack_scale`, `app_deploy`, `app_rollback`, `build_run` |
+| `admin` | everything the role allows (the same as no scopes) |
+| `tool:GLOB` | tools whose name matches, e.g. `tool:app_*`, `tool:stack_status` |
+
+A token may hold several; a call passes if any allows it. A scoped token without
+`admin` cannot change accounts, tokens, invitations or
+members (every state-changing `/api/v1/auth/*` request is refused). Give
+them with `"scopes": ["deploy", "tool:app_*"]` on `POST tokens`, `isb token
+create --scope deploy --scope 'tool:app_*'`, or the web UI's Access choice.
+
 A request carrying `Authorization` is judged by it alone: a bad token is a
 401 even with a valid session cookie.
 
@@ -338,14 +366,14 @@ JSON in and out; every response is `Cache-Control: no-store`. Errors are
 | `POST setup` | anyone, with the setup token | `{setup_token, email, name, password}` | `201` session (below), cookie set |
 | `POST login` | anyone | `{email, password}` | session, cookie set |
 | `POST logout` | anyone | | `204`, cookie cleared |
-| `GET me` | signed in | | `{user, platform_admin, memberships: [{org, role}], orgs: [ORG], auth: {kind: "session", id} \| {kind: "api_token", id, org}}`; `orgs` is every org the caller can open (all of them for a platform admin) |
+| `GET me` | signed in | | `{user, platform_admin, memberships: [{org, role}], orgs: [ORG], auth: {kind: "session", id} \| {kind: "api_token", id, org, name, scopes?}}`; `orgs` is every org the caller can open (all of them for a platform admin) |
 | `GET sessions` | signed in | | `{sessions: [{id, created_at, last_seen, expires_at, idle_expires_at, user_agent, ip, current}]}` |
 | `DELETE sessions/ID` | signed in | | `204` |
 | `POST invitations` | org owner/admin | `{org, email, role?}` (default member) | `201 {invitation, token, link}` |
 | `POST invitations/inspect` | anyone with the token | `{token}` | `{org, email, role, expires_at, account_exists}` |
 | `POST invitations/accept` | anyone with the token | `{token, name?, password?}` | `{user, membership, created}`, cookie set unless already signed in |
-| `GET tokens` | signed in | | `{tokens: [{id, name, user_id, org, created_at, last_used, expires_at}]}` |
-| `POST tokens` | signed in | `{name, org?, expires?}` | `201 {token, info}` |
+| `GET tokens` | signed in | | `{tokens: [{id, name, user_id, org, created_at, last_used, expires_at, scopes}]}` |
+| `POST tokens` | signed in | `{name, org?, expires?, scopes?}` | `201 {token, info}` |
 | `DELETE tokens/ID` | its user, or the org's owners/admins | | `204` |
 | `POST password` | signed in with a session | `{current_password, new_password}` | `204` |
 | `POST password-reset/request` | anyone | `{email}` | `202 {"ok": true}` |
@@ -390,15 +418,18 @@ and the daemon reads sessions and tokens per request, so changes apply at once.
 isb user create EMAIL [--admin] [--name N]   password prompted twice, or stdin's first line
 isb user ls [--json]                          users, flags, org memberships
 isb user passwd EMAIL                         set a password, end their sessions
-isb invite ORG EMAIL [--role member]          prints the token, or the link with ISB_PUBLIC_URL
-isb token create NAME [--org ORG] [--expires 90d] [--user EMAIL]
+isb invite ORG EMAIL [--role member]          viewer, member, admin or owner; prints the token, or the link with ISB_PUBLIC_URL
+isb token create NAME [--org ORG] [--expires 90d] [--user EMAIL] [--scope S]...
                                               prints the token once; --user defaults to the only platform admin
 isb token ls [--json]                         metadata only
 isb token revoke ID...
 ```
 
 Passwords never come from argv, where they would show in `ps` and shell
-history.
+history. Every change these commands make is recorded in the audit log as
+`local(uid N)` on the `cli` surface, and so is every sign-in, account,
+token, invitation, member and user change made over HTTP
+([audit.md](audit.md)).
 
 ## Schema
 
@@ -406,5 +437,6 @@ Tables: `users` (email unique, case-insensitive), `user_identities` (external
 sign-in: provider, subject, email, email_verified), `passkeys` (credential id,
 user, user handle, COSE public key, algorithm, sign count, transports,
 AAGUID, name, created_at, last_used), `orgs`, `memberships`, `sessions`,
-`invitations`, `api_tokens`, `password_resets`, and `schema_version`. Migrations run at open, each in its own transaction; a
+`invitations`, `api_tokens` (with `scopes`, a JSON array, NULL for none),
+`password_resets`, and `schema_version`. Migrations run at open, each in its own transaction; a
 database from a newer isb is refused rather than downgraded.

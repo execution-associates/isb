@@ -198,12 +198,18 @@ pub fn entry(a: &Audited, record_all: bool) -> Option<NewEntry> {
         return None;
     }
     let details = safe_details(a.args);
+    // The org tools act on the org they name.
+    let target = if a.action.starts_with("org_") {
+        details.get("org").and_then(Value::as_str).map(String::from)
+    } else {
+        target(&details)
+    };
     Some(NewEntry {
         org: row_org(a.action, a.args),
         actor: actor(a.caller),
         origin: a.origin.clone(),
         action: a.action.to_string(),
-        target: target(&details),
+        target,
         details,
         outcome: outcome(a.outcome),
     })
@@ -699,6 +705,22 @@ mod tests {
                 "{who}"
             );
         }
+        // A refusal on an org-bound endpoint is filed under that org.
+        let e = t.one(|| {
+            let r = t.ep.handle(&crate::server::http::Request {
+                method: "POST".into(),
+                path: "/orgs/acme/api/v1/tools/secret_get".into(),
+                query: None,
+                headers: vec![("Authorization".into(), "Bearer viewer".into())],
+                body: br#"{"name": "DB_PASSWORD"}"#.to_vec(),
+                peer: Peer::Tcp("127.0.0.1:5000".parse().unwrap()),
+            });
+            assert_eq!(r.status, 403);
+        });
+        assert_eq!(
+            (e.org.as_deref(), e.outcome.as_str()),
+            (Some("acme"), "forbidden")
+        );
         // The local CLI over the socket.
         let e = t.one(|| {
             let st = t.rest(None, "stack_deploy", json!({"org": "acme", "name": "api"}));

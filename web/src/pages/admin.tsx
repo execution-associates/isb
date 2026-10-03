@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building2, MoreHorizontal, Plus, Server, ShieldCheck, ShieldOff, Trash2, UserCheck, UserX, Users } from "lucide-react";
+import { Building2, MoreHorizontal, Plus, ScrollText, Server, ShieldCheck, ShieldOff, Trash2, UserCheck, UserX, Users } from "lucide-react";
 import { useState } from "react";
 import { Link, Navigate, NavLink, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
@@ -26,12 +26,14 @@ import { dateTime, initials, relativeTime } from "@/lib/format";
 import { errorMessage } from "@/lib/messages";
 import { useMe } from "@/lib/session";
 import { cn } from "@/lib/utils";
+import { AuditPanel } from "@/pages/audit";
 import { DeleteOrgDialog } from "@/pages/org-settings";
 
 const TABS = [
   { id: "orgs", label: "Orgs", icon: Building2 },
   { id: "users", label: "Users", icon: Users },
   { id: "server", label: "Server", icon: Server },
+  { id: "audit", label: "Audit", icon: ScrollText },
 ] as const;
 
 /** Platform administration: every org, every user, the server. */
@@ -63,6 +65,7 @@ export function AdminPage() {
       {tab === "orgs" && <OrgsTab />}
       {tab === "users" && <UsersTab />}
       {tab === "server" && <ServerTab />}
+      {tab === "audit" && <AuditPanel orgs={me.orgs} />}
     </>
   );
 }
