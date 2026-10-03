@@ -375,10 +375,10 @@ minime only runs binaries downloaded from our CI runs.
 
 ## Phase 5: scale-out
 
-- [ ] P5.1 Remote servers: add a server (SSH bootstrap installs incus + isb
+- [~] (subagent p5.1) P5.1 Remote servers: add a server (SSH bootstrap installs incus + isb
   agent), mTLS between control plane and agent, health. **Verify:** the
   hcloud box joins titan's (or a test) control plane.
-- [ ] P5.2 Placement: orgs on servers; MCP/REST calls proxied to the owning
+- [~] (subagent p5.1) P5.2 Placement: orgs on servers; MCP/REST calls proxied to the owning
   server; secrets delivered only to servers that run their consumers.
   **Verify:** deploy to an org placed on the hcloud box from titan's UI.
 - [~] (8423ecc, f48d234: audit log, viewer role, token scopes done; the persistent history is next) P5.3 Audit log and finer roles. **Verify:** actions appear in the log
