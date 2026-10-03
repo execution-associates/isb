@@ -27,6 +27,8 @@ export default defineConfig({
     proxy: {
       "/api": { target },
       "/healthz": { target },
+      // Org-bound tools, and the terminal's websocket.
+      "^/orgs/[^/]+/api/": { target, ws: true },
     },
   },
   test: {

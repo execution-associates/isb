@@ -13,6 +13,7 @@
 pub mod apps;
 pub mod policy;
 pub mod secrets;
+mod terminal;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -281,6 +282,7 @@ fn visible_orgs(c: &Caller) -> Option<Vec<crate::org::OrgId>> {
 /// Authentication and authorization for every listener.
 fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate::server::Hooks {
     use crate::server::Authenticated;
+    let term = terminal::terminal(d.clone());
     let u = users.clone();
     let authn: crate::server::mcp::Authn = Arc::new(move |req, id| {
         if req.header("authorization").is_some()
@@ -387,6 +389,7 @@ fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate:
         authn: Some(authn),
         authorize: Some(authorize),
         events: Some(events),
+        terminal: Some(term),
     }
 }
 

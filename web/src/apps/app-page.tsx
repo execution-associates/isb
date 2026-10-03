@@ -1,8 +1,8 @@
 // /orgs/:org/apps/:app/:tab: one app, with its header (state, Deploy, Stop)
 // and tabs. Deployment logs live under the Deployments tab.
 import { useQueryClient } from "@tanstack/react-query";
-import { Activity, Boxes, Globe, History, Loader2, Play, Rocket, ScrollText, Settings2, SlidersHorizontal, Square, Variable } from "lucide-react";
-import { useState } from "react";
+import { Activity, Boxes, Globe, History, Loader2, Play, Rocket, ScrollText, Settings2, SlidersHorizontal, Square, TerminalSquare, Variable } from "lucide-react";
+import { lazy, Suspense, useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
@@ -32,8 +32,12 @@ const TABS = [
   { id: "deployments", label: "Deployments", icon: History },
   { id: "logs", label: "Logs", icon: ScrollText },
   { id: "monitoring", label: "Monitoring", icon: Activity },
+  { id: "terminal", label: "Terminal", icon: TerminalSquare },
   { id: "advanced", label: "Advanced", icon: SlidersHorizontal },
 ] as const;
+
+// xterm.js is loaded only when the Terminal tab opens.
+const TerminalTab = lazy(() => import("./app-terminal"));
 
 export type TabId = (typeof TABS)[number]["id"];
 
@@ -91,6 +95,11 @@ export function AppPage() {
       {active === "deployments" && (id ? <DeploymentPage org={org} app={a} id={Number(id)} /> : <DeploymentsTab org={org} app={a} />)}
       {active === "logs" && <LogsTab org={org} app={a} />}
       {active === "monitoring" && <MonitoringTab org={org} app={a} />}
+      {active === "terminal" && (
+        <Suspense fallback={<Skeleton className="h-96" />}>
+          <TerminalTab org={org} app={a} />
+        </Suspense>
+      )}
       {active === "advanced" && <AdvancedTab org={org} app={a} />}
     </>
   );

@@ -80,6 +80,27 @@ impl Request {
 /// connection closes after it, which is what delimits the body.
 pub type StreamFn = Box<dyn FnOnce(&mut dyn Write) -> std::io::Result<()> + Send>;
 
+/// A connection a handler takes over after `101 Switching Protocols` (a
+/// websocket): both directions, and a read deadline it can shorten to poll.
+pub trait Duplex: Read + Write + Send {
+    fn set_read_timeout(&mut self, t: Option<Duration>) -> std::io::Result<()>;
+}
+
+impl Duplex for TcpStream {
+    fn set_read_timeout(&mut self, t: Option<Duration>) -> std::io::Result<()> {
+        TcpStream::set_read_timeout(self, t)
+    }
+}
+
+impl Duplex for UnixStream {
+    fn set_read_timeout(&mut self, t: Option<Duration>) -> std::io::Result<()> {
+        UnixStream::set_read_timeout(self, t)
+    }
+}
+
+/// Runs on the connection after a 101; the connection closes when it returns.
+pub type UpgradeFn = Box<dyn FnOnce(&mut dyn Duplex) + Send>;
+
 #[derive(Clone)]
 pub struct Response {
     pub status: u16,
@@ -87,6 +108,8 @@ pub struct Response {
     pub body: Vec<u8>,
     /// When set, written after the headers in place of `body`.
     pub stream: Option<Arc<std::sync::Mutex<Option<StreamFn>>>>,
+    /// When set, the status is 101 and this takes the connection over.
+    pub upgrade: Option<Arc<std::sync::Mutex<Option<UpgradeFn>>>>,
 }
 
 impl std::fmt::Debug for Response {
@@ -96,6 +119,7 @@ impl std::fmt::Debug for Response {
             .field("headers", &self.headers)
             .field("body", &self.body.len())
             .field("stream", &self.stream.is_some())
+            .field("upgrade", &self.upgrade.is_some())
             .finish()
     }
 }
@@ -107,7 +131,15 @@ impl Response {
             headers: Vec::new(),
             body: Vec::new(),
             stream: None,
+            upgrade: None,
         }
+    }
+
+    /// `101 Switching Protocols` to `protocol`, then `f` owns the connection.
+    pub fn upgrade(protocol: &str, f: UpgradeFn) -> Self {
+        let mut r = Response::new(101).header("Upgrade", protocol);
+        r.upgrade = Some(Arc::new(std::sync::Mutex::new(Some(f))));
+        r
     }
 
     /// A streamed response: `f` writes the body and the connection closes
@@ -455,7 +487,7 @@ fn peer_uid(_: &UnixStream) -> Option<u32> {
 }
 
 /// Serve one request on `stream`. Generic so tests can drive it in memory.
-pub(crate) fn handle<S: Read + Write>(
+pub(crate) fn handle<S: Duplex>(
     stream: &mut S,
     peer: Peer,
     limits: &Limits,
@@ -468,6 +500,15 @@ pub(crate) fn handle<S: Read + Write>(
                     eprintln!("isb serve: handler panicked on {} {}", req.method, req.path);
                     Response::text(500, "internal error")
                 });
+            if let Some(up) = &resp.upgrade {
+                let f = up.lock().unwrap().take();
+                if write_upgrade(stream, &resp).is_ok() {
+                    if let Some(f) = f {
+                        f(stream);
+                    }
+                }
+                return;
+            }
             let _ = write_response(stream, &resp);
         }
         Err(Some(resp)) => {
@@ -639,6 +680,25 @@ fn split_target(target: &str) -> Option<(String, Option<String>)> {
     })
 }
 
+/// The head of a `101 Switching Protocols`; no body follows.
+fn write_upgrade<W: Write>(w: &mut W, r: &Response) -> std::io::Result<()> {
+    let mut head = String::from("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\n");
+    for (k, v) in &r.headers {
+        if k.eq_ignore_ascii_case("content-length")
+            || k.eq_ignore_ascii_case("connection")
+            || k.eq_ignore_ascii_case("transfer-encoding")
+            || k.contains(['\r', '\n', ':'])
+            || v.contains(['\r', '\n'])
+        {
+            continue;
+        }
+        head.push_str(&format!("{k}: {v}\r\n"));
+    }
+    head.push_str("\r\n");
+    w.write_all(head.as_bytes())?;
+    w.flush()
+}
+
 pub(crate) fn write_response<W: Write>(w: &mut W, r: &Response) -> std::io::Result<()> {
     let mut head = format!("HTTP/1.1 {} {}\r\n", r.status, reason(r.status));
     for (k, v) in &r.headers {
@@ -679,6 +739,7 @@ pub(crate) fn write_response<W: Write>(w: &mut W, r: &Response) -> std::io::Resu
 fn reason(status: u16) -> &'static str {
     match status {
         100 => "Continue",
+        101 => "Switching Protocols",
         200 => "OK",
         202 => "Accepted",
         204 => "No Content",
@@ -736,6 +797,12 @@ pub(crate) mod tests {
                 self.chunks.pop_front();
             }
             Ok(n)
+        }
+    }
+
+    impl Duplex for Mock {
+        fn set_read_timeout(&mut self, _: Option<Duration>) -> std::io::Result<()> {
+            Ok(())
         }
     }
 
@@ -866,6 +933,27 @@ pub(crate) mod tests {
         assert!(out.contains("Connection: close\r\n"));
         assert!(!out.contains("999") && !out.contains("Injected"));
         assert!(out.ends_with("\r\n\r\n/hello\n"));
+    }
+
+    #[test]
+    fn an_upgrade_hands_over_the_connection() {
+        let h: Handler = Arc::new(|_: &Request| {
+            Response::upgrade(
+                "websocket",
+                Box::new(|s: &mut dyn Duplex| {
+                    let _ = s.write_all(b"after");
+                }),
+            )
+            .header("Sec-WebSocket-Accept", "k")
+        });
+        let mut m = Mock::new(&b"GET /ws HTTP/1.1\r\nUpgrade: websocket\r\n\r\n"[..]);
+        handle(&mut m, Peer::Unix { uid: None }, &Limits::default(), &h);
+        let out = String::from_utf8(m.output).unwrap();
+        assert!(out.starts_with("HTTP/1.1 101 Switching Protocols\r\n"), "{out}");
+        assert!(out.contains("Connection: Upgrade\r\n") && out.contains("Upgrade: websocket\r\n"));
+        assert!(out.contains("Sec-WebSocket-Accept: k\r\n"));
+        assert!(!out.contains("Content-Length") && !out.contains("close"));
+        assert!(out.ends_with("\r\n\r\nafter"), "{out}");
     }
 
     #[test]
