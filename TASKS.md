@@ -510,8 +510,7 @@ minime only runs binaries downloaded from our CI runs.
   bucket staged and diffed; restore while stopped left detached; discard
   refused a volume that was not a staged restore; the UI restored a backup
   file staged.
-- [ ] W4 follow-ups: the workspace's Home tab embeds the Volume panel on
-  `<org>_workspace_home` with a default schedule once W1 lands; volume
+- [ ] W4 follow-ups: volume
   snapshots and backups for orgs placed on a server (tools forward, not
   verified); a restore's byte count in its run record.
 - [x] (workspaces-core) W1 the workspace and its sandboxes, W2 the
@@ -533,9 +532,18 @@ minime only runs binaries downloaded from our CI runs.
   `isb.owner=workspace`, reaped on expiry (2m) and on idle (1m) with
   `sandbox.reaped` in the history, the audit actor `workspace`, the web
   terminal as `dev` counted as a live session, UI light/dark,
-  desktop/phone.
+  desktop/phone. Homes: a volume's pool per host (`--workspace-pool`) and
+  org (`home_pool`), hourly snapshots only on copy-on-write pools (titan's
+  `dir` gets none, with the Home tab's warning), the Volume panel on the
+  Home tab; host-folder homes (`--workspace-home-root`, `home_kind`,
+  `home_bind` for superadmins), the folder allowed in the org's project and
+  mapped 1:1. **Verified**: a host-folder home under the scratchpad (a file
+  made inside is uid 1000 on the host, the path added to
+  `restricted.devices.disk.paths`), and an org opting back to a volume on
+  `dir` with no schedule.
 - [ ] Workspace follow-ups: `isb host setup` on titan for port 8481 (not
-  run: the rule is in the code); a workspace on an org placed on a server
+  run: the rule is in the code); titan's `--workspace-home-root
+  /srv/workspaces` and migrating clem with `home_bind`; a workspace on an org placed on a server
   (the agent runs it and serves the bridge; untested); W3's terminal
   reattach and ports; SSH to orgs placed on a server; Access credentials in
   `isb ssh-proxy`.

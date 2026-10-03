@@ -28,6 +28,7 @@ isb workspace update [NAME] [--image I] [--cpus N] [--memory M] [--root-size S]
 isb workspace rm [NAME] [--keep-home] --yes
 isb workspace rotate-token [NAME]
 isb workspace settings [--max-workspaces N] [--sandbox-expiry 24h] [--sandbox-idle 2h|none]
+                       [--home-kind volume|host] [--home-pool POOL]
 isb workspace sandboxes [--json]             creator, age, expiry, resources
 isb workspace extend SANDBOX [--by 24h] [--idle-timeout 4h|none]
 isb workspace ssh-config [--name N] ...      the Host block (isb ssh-config for it)
@@ -44,14 +45,11 @@ All of them take `--org` (or `$ISB_ORG`) and go through `isb serve`
   workspace (`workspace` unless `--name`), from any incus image (`dev-base`,
   `images:ubuntu/24.04`) or the org's own `registry:APP:TAG`. It starts with
   the host (`boot.autostart`).
-- **The home** is a managed volume `<org>_<name>_home` (`--home-size`,
-  default 20 GiB) mounted at the workspace user's home (`--user`, default
-  `dev`; made when the image lacks it, uid as `useradd` picks). A new home
-  is seeded from what the image has at that path (incus `initial.copy`;
-  `dev-base`'s mise and dotfiles), else from `/etc/skel`, and is owned by
-  the user.
-- **The home counts against the org's `--disk` quota**: it is the org's data.
-  In an org with a disk quota incus needs a size on every disk, so a
+- **The home** is mounted at the workspace user's home (`--user`, default
+  `dev`, made when the image lacks it) and survives rebuilds. It is one of
+  two things ([below](#the-home-a-volume-or-a-host-folder)): a managed
+  volume, or a host folder the host backs up.
+- In an org with a disk quota incus needs a size on every disk, so a
   workspace without `--root-size` gets a 20 GiB root, and a sandbox spec
   without one a 10 GiB root.
 - **Rebuild** replaces the machine with a fresh one from its image (or a
@@ -61,8 +59,55 @@ All of them take `--org` (or `$ISB_ORG`) and go through `isb serve`
 - **Resizing** (`cpus`, `memory`, root and home size) applies at once.
   `image` changes apply on the next rebuild; `env` and `secrets` are
   delivered again at once (new login shells see them).
-- Delete removes the machine, revokes the token, and deletes the home unless
-  `--keep-home` (a new workspace of the same name then mounts it again).
+- Delete removes the machine and revokes the token. A volume home is
+  deleted unless `--keep-home` (a new workspace of the same name then
+  mounts it again); a host-folder home is always kept.
+
+## The home: a volume or a host folder
+
+| | Managed volume | Host folder |
+|---|---|---|
+| Where | `<org>_<name>_home` in a storage pool | `<root>/<org>/home` (`<root>/<org>/<name>/home` for another name) on the host |
+| When | the default | `isb serve --workspace-home-root DIR` (`ISB_WORKSPACE_HOME_ROOT`) |
+| Size | `--home-size` (20 GiB), grown with `workspace_update`; counts against the org's `--disk` quota | the host's disk; no quota |
+| First contents | what the image has at that path (incus `initial.copy`: `dev-base`'s mise and dotfiles), else `/etc/skel` | `/etc/skel` when empty |
+| Backups | isb: snapshots, backups to the org's S3 destinations, staged restores ([volumes.md](volumes.md)), on the Home tab | the host's own (restic of the root, say); isb takes none |
+| Deleting the workspace | deletes it, unless `--keep-home` | keeps it |
+
+**Volumes: the pool.** A new home volume goes in the org's `home_pool`
+setting (platform admins), else `isb serve --workspace-pool POOL`
+(`ISB_WORKSPACE_POOL`), else the org's default pool; the workspace keeps
+the pool it was created in. The Home tab shows the pool and its driver. The
+driver decides the default snapshots: on a copy-on-write pool (zfs, btrfs,
+lvm, ceph) a new home is snapshotted `@hourly`, keeping 24; on `dir` (and
+any other driver) every snapshot is a **full copy of the home**, as large
+and as slow as the home itself, so none are scheduled. Back such a home up
+to S3 instead, or schedule snapshots by hand with a small keep (two or
+three); the Home tab says so.
+
+**Host folders.** With `--workspace-home-root`, a workspace's home is a host
+folder the daemon creates (0750, owned by the daemon's user) and binds at
+the user's home. The instance maps the daemon's uid 1:1 (`idmap: auto`),
+and a workspace user the image lacks is made with that uid, so files have
+the same owner inside and on the host; other uids show as `nobody` inside.
+For the bind, the org's restricted project is allowed `<root>/<org>`
+(`restricted.devices.disk.paths`, checked again at every build, so an
+`isb org create` that rewrote the bind roots is repaired by the next
+rebuild); nothing else of the host. An org opts out (or in) with its
+`home_kind` setting, `volume` or `host` (platform admins).
+
+Restoring a host-folder home is the host's job and follows the same rule as
+isb's staged restores: restore into a folder beside the home (bound or
+copied in), compare, copy back what you need; never write over the live
+home while the workspace runs.
+
+**Security.** A host-folder home puts host disk into a restricted project
+by a path only the operator chooses: `--workspace-home-root` is the
+daemon's configuration, `home_kind` is for platform admins, and naming a
+path per workspace (`home_bind`) is for superadmins. Org members and the
+workspace's own token can set none of them. The folder is readable on the
+host by its owner (the daemon's user), and the host's backups hold the
+org's data, so they must be kept with the same care as the daemon's state.
 
 **Confirmation.** Stop, restart, rebuild, delete and resizing end (or can
 end) every session on the machine, so the tools refuse without
@@ -85,7 +130,8 @@ daemon, and established SSH connections inside the machine (`ss` on port
 | Start, stop, restart; the terminal and SSH (attach) | | yes | yes |
 | Create, change, rebuild, delete; rotate the token | | | yes |
 | Sandbox defaults (`workspace_settings`) | | | yes |
-| `max_workspaces`; `home_bind` | platform admins / superadmins only | | |
+| `max_workspaces`, `home_kind`, `home_pool` | platform admins | | |
+| `home_bind` (a host path per workspace) | superadmins | | |
 
 ## The workspace is an org actor
 
@@ -181,13 +227,13 @@ name and `sandbox_remove` of it are refused.
 |---|---|---|
 | `workspace_get` | members | the workspace (or `null`) and the org's settings: definition, status, resources, home, live sessions, last activity, token metadata, `connect` (`url`, `mcp_url`), sandbox count |
 | `workspace_list` | members | every workspace in the org (one, unless `max_workspaces` was raised) |
-| `workspace_create` | admins | `image`, `name`, `user`, `cpus`, `memory`, `root_size`, `home_size`, `env`, `secrets`, `labels`, `token_role`; `home_bind` (superadmins) |
+| `workspace_create` | admins | `image`, `name`, `user`, `cpus`, `memory`, `root_size`, `home_size`, `env`, `secrets`, `labels`, `token_role`; `home_bind` (superadmins: a host folder as the home) |
 | `workspace_update` | admins | any of those but `name`, `user`, `home_bind`; resizing needs `confirm` |
 | `workspace_start`, `workspace_stop`, `workspace_restart` | members | stop and restart need `confirm` |
 | `workspace_rebuild` | admins | `image`, `confirm` |
 | `workspace_delete` | admins | `keep_home`, `confirm` |
 | `workspace_token_rotate` | admins | a new token, delivered; the old one revoked |
-| `workspace_settings` | members read, admins change | `max_workspaces` (platform admins), `sandbox_expiry`, `sandbox_idle` |
+| `workspace_settings` | members read, admins change | `sandbox_expiry`, `sandbox_idle`; `max_workspaces`, `home_kind`, `home_pool` (platform admins) |
 | `sandbox_create` | members | gains `expires`, `idle_timeout` |
 | `sandbox_extend` | the creator, admins | `name`, `by`, `idle_timeout` |
 
@@ -204,15 +250,21 @@ The same as a REST resource, per org:
 
 ## Migrating a box
 
-`home_bind` (superadmins only: the unix socket, a superadmin token or
-identity) mounts a host directory as the home instead of a volume, for a
-trial period while a titan-iac box moves over; it must be under the org's
-`--bind-root` directories, which incus enforces. The lasting form is a
-volume: copy the old home in once, with the box stopped.
+A titan-iac box's home is already a host folder,
+`/srv/workspaces/<box>/home`, and the box's name need not be the org's
+(ocai's box is `clem`). With `--workspace-home-root /srv/workspaces`, a
+superadmin (the unix socket, a superadmin token or identity) creates the
+org's workspace with `home_bind` naming that folder
+(`isb --org ocai workspace create --image ... --home-bind
+/srv/workspaces/clem/home`), with the box stopped; the folder is allowed in
+the org's project and kept as it is. Its files keep their owner as long
+as the workspace user's uid is the daemon's (1000 on titan).
 
 ## Files
 
 Under the org's state directory (`<state>/workspaces/` for the default org,
 `<state>/orgs/<org>/workspaces/` for the others), 0600: `<name>.json` (the
-definition, the token's id and hash), `<name>.token.age` (the token,
-encrypted to the daemon's key), `settings.json`.
+definition, the token's id and hash, the home's pool or host folder),
+`<name>.token.age` (the token, encrypted to the daemon's key),
+`settings.json`. A volume home's snapshot schedule and backups are the
+volume's ([volumes.md](volumes.md)).

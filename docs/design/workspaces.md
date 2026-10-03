@@ -119,17 +119,10 @@ scheduled and manual snapshots with retention, volume backups to the org's
 S3 destinations beside the databases', the `/etc/isb/pre-snapshot` hook,
 and staged restores into a new volume at `/restore/<stamp>` (titan-iac's
 `ws-rollback.sh` rule: never a second writer over a live home). The Volume
-panel (`web/src/volumes/volume-panel.tsx`) is self-contained. Left for the
-workspace:
-
-- Embed `<VolumePanel org name="<org>_workspace_home" />` as the workspace
-  page's Home tab, and point `isb workspace home ...` at the volume tools.
-- Give a new workspace a default snapshot schedule for its home (proposed:
-  hourly, keep 24), and say in the create form that the image's
-  `/etc/isb/pre-snapshot` makes agent state (SQLite under `~/.claude`,
-  herdr's `session.json`) consistent; isb knows nothing about it.
-- Rebuild keeps the home and its staged restores; deleting the workspace
-  asks what to do with both.
+panel (`web/src/volumes/volume-panel.tsx`) is self-contained. The workspace's Home tab
+embeds the panel for a volume home, with a default schedule by pool driver
+([workspaces.md](../workspaces.md#the-home-a-volume-or-a-host-folder)).
+Left: rebuild and delete say what happens to a home's staged restores.
 
 ### W5. Workspace images
 
@@ -182,8 +175,17 @@ Per org, attended, one at a time:
   are admitted as `sandbox_exec`).
 - **Sandbox defaults**: 24 h expiry and 2 h idle, per org
   (`workspace_settings`).
-- **Home bind**: superadmins only (`home_bind`), meant for migration; the
-  lasting home is a volume.
+- **The home is a volume or a host folder.** A managed volume by default
+  (its pool configurable per host and per org; hourly snapshots only on a
+  copy-on-write pool, since on `dir` each is a full copy). Or, with
+  `--workspace-home-root`, a host folder `<root>/<org>/home` that the host
+  backs up (restic), as titan-iac's `/srv/workspaces` homes are: isb's
+  snapshots and S3 backups give way to the host's, in exchange for no copy
+  cost and one backup for every org. Choosing host disk for an org is the
+  operator's (the flag), platform admins' (`home_kind`) and, per workspace,
+  superadmins' (`home_bind`, for a box whose name is not the org's); never
+  an org member's or the workspace's own.
+
 - **Plain `isb create` and `isb up` sandboxes get no deadlines**: only
   sandboxes made through `isb serve` expire, so the reaper never takes a
   developer's long-running `isb up` on the host.

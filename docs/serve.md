@@ -384,6 +384,8 @@ prior `initialize`, and there is no session id.
 | `--ingress-tunnels` | `ISB_INGRESS_TUNNELS` | off: turns the ingress on for Cloudflare-tunnel orgs without public listeners |
 | `--ingress-tunnel-port` | `ISB_INGRESS_TUNNEL_PORT` | `8480`: tunnel orgs' listener port on their bridge address |
 | `--workspace-mcp-port` | `ISB_WORKSPACE_MCP_PORT` | `8481`: where each org's workspace reaches the org-bound MCP, on its bridge address ([workspaces.md](workspaces.md#reaching-isb-from-inside-the-bridge-listener)) |
+| `--workspace-pool` | `ISB_WORKSPACE_POOL` | the org's default pool: where new workspace home volumes go (an org's `home_pool` wins) |
+| `--workspace-home-root` | `ISB_WORKSPACE_HOME_ROOT` | off: workspace homes are host folders `<DIR>/<org>/home` instead of volumes ([workspaces.md](workspaces.md#the-home-a-volume-or-a-host-folder)) |
 | `--ingress-public-ip` | `ISB_INGRESS_PUBLIC_IP` | the default route's source address, if public: what `host: auto` names resolve to |
 | `--acme-ca` | `ISB_ACME_CA` | `letsencrypt`; or `letsencrypt-staging`, `internal`, an ACME directory URL |
 | `--acme-email` | `ISB_ACME_EMAIL` | none: the ACME account's contact |
