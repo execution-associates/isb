@@ -2,7 +2,7 @@
 // and above create; everyone else is told who can.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, SquareTerminal } from "lucide-react";
-import { useId, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Meta, Section } from "@/apps/components";
 import { parseKv } from "@/apps/util";
@@ -13,16 +13,33 @@ import { Textarea } from "@/components/ui/textarea";
 import { callTool, type OrgView } from "@/api/tools";
 import type { Role } from "@/api/auth";
 import { errorMessage } from "@/lib/messages";
-import { type WorkspaceSettings, wsCall, wsKeys } from "./api";
-import { envProblems, sizeProblem, TOKEN_ROLES } from "./util";
+import { type WorkspaceCreateOptions, type WorkspaceSettings, wsCall, wsKeys } from "./api";
+import { envProblems, headroom, sizeProblem, TOKEN_ROLES } from "./util";
 
-const IMAGES = ["dev-base", "images:ubuntu/24.04", "images:debian/12"];
+/** Works on any host: what to fall back on when the daemon offers nothing. */
+const REMOTE_DEFAULT = "images:ubuntu/24.04";
+/** The image picker's "type one" entry. */
+const OTHER = "__other__";
 
-export function CreateWorkspace({ org, admin, settings }: { org: string; admin: boolean; settings: WorkspaceSettings }) {
+export function CreateWorkspace({
+  org,
+  admin,
+  settings,
+  options,
+}: {
+  org: string;
+  admin: boolean;
+  settings: WorkspaceSettings;
+  options?: WorkspaceCreateOptions;
+}) {
   const qc = useQueryClient();
-  const list = useId();
+  const images = options?.images ?? [{ image: REMOTE_DEFAULT, description: "", source: "remote" as const }];
   const info = useQuery({ queryKey: ["org", org], queryFn: () => callTool<OrgView & { server?: string }>("org_get", {}, org) });
-  const [f, setF] = useState({ image: "dev-base", name: "workspace", user: "dev", cpus: "", memory: "", root: "", home: "20GiB", env: "" });
+  const [f, setF] = useState({ image: options?.default_image ?? REMOTE_DEFAULT, name: "workspace", user: "dev", cpus: "", memory: "", root: "", home: "20GiB", env: "" });
+  const [custom, setCustom] = useState(false);
+  const room = headroom(options?.quota);
+  const cpuFree = room.find((r) => r.label === "CPUs")?.free;
+  const cpuFull = cpuFree === 0;
   const [role, setRole] = useState<Exclude<Role, "owner">>("admin");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +48,12 @@ export function CreateWorkspace({ org, admin, settings }: { org: string; admin: 
   const problems = {
     name: /^[a-z][a-z0-9-]{0,29}$/.test(f.name) && !f.name.endsWith("-") ? null : "Up to 30 of a-z, 0-9 and -, starting with a letter.",
     user: /^[a-z_][a-z0-9_-]{0,31}$/.test(f.user) ? null : "A lowercase user name.",
-    cpus: f.cpus.trim() && !(Number.isInteger(Number(f.cpus)) && Number(f.cpus) >= 1) ? "A whole number of CPUs." : null,
+    cpus:
+      f.cpus.trim() && !(Number.isInteger(Number(f.cpus)) && Number(f.cpus) >= 1)
+        ? "A whole number of CPUs."
+        : f.cpus.trim() && cpuFree !== undefined && Number(f.cpus) > cpuFree
+          ? `${org} has ${cpuFree} CPU${cpuFree === 1 ? "" : "s"} left in its quota.`
+          : null,
     memory: sizeProblem(f.memory),
     root: sizeProblem(f.root),
     home: f.home.trim() ? sizeProblem(f.home) : "The home needs a size.",
@@ -92,14 +114,43 @@ export function CreateWorkspace({ org, admin, settings }: { org: string; admin: 
       >
         <div className="grid gap-5">
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Image" hint="An incus image (dev-base, images:ubuntu/24.04) or registry:APP:TAG from the org's builds.">
-              {(id, d) => <Input id={id} aria-describedby={d} list={list} value={f.image} onChange={set("image")} required />}
+            <Field
+              label="Image"
+              hint={
+                custom
+                  ? "An incus image: a local alias, a remote one with its server (images:debian/12), or registry:APP:TAG from the org's builds."
+                  : images.find((i) => i.image === f.image)?.description || "Local images are this host's; a remote one is pulled on first use."
+              }
+            >
+              {(id, d) =>
+                custom ? (
+                  <Input id={id} aria-describedby={d} value={f.image} onChange={set("image")} placeholder={REMOTE_DEFAULT} required autoFocus />
+                ) : (
+                  <Select
+                    value={f.image}
+                    onValueChange={(v) => {
+                      if (v === OTHER) {
+                        setCustom(true);
+                        setF({ ...f, image: "" });
+                      } else setF({ ...f, image: v });
+                    }}
+                  >
+                    <SelectTrigger id={id} aria-describedby={d} className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {images.map((i) => (
+                        <SelectItem key={i.image} value={i.image}>
+                          <span className="font-mono text-xs">{i.image}</span>
+                          <span className="text-muted-foreground">{i.source === "local" ? "on this host" : "remote"}</span>
+                        </SelectItem>
+                      ))}
+                      <SelectItem value={OTHER}>Another image…</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )
+              }
             </Field>
-            <datalist id={list}>
-              {IMAGES.map((i) => (
-                <option key={i} value={i} />
-              ))}
-            </datalist>
             <Field label="Name" error={problems.name}>
               {(id, d) => <Input id={id} aria-describedby={d} value={f.name} onChange={set("name")} />}
             </Field>
@@ -135,6 +186,12 @@ export function CreateWorkspace({ org, admin, settings }: { org: string; admin: 
               )}
             </Field>
           </div>
+          {room.length > 0 && (
+            <div className={cpuFull ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>
+              Org quota left: {room.map((r) => `${r.label} ${r.text}`).join(" · ")}.
+              {cpuFull && ` ${org}'s CPUs are all in use, so a new workspace will be refused until something in the org stops or a platform admin raises its quota.`}
+            </div>
+          )}
           <Field label="Environment" hint="KEY=VALUE per line, for login shells. Plain values; deliver secrets from the Environment tab once it exists." error={problems.env}>
             {(id, d) => <Textarea id={id} aria-describedby={d} value={f.env} onChange={set("env")} rows={3} spellCheck={false} className="font-mono text-[13px]" placeholder="EDITOR=vim" />}
           </Field>
@@ -142,7 +199,7 @@ export function CreateWorkspace({ org, admin, settings }: { org: string; admin: 
             <div className="text-xs font-medium text-muted-foreground">Placement, from the org</div>
             {info.isLoading ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : placement}
           </div>
-          <FormError>{error}</FormError>
+          <FormError title="The workspace was not created">{error}</FormError>
         </div>
       </Section>
     </form>

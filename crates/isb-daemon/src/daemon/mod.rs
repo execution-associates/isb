@@ -1056,12 +1056,11 @@ impl Daemon {
             || i.config.contains_key(&format!("user.{LABEL_OWNER}"))
     }
 
-    /// A client on the org a tool call names (default: the default org).
+    /// A client on the org a tool call names (default: the default org),
+    /// refused up front when that org does not exist.
     fn oc(&self, org: &Option<String>) -> Result<Client> {
-        let org = match org {
-            Some(o) => crate::org::OrgId::new(o.clone())?,
-            None => crate::org::OrgId::default_org(),
-        };
+        let org = crate::org::OrgId::new(org.as_deref().unwrap_or(crate::org::DEFAULT_ORG))?;
+        crate::org::check_exists(&self.client, &org)?;
         Ok(crate::org::client(&self.client, &org))
     }
 

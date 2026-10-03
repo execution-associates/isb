@@ -41,6 +41,10 @@ use crate::server::http::{Handler, Peer, Request, Response, Shutdown};
 use crate::server::{Caller, Healthz, Listener, Registry, Tool};
 use crate::workspace::{self as ws, Settings, Store, TokenMeta, Workspace};
 
+mod create;
+mod images;
+use create::{check_fields, check_size, token_role, workspace_create};
+
 /// The bridge listener's port when `--workspace-mcp-port` is not given.
 pub const DEFAULT_PORT: u16 = 8481;
 
@@ -567,7 +571,7 @@ impl Workspaces {
             Some(root) if dir.starts_with(root.join(org.as_str())) => root.join(org.as_str()),
             _ => dir.to_path_buf(),
         };
-        allow_disk_path(&self.client, org, &allow)
+        crate::org::allow_home(&self.client, org, &allow)
     }
 
     /// The workspace user and its home: made when the image lacks them,
@@ -862,48 +866,6 @@ const DEFAULT_ROOT_SIZE: &str = "20GiB";
 /// A sandbox's root disk size when it gives none in an org with a disk
 /// quota.
 pub const SANDBOX_ROOT_SIZE: &str = "10GiB";
-
-/// Let the org's restricted project bind `path` (and what is under it):
-/// added to `restricted.devices.disk.paths` unless a listed path covers it.
-fn allow_disk_path(client: &Client, org: &OrgId, path: &Path) -> Result<()> {
-    let pp = format!("/1.0/projects/{}", encode_segment(&org.incus_project()));
-    let p = client.get(&pp)?;
-    let cfg = &p["config"];
-    if cfg["restricted"].as_str() != Some("true") {
-        return Ok(());
-    }
-    let mut paths: Vec<String> = cfg["restricted.devices.disk.paths"]
-        .as_str()
-        .unwrap_or("")
-        .split(',')
-        .filter(|s| !s.is_empty())
-        .map(String::from)
-        .collect();
-    let covered = cfg["restricted.devices.disk"].as_str() == Some("allow")
-        && paths.iter().any(|x| path.starts_with(x));
-    if covered {
-        return Ok(());
-    }
-    paths.push(path.display().to_string());
-    let mut patch = serde_json::Map::new();
-    patch.insert("restricted.devices.disk".into(), json!("allow"));
-    patch.insert(
-        "restricted.devices.disk.paths".into(),
-        json!(paths.join(",")),
-    );
-    let mut merged = cfg.clone();
-    for (k, v) in patch {
-        merged[k] = v;
-    }
-    client.mutate(
-        "PUT",
-        &pp,
-        Some(&json!({"description": p["description"], "config": merged})),
-        &format!("let org {org} bind {}", path.display()),
-        client.timeouts.other,
-    )?;
-    Ok(())
-}
 
 /// A storage pool's driver (`zfs`, `btrfs`, `lvm`, `dir`, ...).
 pub fn pool_driver(client: &Client, pool: &str) -> Result<String> {
@@ -1200,263 +1162,6 @@ fn view(d: &Daemon, org: &OrgId, w: &Workspace, sessions: bool) -> Value {
     });
     v["sandboxes"] = json!(sandboxes);
     v
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct CreateArgs {
-    #[serde(default)]
-    #[allow(dead_code)]
-    org: Option<String>,
-    #[serde(default)]
-    name: Option<String>,
-    image: String,
-    #[serde(default)]
-    user: Option<String>,
-    #[serde(default)]
-    cpus: Option<u32>,
-    #[serde(default)]
-    memory: Option<String>,
-    #[serde(default)]
-    root_size: Option<String>,
-    #[serde(default)]
-    home_size: Option<String>,
-    #[serde(default)]
-    env: BTreeMap<String, String>,
-    #[serde(default)]
-    secrets: Vec<String>,
-    #[serde(default)]
-    labels: BTreeMap<String, String>,
-    #[serde(default)]
-    token_role: Option<Role>,
-    #[serde(default)]
-    home_bind: Option<String>,
-}
-
-fn check_size(what: &str, s: &str) -> Result<()> {
-    let ok = !s.is_empty()
-        && s.len() <= 20
-        && s.chars().next().is_some_and(|c| c.is_ascii_digit())
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '.');
-    if ok {
-        Ok(())
-    } else {
-        Err(Error::invalid(format!(
-            "{what} {s:?}: a size such as 20GiB or 512MiB"
-        )))
-    }
-}
-
-fn check_fields(
-    env: &BTreeMap<String, String>,
-    secrets: &[String],
-    labels: &BTreeMap<String, String>,
-) -> Result<()> {
-    for k in env.keys() {
-        ws::check_env_name(k)?;
-    }
-    for s in secrets {
-        if s.is_empty() || s.contains('/') || s.starts_with('.') || s.len() > 128 {
-            return Err(Error::invalid(format!("secret name {s:?}")));
-        }
-    }
-    for k in labels.keys() {
-        if k.starts_with("isb.") || k.is_empty() || k.contains(char::is_whitespace) {
-            return Err(Error::invalid(format!(
-                "label {k:?}: isb.* labels are isb's own"
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn token_role(r: Option<Role>) -> Result<Role> {
-    match r.unwrap_or(Role::Admin) {
-        Role::Owner => Err(Error::invalid(
-            "token_role: viewer, member or admin (an owner's reach is for people)",
-        )),
-        r => Ok(r),
-    }
-}
-
-#[expect(
-    clippy::too_many_lines,
-    reason = "predates the lint ratchet; split it when next changed"
-)]
-fn workspace_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
-    let org = super::arg_org(&a)?;
-    let a: CreateArgs = args(a)?;
-    require(c, &org, Role::Admin, "creating a workspace")?;
-    if org.is_legacy_default() {
-        return Err(Error::invalid(
-            "the default org on this host is incus' default project, not an org of its own; create the workspace in an org (isb org create)",
-        ));
-    }
-    let name = a.name.clone().unwrap_or_else(|| ws::DEFAULT_NAME.into());
-    ws::check_name(&name)?;
-    let user = a.user.clone().unwrap_or_else(|| ws::DEFAULT_USER.into());
-    ws::check_user(&user)?;
-    if a.image.trim().is_empty() {
-        return Err(Error::invalid("image is required"));
-    }
-    let home_size = a
-        .home_size
-        .clone()
-        .unwrap_or_else(|| ws::DEFAULT_HOME_SIZE.into());
-    check_size("home_size", &home_size)?;
-    if let Some(r) = &a.root_size {
-        check_size("root_size", r)?;
-    }
-    check_fields(&a.env, &a.secrets, &a.labels)?;
-    if a.home_bind.is_some() && !c.is_trusted() {
-        return Err(Error::Forbidden(
-            "home_bind (a host directory as the home) is for superadmins".into(),
-        ));
-    }
-    if let Some(b) = &a.home_bind {
-        if !b.starts_with('/') {
-            return Err(Error::invalid("home_bind must be an absolute host path"));
-        }
-    }
-    let role = token_role(a.token_role)?;
-    let wsm = d.workspaces.clone();
-    let _g = wsm.lock.lock().unwrap_or_else(|e| e.into_inner());
-    let settings = wsm.store.settings(&org)?;
-    let existing = wsm.store.list(&org)?;
-    if existing.iter().any(|w| w.name == name) {
-        return Err(Error::AlreadyExists(format!(
-            "org {org} already has workspace {name}"
-        )));
-    }
-    if existing.len() as u32 >= settings.max_workspaces {
-        return Err(Error::invalid(format!(
-            "org {org} has its workspace ({}); an org has {} (a platform admin can raise max_workspaces with workspace_settings)",
-            existing
-                .iter()
-                .map(|w| w.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", "),
-            settings.max_workspaces
-        )));
-    }
-    let oc = wsm.oc(&org);
-    if Sandbox::get(&oc, &name).is_ok() {
-        return Err(Error::AlreadyExists(format!(
-            "an instance named {name} exists in org {org}; pick another workspace name"
-        )));
-    }
-    for s in &a.secrets {
-        d.secrets
-            .inspect(&org, s)
-            .map_err(|e| Error::invalid(format!("secret {s}: {e}")))?;
-    }
-    let t = now();
-    let mut w = Workspace {
-        name: name.clone(),
-        id: random_hex(8),
-        image: a.image.trim().to_string(),
-        user,
-        cpus: a.cpus,
-        memory: a.memory,
-        root_size: a.root_size,
-        home_size,
-        env: a.env,
-        secrets: a.secrets,
-        labels: a.labels,
-        token_role: role,
-        home_bind: a.home_bind,
-        pool: None,
-        created_at: t,
-        created_by: creator(c),
-        updated_at: t,
-        rebuilt_at: None,
-        token: None,
-    };
-    // Where the home goes: the path a superadmin named, else a host folder
-    // under --workspace-home-root (unless the org says volume), else a
-    // managed volume.
-    if w.home_bind.is_none() {
-        let kind = settings.home_kind.as_deref();
-        match (&wsm.home_root, kind) {
-            (Some(root), None | Some("host")) => {
-                w.home_bind = Some(ws::host_home(root, &org, &name).display().to_string());
-            }
-            (None, Some("host")) => {
-                return Err(Error::invalid(
-                    "org setting home_kind is host, but isb serve has no --workspace-home-root",
-                ));
-            }
-            _ => {}
-        }
-    }
-    if w.home_bind.is_none() {
-        w.pool = Some(wsm.new_home_pool(&org, &oc)?);
-    }
-    if w.root_size.is_none() && project_has_disk_limit(&d.client, &org) {
-        // incus needs a root size in an org with a disk quota.
-        w.root_size = Some(DEFAULT_ROOT_SIZE.into());
-    }
-    wsm.mint(&org, &mut w)?;
-    wsm.store.put(&org, &w)?;
-    let mut log = Vec::new();
-    if let Err(e) = wsm.build(&org, &w, &mut log) {
-        // Nothing half-made stays behind: no token, no definition. The home
-        // volume stays if it was made (it is empty, and a retry reuses it).
-        let _ = Sandbox::remove(&oc, &name, true);
-        wsm.store.delete(&org, &name)?;
-        wsm.index(
-            &org,
-            &Workspace {
-                token: None,
-                ..w.clone()
-            },
-        );
-        return Err(e);
-    }
-    // On a copy-on-write pool the home gets snapshots from the start,
-    // hourly with the last day kept. On `dir` and the like every snapshot
-    // is a full copy of the home, so none are scheduled: backups to S3
-    // instead, or an admin opts in with a small keep.
-    if let (None, Some(pool)) = (&w.home_bind, &w.pool) {
-        match pool_driver(&d.client, pool) {
-            Ok(drv) if copy_on_write(&drv) => {
-                match d.volumes.update(
-                    &org,
-                    &w.home_volume(&org),
-                    &json!({"schedule": HOME_SNAPSHOTS, "keep": HOME_SNAPSHOTS_KEEP}),
-                ) {
-                    Ok(_) => log.push(format!(
-                        "home snapshots {HOME_SNAPSHOTS}, keeping {HOME_SNAPSHOTS_KEEP} (pool {pool}, {drv})"
-                    )),
-                    Err(e) => log.push(format!("home snapshot schedule not set: {e}")),
-                }
-            }
-            Ok(drv) => log.push(format!(
-                "no automatic home snapshots: pool {pool} is {drv}, where each snapshot is a full copy of the home"
-            )),
-            Err(e) => log.push(format!("pool {pool}: {e}")),
-        }
-    }
-    wsm.ensure_bridge(&org);
-    // The bridge may have come up after the first delivery: write the
-    // profile again with its URL.
-    let _ = wsm.deliver(&org, &w);
-    wsm.record(
-        &org,
-        "workspace.created",
-        &name,
-        &creator(c),
-        format!("workspace {name} created from {}", w.image),
-        json!({"image": w.image, "token_role": role}),
-    );
-    let mut v = view(d, &org, &w, false);
-    v["log"] = json!(log);
-    v["message"] = json!(format!(
-        "Workspace {name} is running. Its token (role {}) is at {} inside it and in $ISB_TOKEN for login shells; it is never shown here.",
-        role.as_str(),
-        ws::TOKEN_PATH
-    ));
-    Ok(v)
 }
 
 #[derive(Deserialize)]
@@ -1968,9 +1673,13 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
             let d = d.clone();
             let f = $f;
             r.register(
-                Tool::new($name, $desc, $schema, move |a, c| f(&d, a, c))
-                    .title($title)
-                    .annotations($ann.clone()),
+                Tool::new($name, $desc, $schema, move |a, c| {
+                    // An org that does not exist is refused before anything.
+                    crate::org::check_exists(&d.client, &super::arg_org(&a)?)?;
+                    f(&d, a, c)
+                })
+                .title($title)
+                .annotations($ann.clone()),
             )?;
         }};
     }
@@ -1981,7 +1690,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
     tool!(
         "workspace_get",
         "Get the workspace",
-        "The org's workspace (its long-lived machine, docs/concepts/workspaces.md): image, size, home volume, status, CPU and memory, live sessions (web terminals, SSH), last activity, its token's metadata (never the token) and how to connect; `workspace` is null when the org has none yet. Also the org's workspace settings.",
+        "The org's workspace (its long-lived machine, docs/concepts/workspaces.md): image, size, home volume, status, CPU and memory, live sessions (web terminals, SSH), last activity, its token's metadata (never the token) and how to connect; `workspace` is null when the org has none yet, and `create` then says what one can be made from (`images`, `default_image`) and the org's quota and usage (`quota`). Also the org's workspace settings.",
         obj(json!({"name": name()}), &[]),
         ro,
         |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
@@ -1999,10 +1708,12 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
             let wsm = &d.workspaces;
             let name = resolve_name(wsm, &org, a.name.as_deref())?;
             let w = wsm.store.get(&org, &name)?;
+            let create = w.is_none().then(|| images::create_options(wsm, &org));
             Ok(json!({
                 "org": org.as_str(),
                 "settings": wsm.store.settings(&org)?,
                 "workspace": w.map(|w| view(d, &org, &w, true)),
+                "create": create,
             }))
         }
     );
@@ -2033,7 +1744,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
         obj(
             json!({
                 "name": {"type": "string", "description": "Default: workspace."},
-                "image": {"type": "string", "description": "An incus image (dev-base, images:ubuntu/24.04) or registry:APP:TAG."},
+                "image": {"type": "string", "description": "An incus image (a local alias such as dev-base, or a remote one such as images:ubuntu/24.04) or registry:APP:TAG. Default: dev-base when this host has it, else images:ubuntu/24.04; workspace_get lists the choices."},
                 "user": {"type": "string", "description": "The workspace user (default dev); created when the image lacks it."},
                 "cpus": {"type": "integer", "minimum": 1},
                 "memory": {"type": "string", "description": "e.g. 8GiB."},
@@ -2045,7 +1756,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
                 "token_role": {"type": "string", "enum": ["viewer", "member", "admin"], "description": "The workspace token's role in the org (default admin)."},
                 "home_bind": {"type": "string", "description": "Superadmins only: this host directory as the home (an existing box's, when migrating), instead of the default home."}
             }),
-            &["image"]
+            &[]
         ),
         write,
         workspace_create
@@ -2251,34 +1962,26 @@ mod tests {
         assert_eq!(s.volumes[0].source, "/srv/workspaces/acme/home");
     }
 
-    #[test]
-    fn workspace_tokens_authenticate_as_the_org_workspace_and_rotate() {
-        let d = tempfile::tempdir().unwrap();
+    /// A workspace manager over `state`, its incus a socket that is not
+    /// there.
+    pub(super) fn manager(state: &Path, home_root: Option<PathBuf>) -> Workspaces {
         let keyring = Arc::new(crate::secrets::Keyring::new(
             age::x25519::Identity::generate(),
             vec![],
         ));
-        let org = OrgId::new("acme").unwrap();
-        let store = Store::new(d.path());
-        let mut w: Workspace = serde_json::from_value(json!({
-            "name": "workspace", "id": "x", "image": "dev-base", "user": "dev",
-            "home_size": "1GiB", "token_role": "admin", "created_at": 0, "created_by": "a"
-        }))
-        .unwrap();
-        let m = Workspaces {
-            store: store.clone(),
-            client: Client::new(),
+        Workspaces {
+            store: Store::new(state),
+            client: Client::with_socket(state.join("no-incus.sock")),
             keyring: keyring.clone(),
             secrets: Arc::new(crate::secrets::Secrets::new(
-                crate::secrets::LocalDriver::new(d.path(), keyring),
+                crate::secrets::LocalDriver::new(state, keyring),
             )),
             recorder: crate::history::Recorder::start(Arc::new(
-                crate::audit::AuditLog::open(&d.path().join("a.db"), Duration::from_secs(60))
-                    .unwrap(),
+                crate::audit::AuditLog::open(&state.join("a.db"), Duration::from_secs(60)).unwrap(),
             )),
             port: DEFAULT_PORT,
             home_pool: None,
-            home_root: None,
+            home_root,
             tokens: Mutex::new(HashMap::new()),
             last_used: Mutex::new(HashMap::new()),
             sessions: Arc::new(Mutex::new(HashMap::new())),
@@ -2289,7 +1992,24 @@ mod tests {
             serve: OnceLock::new(),
             lock: Mutex::new(()),
             started: 0,
-        };
+        }
+    }
+
+    pub(super) fn a_workspace() -> Workspace {
+        serde_json::from_value(json!({
+            "name": "workspace", "id": "x", "image": "dev-base", "user": "dev",
+            "home_size": "1GiB", "token_role": "admin", "created_at": 0, "created_by": "a"
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn workspace_tokens_authenticate_as_the_org_workspace_and_rotate() {
+        let d = tempfile::tempdir().unwrap();
+        let org = OrgId::new("acme").unwrap();
+        let m = manager(d.path(), None);
+        let store = m.store.clone();
+        let mut w = a_workspace();
         m.mint(&org, &mut w).unwrap();
         store.put(&org, &w).unwrap();
         let t1 = String::from_utf8(m.token_plain(&org, "workspace").unwrap().unwrap()).unwrap();

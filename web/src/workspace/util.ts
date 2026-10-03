@@ -138,3 +138,40 @@ export function sshSteps(org: string, name: string, url: string): { title: strin
 
 /** The daemon's refusal of a disruptive call without confirm, minus the instruction meant for agents. */
 export const sessionsNotice = (message: string) => message.replace(/\s*If that is intended, call again with confirm: true\.?\s*$/, "");
+
+/** One of the org's quotas: its limit (null: none) and what is in use. */
+export interface QuotaItem {
+  limit: number | null;
+  usage: number;
+}
+export type Quota = Partial<Record<"cpu" | "memory" | "disk" | "instances", QuotaItem>>;
+
+/** Bytes as incus writes sizes: 512MiB, 3.5GiB. */
+export function gib(n: number): string {
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let v = n;
+  let u = 0;
+  while (v >= 1024 && u < units.length - 1) {
+    v /= 1024;
+    u++;
+  }
+  return `${Number.isInteger(v) ? v : v.toFixed(1)}${units[u]}`;
+}
+
+/** The org's limited quotas as "free of limit" lines, for the create form. */
+export function headroom(q: Quota | undefined): { label: string; text: string; free: number; full: boolean }[] {
+  const out: { label: string; text: string; free: number; full: boolean }[] = [];
+  const rows: [keyof Quota, string, (n: number) => string][] = [
+    ["cpu", "CPUs", String],
+    ["memory", "Memory", gib],
+    ["disk", "Disk", gib],
+    ["instances", "Instances", String],
+  ];
+  for (const [k, label, fmt] of rows) {
+    const r = q?.[k];
+    if (!r || r.limit == null) continue;
+    const free = Math.max(0, r.limit - r.usage);
+    out.push({ label, text: `${fmt(free)} free of ${fmt(r.limit)}`, free, full: free === 0 });
+  }
+  return out;
+}

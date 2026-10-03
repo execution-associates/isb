@@ -189,6 +189,13 @@ use crate::client::{Client, encode_segment};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
+mod ensure;
+mod homes;
+pub(crate) mod limits;
+
+pub use ensure::ensure;
+pub use homes::allow_home;
+
 /// Config keys isb keeps on the org's project.
 const KEY_ORG: &str = "user.isb.org";
 const KEY_NETWORK: &str = "user.isb.network";
@@ -622,295 +629,6 @@ fn strmap(v: &Value) -> std::collections::BTreeMap<String, String> {
         .unwrap_or_default()
 }
 
-/// Create an org, or bring an existing one in line with `opts`. A legacy
-/// default org (the incus default project) has no settings.
-#[expect(
-    clippy::too_many_lines,
-    reason = "predates the lint ratchet; split it when next changed"
-)]
-pub fn ensure(
-    base: &Client,
-    org: &OrgId,
-    opts: &OrgOptions,
-    report: &mut dyn FnMut(&str),
-) -> Result<OrgInfo> {
-    resolve_default(base);
-    if org.is_legacy_default() {
-        return Err(Error::invalid(
-            "the default org on this host is incus' default project (it held workloads before isb's orgs); it has no settings",
-        ));
-    }
-    let h = host(base);
-    let project = org.incus_project();
-    let proj_path = format!("/1.0/projects/{}", encode_segment(&project));
-    let existing = h.get_opt(&proj_path)?;
-    if let Some(p) = &existing {
-        if p["config"][KEY_ORG].as_str() != Some(org.as_str()) {
-            return Err(Error::AlreadyExists(format!(
-                "incus project {project} exists but is not isb org {org}"
-            )));
-        }
-    }
-    let egress: Vec<Egress> = match &opts.egress {
-        Some(e) => e.clone(),
-        None => existing
-            .as_ref()
-            .and_then(|p| p["config"][KEY_EGRESS].as_str())
-            .map(parse_egress_list)
-            .unwrap_or_default(),
-    };
-    check_egress(&egress)?;
-    let keep = |key: &str| -> String {
-        existing
-            .as_ref()
-            .and_then(|p| p["config"][key].as_str())
-            .unwrap_or_default()
-            .to_string()
-    };
-    let domains = match &opts.domains {
-        Some(d) => d
-            .iter()
-            .map(|s| check_domain_suffix(s))
-            .collect::<Result<Vec<_>>>()?
-            .join(" "),
-        None => keep(KEY_DOMAINS),
-    };
-    let ingress = match &opts.ingress {
-        Some(i) if i == INGRESS_CADDY || i == INGRESS_CLOUDFLARE_TUNNEL => i.clone(),
-        Some(i) => {
-            return Err(Error::invalid(format!(
-                "--ingress {i:?}: {INGRESS_CADDY} or {INGRESS_CLOUDFLARE_TUNNEL}"
-            )));
-        }
-        None => keep(KEY_INGRESS),
-    };
-    let cf_account = opts
-        .cloudflare_account
-        .clone()
-        .unwrap_or_else(|| keep(KEY_CF_ACCOUNT));
-    let cf_zone = opts
-        .cloudflare_zone
-        .clone()
-        .unwrap_or_else(|| keep(KEY_CF_ZONE));
-    for v in [&cf_account, &cf_zone] {
-        if !v.chars().all(|c| c.is_ascii_alphanumeric()) {
-            return Err(Error::invalid(format!(
-                "Cloudflare id {v:?}: letters and digits only"
-            )));
-        }
-    }
-
-    // Service discovery: the org's dnsmasq reads its hosts directory. Set at
-    // creation, since changing raw.dnsmasq later restarts dnsmasq.
-    let dns_dir = crate::discovery::prepare_org(org)?;
-    if dns_dir.is_none() {
-        report(&format!(
-            "{org}: no writable {}: service names are off (run `sudo isb host setup`, then this again)",
-            crate::discovery::root().display()
-        ));
-    }
-    let raw_dnsmasq = dns_dir
-        .as_deref()
-        .map(crate::discovery::raw_dnsmasq)
-        .unwrap_or_default();
-
-    let bridge = bridge_name(org);
-    let net_path = format!("/1.0/networks/{}", encode_segment(&bridge));
-    if h.get_opt(&net_path)?.is_none() {
-        report(&format!("{org}: creating network {bridge}"));
-        let mut config = json!({
-            "ipv4.address": "auto",
-            "ipv4.nat": "true",
-            "ipv6.address": "none",
-            "dns.domain": format!("{org}.isb"),
-        });
-        if !raw_dnsmasq.is_empty() {
-            config["raw.dnsmasq"] = json!(raw_dnsmasq);
-        }
-        h.mutate(
-            "POST",
-            "/1.0/networks",
-            Some(&json!({
-                "name": bridge,
-                "type": "bridge",
-                "description": format!("isb org {org}"),
-                "config": config,
-            })),
-            &format!("create network {bridge}"),
-            h.get_timeouts().other,
-        )?;
-    }
-    let net = h.get(&net_path)?;
-    let subnet = net["config"]["ipv4.address"]
-        .as_str()
-        .unwrap_or_default()
-        .to_string();
-    let own = subnet_of(&subnet).and_then(|s| parse_cidr(&s));
-
-    // Deny private ranges, except the org's own subnet (which holds its DNS)
-    // and its exceptions.
-    let acl = acl_name(org);
-    let acl_body = json!({
-        "description": format!("isb org {org}: allow within the org, deny other private networks"),
-        "egress": egress_rules(own, &egress)?,
-        "ingress": [],
-        "config": {},
-    });
-    let acl_path = format!("/1.0/network-acls/{}", encode_segment(&acl));
-    if h.get_opt(&acl_path)?.is_none() {
-        report(&format!("{org}: creating ACL {acl}"));
-        let mut body = acl_body.clone();
-        body["name"] = json!(acl);
-        h.mutate(
-            "POST",
-            "/1.0/network-acls",
-            Some(&body),
-            &format!("create ACL {acl}"),
-            h.get_timeouts().other,
-        )?;
-    } else {
-        h.mutate(
-            "PUT",
-            &acl_path,
-            Some(&acl_body),
-            &format!("update ACL {acl}"),
-            h.get_timeouts().other,
-        )?;
-    }
-    let mut cfg = net["config"].clone();
-    let mut changed = Vec::new();
-    if net["config"]["security.acls"].as_str() != Some(acl.as_str()) {
-        cfg["security.acls"] = json!(acl);
-        // Traffic no rule matches passes: ingress from the host and the
-        // balancer, egress to the internet.
-        cfg["security.acls.default.egress.action"] = json!("allow");
-        cfg["security.acls.default.ingress.action"] = json!("allow");
-        changed.push("attach ACL");
-    }
-    // Only ever added: a host without the directory leaves an org's
-    // existing setting alone.
-    if !raw_dnsmasq.is_empty() && net["config"]["raw.dnsmasq"].as_str() != Some(&raw_dnsmasq) {
-        report(&format!(
-            "{org}: turning on service names (restarts {bridge}'s DNS)"
-        ));
-        cfg["raw.dnsmasq"] = json!(raw_dnsmasq);
-        changed.push("set raw.dnsmasq");
-    }
-    if !changed.is_empty() {
-        h.mutate(
-            "PATCH",
-            &net_path,
-            Some(&json!({"config": cfg})),
-            &format!("{} on {bridge}", changed.join(", ")),
-            h.get_timeouts().other,
-        )?;
-    }
-
-    let uid = rustix::process::getuid().as_raw();
-    let gid = rustix::process::getgid().as_raw();
-    let mut config = json!({
-        "features.images": "false",
-        "features.profiles": "true",
-        "features.storage.volumes": "true",
-        "features.storage.buckets": "true",
-        "features.networks": "false",
-        "restricted": "true",
-        "restricted.containers.privilege": "unprivileged",
-        // Volume snapshots and exports (crate::volume_backup).
-        "restricted.snapshots": "allow",
-        "restricted.backups": "allow",
-        "restricted.networks.access": bridge,
-        // The daemon's own uid may be mapped 1:1, so `idmap: auto` keeps
-        // bind-mounted files writable; root never.
-        "restricted.idmap.uid": uid.to_string(),
-        "restricted.idmap.gid": gid.to_string(),
-        KEY_ORG: org.as_str(),
-        KEY_NETWORK: bridge,
-        KEY_EGRESS: egress.iter().map(Egress::render).collect::<Vec<_>>().join(" "),
-        KEY_DOMAINS: domains,
-        KEY_INGRESS: ingress,
-        KEY_CF_ACCOUNT: cf_account,
-        KEY_CF_ZONE: cf_zone,
-    });
-    let roots: Vec<String> = opts
-        .bind_roots
-        .iter()
-        .map(|p| p.display().to_string())
-        .collect();
-    if roots.is_empty() {
-        config["restricted.devices.disk"] = json!("managed");
-    } else {
-        config["restricted.devices.disk"] = json!("allow");
-        config["restricted.devices.disk.paths"] = json!(roots.join(","));
-    }
-    for (k, v) in [
-        ("limits.cpu", opts.cpus.map(|c| c.to_string())),
-        ("limits.memory", opts.memory.clone()),
-        ("limits.disk", opts.disk.clone()),
-        ("limits.instances", opts.instances.map(|c| c.to_string())),
-    ] {
-        if let Some(v) = v {
-            config[k] = json!(v);
-        }
-    }
-    match existing {
-        None => {
-            report(&format!("{org}: creating project {project}"));
-            h.mutate(
-                "POST",
-                "/1.0/projects",
-                Some(&json!({"name": project, "description": format!("isb org {org}"), "config": config})),
-                &format!("create project {project}"),
-                h.get_timeouts().other,
-            )?;
-        }
-        Some(p) => {
-            let mut merged = p["config"].clone();
-            for (k, v) in config.as_object().unwrap() {
-                merged[k] = v.clone();
-            }
-            if roots.is_empty() {
-                if let Some(m) = merged.as_object_mut() {
-                    m.remove("restricted.devices.disk.paths");
-                }
-            }
-            h.mutate(
-                "PUT",
-                &proj_path,
-                Some(&json!({"description": p["description"], "config": merged})),
-                &format!("update project {project}"),
-                h.get_timeouts().other,
-            )?;
-        }
-    }
-
-    // The default profile: root disk, the org NIC, per-instance defaults and
-    // an isolated uid range per instance.
-    let oc = client(base, org);
-    let facts = crate::sandbox::host_facts(&h)?;
-    let pool = facts.pick_pool(None)?;
-    let profile = json!({
-        "description": format!("isb org {org}"),
-        "config": {
-            "limits.cpu": opts.default_cpus.unwrap_or(1).to_string(),
-            "limits.memory": opts.default_memory.clone().unwrap_or_else(|| "512MiB".into()),
-            "security.idmap.isolated": "true",
-        },
-        "devices": {
-            "root": {"type": "disk", "path": "/", "pool": pool},
-            "eth0": {"type": "nic", "name": "eth0", "network": bridge},
-        },
-    });
-    oc.mutate(
-        "PUT",
-        "/1.0/profiles/default",
-        Some(&profile),
-        &format!("set {org}'s default profile"),
-        oc.get_timeouts().other,
-    )?;
-    get(base, org)
-}
-
 /// The network part of a CIDR address: `10.64.3.1/24` -> `10.64.3.0/24`.
 fn subnet_of(cidr: &str) -> Option<String> {
     let (ip, len) = cidr.split_once('/')?;
@@ -1005,6 +723,27 @@ pub fn get(base: &Client, org: &OrgId) -> Result<OrgInfo> {
     info(base, org.clone(), &p)
 }
 
+/// `Ok` when `org` exists here, else the same "org X not found" as
+/// [`get`], without reading the rest of it. For a tool to check before it
+/// acts, so an unknown org is refused up front instead of failing halfway
+/// on an incus error about a missing project.
+pub fn check_exists(base: &Client, org: &OrgId) -> Result<()> {
+    resolve_default(base);
+    if org.is_default() {
+        // The legacy `default` project, or `isb-default`, which
+        // `resolve_default` found.
+        return Ok(());
+    }
+    let p = host(base).get_opt(&format!(
+        "/1.0/projects/{}",
+        encode_segment(&org.incus_project())
+    ))?;
+    match p {
+        Some(p) if p["config"][KEY_ORG].as_str() == Some(org.as_str()) => Ok(()),
+        _ => Err(Error::NotFound(format!("org {org}"))),
+    }
+}
+
 /// Every org: the default one first, then isb's projects by name.
 pub fn list(base: &Client) -> Result<Vec<OrgInfo>> {
     resolve_default(base);
@@ -1091,6 +830,30 @@ pub fn remove(base: &Client, org: &OrgId, force: bool, report: &mut dyn FnMut(&s
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn an_unknown_org_is_not_found_up_front() {
+        use crate::client::fake::{Route, serve};
+        let (_d, c) = serve(vec![
+            Route {
+                prefix: "GET /1.0/projects/isb-lab",
+                status: 200,
+                body: json!({"config": {KEY_ORG: "lab"}}),
+            },
+            // Another tool's project that happens to look like one.
+            Route {
+                prefix: "GET /1.0/projects/isb-other",
+                status: 200,
+                body: json!({"config": {}}),
+            },
+        ]);
+        assert!(check_exists(&c, &OrgId::new("lab").unwrap()).is_ok());
+        for o in ["demo", "other"] {
+            let e = check_exists(&c, &OrgId::new(o).unwrap()).unwrap_err();
+            assert!(e.is_not_found(), "{e}");
+            assert_eq!(e.to_string(), format!("org {o} not found"));
+        }
+    }
 
     #[test]
     fn the_default_org_project_on_either_kind_of_host() {

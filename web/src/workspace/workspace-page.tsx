@@ -54,7 +54,7 @@ export function WorkspacePage() {
     return (
       <>
         <PageHeader title="Workspace" description={`${org} has no workspace yet.`} />
-        <CreateWorkspace org={org} admin={admin} settings={q.data.settings} />
+        <CreateWorkspace org={org} admin={admin} settings={q.data.settings} options={q.data.create ?? undefined} />
       </>
     );
   }

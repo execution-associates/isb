@@ -4,6 +4,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { callTool } from "@/api/tools";
 import type { Role } from "@/api/auth";
+import type { Quota } from "./util";
 
 export interface WorkspaceSettings {
   max_workspaces: number;
@@ -65,10 +66,25 @@ export interface Workspace {
   sandboxes: number;
 }
 
+/** An image a workspace can be made from: local to this host, or remote. */
+export interface WorkspaceImage {
+  image: string;
+  description: string;
+  source: "local" | "remote";
+}
+
+/** With no workspace yet: what one can be made from, and the org's quota. */
+export interface WorkspaceCreateOptions {
+  images: WorkspaceImage[];
+  default_image: string;
+  quota: Quota;
+}
+
 export interface WorkspaceGet {
   org: string;
   settings: WorkspaceSettings;
   workspace: Workspace | null;
+  create?: WorkspaceCreateOptions | null;
 }
 
 export interface Sandbox {

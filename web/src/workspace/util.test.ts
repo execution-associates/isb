@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeTab, envProblems, inWorkspaceEnv, expiresIn, expiringSoon, human, idleLabel, instanceTerminalUrl, sessionsNotice, sizeProblem, sshHost, sshSteps, statusTone, tabsFor } from "./util";
+import { activeTab, envProblems, gib, headroom, inWorkspaceEnv, expiresIn, expiringSoon, human, idleLabel, instanceTerminalUrl, sessionsNotice, sizeProblem, sshHost, sshSteps, statusTone, tabsFor } from "./util";
 
 describe("workspace helpers", () => {
   it("formats durations as the daemon does", () => {
@@ -66,5 +66,17 @@ describe("ssh steps", () => {
     expect(sshHost("acme", "workspace")).toBe("workspace.acme.isb");
     expect(s[1].code).toBe("isb --org acme workspace ssh-config --url https://isb.example.com -o ~/.config/isb/ssh_config");
     expect(s[2].code).toContain("herdr machine add workspace.acme.isb --label acme/workspace");
+  });
+
+  it("shows the org's quota headroom", () => {
+    expect(gib(4 * 1024 ** 3)).toBe("4GiB");
+    expect(gib(3.5 * 1024 ** 3)).toBe("3.5GiB");
+    expect(headroom(undefined)).toEqual([]);
+    expect(
+      headroom({ cpu: { limit: 2, usage: 2 }, memory: { limit: 4 * 1024 ** 3, usage: 1024 ** 3 }, disk: { limit: null, usage: 5 } }),
+    ).toEqual([
+      { label: "CPUs", text: "0 free of 2", free: 0, full: true },
+      { label: "Memory", text: "3GiB free of 4GiB", free: 3 * 1024 ** 3, full: false },
+    ]);
   });
 });

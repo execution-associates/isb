@@ -16,6 +16,8 @@ use serde_json::Value;
 
 use crate::error::{Error, Result};
 
+#[cfg(test)]
+pub(crate) mod fake;
 mod stream;
 
 /// Deadlines used by the client. Every request has one; there is no unbounded wait
@@ -283,6 +285,9 @@ impl Client {
             ))
         })?;
         if env.kind == "error" || status >= 400 {
+            if let Some(e) = crate::org::limits::translate(self, &env.error) {
+                return Err(e);
+            }
             return Err(Error::Api {
                 method: method.to_string(),
                 path: path.to_string(),
@@ -427,6 +432,9 @@ impl Client {
                     } else {
                         "operation failed"
                     });
+                if let Some(e) = crate::org::limits::translate(self, err) {
+                    return Err(e);
+                }
                 Err(Error::OperationFailed {
                     step: step.to_string(),
                     message: err.to_string(),

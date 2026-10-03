@@ -20,8 +20,9 @@ pub enum WorkspaceCmd {
     /// org token delivered inside.
     Create {
         /// Image: an incus alias (dev-base), images:ubuntu/24.04, registry:APP:TAG.
+        /// Default: dev-base when the host has it, else images:ubuntu/24.04.
         #[arg(long)]
-        image: String,
+        image: Option<String>,
         /// Default: workspace.
         #[arg(long)]
         name: Option<String>,
@@ -200,7 +201,7 @@ fn workspace_target(
     match v["workspace"]["name"].as_str() {
         Some(n) => Ok((o, n.to_string())),
         None => Err(isb::Error::Invalid(format!(
-            "org {o} has no workspace: isb workspace create --image dev-base"
+            "org {o} has no workspace: isb workspace create"
         ))),
     }
 }
@@ -234,7 +235,7 @@ fn show(v: &Value) {
     let w = &v["workspace"];
     if w.is_null() {
         println!(
-            "org {} has no workspace: isb workspace create --image dev-base",
+            "org {} has no workspace: isb workspace create",
             v["org"].as_str().unwrap_or("?")
         );
         return;
@@ -302,7 +303,8 @@ pub fn workspace(org: &Option<String>, cmd: WorkspaceCmd) -> Result<u8> {
             token_role,
             home_bind,
         } => {
-            let mut a = json!({"image": image});
+            let mut a = json!({});
+            opt(&mut a, "image", image);
             opt(&mut a, "name", name);
             opt(&mut a, "user", user);
             opt(&mut a, "cpus", cpus);

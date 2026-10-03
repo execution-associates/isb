@@ -12,6 +12,8 @@ use crate::error::{Error, Result};
 use crate::exec::{self, ExecOptions, ExecOutput, ExecStream, Stdin};
 use crate::idmap::SubIds;
 use crate::lock::NameLock;
+
+pub mod images;
 use crate::plan::{
     self, Action, Actual, Desired, DesiredDevice, DiffOptions, HostFacts, Props, SandboxPlan,
     VolumeDefs, split_addr,
@@ -230,10 +232,7 @@ pub fn plan_desired(client: &Client, desired: &Desired, opts: DiffOptions) -> Re
         && desired.image.server.is_none()
         && local_image(client, &desired.image.alias)?.is_none()
     {
-        return Err(Error::invalid(format!(
-            "image {:?} not found locally (see `incus image list`)",
-            desired.image.alias
-        )));
+        return Err(images::missing_on(client, &desired.image.alias));
     }
     let mut missing = Vec::new();
     for v in &desired.volumes {
@@ -489,12 +488,10 @@ pub fn update_instance(
 
 fn create_instance(client: &Client, desired: &Desired, report: &mut dyn FnMut(&str)) -> Result<()> {
     let fingerprint = match &desired.image.server {
-        None => Some(local_image(client, &desired.image.alias)?.ok_or_else(|| {
-            Error::invalid(format!(
-                "image {:?} not found locally (see `incus image list`)",
-                desired.image.alias
-            ))
-        })?),
+        None => Some(
+            local_image(client, &desired.image.alias)?
+                .ok_or_else(|| images::missing_on(client, &desired.image.alias))?,
+        ),
         Some(_) => None,
     };
     let step = format!("create instance {}", desired.name);
