@@ -2,6 +2,7 @@ id: umami
 name: Umami
 description: Simple, privacy-focused web analytics, with a Postgres database.
 version: "2"
+logo: https://raw.githubusercontent.com/umami-software/umami/ec0ff50388c264ed8ce46f00967e92f7e71476ae/src/assets/logo.svg
 tags: [analytics]
 links:
   website: https://umami.is

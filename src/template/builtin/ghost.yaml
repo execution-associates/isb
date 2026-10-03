@@ -2,6 +2,7 @@ id: ghost
 name: Ghost
 description: A publishing platform for blogs and newsletters, with MySQL.
 version: "5"
+logo: https://raw.githubusercontent.com/TryGhost/Ghost/23041798149f42b6d9a950e5385821bcc54ca2e5/apps/admin/src/assets/img/apple-touch-icon.png
 tags: [cms, blog]
 links:
   website: https://ghost.org

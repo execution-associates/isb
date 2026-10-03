@@ -302,9 +302,11 @@ what an event in its org touches.
   Platform admins also see the server-wide switch for private destinations
   (`notification_settings`).
 - **Templates** section: the catalog (`template_list`) with search and
-  tags; cards show a template's initials, not its logo (logos are
-  third-party URLs: the CSP keeps `img-src` to this origin, and the page
-  makes no requests to other servers). A template's page lists what it
+  tags; cards show a template's logo, loaded from isb's cached copy
+  (`/api/v1/templates/<catalog>/<id>/logo`, see
+  [templates.md](templates.md#logos)), so the CSP keeps `img-src` to this
+  origin and the page makes no requests to other servers. A template
+  without a logo, or whose logo fails to load, shows its initials. A template's page lists what it
   creates, its links and notes (and a Dokploy template's translation notes
   or refusals), and a form generated from its variables: each typed
   (email, URL, number, domain, choices) and checked as the daemon checks

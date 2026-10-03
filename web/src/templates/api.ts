@@ -10,6 +10,7 @@ export interface TemplateSummary {
   name: string;
   description: string;
   version?: string;
+  /** The logo's upstream URL. The browser never loads it: see logoSrc. */
   logo?: string;
   tags: string[];
   links: Record<string, string>;
@@ -297,3 +298,7 @@ export const initialsOf = (name: string) =>
     .slice(0, 2)
     .map((w) => w[0]?.toUpperCase() ?? "")
     .join("") || "?";
+
+/** isb's cached copy of a template's logo, when it has one. */
+export const logoSrc = (t: Pick<TemplateSummary, "catalog" | "id" | "logo">) =>
+  t.logo ? `/api/v1/templates/${encodeURIComponent(t.catalog)}/${encodeURIComponent(t.id)}/logo` : undefined;

@@ -24,7 +24,7 @@ import { useMe } from "@/lib/session";
 import type { Tone } from "@/lib/status";
 import { useCanWrite } from "@/lib/use-role";
 import { cn } from "@/lib/utils";
-import { type DeployAnswer, emptyMeans, followOf, formProblems, type Plan, type PlannedVar, type TemplateDetail, useTemplate, valuesToSend, type Variable, varLabel } from "./api";
+import { type DeployAnswer, emptyMeans, followOf, formProblems, logoSrc, type Plan, type PlannedVar, type TemplateDetail, useTemplate, valuesToSend, type Variable, varLabel } from "./api";
 import { TemplateLogo } from "./logo";
 
 export function TemplatePage() {
@@ -55,7 +55,7 @@ export function TemplatePage() {
     <>
       {crumbs}
       <PageHeader
-        icon={<TemplateLogo name={d.template.name} className="size-12 rounded-xl text-base" />}
+        icon={<TemplateLogo name={d.template.name} src={logoSrc(d.template)} className="size-12 rounded-xl text-base" />}
         title={
           <>
             <span className="truncate">{d.template.name}</span>

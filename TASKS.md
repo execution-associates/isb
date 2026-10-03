@@ -448,6 +448,11 @@ minime only runs binaries downloaded from our CI runs.
 - [x] (1502ebd; Gitea live; GitLab and fork previews unit-tested only) P4.5 Preview deployments per pull request. **Verify:** a PR on the test
   repo gets a URL; closing it removes it.
 - [x] (6d71ea9, 83fa46e) P4.6 Metrics history (retained samples) and monitoring pages.
+- [x] (template-logos) P4.7 Template logos: the daemon fetches and caches
+  each template's logo and serves it from `/api/v1/templates/<ref>/logo`
+  (SSRF-checked https, 512 KiB, sniffed image types); built-ins link to
+  upstream logos. **Verify:** the Templates page shows built-in and Dokploy
+  logos in light and dark mode, with no request leaving isb's origin.
 
 ## Phase 5: scale-out
 

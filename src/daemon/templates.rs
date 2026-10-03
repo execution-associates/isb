@@ -641,5 +641,7 @@ pub fn register(r: &mut Registry, t: Templates) -> Result<()> {
     Ok(())
 }
 
+pub mod logo;
+
 #[cfg(test)]
 mod tests;

@@ -2,6 +2,7 @@ id: uptime-kuma
 name: Uptime Kuma
 description: A self-hosted monitoring tool with HTTP, TCP, DNS and ping checks, status pages and notifications.
 version: "1"
+logo: https://raw.githubusercontent.com/louislam/uptime-kuma/e7420f8fa546a8baa7ac4bf9d10a32545d4346e0/public/icon.svg
 tags: [monitoring, status-page]
 links:
   website: https://uptime.kuma.pet

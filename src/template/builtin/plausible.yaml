@@ -2,6 +2,7 @@ id: plausible
 name: Plausible Analytics
 description: Privacy-friendly web analytics (Community Edition), with Postgres and ClickHouse.
 version: "3"
+logo: https://raw.githubusercontent.com/plausible/docs/8c3b2383026e3826d0921d32957ce9140e613c2e/static/img/plausible_logo.png
 tags: [analytics]
 links:
   website: https://plausible.io
