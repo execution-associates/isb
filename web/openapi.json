@@ -54,6 +54,13 @@
                     "description": "Default production.",
                     "type": "string"
                   },
+                  "files": {
+                    "description": "[{path, secret, mode?}]: an org secret's value as a file at an absolute path (config files, certificates).",
+                    "items": {
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
                   "healthcheck": {
                     "description": "A compose healthcheck: {test, interval, timeout, retries, start_period}.",
                     "type": "object"
@@ -79,6 +86,10 @@
                     },
                     "type": "array"
                   },
+                  "previews": {
+                    "description": "Preview deployments per pull request (git sources): {enabled, branches (base branches; default the app's ref), max (default 3), env (.env text or {KEY: value | {secret: NAME}}), inherit_env (default false), domain (auto | *.suffix), port, replicas (default 1), resources, ttl (e.g. 7d), forks (default false; fork PRs build in a VM and get only fork_secrets), fork_secrets [NAME], status {token_secret, kind: github | gitea, api_url}}. See preview_list.",
+                    "type": "object"
+                  },
                   "project": {
                     "type": "string"
                   },
@@ -95,12 +106,19 @@
                     "description": "Exactly one of {\"image\": \"docker:nginx:1.27\"} or {\"git\": {\"url\", \"ref\" (branch, tag or SHA; default main), \"subdir\", \"auth\": {\"token_secret\": NAME, \"username\"} | {\"ssh_key_secret\": NAME}, \"submodules\": false}}.",
                     "type": "object"
                   },
+                  "user": {
+                    "description": "The user the app runs as; numeric (uid[:gid]) on an OCI image.",
+                    "type": "string"
+                  },
                   "volumes": {
                     "description": "Named volumes, NAME:/path[:ro]. No host paths.",
                     "items": {
                       "type": "string"
                     },
                     "type": "array"
+                  },
+                  "working_dir": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -690,6 +708,13 @@
                   "env": {
                     "description": ".env text, or a map {KEY: \"value\" | {\"secret\": NAME}}. A secret is an org secret, delivered as the variable."
                   },
+                  "files": {
+                    "description": "[{path, secret, mode?}]: an org secret's value as a file at an absolute path (config files, certificates).",
+                    "items": {
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
                   "healthcheck": {
                     "description": "A compose healthcheck: {test, interval, timeout, retries, start_period}.",
                     "type": "object"
@@ -714,6 +739,10 @@
                     },
                     "type": "array"
                   },
+                  "previews": {
+                    "description": "Preview deployments per pull request (git sources): {enabled, branches (base branches; default the app's ref), max (default 3), env (.env text or {KEY: value | {secret: NAME}}), inherit_env (default false), domain (auto | *.suffix), port, replicas (default 1), resources, ttl (e.g. 7d), forks (default false; fork PRs build in a VM and get only fork_secrets), fork_secrets [NAME], status {token_secret, kind: github | gitea, api_url}}. See preview_list.",
+                    "type": "object"
+                  },
                   "replicas": {
                     "maximum": 100,
                     "minimum": 0,
@@ -727,12 +756,19 @@
                     "description": "Exactly one of {\"image\": \"docker:nginx:1.27\"} or {\"git\": {\"url\", \"ref\" (branch, tag or SHA; default main), \"subdir\", \"auth\": {\"token_secret\": NAME, \"username\"} | {\"ssh_key_secret\": NAME}, \"submodules\": false}}.",
                     "type": "object"
                   },
+                  "user": {
+                    "description": "The user the app runs as; numeric (uid[:gid]) on an OCI image.",
+                    "type": "string"
+                  },
                   "volumes": {
                     "description": "Named volumes, NAME:/path[:ro]. No host paths.",
                     "items": {
                       "type": "string"
                     },
                     "type": "array"
+                  },
+                  "working_dir": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -814,6 +850,882 @@
           }
         },
         "summary": "An app's webhook"
+      }
+    },
+    "/api/v1/tools/audit_list": {
+      "post": {
+        "description": "Who did what: audit log entries, newest first (or oldest first after `after`, for tailing). Org owners and admins see their org's entries; platform admins see every org and platform-level entries (sign-ins, users, org changes). Filters: actor (glob on name or email), action (glob: `secret_*`, `auth.*`), target (glob), outcome (`ok`, `error`, or a code), surface, since/until (unix ms). Page with `before` = the last id you got.",
+        "operationId": "audit_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
+                    "type": "string"
+                  },
+                  "actor": {
+                    "type": "string"
+                  },
+                  "after": {
+                    "description": "Entries newer than this id, oldest first.",
+                    "type": "integer"
+                  },
+                  "before": {
+                    "description": "Entries older than this id.",
+                    "type": "integer"
+                  },
+                  "limit": {
+                    "description": "Default 100.",
+                    "maximum": 1000,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "org": {
+                    "description": "One org's entries (an org admin's own when omitted).",
+                    "type": "string"
+                  },
+                  "outcome": {
+                    "type": "string"
+                  },
+                  "platform": {
+                    "description": "Only platform-level entries (platform admins).",
+                    "type": "boolean"
+                  },
+                  "since": {
+                    "description": "Unix milliseconds, inclusive.",
+                    "type": "integer"
+                  },
+                  "surface": {
+                    "enum": [
+                      "mcp",
+                      "rest",
+                      "cli",
+                      "web",
+                      "webhook"
+                    ],
+                    "type": "string"
+                  },
+                  "target": {
+                    "type": "string"
+                  },
+                  "token_id": {
+                    "type": "integer"
+                  },
+                  "until": {
+                    "description": "Unix milliseconds, exclusive.",
+                    "type": "integer"
+                  },
+                  "user_id": {
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Audit log"
+      }
+    },
+    "/api/v1/tools/audit_verify": {
+      "post": {
+        "description": "Walk the audit log's hash chain: ok, how many rows, the head (id and hash: keep a copy elsewhere to pin the log), and the first row that does not check out. Platform admins.",
+        "operationId": "audit_verify",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {},
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Verify the audit log"
+      }
+    },
+    "/api/v1/tools/backup_create": {
+      "post": {
+        "description": "Back a database up on a cron schedule to a destination: the engine's own dump (pg_dump, mysqldump, mariadb-dump, mongodump, a Redis RDB) runs in the database's instance, is compressed and streamed to the bucket by the daemon, checked with HEAD, and the oldest beyond `keep` are deleted. Emits backup.succeeded / backup.failed events.",
+        "operationId": "backup_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "compression": {
+                    "enum": [
+                      "gzip",
+                      "zstd",
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  "database": {
+                    "description": "The database app.",
+                    "type": "string"
+                  },
+                  "destination": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "keep": {
+                    "description": "Backups kept in the bucket (default 7).",
+                    "maximum": 1000,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "missed_grace": {
+                    "description": "How late a slot missed while the daemon was down still runs (default 1h).",
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "schedule": {
+                    "description": "Cron: five fields (minute hour day-of-month month day-of-week) or @hourly, @daily, @weekly, @monthly, @yearly.",
+                    "type": "string"
+                  },
+                  "timezone": {
+                    "description": "UTC (default) or a fixed offset such as +02:00.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "database",
+                  "destination",
+                  "schedule"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Schedule a backup"
+      }
+    },
+    "/api/v1/tools/backup_delete": {
+      "post": {
+        "description": "Delete a backup schedule and its run records. Its files stay in the bucket (restore them with destination and key).",
+        "operationId": "backup_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Delete a backup"
+      }
+    },
+    "/api/v1/tools/backup_destination_create": {
+      "post": {
+        "description": "An S3-compatible bucket for backups: endpoint (https://s3.<region>.amazonaws.com, an R2/B2/MinIO URL), region (default us-east-1), bucket, key prefix, path_style (true for MinIO and most self-hosted stores). The key pair is given as access_key/secret_key (stored as the org secrets backup.<name>.access-key/.secret-key) or as the names of existing secrets. Endpoints on this host (loopback) are for the local CLI and platform admins. create_bucket=true creates the bucket; test=true writes, reads back and deletes a small object.",
+        "operationId": "backup_destination_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "access_key": {
+                    "type": "string"
+                  },
+                  "access_key_secret": {
+                    "type": "string"
+                  },
+                  "bucket": {
+                    "type": "string"
+                  },
+                  "create_bucket": {
+                    "description": "Create the bucket first (self-hosted stores).",
+                    "type": "boolean"
+                  },
+                  "endpoint": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "path_style": {
+                    "type": "boolean"
+                  },
+                  "prefix": {
+                    "type": "string"
+                  },
+                  "region": {
+                    "type": "string"
+                  },
+                  "secret_key": {
+                    "type": "string"
+                  },
+                  "secret_key_secret": {
+                    "type": "string"
+                  },
+                  "test": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name",
+                  "endpoint",
+                  "bucket"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Create a backup destination"
+      }
+    },
+    "/api/v1/tools/backup_destination_delete": {
+      "post": {
+        "description": "Delete a destination no backup uses, with the key secrets isb stored for it. Objects in the bucket are kept.",
+        "operationId": "backup_destination_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Delete a backup destination"
+      }
+    },
+    "/api/v1/tools/backup_destination_list": {
+      "post": {
+        "description": "An org's backup destinations (key pairs as secret names).",
+        "operationId": "backup_destination_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List backup destinations"
+      }
+    },
+    "/api/v1/tools/backup_destination_test": {
+      "post": {
+        "description": "Write a small object under the destination's prefix, check it with HEAD and delete it.",
+        "operationId": "backup_destination_test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Test a backup destination"
+      }
+    },
+    "/api/v1/tools/backup_list": {
+      "post": {
+        "description": "An org's backup schedules with their last run and next run. With `name`, that backup only, plus the backup files in its bucket (newest first): what backup_restore takes.",
+        "operationId": "backup_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "database": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List backups"
+      }
+    },
+    "/api/v1/tools/backup_restore": {
+      "post": {
+        "description": "Restore a backup file into a database: `backup` (its newest file, or `key`) or `destination` + `key`; into `target`, an existing database of the same engine whose data is REPLACED (needs confirm: true), or `new`: {name, project?, environment?, version?}, a database created for it (by default beside the backed-up one). The file streams from the bucket through the daemon into the engine's restore tool (pg_restore --clean, mysql, mongorestore --drop, a Redis RDB swap). Emits restore.succeeded / restore.failed.",
+        "operationId": "backup_restore",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "backup": {
+                    "type": "string"
+                  },
+                  "confirm": {
+                    "type": "boolean"
+                  },
+                  "destination": {
+                    "type": "string"
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "new": {
+                    "properties": {
+                      "environment": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "project": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "target": {
+                    "type": "string"
+                  },
+                  "timeout": {
+                    "type": "string"
+                  },
+                  "wait": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Restore a backup"
+      }
+    },
+    "/api/v1/tools/backup_run": {
+      "post": {
+        "description": "Back up now, outside the schedule. Returns the run; wait=true returns when it finishes (at most `timeout`, default 10m).",
+        "operationId": "backup_run",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "timeout": {
+                    "type": "string"
+                  },
+                  "wait": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Run a backup now"
+      }
+    },
+    "/api/v1/tools/backup_run_log": {
+      "post": {
+        "description": "One backup (or restore) run's log from byte `offset`; poll with the returned offset until finished.",
+        "operationId": "backup_run_log",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The backup (omit with restore=true).",
+                    "type": "string"
+                  },
+                  "offset": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "restore": {
+                    "type": "boolean"
+                  },
+                  "run": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "run"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Backup run log"
+      }
+    },
+    "/api/v1/tools/backup_runs": {
+      "post": {
+        "description": "A backup's runs, newest first (status, trigger, duration, object key and size). With restores=true instead, the org's restore runs.",
+        "operationId": "backup_runs",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "limit": {
+                    "maximum": 1000,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "restores": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Backup runs"
+      }
+    },
+    "/api/v1/tools/backup_update": {
+      "post": {
+        "description": "Change a backup's settings (a merge patch: schedule, timezone, destination, keep, compression, enabled, missed_grace). A changed schedule counts from now.",
+        "operationId": "backup_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "compression": {
+                    "enum": [
+                      "gzip",
+                      "zstd",
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  "database": {
+                    "description": "The database app.",
+                    "type": "string"
+                  },
+                  "destination": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "keep": {
+                    "description": "Backups kept in the bucket (default 7).",
+                    "maximum": 1000,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "missed_grace": {
+                    "description": "How late a slot missed while the daemon was down still runs (default 1h).",
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "schedule": {
+                    "description": "Cron: five fields (minute hour day-of-month month day-of-week) or @hourly, @daily, @weekly, @monthly, @yearly.",
+                    "type": "string"
+                  },
+                  "timezone": {
+                    "description": "UTC (default) or a fixed offset such as +02:00.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Update a backup"
       }
     },
     "/api/v1/tools/build_list": {
@@ -1008,6 +1920,201 @@
           }
         },
         "summary": "Start a build"
+      }
+    },
+    "/api/v1/tools/database_create": {
+      "post": {
+        "description": "Create a database in a project's environment: Postgres, MySQL, MariaDB, MongoDB or Redis from the official image at `version`, its data on a named volume, one replica rolled out stop-first, with a health check. Credentials are generated and kept as org secrets (db.<name>.password; db.<name>.root-password for MySQL/MariaDB; db.<name>.url, the internal connection URL for apps: DATABASE_URL=${{secret.db.<name>.url}}). Other apps reach it at <name>.<project>-<env>. Not published outside the org unless `publish` is set. A database is an app: deploy, update, roll back and delete it with the app_* tools.",
+        "operationId": "database_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "database": {
+                    "description": "Database created on first start (default: the name with - as _). Not Redis.",
+                    "type": "string"
+                  },
+                  "deploy": {
+                    "description": "Deploy right away (default true).",
+                    "type": "boolean"
+                  },
+                  "engine": {
+                    "enum": [
+                      "postgres",
+                      "mysql",
+                      "mariadb",
+                      "mongodb",
+                      "redis"
+                    ],
+                    "type": "string"
+                  },
+                  "env": {
+                    "description": "Extra environment (.env text or a map), e.g. POSTGRES_INITDB_ARGS."
+                  },
+                  "environment": {
+                    "description": "Default production.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "project": {
+                    "type": "string"
+                  },
+                  "publish": {
+                    "description": "Publish the port on the host: [IP:]PORT (default address 127.0.0.1). Off by default.",
+                    "type": "string"
+                  },
+                  "resources": {
+                    "description": "{cpus, memory}.",
+                    "type": "object"
+                  },
+                  "user": {
+                    "description": "User created on first start (default: as database). Not Redis.",
+                    "type": "string"
+                  },
+                  "version": {
+                    "description": "Image tag (default: 17, 8.4, 11.4, 8.0, 7.4).",
+                    "type": "string"
+                  },
+                  "wait": {
+                    "description": "Wait until it is up (default false).",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name",
+                  "project",
+                  "engine"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Create a database"
+      }
+    },
+    "/api/v1/tools/database_get": {
+      "post": {
+        "description": "A database's settings and connection details: host (service name), port, user, database, the password as a reference to its org secret, and a URL with that reference. `reveal: true` adds the password and URL values (org members may read org secrets).",
+        "operationId": "database_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "reveal": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Get a database"
+      }
+    },
+    "/api/v1/tools/database_list": {
+      "post": {
+        "description": "An org's databases (apps with a database source), each with its engine, version, stack and connection details (password as a secret reference).",
+        "operationId": "database_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "project": {
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List databases"
       }
     },
     "/api/v1/tools/environment_create": {
@@ -1260,6 +2367,1038 @@
           }
         },
         "summary": "Ingress status"
+      }
+    },
+    "/api/v1/tools/job_create": {
+      "post": {
+        "description": "Run a command on a cron schedule against an app or a stack service: in a running replica (mode exec) or a fresh one-off instance from its image (mode run). Each run keeps its exit code, duration and output (bounded); job.succeeded / job.failed events.",
+        "operationId": "job_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command": {
+                    "description": "argv (a list), or a line split like a shell would (no shell runs unless you run one)."
+                  },
+                  "concurrency": {
+                    "description": "skip (default): a run due while one is going is skipped.",
+                    "enum": [
+                      "skip",
+                      "allow"
+                    ],
+                    "type": "string"
+                  },
+                  "cwd": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "env": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "keep": {
+                    "description": "Runs kept (default 20).",
+                    "maximum": 1000,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "missed_grace": {
+                    "description": "How late a slot missed while the daemon was down still runs (default 1h).",
+                    "type": "string"
+                  },
+                  "mode": {
+                    "description": "exec (default): in a running replica. run: in a fresh one-off instance from the service's image, env and secrets, deleted after.",
+                    "enum": [
+                      "exec",
+                      "run"
+                    ],
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "schedule": {
+                    "description": "Cron: five fields or @hourly, @daily, @weekly, @monthly, @yearly.",
+                    "type": "string"
+                  },
+                  "target": {
+                    "description": "{app: NAME}, or {stack: NAME, service: NAME}.",
+                    "type": "object"
+                  },
+                  "timeout": {
+                    "description": "Kill after this long (default 10m, at most 24h).",
+                    "type": "string"
+                  },
+                  "timezone": {
+                    "description": "UTC (default) or a fixed offset such as +02:00.",
+                    "type": "string"
+                  },
+                  "user": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "schedule",
+                  "target",
+                  "command"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Create a scheduled job"
+      }
+    },
+    "/api/v1/tools/job_delete": {
+      "post": {
+        "description": "Delete a job and its run records.",
+        "operationId": "job_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Delete a job"
+      }
+    },
+    "/api/v1/tools/job_get": {
+      "post": {
+        "description": "A job's settings, next run and last run.",
+        "operationId": "job_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Get a job"
+      }
+    },
+    "/api/v1/tools/job_list": {
+      "post": {
+        "description": "An org's jobs with their next and last run.",
+        "operationId": "job_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List jobs"
+      }
+    },
+    "/api/v1/tools/job_run": {
+      "post": {
+        "description": "Run a job now, outside its schedule (refused while a run is going under concurrency skip). wait=true returns when it finishes (at most `timeout`, default 10m).",
+        "operationId": "job_run",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "timeout": {
+                    "type": "string"
+                  },
+                  "wait": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Run a job now"
+      }
+    },
+    "/api/v1/tools/job_run_log": {
+      "post": {
+        "description": "One run's output from byte `offset` (the first 192 KiB and the last 64 KiB are kept); poll with the returned offset until finished.",
+        "operationId": "job_run_log",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "offset": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "run": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "name",
+                  "run"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Job run log"
+      }
+    },
+    "/api/v1/tools/job_runs": {
+      "post": {
+        "description": "A job's runs, newest first: trigger (schedule, missed, manual), status (running, succeeded, failed, skipped), exit code, duration, output size.",
+        "operationId": "job_runs",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "limit": {
+                    "maximum": 1000,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Job runs"
+      }
+    },
+    "/api/v1/tools/job_update": {
+      "post": {
+        "description": "Change a job's settings (a merge patch; the name is fixed). A changed schedule counts from now.",
+        "operationId": "job_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command": {
+                    "description": "argv (a list), or a line split like a shell would (no shell runs unless you run one)."
+                  },
+                  "concurrency": {
+                    "description": "skip (default): a run due while one is going is skipped.",
+                    "enum": [
+                      "skip",
+                      "allow"
+                    ],
+                    "type": "string"
+                  },
+                  "cwd": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "env": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "keep": {
+                    "description": "Runs kept (default 20).",
+                    "maximum": 1000,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "missed_grace": {
+                    "description": "How late a slot missed while the daemon was down still runs (default 1h).",
+                    "type": "string"
+                  },
+                  "mode": {
+                    "description": "exec (default): in a running replica. run: in a fresh one-off instance from the service's image, env and secrets, deleted after.",
+                    "enum": [
+                      "exec",
+                      "run"
+                    ],
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "schedule": {
+                    "description": "Cron: five fields or @hourly, @daily, @weekly, @monthly, @yearly.",
+                    "type": "string"
+                  },
+                  "target": {
+                    "description": "{app: NAME}, or {stack: NAME, service: NAME}.",
+                    "type": "object"
+                  },
+                  "timeout": {
+                    "description": "Kill after this long (default 10m, at most 24h).",
+                    "type": "string"
+                  },
+                  "timezone": {
+                    "description": "UTC (default) or a fixed offset such as +02:00.",
+                    "type": "string"
+                  },
+                  "user": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Update a job"
+      }
+    },
+    "/api/v1/tools/metrics_query": {
+      "post": {
+        "description": "Metrics history of the org's instances for charts: cpu (percent of one core), memory (bytes), net_rx, net_tx, disk_read, disk_write (bytes per second). Choose an app, a stack (and service), or one instance. Kept 24 h at 10 s, 7 d at 1 min, 30 d at 10 min; `step` is widened to the tier that still holds `from`, and to at most 2000 points. With `aggregate` (sum, avg, max, min) the instances are combined bucket by bucket (a service's replicas); without, one series per instance. Points are [unix seconds, value].",
+        "operationId": "metrics_query",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "aggregate": {
+                    "enum": [
+                      "sum",
+                      "avg",
+                      "max",
+                      "min"
+                    ],
+                    "type": "string"
+                  },
+                  "app": {
+                    "description": "An app: its service in its project environment's stack.",
+                    "type": "string"
+                  },
+                  "from": {
+                    "description": "Unix seconds; overrides range.",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "instance": {
+                    "type": "string"
+                  },
+                  "metric": {
+                    "enum": [
+                      "cpu",
+                      "memory",
+                      "net_rx",
+                      "net_tx",
+                      "disk_read",
+                      "disk_write"
+                    ],
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "range": {
+                    "description": "How far back from `to`, e.g. 1h, 24h, 7d (default 1h).",
+                    "type": "string"
+                  },
+                  "service": {
+                    "type": "string"
+                  },
+                  "stack": {
+                    "type": "string"
+                  },
+                  "step": {
+                    "description": "Seconds per point (default: the tier's).",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "to": {
+                    "description": "Unix seconds (default now).",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "metric"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Query metrics history"
+      }
+    },
+    "/api/v1/tools/notification_channel_create": {
+      "post": {
+        "description": "Add a notification channel to the org: a destination (webhook, Slack, Discord, Telegram, email) and rules choosing which events it hears about. Only the org's own events reach it. Its secrets must exist.",
+        "operationId": "notification_channel_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "description": "Default true.",
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "description": "[a-z0-9-], starting with a letter, at most 40.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "provider": {
+                    "description": "Where messages go, by `type`: {\"type\": \"webhook\", \"url_secret\": NAME, \"signing_secret\": NAME?} (JSON POST; with a signing secret, X-Isb-Signature: sha256=HMAC of the body), {\"type\": \"slack\", \"url_secret\": NAME} (an incoming-webhook URL), {\"type\": \"discord\", \"url_secret\": NAME}, {\"type\": \"telegram\", \"token_secret\": NAME, \"chat_id\": \"-100...\"}, {\"type\": \"email\", \"host\", \"port\"?, \"tls\": \"starttls\"|\"tls\"|\"none\", \"username\"?, \"password_secret\"?, \"from\", \"to\": [..]}. Every URL, token and password is an org secret, named here (secret_create first), never a value.",
+                    "type": "object"
+                  },
+                  "rules": {
+                    "description": "Which events: a list of {\"events\": [glob, ...] (deploy.*, health.*, backup.*, job.*, cert.*, *.failed, *), \"projects\"?: [..], \"apps\"?: [..], \"stacks\"?: [..]}; any rule matching sends. Default: [{\"events\": [\"*\"]}].",
+                    "items": {
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "name",
+                  "provider"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Create a notification channel"
+      }
+    },
+    "/api/v1/tools/notification_channel_delete": {
+      "post": {
+        "description": "Remove a notification channel and its delivery log (its secrets stay).",
+        "operationId": "notification_channel_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Delete a notification channel"
+      }
+    },
+    "/api/v1/tools/notification_channel_get": {
+      "post": {
+        "description": "One notification channel.",
+        "operationId": "notification_channel_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Get a notification channel"
+      }
+    },
+    "/api/v1/tools/notification_channel_list": {
+      "post": {
+        "description": "The org's notification channels: provider (secret names, never values), rules, enabled, and each one's last delivery.",
+        "operationId": "notification_channel_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List notification channels"
+      }
+    },
+    "/api/v1/tools/notification_channel_update": {
+      "post": {
+        "description": "Change a notification channel: its provider, its rules (the list is replaced), or enabled. Fields left out are kept.",
+        "operationId": "notification_channel_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "provider": {
+                    "description": "Where messages go, by `type`: {\"type\": \"webhook\", \"url_secret\": NAME, \"signing_secret\": NAME?} (JSON POST; with a signing secret, X-Isb-Signature: sha256=HMAC of the body), {\"type\": \"slack\", \"url_secret\": NAME} (an incoming-webhook URL), {\"type\": \"discord\", \"url_secret\": NAME}, {\"type\": \"telegram\", \"token_secret\": NAME, \"chat_id\": \"-100...\"}, {\"type\": \"email\", \"host\", \"port\"?, \"tls\": \"starttls\"|\"tls\"|\"none\", \"username\"?, \"password_secret\"?, \"from\", \"to\": [..]}. Every URL, token and password is an org secret, named here (secret_create first), never a value.",
+                    "type": "object"
+                  },
+                  "rules": {
+                    "description": "Which events: a list of {\"events\": [glob, ...] (deploy.*, health.*, backup.*, job.*, cert.*, *.failed, *), \"projects\"?: [..], \"apps\"?: [..], \"stacks\"?: [..]}; any rule matching sends. Default: [{\"events\": [\"*\"]}].",
+                    "items": {
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Update a notification channel"
+      }
+    },
+    "/api/v1/tools/notification_deliveries": {
+      "post": {
+        "description": "A channel's recent deliveries, newest first (the last 50): event kind and number, status (queued, retrying, sent, failed, dropped, skipped), attempts, HTTP status, error.",
+        "operationId": "notification_deliveries",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "limit": {
+                    "maximum": 50,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Notification deliveries"
+      }
+    },
+    "/api/v1/tools/notification_settings": {
+      "post": {
+        "description": "Server-wide notification settings (platform admins). allow_private_targets lets channels reach loopback, private (RFC 1918, ULA), link-local and CGNAT addresses, which are refused by default so a channel cannot reach into the host's network. Pass a field to change it; returns the settings.",
+        "operationId": "notification_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "allow_private_targets": {
+                    "type": "boolean"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Notification settings"
+      }
+    },
+    "/api/v1/tools/notification_test": {
+      "post": {
+        "description": "Send a test message to a channel now (once, no retries) and report the outcome: status sent or failed, the HTTP status, the error. It is logged with the channel's deliveries.",
+        "operationId": "notification_test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Test a notification channel"
       }
     },
     "/api/v1/tools/org_create": {
@@ -1596,6 +3735,298 @@
           }
         },
         "summary": "Overview"
+      }
+    },
+    "/api/v1/tools/preview_delete": {
+      "post": {
+        "description": "Remove a preview now: its service (and its stack, with its last service), its volumes, its build cache, its images in the registry and its records. A new push to the pull request makes a new one. wait=true returns when it is gone.",
+        "operationId": "preview_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The app.",
+                    "type": "string"
+                  },
+                  "number": {
+                    "description": "The pull (merge) request number.",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "timeout": {
+                    "description": "How long wait may take (default 15m).",
+                    "type": "string"
+                  },
+                  "wait": {
+                    "description": "Wait until it finishes (default false).",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name",
+                  "number"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Delete a preview"
+      }
+    },
+    "/api/v1/tools/preview_get": {
+      "post": {
+        "description": "One preview: its pull request, stack, commit, image, URL and status, and its deployments (newest first) with their logs' ids for preview_log.",
+        "operationId": "preview_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The app.",
+                    "type": "string"
+                  },
+                  "number": {
+                    "description": "The pull (merge) request number.",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "number"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Get a preview"
+      }
+    },
+    "/api/v1/tools/preview_list": {
+      "post": {
+        "description": "The preview deployments of an app (or of every app in the org): one per open pull request, with its stack, head commit, image, URL and status. Settings are the app's `previews` field (app_update).",
+        "operationId": "preview_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The app (default: every app).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List previews"
+      }
+    },
+    "/api/v1/tools/preview_log": {
+      "post": {
+        "description": "A preview deployment's log (git, build and rollout lines) from byte `offset`; poll with the returned offset until finished.",
+        "operationId": "preview_log",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "deployment": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "description": "The app.",
+                    "type": "string"
+                  },
+                  "number": {
+                    "description": "The pull (merge) request number.",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "offset": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "number",
+                  "deployment"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "A preview deployment's log"
+      }
+    },
+    "/api/v1/tools/preview_redeploy": {
+      "post": {
+        "description": "Fetch the pull request's head again, build it and roll the preview, as a push to it would.",
+        "operationId": "preview_redeploy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The app.",
+                    "type": "string"
+                  },
+                  "number": {
+                    "description": "The pull (merge) request number.",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "timeout": {
+                    "description": "How long wait may take (default 15m).",
+                    "type": "string"
+                  },
+                  "wait": {
+                    "description": "Wait until it finishes (default false).",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name",
+                  "number"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Redeploy a preview"
       }
     },
     "/api/v1/tools/project_create": {
@@ -3097,6 +5528,428 @@
           }
         },
         "summary": "Stack status"
+      }
+    },
+    "/api/v1/tools/template_catalog_add": {
+      "post": {
+        "description": "Platform admins: add (or replace) a catalog every org can deploy from. format native (isb templates: a directory of *.yaml, or an https URL of a {templates: [...]} document) or dokploy (a checkout of Dokploy/templates, or https://templates.dokploy.com). Its templates are third-party content: Dokploy's are translated strictly and refused when they need what isb does not allow.",
+        "operationId": "template_catalog_add",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "format": {
+                    "enum": [
+                      "native",
+                      "dokploy"
+                    ],
+                    "type": "string"
+                  },
+                  "location": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "format",
+                  "location"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Add a template catalog"
+      }
+    },
+    "/api/v1/tools/template_catalog_list": {
+      "post": {
+        "description": "The catalogs added to the built-in one: name, format (native or dokploy) and location (a host directory or an https URL).",
+        "operationId": "template_catalog_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List template catalogs"
+      }
+    },
+    "/api/v1/tools/template_catalog_remove": {
+      "post": {
+        "description": "Platform admins: remove an added catalog. Instances deployed from it keep running.",
+        "operationId": "template_catalog_remove",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Remove a template catalog"
+      }
+    },
+    "/api/v1/tools/template_deploy": {
+      "post": {
+        "description": "Deploy a template into a project environment as apps (made if missing): <name>-<app> per app (the main app just <name>), generated passwords and keys stored as org secrets tpl.<name>.<var>, then each app deployed in dependency order. dry_run=true returns the plan (apps, secrets by name, variables, URLs, notes) and changes nothing. Returns at once unless wait=true.",
+        "operationId": "template_deploy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "dry_run": {
+                    "type": "boolean"
+                  },
+                  "environment": {
+                    "description": "Default production.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "The instance name: names the apps and secrets. Default: the template id.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "project": {
+                    "type": "string"
+                  },
+                  "template": {
+                    "description": "catalog/id, or a bare id.",
+                    "type": "string"
+                  },
+                  "timeout": {
+                    "description": "How long each app's deploy may take with wait (default 30m).",
+                    "type": "string"
+                  },
+                  "values": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Variable values; generated ones may be left out.",
+                    "type": "object"
+                  },
+                  "wait": {
+                    "description": "Return when every app has deployed (or one failed).",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "template",
+                  "project"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Deploy a template"
+      }
+    },
+    "/api/v1/tools/template_get": {
+      "post": {
+        "description": "A template's metadata, its variables (what template_deploy takes in values: type, default, required, generated, secret), the apps it creates, notes, and for a Dokploy template how its translation went (compatibility: clean, notes, or refused with reasons).",
+        "operationId": "template_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "template": {
+                    "description": "catalog/id, or a bare id.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "template"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Get a template"
+      }
+    },
+    "/api/v1/tools/template_instance_delete": {
+      "post": {
+        "description": "Delete a template instance: its apps (their named volumes are kept), the secrets it made (tpl.<name>.*) and its record.",
+        "operationId": "template_instance_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Delete a deployed template"
+      }
+    },
+    "/api/v1/tools/template_instance_list": {
+      "post": {
+        "description": "The template instances in an org: template, project, environment, apps, secrets (names), non-secret variable values and URLs.",
+        "operationId": "template_instance_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List deployed templates"
+      }
+    },
+    "/api/v1/tools/template_list": {
+      "post": {
+        "description": "One-click apps: the built-in catalog and any a platform admin added (isb's own format, or Dokploy's, translated). Each has a ref (catalog/id) for template_get and template_deploy. Filter with query (words in the name, description or tags), tag or catalog.",
+        "operationId": "template_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "catalog": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "query": {
+                    "type": "string"
+                  },
+                  "tag": {
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List templates"
       }
     }
   },

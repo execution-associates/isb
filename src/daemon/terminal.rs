@@ -22,6 +22,7 @@ struct ExecPty {
     stream: ExecStream,
     ctl: ExecController,
     done: bool,
+    instance: String,
 }
 
 impl Pty for ExecPty {
@@ -51,6 +52,10 @@ impl Pty for ExecPty {
                 ))
             }
         }
+    }
+
+    fn target(&self) -> Option<String> {
+        Some(self.instance.clone())
     }
 
     fn close(&mut self) {
@@ -119,6 +124,7 @@ pub(super) fn terminal(d: Arc<Daemon>) -> Terminal {
                 ctl: stream.controller(),
                 stream,
                 done: false,
+                instance: inst.name.clone(),
             }))
         },
     )

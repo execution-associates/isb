@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ACCESS, type Access, describeScopes, scopesFor } from "@/lib/admin";
 import { dateTime, describeAgent, initials, relativeTime } from "@/lib/format";
 import { errorMessage, signInErrorMessage } from "@/lib/messages";
 import { useMe, useProviders } from "@/lib/session";
@@ -436,15 +437,21 @@ function Tokens({ me }: { me: Me }) {
   const [name, setName] = useState("");
   const [org, setOrg] = useState(me.memberships[0]?.org ?? me.orgs[0] ?? PLATFORM);
   const [expires, setExpires] = useState("90d");
+  const [access, setAccess] = useState<Access>("full");
+  const [tools, setTools] = useState("");
   const [created, setCreated] = useState<{ token: string; info: ApiToken } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const create = useMutation({
-    mutationFn: () =>
-      auth.createToken({
+    mutationFn: () => {
+      const s = scopesFor(access, tools);
+      if ("error" in s) throw new Error(s.error);
+      return auth.createToken({
         name: name.trim(),
         org: org === PLATFORM ? undefined : org,
         expires: expires === "never" ? undefined : expires,
-      }),
+        scopes: s.scopes.length ? s.scopes : undefined,
+      });
+    },
     onSuccess: (r) => {
       setCreated(r);
       qc.invalidateQueries({ queryKey: ["tokens"] });
@@ -456,6 +463,8 @@ function Tokens({ me }: { me: Me }) {
     if (!o) {
       setCreated(null);
       setName("");
+      setAccess("full");
+      setTools("");
       setError(null);
     }
   };
@@ -492,6 +501,11 @@ function Tokens({ me }: { me: Me }) {
                   <Badge variant="secondary" className="font-normal">
                     {t.org ?? "platform"}
                   </Badge>
+                  {t.scopes?.length > 0 && (
+                    <Badge variant="outline" className="font-normal">
+                      {describeScopes(t.scopes)}
+                    </Badge>
+                  )}
                 </>
               }
               meta={`Created ${relativeTime(t.created_at)} · ${t.last_used ? `last used ${relativeTime(t.last_used)}` : "never used"} · ${t.expires_at ? `expires ${relativeTime(t.expires_at)}` : "no expiry"}`}
@@ -532,7 +546,8 @@ function Tokens({ me }: { me: Me }) {
                   </>
                 ) : (
                   "A platform token: it reaches every org you can."
-                )}
+                )}{" "}
+                {created.info.scopes?.length ? `Limited to ${describeScopes(created.info.scopes)}.` : ""}
               </p>
               <DialogFooter>
                 <Button onClick={() => close(false)}>Done</Button>
@@ -559,7 +574,7 @@ function Tokens({ me }: { me: Me }) {
                   )}
                 </Field>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Scope">
+                  <Field label="Org">
                     {(id) => (
                       <Select value={org} onValueChange={setOrg}>
                         <SelectTrigger id={id} className="w-full">
@@ -593,6 +608,36 @@ function Tokens({ me }: { me: Me }) {
                     )}
                   </Field>
                 </div>
+                <Field label="Access" hint={ACCESS.find((a) => a.value === access)?.hint}>
+                  {(id, d) => (
+                    <Select value={access} onValueChange={(v) => setAccess(v as Access)}>
+                      <SelectTrigger id={id} aria-describedby={d} className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ACCESS.map((a) => (
+                          <SelectItem key={a.value} value={a.value}>
+                            {a.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </Field>
+                {access === "tools" ? (
+                  <Field label="Tools" hint="Names or globs, separated by spaces.">
+                    {(id, d) => (
+                      <Input
+                        id={id}
+                        aria-describedby={d}
+                        className="font-mono text-sm"
+                        placeholder="app_* stack_status"
+                        value={tools}
+                        onChange={(e) => setTools(e.target.value)}
+                      />
+                    )}
+                  </Field>
+                ) : null}
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => close(false)}>
                     Cancel

@@ -20,7 +20,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { maxGrant, memberLock, roleChoices } from "@/lib/admin";
+import { describeScopes, maxGrant, memberLock, roleChoices } from "@/lib/admin";
 import { dateTime, initials, relativeTime } from "@/lib/format";
 import { errorMessage } from "@/lib/messages";
 import { useOrgPage } from "@/pages/org-common";
@@ -324,6 +324,7 @@ function TokensPanel({ org }: { org: string }) {
               <TableRow key={t.id}>
                 <TableCell className="max-w-0 pl-5">
                   <div className="truncate font-medium">{t.name}</div>
+                  <div className="truncate text-xs text-muted-foreground">{describeScopes(t.scopes)}</div>
                   <div className="truncate text-xs text-muted-foreground sm:hidden">{t.user.email}</div>
                 </TableCell>
                 <TableCell className="hidden max-w-0 truncate text-muted-foreground sm:table-cell">{t.user.email}</TableCell>

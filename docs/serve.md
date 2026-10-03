@@ -36,8 +36,11 @@ reverse proxy) in front of it, never an open port.
 ## Signing in, and what callers may reach
 
 Every HTTP caller is an isb user. **The org is the trust boundary**: a member
-of an org (any role) fully administers that org's stacks, sandboxes and
-secrets, and nothing in any other org. Platform admins reach every org.
+of an org (member, admin or owner) fully administers that org's stacks,
+sandboxes and secrets, and nothing in any other org; a viewer only reads it
+(read-only tools, no secret values, no exec). Platform admins reach every
+org. API tokens can be narrowed with scopes (`read`, `deploy`, `admin`,
+`tool:GLOB`; [auth.md](auth.md#scopes)), judged in the same authorizer.
 
 - **API tokens** (`Authorization: Bearer isb_tok_...`, from `isb token create`
   or the web UI) are how agents sign in. A token made for an org reaches only
@@ -56,7 +59,12 @@ secrets, and nothing in any other org. Platform admins reach every org.
   re-encrypting every org's secrets are for platform admins, whatever their
   role in an org (an org owner's token is refused). `org_get` is for the
   org's members.
+- `audit_list` shows an org's owners and admins their org's entries and
+  platform admins everything; `audit_verify` is for platform admins.
 - The unix socket is the daemon's own user and reaches everything.
+- Every call that changes something, every refusal, every secret read,
+  sign-in, webhook delivery and terminal session is recorded in the audit
+  log ([audit.md](audit.md)).
 
 ## The web terminal
 
@@ -67,8 +75,9 @@ pseudo-terminal. The web UI's Terminal tab uses it.
 
 - **Who**: the caller signs in as for any tool (session, API token, Access)
   and is admitted as if calling `sandbox_exec` in the org: the org's
-  members, platform admins, and nobody when `--deny-tools` covers
-  `sandbox_exec`. Only replicas of the org's own apps are reachable.
+  members, admins and owners (not viewers, nor tokens whose scopes leave
+  out `sandbox_exec`), platform admins, and nobody when `--deny-tools`
+  covers `sandbox_exec`. Only replicas of the org's own apps are reachable.
 - **Cross-site**: a session cookie rides along on a websocket from any
   site, so a cookie-authenticated upgrade must carry an `Origin` naming the
   request's `Host`. A bearer token needs no `Origin` (a browser never adds
@@ -82,7 +91,9 @@ pseudo-terminal. The web UI's Terminal tab uses it.
 - **Bounds**: 16 terminals at once per daemon, closed after 30 minutes
   without a byte either way and after 8 hours in all, messages up to
   64 KiB. Closing the websocket kills the shell. Each opening is an event on
-  the app's service, with the caller.
+  the app's service, with the caller, and the audit log records the opening
+  (or its refusal) and the closing with how long it ran, never the
+  keystrokes.
 
 ## Install
 
@@ -256,6 +267,8 @@ directly.
 | `metrics_query` | Metrics history of an org's instances (CPU, memory, network, disk I/O; 30 days in tiers): per instance, or summed/averaged over a service's replicas. See [metrics.md](metrics.md). |
 | `overview` | Everything a dashboard shows in one call: host CPU and memory with history, every stack in detail, sandboxes with their CPU and memory, the latest event number. |
 | `events` | The event feed (deploys, rollouts, health changes, restarts, failures) after a `since` cursor, optionally waiting up to 30 s for one. |
+| `audit_list` | The audit log, filtered (actor, action and target globs, outcome, surface, time) and paged; an org's owners and admins see their org, platform admins everything ([audit.md](audit.md)). |
+| `audit_verify` | Walk the audit log's hash chain. Platform admins. |
 
 `stack_deploy` also takes `dry_run: true`, which returns the per-service
 changes without deploying. `isb tui` ([tui.md](tui.md)) is built on
@@ -293,3 +306,5 @@ prior `initialize`, and there is no session id.
 | `--acme-ca` | `ISB_ACME_CA` | `letsencrypt`; or `letsencrypt-staging`, `internal`, an ACME directory URL |
 | `--acme-email` | `ISB_ACME_EMAIL` | none: the ACME account's contact |
 | `--caddy-bin` | `ISB_CADDY_BIN` | the pinned Caddy release, downloaded and checked |
+| `--audit-retention` | `ISB_AUDIT_RETENTION` | `90d`: how long audit entries are kept ([audit.md](audit.md)) |
+| `--audit-all` | `ISB_AUDIT_ALL` | off: read-only tool calls are not recorded (secret reads and refusals always are) |

@@ -124,9 +124,16 @@ isb notify settings [--allow-private-targets true|false]   platform admins
 # identity for isb serve, on <state>/isb.db directly (docs/auth.md)
 isb user create EMAIL [--admin] [--name N]  password from the terminal, or stdin's first line
 isb user ls [--json] | passwd EMAIL
-isb invite ORG EMAIL [--role member]       prints the invitation token (or link), once
-isb token create NAME [--org ORG] [--expires 90d] [--user EMAIL]   prints the token, once
+isb invite ORG EMAIL [--role member]       viewer|member|admin|owner; prints the invitation token (or link), once
+isb token create NAME [--org ORG] [--expires 90d] [--user EMAIL] [--scope read|deploy|admin|tool:GLOB]...
+                                           prints the token, once; scopes only narrow the user's role
 isb token ls [--json] | revoke ID...
+
+# the audit log of isb serve, on <state>/audit.db directly (docs/audit.md)
+isb audit ls [--org ORG | --platform] [--actor G] [--action G] [--target G] [--outcome ok|error|CODE]
+             [--since 24h] [--until 1h] [-n 50] [--json]
+isb audit export [filters]                 every match as JSON lines, oldest first
+isb audit verify                           the hash chain; exit 1 when an entry does not check out
 
 # macOS: the Lima VM that runs incus and isb serve (docs/macos.md); NAME defaults to isb
 isb machine init [NAME] [--cpus 4] [--memory 4GiB] [--disk 10GiB] [--isb-binary PATH] [--timeout 20m]

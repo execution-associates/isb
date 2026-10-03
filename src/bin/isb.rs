@@ -310,6 +310,82 @@ enum Cmd {
     /// API tokens for `isb serve`.
     #[command(subcommand)]
     Token(TokenCmd),
+    /// The audit log of `isb serve` (`<state>/audit.db`): who did what.
+    #[command(subcommand)]
+    Audit(AuditCmd),
+}
+
+/// Filters shared by `isb audit ls` and `export`.
+#[derive(Args, Clone, Default)]
+struct AuditFilter {
+    /// One org's entries.
+    #[arg(long)]
+    org: Option<String>,
+    /// Only platform-level entries (sign-ins, users, org changes).
+    #[arg(long)]
+    platform: bool,
+    /// Actor name or email (glob).
+    #[arg(long)]
+    actor: Option<String>,
+    /// Action (glob): `secret_*`, `auth.*`, `terminal.*`.
+    #[arg(long)]
+    action: Option<String>,
+    /// Target (glob).
+    #[arg(long)]
+    target: Option<String>,
+    /// `ok`, `error`, or a code (`forbidden`, ...).
+    #[arg(long)]
+    outcome: Option<String>,
+    /// Newer than this long ago, e.g. 24h, 7d.
+    #[arg(long, value_parser = dur)]
+    since: Option<Duration>,
+    /// Older than this long ago.
+    #[arg(long, value_parser = dur)]
+    until: Option<Duration>,
+}
+
+impl AuditFilter {
+    fn query(&self) -> isb::audit::Query {
+        isb::audit::Query {
+            org: self.org.clone(),
+            platform: self.platform,
+            actor: self.actor.clone(),
+            action: self.action.clone(),
+            target: self.target.clone(),
+            outcome: self.outcome.clone(),
+            since: self.since.map(isb::audit::ago_ms),
+            until: self.until.map(isb::audit::ago_ms),
+            ..Default::default()
+        }
+    }
+}
+
+#[derive(Subcommand)]
+enum AuditCmd {
+    /// Recent entries, newest first.
+    Ls {
+        #[command(flatten)]
+        filter: AuditFilter,
+        /// How many.
+        #[arg(short = 'n', long, default_value = "50")]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+        #[command(flatten)]
+        db: AuthDb,
+    },
+    /// Every matching entry as JSON lines, oldest first.
+    Export {
+        #[command(flatten)]
+        filter: AuditFilter,
+        #[command(flatten)]
+        db: AuthDb,
+    },
+    /// Check the hash chain; exits 1 when a row does not check out.
+    Verify {
+        #[command(flatten)]
+        db: AuthDb,
+    },
 }
 
 /// The identity store the user/invite/token commands open directly.
@@ -366,6 +442,10 @@ enum TokenCmd {
         /// Whose token (default: the only platform admin).
         #[arg(long)]
         user: Option<String>,
+        /// Narrow it: read, deploy, admin or tool:GLOB (repeatable).
+        /// Default: the user's whole role.
+        #[arg(long = "scope")]
+        scopes: Vec<String>,
         #[command(flatten)]
         db: AuthDb,
     },
@@ -467,6 +547,12 @@ struct ServeArgs {
     /// Let a verified provider email make an account without an invitation.
     #[arg(long, env = "ISB_OPEN_SIGNUP")]
     open_signup: bool,
+    /// How long the audit log keeps entries.
+    #[arg(long, value_parser = dur, default_value = "90d", env = "ISB_AUDIT_RETENTION")]
+    audit_retention: Duration,
+    /// Record read-only tool calls too (secret reads always are).
+    #[arg(long, env = "ISB_AUDIT_ALL")]
+    audit_all: bool,
     /// Ingress: serve stack domains over plain HTTP here (and redirect
     /// HTTPS domains), e.g. 0.0.0.0:80. Turns the ingress on.
     #[arg(long, env = "ISB_INGRESS_HTTP", value_name = "ADDR")]
@@ -1188,6 +1274,7 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
             db,
         } => invite_cmd(&org, &email, &role, &db),
         Cmd::Token(c) => token_cmd(c),
+        Cmd::Audit(c) => audit_cmd(c),
         Cmd::Create(a) => create(ctx, a),
         Cmd::Start { names } => {
             let c = ctx.client(None);
@@ -2060,6 +2147,8 @@ fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
         }
         .secrets_from_env(),
         open_signup: a.open_signup,
+        audit_retention: a.audit_retention,
+        audit_all: a.audit_all,
         ingress: ingress_config(
             a.ingress_http,
             a.ingress_https,
@@ -3297,6 +3386,118 @@ fn default_route_iface() -> Option<String> {
 // SQLite in WAL mode lets the daemon and the CLI use it at once, and the
 // daemon reads sessions and tokens per request, so changes apply immediately.
 
+fn audit_log(db: &AuthDb) -> Result<isb::audit::AuditLog> {
+    let dir = db
+        .state_dir
+        .clone()
+        .unwrap_or_else(isb::daemon::default_state_dir);
+    // Retention is the daemon's to apply; the CLI never prunes early.
+    isb::audit::AuditLog::open(
+        &isb::audit::db_path(&dir),
+        Duration::from_secs(100 * 365 * 86400),
+    )
+}
+
+/// Record what an identity command did, as the host user on the CLI.
+fn cli_audit(
+    db: &AuthDb,
+    action: &str,
+    org: Option<&str>,
+    target: &str,
+    details: serde_json::Value,
+) {
+    let r = audit_log(db).and_then(|l| {
+        l.append(isb::audit::NewEntry {
+            org: org.map(String::from),
+            actor: isb::audit::Actor::cli(),
+            origin: isb::audit::Origin {
+                surface: "cli".into(),
+                ..Default::default()
+            },
+            action: action.into(),
+            target: Some(target.to_string()),
+            details,
+            outcome: "ok".into(),
+        })
+    });
+    if let Err(e) = r {
+        eprintln!("isb: warning: not recorded in the audit log: {e}");
+    }
+}
+
+fn audit_cmd(c: AuditCmd) -> Result<u8> {
+    match c {
+        AuditCmd::Ls {
+            filter,
+            limit,
+            json,
+            db,
+        } => {
+            let log = audit_log(&db)?;
+            let mut q = filter.query();
+            q.limit = Some(limit.clamp(1, 1000));
+            let rows = log.list(&q, &isb::audit::Visibility::All)?;
+            if json {
+                print_json(&rows);
+                return Ok(0);
+            }
+            let mut t = vec![vec![
+                "ID".into(),
+                "TIME".into(),
+                "ORG".into(),
+                "ACTOR".into(),
+                "SURFACE".into(),
+                "ACTION".into(),
+                "TARGET".into(),
+                "OUTCOME".into(),
+            ]];
+            for e in rows {
+                let actor = match &e.token_name {
+                    Some(n) => format!("{} (token {n})", e.actor),
+                    None => e.actor.clone(),
+                };
+                t.push(vec![
+                    e.id.to_string(),
+                    fmt_time((e.time / 1000).max(0) as u64),
+                    e.org.unwrap_or_else(|| "-".into()),
+                    actor,
+                    e.surface,
+                    e.action,
+                    e.target.unwrap_or_default(),
+                    e.outcome,
+                ]);
+            }
+            table(t);
+            Ok(0)
+        }
+        AuditCmd::Export { filter, db } => {
+            use std::io::Write;
+            let log = audit_log(&db)?;
+            let mut q = filter.query();
+            q.after = Some(0);
+            q.limit = Some(1000);
+            let out = std::io::stdout();
+            let mut out = out.lock();
+            loop {
+                let rows = log.list(&q, &isb::audit::Visibility::All)?;
+                for e in &rows {
+                    writeln!(out, "{}", serde_json::to_string(e)?)?;
+                }
+                match rows.last() {
+                    Some(l) if rows.len() == 1000 => q.after = Some(l.id),
+                    _ => break,
+                }
+            }
+            Ok(0)
+        }
+        AuditCmd::Verify { db } => {
+            let v = audit_log(&db)?.verify()?;
+            print_json(&v);
+            Ok(if v.ok { 0 } else { 1 })
+        }
+    }
+}
+
 fn open_auth(db: &AuthDb) -> Result<isb::auth::AuthStore> {
     let dir = db
         .state_dir
@@ -3359,6 +3560,13 @@ fn user_cmd(c: UserCmd) -> Result<u8> {
             } else {
                 store.create_user(&email, &name, Some(&pw), admin)?
             };
+            cli_audit(
+                &db,
+                "auth.user_create",
+                None,
+                &u.id.to_string(),
+                serde_json::json!({"email": u.email, "platform_admin": u.platform_admin}),
+            );
             println!(
                 "created user {} (id {}){}",
                 u.email,
@@ -3427,6 +3635,13 @@ fn user_cmd(c: UserCmd) -> Result<u8> {
                 .ok_or_else(|| Error::NotFound(format!("user {email}")))?;
             let pw = read_password(&format!("new password for {}: ", u.email))?;
             store.set_password(u.id, &pw)?;
+            cli_audit(
+                &db,
+                "auth.password_reset",
+                None,
+                &u.id.to_string(),
+                serde_json::json!({"email": u.email}),
+            );
             println!("password set for {}; their sessions have ended", u.email);
             Ok(0)
         }
@@ -3438,6 +3653,13 @@ fn invite_cmd(org: &str, email: &str, role: &str, db: &AuthDb) -> Result<u8> {
     let org = isb::org::OrgId::new(org)?;
     let role = isb::auth::Role::parse(role)?;
     let n = store.create_invitation(None, &org, email, role)?;
+    cli_audit(
+        db,
+        "auth.invitation_create",
+        Some(org.as_str()),
+        &n.invitation.email,
+        serde_json::json!({"role": role.as_str()}),
+    );
     let days = (n.invitation.expires_at - n.invitation.created_at) / 86400;
     eprintln!(
         "invited {} to org {org} as {role}; valid for {days} days, shown once:",
@@ -3460,6 +3682,7 @@ fn token_cmd(c: TokenCmd) -> Result<u8> {
             org,
             expires,
             user,
+            scopes,
             db,
         } => {
             let store = open_auth(&db)?;
@@ -3485,7 +3708,14 @@ fn token_cmd(c: TokenCmd) -> Result<u8> {
                 }
             };
             let org = org.map(isb::org::OrgId::new).transpose()?;
-            let t = store.create_api_token(u.id, org.as_ref(), &name, expires)?;
+            let t = store.create_api_token_scoped(u.id, org.as_ref(), &name, expires, &scopes)?;
+            cli_audit(
+                &db,
+                "auth.token_create",
+                t.info.org.as_ref().map(|o| o.as_str()),
+                &t.info.name,
+                serde_json::json!({"id": t.info.id, "email": u.email}),
+            );
             eprintln!(
                 "token {} ({}) for {}{}{}; shown once:",
                 t.info.id,
@@ -3528,6 +3758,7 @@ fn token_cmd(c: TokenCmd) -> Result<u8> {
                 "CREATED".into(),
                 "LAST USED".into(),
                 "EXPIRES".into(),
+                "SCOPES".into(),
             ]];
             for t in tokens {
                 rows.push(vec![
@@ -3538,6 +3769,11 @@ fn token_cmd(c: TokenCmd) -> Result<u8> {
                     fmt_time((t.created_at).max(0) as u64),
                     when(t.last_used),
                     when(t.expires_at),
+                    if t.scopes.is_empty() {
+                        "-".into()
+                    } else {
+                        t.scopes.join(",")
+                    },
                 ]);
             }
             table(rows);
@@ -3547,7 +3783,15 @@ fn token_cmd(c: TokenCmd) -> Result<u8> {
             let store = open_auth(&db)?;
             let mut code = 0;
             for id in ids {
+                let org = store.api_token(id).ok().and_then(|t| t.org);
                 if store.revoke_api_token(id)? {
+                    cli_audit(
+                        &db,
+                        "auth.token_revoke",
+                        org.as_ref().map(|o| o.as_str()),
+                        &id.to_string(),
+                        serde_json::json!({}),
+                    );
                     println!("revoked token {id}");
                 } else {
                     eprintln!("isb: token {id} not found");

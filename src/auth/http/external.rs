@@ -418,6 +418,7 @@ impl AuthApi {
                 ));
             }
             self.store.link_identity(uid, ext)?;
+            super::note_user(uid);
             return Ok(redirect(&flow.next));
         }
         let (user, how) =
@@ -427,6 +428,7 @@ impl AuthApi {
             eprintln!("isb serve: {} signed up with {}", user.email, ext.provider);
         }
         let s = self.store.start_session(user.id, meta(req))?;
+        super::note_user(user.id);
         let max_age = (s.session.expires_at - self.store.now()).max(0);
         Ok(redirect(&flow.next).header("Set-Cookie", session_cookie(req, &s.token, max_age)))
     }

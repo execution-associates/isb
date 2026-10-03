@@ -264,6 +264,286 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/audit_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Audit log
+         * @description Who did what: audit log entries, newest first (or oldest first after `after`, for tailing). Org owners and admins see their org's entries; platform admins see every org and platform-level entries (sign-ins, users, org changes). Filters: actor (glob on name or email), action (glob: `secret_*`, `auth.*`), target (glob), outcome (`ok`, `error`, or a code), surface, since/until (unix ms). Page with `before` = the last id you got.
+         */
+        post: operations["audit_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/audit_verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify the audit log
+         * @description Walk the audit log's hash chain: ok, how many rows, the head (id and hash: keep a copy elsewhere to pin the log), and the first row that does not check out. Platform admins.
+         */
+        post: operations["audit_verify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/backup_create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Schedule a backup
+         * @description Back a database up on a cron schedule to a destination: the engine's own dump (pg_dump, mysqldump, mariadb-dump, mongodump, a Redis RDB) runs in the database's instance, is compressed and streamed to the bucket by the daemon, checked with HEAD, and the oldest beyond `keep` are deleted. Emits backup.succeeded / backup.failed events.
+         */
+        post: operations["backup_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/backup_delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete a backup
+         * @description Delete a backup schedule and its run records. Its files stay in the bucket (restore them with destination and key).
+         */
+        post: operations["backup_delete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/backup_destination_create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a backup destination
+         * @description An S3-compatible bucket for backups: endpoint (https://s3.<region>.amazonaws.com, an R2/B2/MinIO URL), region (default us-east-1), bucket, key prefix, path_style (true for MinIO and most self-hosted stores). The key pair is given as access_key/secret_key (stored as the org secrets backup.<name>.access-key/.secret-key) or as the names of existing secrets. Endpoints on this host (loopback) are for the local CLI and platform admins. create_bucket=true creates the bucket; test=true writes, reads back and deletes a small object.
+         */
+        post: operations["backup_destination_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/backup_destination_delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete a backup destination
+         * @description Delete a destination no backup uses, with the key secrets isb stored for it. Objects in the bucket are kept.
+         */
+        post: operations["backup_destination_delete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/backup_destination_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List backup destinations
+         * @description An org's backup destinations (key pairs as secret names).
+         */
+        post: operations["backup_destination_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/backup_destination_test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test a backup destination
+         * @description Write a small object under the destination's prefix, check it with HEAD and delete it.
+         */
+        post: operations["backup_destination_test"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/backup_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List backups
+         * @description An org's backup schedules with their last run and next run. With `name`, that backup only, plus the backup files in its bucket (newest first): what backup_restore takes.
+         */
+        post: operations["backup_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/backup_restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore a backup
+         * @description Restore a backup file into a database: `backup` (its newest file, or `key`) or `destination` + `key`; into `target`, an existing database of the same engine whose data is REPLACED (needs confirm: true), or `new`: {name, project?, environment?, version?}, a database created for it (by default beside the backed-up one). The file streams from the bucket through the daemon into the engine's restore tool (pg_restore --clean, mysql, mongorestore --drop, a Redis RDB swap). Emits restore.succeeded / restore.failed.
+         */
+        post: operations["backup_restore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/backup_run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a backup now
+         * @description Back up now, outside the schedule. Returns the run; wait=true returns when it finishes (at most `timeout`, default 10m).
+         */
+        post: operations["backup_run"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/backup_run_log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Backup run log
+         * @description One backup (or restore) run's log from byte `offset`; poll with the returned offset until finished.
+         */
+        post: operations["backup_run_log"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/backup_runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Backup runs
+         * @description A backup's runs, newest first (status, trigger, duration, object key and size). With restores=true instead, the org's restore runs.
+         */
+        post: operations["backup_runs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/backup_update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update a backup
+         * @description Change a backup's settings (a merge patch: schedule, timezone, destination, keep, compression, enabled, missed_grace). A changed schedule counts from now.
+         */
+        post: operations["backup_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/build_list": {
         parameters: {
             query?: never;
@@ -318,6 +598,66 @@ export interface paths {
          * @description Start a build of a source directory into an image in the org's local registry. It runs in a fresh sandbox in the org (a VM with untrusted=true), never on the host, and is pushed as <org>/<app>:<tag>. Returns an id at once: follow it with build_logs. The result's `image` (registry:APP:TAG@DIGEST) goes in a compose `image:`.
          */
         post: operations["build_run"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/database_create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a database
+         * @description Create a database in a project's environment: Postgres, MySQL, MariaDB, MongoDB or Redis from the official image at `version`, its data on a named volume, one replica rolled out stop-first, with a health check. Credentials are generated and kept as org secrets (db.<name>.password; db.<name>.root-password for MySQL/MariaDB; db.<name>.url, the internal connection URL for apps: DATABASE_URL=${{secret.db.<name>.url}}). Other apps reach it at <name>.<project>-<env>. Not published outside the org unless `publish` is set. A database is an app: deploy, update, roll back and delete it with the app_* tools.
+         */
+        post: operations["database_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/database_get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get a database
+         * @description A database's settings and connection details: host (service name), port, user, database, the password as a reference to its org secret, and a URL with that reference. `reveal: true` adds the password and URL values (org members may read org secrets).
+         */
+        post: operations["database_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/database_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List databases
+         * @description An org's databases (apps with a database source), each with its engine, version, stack and connection details (password as a secret reference).
+         */
+        post: operations["database_list"];
         delete?: never;
         options?: never;
         head?: never;
@@ -418,6 +758,346 @@ export interface paths {
          * @description The HTTP(S) edge: its listeners, CA and Caddy process; every routed domain with its URL, certificate state (issued, pending, failed, unsupported, cloudflare, none) and live upstreams; domain conflicts and refusals; and each Cloudflare-tunnel org's cloudflared and API sync. Shows the caller's orgs only.
          */
         post: operations["ingress_status"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/job_create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a scheduled job
+         * @description Run a command on a cron schedule against an app or a stack service: in a running replica (mode exec) or a fresh one-off instance from its image (mode run). Each run keeps its exit code, duration and output (bounded); job.succeeded / job.failed events.
+         */
+        post: operations["job_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/job_delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete a job
+         * @description Delete a job and its run records.
+         */
+        post: operations["job_delete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/job_get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get a job
+         * @description A job's settings, next run and last run.
+         */
+        post: operations["job_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/job_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List jobs
+         * @description An org's jobs with their next and last run.
+         */
+        post: operations["job_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/job_run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a job now
+         * @description Run a job now, outside its schedule (refused while a run is going under concurrency skip). wait=true returns when it finishes (at most `timeout`, default 10m).
+         */
+        post: operations["job_run"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/job_run_log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Job run log
+         * @description One run's output from byte `offset` (the first 192 KiB and the last 64 KiB are kept); poll with the returned offset until finished.
+         */
+        post: operations["job_run_log"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/job_runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Job runs
+         * @description A job's runs, newest first: trigger (schedule, missed, manual), status (running, succeeded, failed, skipped), exit code, duration, output size.
+         */
+        post: operations["job_runs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/job_update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update a job
+         * @description Change a job's settings (a merge patch; the name is fixed). A changed schedule counts from now.
+         */
+        post: operations["job_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/metrics_query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Query metrics history
+         * @description Metrics history of the org's instances for charts: cpu (percent of one core), memory (bytes), net_rx, net_tx, disk_read, disk_write (bytes per second). Choose an app, a stack (and service), or one instance. Kept 24 h at 10 s, 7 d at 1 min, 30 d at 10 min; `step` is widened to the tier that still holds `from`, and to at most 2000 points. With `aggregate` (sum, avg, max, min) the instances are combined bucket by bucket (a service's replicas); without, one series per instance. Points are [unix seconds, value].
+         */
+        post: operations["metrics_query"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/notification_channel_create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a notification channel
+         * @description Add a notification channel to the org: a destination (webhook, Slack, Discord, Telegram, email) and rules choosing which events it hears about. Only the org's own events reach it. Its secrets must exist.
+         */
+        post: operations["notification_channel_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/notification_channel_delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete a notification channel
+         * @description Remove a notification channel and its delivery log (its secrets stay).
+         */
+        post: operations["notification_channel_delete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/notification_channel_get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get a notification channel
+         * @description One notification channel.
+         */
+        post: operations["notification_channel_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/notification_channel_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List notification channels
+         * @description The org's notification channels: provider (secret names, never values), rules, enabled, and each one's last delivery.
+         */
+        post: operations["notification_channel_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/notification_channel_update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update a notification channel
+         * @description Change a notification channel: its provider, its rules (the list is replaced), or enabled. Fields left out are kept.
+         */
+        post: operations["notification_channel_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/notification_deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Notification deliveries
+         * @description A channel's recent deliveries, newest first (the last 50): event kind and number, status (queued, retrying, sent, failed, dropped, skipped), attempts, HTTP status, error.
+         */
+        post: operations["notification_deliveries"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/notification_settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Notification settings
+         * @description Server-wide notification settings (platform admins). allow_private_targets lets channels reach loopback, private (RFC 1918, ULA), link-local and CGNAT addresses, which are refused by default so a channel cannot reach into the host's network. Pass a field to change it; returns the settings.
+         */
+        post: operations["notification_settings"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/notification_test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test a notification channel
+         * @description Send a test message to a channel now (once, no retries) and report the outcome: status sent or failed, the HTTP status, the error. It is logged with the channel's deliveries.
+         */
+        post: operations["notification_test"];
         delete?: never;
         options?: never;
         head?: never;
@@ -538,6 +1218,106 @@ export interface paths {
          * @description Everything a dashboard shows in one call: the host's CPU and memory (with history), every stack in detail (as stack_status), the sandboxes (status, IP, CPU, memory), and the latest event number for the events tool.
          */
         post: operations["overview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/preview_delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete a preview
+         * @description Remove a preview now: its service (and its stack, with its last service), its volumes, its build cache, its images in the registry and its records. A new push to the pull request makes a new one. wait=true returns when it is gone.
+         */
+        post: operations["preview_delete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/preview_get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get a preview
+         * @description One preview: its pull request, stack, commit, image, URL and status, and its deployments (newest first) with their logs' ids for preview_log.
+         */
+        post: operations["preview_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/preview_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List previews
+         * @description The preview deployments of an app (or of every app in the org): one per open pull request, with its stack, head commit, image, URL and status. Settings are the app's `previews` field (app_update).
+         */
+        post: operations["preview_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/preview_log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A preview deployment's log
+         * @description A preview deployment's log (git, build and rollout lines) from byte `offset`; poll with the returned offset until finished.
+         */
+        post: operations["preview_log"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/preview_redeploy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Redeploy a preview
+         * @description Fetch the pull request's head again, build it and roll the preview, as a push to it would.
+         */
+        post: operations["preview_redeploy"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1124,6 +1904,166 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/template_catalog_add": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a template catalog
+         * @description Platform admins: add (or replace) a catalog every org can deploy from. format native (isb templates: a directory of *.yaml, or an https URL of a {templates: [...]} document) or dokploy (a checkout of Dokploy/templates, or https://templates.dokploy.com). Its templates are third-party content: Dokploy's are translated strictly and refused when they need what isb does not allow.
+         */
+        post: operations["template_catalog_add"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/template_catalog_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List template catalogs
+         * @description The catalogs added to the built-in one: name, format (native or dokploy) and location (a host directory or an https URL).
+         */
+        post: operations["template_catalog_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/template_catalog_remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove a template catalog
+         * @description Platform admins: remove an added catalog. Instances deployed from it keep running.
+         */
+        post: operations["template_catalog_remove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/template_deploy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deploy a template
+         * @description Deploy a template into a project environment as apps (made if missing): <name>-<app> per app (the main app just <name>), generated passwords and keys stored as org secrets tpl.<name>.<var>, then each app deployed in dependency order. dry_run=true returns the plan (apps, secrets by name, variables, URLs, notes) and changes nothing. Returns at once unless wait=true.
+         */
+        post: operations["template_deploy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/template_get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get a template
+         * @description A template's metadata, its variables (what template_deploy takes in values: type, default, required, generated, secret), the apps it creates, notes, and for a Dokploy template how its translation went (compatibility: clean, notes, or refused with reasons).
+         */
+        post: operations["template_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/template_instance_delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete a deployed template
+         * @description Delete a template instance: its apps (their named volumes are kept), the secrets it made (tpl.<name>.*) and its record.
+         */
+        post: operations["template_instance_delete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/template_instance_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List deployed templates
+         * @description The template instances in an org: template, project, environment, apps, secrets (names), non-secret variable values and URLs.
+         */
+        post: operations["template_instance_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/template_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List templates
+         * @description One-click apps: the built-in catalog and any a platform admin added (isb's own format, or Dokploy's, translated). Each has a ref (catalog/id) for template_get and template_deploy. Filter with query (words in the name, description or tags), tag or catalog.
+         */
+        post: operations["template_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1158,6 +2098,8 @@ export interface operations {
                     env?: unknown;
                     /** @description Default production. */
                     environment?: string;
+                    /** @description [{path, secret, mode?}]: an org secret's value as a file at an absolute path (config files, certificates). */
+                    files?: Record<string, never>[];
                     /** @description A compose healthcheck: {test, interval, timeout, retries, start_period}. */
                     healthcheck?: Record<string, never>;
                     /** @description [a-z0-9-], unique in the org; the service name in its stack. */
@@ -1168,14 +2110,19 @@ export interface operations {
                     port?: number;
                     /** @description Published host ports, compose syntax (127.0.0.1:8080:80), load-balanced over healthy replicas. */
                     ports?: string[];
+                    /** @description Preview deployments per pull request (git sources): {enabled, branches (base branches; default the app's ref), max (default 3), env (.env text or {KEY: value | {secret: NAME}}), inherit_env (default false), domain (auto | *.suffix), port, replicas (default 1), resources, ttl (e.g. 7d), forks (default false; fork PRs build in a VM and get only fork_secrets), fork_secrets [NAME], status {token_secret, kind: github | gitea, api_url}}. See preview_list. */
+                    previews?: Record<string, never>;
                     project: string;
                     replicas?: number;
                     /** @description {cpus, memory} per replica. */
                     resources?: Record<string, never>;
                     /** @description Exactly one of {"image": "docker:nginx:1.27"} or {"git": {"url", "ref" (branch, tag or SHA; default main), "subdir", "auth": {"token_secret": NAME, "username"} | {"ssh_key_secret": NAME}, "submodules": false}}. */
                     source: Record<string, never>;
+                    /** @description The user the app runs as; numeric (uid[:gid]) on an OCI image. */
+                    user?: string;
                     /** @description Named volumes, NAME:/path[:ro]. No host paths. */
                     volumes?: string[];
+                    working_dir?: string;
                 };
             };
         };
@@ -1607,6 +2554,8 @@ export interface operations {
                     domains?: Record<string, never>[];
                     /** @description .env text, or a map {KEY: "value" | {"secret": NAME}}. A secret is an org secret, delivered as the variable. */
                     env?: unknown;
+                    /** @description [{path, secret, mode?}]: an org secret's value as a file at an absolute path (config files, certificates). */
+                    files?: Record<string, never>[];
                     /** @description A compose healthcheck: {test, interval, timeout, retries, start_period}. */
                     healthcheck?: Record<string, never>;
                     name: string;
@@ -1616,13 +2565,18 @@ export interface operations {
                     port?: number;
                     /** @description Published host ports, compose syntax (127.0.0.1:8080:80), load-balanced over healthy replicas. */
                     ports?: string[];
+                    /** @description Preview deployments per pull request (git sources): {enabled, branches (base branches; default the app's ref), max (default 3), env (.env text or {KEY: value | {secret: NAME}}), inherit_env (default false), domain (auto | *.suffix), port, replicas (default 1), resources, ttl (e.g. 7d), forks (default false; fork PRs build in a VM and get only fork_secrets), fork_secrets [NAME], status {token_secret, kind: github | gitea, api_url}}. See preview_list. */
+                    previews?: Record<string, never>;
                     replicas?: number;
                     /** @description {cpus, memory} per replica. */
                     resources?: Record<string, never>;
                     /** @description Exactly one of {"image": "docker:nginx:1.27"} or {"git": {"url", "ref" (branch, tag or SHA; default main), "subdir", "auth": {"token_secret": NAME, "username"} | {"ssh_key_secret": NAME}, "submodules": false}}. */
                     source?: Record<string, never>;
+                    /** @description The user the app runs as; numeric (uid[:gid]) on an OCI image. */
+                    user?: string;
                     /** @description Named volumes, NAME:/path[:ro]. No host paths. */
                     volumes?: string[];
+                    working_dir?: string;
                 };
             };
         };
@@ -1661,6 +2615,599 @@ export interface operations {
                     /** @description The org to act in (default: default). */
                     org?: string;
                     rotate?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    audit_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    action?: string;
+                    actor?: string;
+                    /** @description Entries newer than this id, oldest first. */
+                    after?: number;
+                    /** @description Entries older than this id. */
+                    before?: number;
+                    /** @description Default 100. */
+                    limit?: number;
+                    /** @description One org's entries (an org admin's own when omitted). */
+                    org?: string;
+                    outcome?: string;
+                    /** @description Only platform-level entries (platform admins). */
+                    platform?: boolean;
+                    /** @description Unix milliseconds, inclusive. */
+                    since?: number;
+                    /** @enum {string} */
+                    surface?: "mcp" | "rest" | "cli" | "web" | "webhook";
+                    target?: string;
+                    token_id?: number;
+                    /** @description Unix milliseconds, exclusive. */
+                    until?: number;
+                    user_id?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    audit_verify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    backup_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    compression?: "gzip" | "zstd" | "none";
+                    /** @description The database app. */
+                    database: string;
+                    destination: string;
+                    enabled?: boolean;
+                    /** @description Backups kept in the bucket (default 7). */
+                    keep?: number;
+                    /** @description How late a slot missed while the daemon was down still runs (default 1h). */
+                    missed_grace?: string;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description Cron: five fields (minute hour day-of-month month day-of-week) or @hourly, @daily, @weekly, @monthly, @yearly. */
+                    schedule: string;
+                    /** @description UTC (default) or a fixed offset such as +02:00. */
+                    timezone?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    backup_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    backup_destination_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    access_key?: string;
+                    access_key_secret?: string;
+                    bucket: string;
+                    /** @description Create the bucket first (self-hosted stores). */
+                    create_bucket?: boolean;
+                    endpoint: string;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    path_style?: boolean;
+                    prefix?: string;
+                    region?: string;
+                    secret_key?: string;
+                    secret_key_secret?: string;
+                    test?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    backup_destination_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    backup_destination_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    backup_destination_test: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    backup_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    database?: string;
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    backup_restore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    backup?: string;
+                    confirm?: boolean;
+                    destination?: string;
+                    key?: string;
+                    new?: {
+                        environment?: string;
+                        name: string;
+                        project?: string;
+                        version?: string;
+                    };
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    target?: string;
+                    timeout?: string;
+                    wait?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    backup_run: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    timeout?: string;
+                    wait?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    backup_run_log: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The backup (omit with restore=true). */
+                    name?: string;
+                    offset?: number;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    restore?: boolean;
+                    run: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    backup_runs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    limit?: number;
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    restores?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    backup_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    compression?: "gzip" | "zstd" | "none";
+                    /** @description The database app. */
+                    database?: string;
+                    destination?: string;
+                    enabled?: boolean;
+                    /** @description Backups kept in the bucket (default 7). */
+                    keep?: number;
+                    /** @description How late a slot missed while the daemon was down still runs (default 1h). */
+                    missed_grace?: string;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description Cron: five fields (minute hour day-of-month month day-of-week) or @hourly, @daily, @weekly, @monthly, @yearly. */
+                    schedule?: string;
+                    /** @description UTC (default) or a fixed offset such as +02:00. */
+                    timezone?: string;
                 };
             };
         };
@@ -1797,6 +3344,139 @@ export interface operations {
                     timeout?: string;
                     /** @description Build in a VM (its own kernel). */
                     untrusted?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    database_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Database created on first start (default: the name with - as _). Not Redis. */
+                    database?: string;
+                    /** @description Deploy right away (default true). */
+                    deploy?: boolean;
+                    /** @enum {string} */
+                    engine: "postgres" | "mysql" | "mariadb" | "mongodb" | "redis";
+                    /** @description Extra environment (.env text or a map), e.g. POSTGRES_INITDB_ARGS. */
+                    env?: unknown;
+                    /** @description Default production. */
+                    environment?: string;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    project: string;
+                    /** @description Publish the port on the host: [IP:]PORT (default address 127.0.0.1). Off by default. */
+                    publish?: string;
+                    /** @description {cpus, memory}. */
+                    resources?: Record<string, never>;
+                    /** @description User created on first start (default: as database). Not Redis. */
+                    user?: string;
+                    /** @description Image tag (default: 17, 8.4, 11.4, 8.0, 7.4). */
+                    version?: string;
+                    /** @description Wait until it is up (default false). */
+                    wait?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    database_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    reveal?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    database_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    project?: string;
                 };
             };
         };
@@ -1983,6 +3663,727 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    job_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description argv (a list), or a line split like a shell would (no shell runs unless you run one). */
+                    command: unknown;
+                    /**
+                     * @description skip (default): a run due while one is going is skipped.
+                     * @enum {string}
+                     */
+                    concurrency?: "skip" | "allow";
+                    cwd?: string;
+                    enabled?: boolean;
+                    env?: {
+                        [key: string]: string;
+                    };
+                    /** @description Runs kept (default 20). */
+                    keep?: number;
+                    /** @description How late a slot missed while the daemon was down still runs (default 1h). */
+                    missed_grace?: string;
+                    /**
+                     * @description exec (default): in a running replica. run: in a fresh one-off instance from the service's image, env and secrets, deleted after.
+                     * @enum {string}
+                     */
+                    mode?: "exec" | "run";
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description Cron: five fields or @hourly, @daily, @weekly, @monthly, @yearly. */
+                    schedule: string;
+                    /** @description {app: NAME}, or {stack: NAME, service: NAME}. */
+                    target: Record<string, never>;
+                    /** @description Kill after this long (default 10m, at most 24h). */
+                    timeout?: string;
+                    /** @description UTC (default) or a fixed offset such as +02:00. */
+                    timezone?: string;
+                    user?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    job_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    job_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    job_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    job_run: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    timeout?: string;
+                    wait?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    job_run_log: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    offset?: number;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    run: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    job_runs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    limit?: number;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    job_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description argv (a list), or a line split like a shell would (no shell runs unless you run one). */
+                    command?: unknown;
+                    /**
+                     * @description skip (default): a run due while one is going is skipped.
+                     * @enum {string}
+                     */
+                    concurrency?: "skip" | "allow";
+                    cwd?: string;
+                    enabled?: boolean;
+                    env?: {
+                        [key: string]: string;
+                    };
+                    /** @description Runs kept (default 20). */
+                    keep?: number;
+                    /** @description How late a slot missed while the daemon was down still runs (default 1h). */
+                    missed_grace?: string;
+                    /**
+                     * @description exec (default): in a running replica. run: in a fresh one-off instance from the service's image, env and secrets, deleted after.
+                     * @enum {string}
+                     */
+                    mode?: "exec" | "run";
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description Cron: five fields or @hourly, @daily, @weekly, @monthly, @yearly. */
+                    schedule?: string;
+                    /** @description {app: NAME}, or {stack: NAME, service: NAME}. */
+                    target?: Record<string, never>;
+                    /** @description Kill after this long (default 10m, at most 24h). */
+                    timeout?: string;
+                    /** @description UTC (default) or a fixed offset such as +02:00. */
+                    timezone?: string;
+                    user?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    metrics_query: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    aggregate?: "sum" | "avg" | "max" | "min";
+                    /** @description An app: its service in its project environment's stack. */
+                    app?: string;
+                    /** @description Unix seconds; overrides range. */
+                    from?: number;
+                    instance?: string;
+                    /** @enum {string} */
+                    metric: "cpu" | "memory" | "net_rx" | "net_tx" | "disk_read" | "disk_write";
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description How far back from `to`, e.g. 1h, 24h, 7d (default 1h). */
+                    range?: string;
+                    service?: string;
+                    stack?: string;
+                    /** @description Seconds per point (default: the tier's). */
+                    step?: number;
+                    /** @description Unix seconds (default now). */
+                    to?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    notification_channel_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Default true. */
+                    enabled?: boolean;
+                    /** @description [a-z0-9-], starting with a letter, at most 40. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description Where messages go, by `type`: {"type": "webhook", "url_secret": NAME, "signing_secret": NAME?} (JSON POST; with a signing secret, X-Isb-Signature: sha256=HMAC of the body), {"type": "slack", "url_secret": NAME} (an incoming-webhook URL), {"type": "discord", "url_secret": NAME}, {"type": "telegram", "token_secret": NAME, "chat_id": "-100..."}, {"type": "email", "host", "port"?, "tls": "starttls"|"tls"|"none", "username"?, "password_secret"?, "from", "to": [..]}. Every URL, token and password is an org secret, named here (secret_create first), never a value. */
+                    provider: Record<string, never>;
+                    /** @description Which events: a list of {"events": [glob, ...] (deploy.*, health.*, backup.*, job.*, cert.*, *.failed, *), "projects"?: [..], "apps"?: [..], "stacks"?: [..]}; any rule matching sends. Default: [{"events": ["*"]}]. */
+                    rules?: Record<string, never>[];
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    notification_channel_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    notification_channel_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    notification_channel_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    notification_channel_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled?: boolean;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description Where messages go, by `type`: {"type": "webhook", "url_secret": NAME, "signing_secret": NAME?} (JSON POST; with a signing secret, X-Isb-Signature: sha256=HMAC of the body), {"type": "slack", "url_secret": NAME} (an incoming-webhook URL), {"type": "discord", "url_secret": NAME}, {"type": "telegram", "token_secret": NAME, "chat_id": "-100..."}, {"type": "email", "host", "port"?, "tls": "starttls"|"tls"|"none", "username"?, "password_secret"?, "from", "to": [..]}. Every URL, token and password is an org secret, named here (secret_create first), never a value. */
+                    provider?: Record<string, never>;
+                    /** @description Which events: a list of {"events": [glob, ...] (deploy.*, health.*, backup.*, job.*, cert.*, *.failed, *), "projects"?: [..], "apps"?: [..], "stacks"?: [..]}; any rule matching sends. Default: [{"events": ["*"]}]. */
+                    rules?: Record<string, never>[];
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    notification_deliveries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    limit?: number;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    notification_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    allow_private_targets?: boolean;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    notification_test: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
                 };
@@ -2231,6 +4632,214 @@ export interface operations {
                 "application/json": {
                     /** @description The org to act in (default: default). */
                     org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    preview_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The app. */
+                    name: string;
+                    /** @description The pull (merge) request number. */
+                    number: number;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description How long wait may take (default 15m). */
+                    timeout?: string;
+                    /** @description Wait until it finishes (default false). */
+                    wait?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The app. */
+                    name: string;
+                    /** @description The pull (merge) request number. */
+                    number: number;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    preview_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The app (default: every app). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    preview_log: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    deployment: number;
+                    /** @description The app. */
+                    name: string;
+                    /** @description The pull (merge) request number. */
+                    number: number;
+                    offset?: number;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    preview_redeploy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The app. */
+                    name: string;
+                    /** @description The pull (merge) request number. */
+                    number: number;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description How long wait may take (default 15m). */
+                    timeout?: string;
+                    /** @description Wait until it finishes (default false). */
+                    wait?: boolean;
                 };
             };
         };
@@ -3360,6 +5969,321 @@ export interface operations {
                     name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    template_catalog_add: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    format: "native" | "dokploy";
+                    location: string;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    template_catalog_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    template_catalog_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    template_deploy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    dry_run?: boolean;
+                    /** @description Default production. */
+                    environment?: string;
+                    /** @description The instance name: names the apps and secrets. Default: the template id. */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    project: string;
+                    /** @description catalog/id, or a bare id. */
+                    template: string;
+                    /** @description How long each app's deploy may take with wait (default 30m). */
+                    timeout?: string;
+                    /** @description Variable values; generated ones may be left out. */
+                    values?: {
+                        [key: string]: string;
+                    };
+                    /** @description Return when every app has deployed (or one failed). */
+                    wait?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    template_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description catalog/id, or a bare id. */
+                    template: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    template_instance_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    template_instance_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    template_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    catalog?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    query?: string;
+                    tag?: string;
                 };
             };
         };

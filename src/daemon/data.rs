@@ -216,7 +216,9 @@ pub fn register(r: &mut Registry, ctx: Ctx) -> Result<()> {
             json!({"name": {"type": "string"}, "reveal": {"type": "boolean"}}),
             &["name"]
         ),
-        ro,
+        // `reveal` hands out the password: a secret read (viewers, `read`
+        // tokens refused; always audited).
+        json!({"readOnlyHint": true, "openWorldHint": false, "isbSecretReadArg": "reveal"}),
         |x: &Ctx, a: Value, _c: &Caller| -> Result<Value> {
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields)]

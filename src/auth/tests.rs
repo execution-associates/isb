@@ -346,7 +346,9 @@ fn api_tokens() {
         pr.kind,
         PrincipalKind::ApiToken {
             id: p.info.id,
-            org: None
+            org: None,
+            name: "ops".into(),
+            scopes: vec![],
         }
     );
     // Non-admins must confine a token to an org they belong to.
@@ -449,8 +451,51 @@ fn roles_and_principals() {
         assert_eq!(Role::parse(r.as_str()).unwrap(), r);
     }
     assert!(Role::parse("god").is_err());
-    assert!(Role::Member < Role::Admin && Role::Admin < Role::Owner);
+    assert!(Role::Viewer < Role::Member && Role::Member < Role::Admin && Role::Admin < Role::Owner);
     assert!(Role::Member.can(Permission::AdminOrg));
+    assert!(Role::Viewer.can(Permission::ReadOrg) && !Role::Viewer.can(Permission::AdminOrg));
+}
+
+#[test]
+fn viewers_and_scoped_tokens() {
+    let (s, _) = store();
+    let root = s.create_first_admin("root@x.io", "", PW).unwrap();
+    let v = s.create_user("v@x.io", "", Some(PW), false).unwrap();
+    let ocai = org("ocai");
+    s.set_member(&ocai, v.id, Role::Viewer).unwrap();
+    let t = s.create_api_token(v.id, Some(&ocai), "ro", None).unwrap();
+    let pr = s.authenticate_token(&t.token).unwrap().unwrap();
+    assert!(pr.can_read_org(&ocai) && !pr.can_admin_org(&ocai));
+    assert!(!pr.restricted());
+    // Scopes are checked, normalized and kept with the token.
+    let bad = s.create_api_token_scoped(root.id, None, "x", None, &["root".into()]);
+    assert!(matches!(bad, Err(AuthError::Invalid(_))));
+    let t = s
+        .create_api_token_scoped(
+            root.id,
+            Some(&ocai),
+            "ci",
+            None,
+            &["deploy".into(), "tool:app_*".into(), "deploy".into()],
+        )
+        .unwrap();
+    assert_eq!(t.info.scopes, ["deploy", "tool:app_*"]);
+    let pr = s.authenticate_token(&t.token).unwrap().unwrap();
+    assert_eq!(pr.scopes(), ["deploy", "tool:app_*"]);
+    assert!(pr.restricted());
+    assert_eq!(
+        s.api_token(t.info.id).unwrap().scopes,
+        ["deploy", "tool:app_*"]
+    );
+    let t = s
+        .create_api_token_scoped(root.id, Some(&ocai), "all", None, &["admin".into()])
+        .unwrap();
+    assert!(
+        !s.authenticate_token(&t.token)
+            .unwrap()
+            .unwrap()
+            .restricted()
+    );
 }
 
 #[test]

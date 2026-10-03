@@ -220,6 +220,13 @@ minime only runs binaries downloaded from our CI runs.
   (`isb history <name>`), so "how did we get here" and "who deleted this"
   are one query. Gaps while no daemon ran are recorded as markers, never
   silent. Built as part of P5.3.
+- **Audit log** (P5.3): its own append-only, hash-chained SQLite file
+  (`audit.db`, triggers refuse edits), recorded at the tool-dispatch hook so
+  every tool is covered; refusals always recorded; error messages never
+  stored (they can quote argument values). New `viewer` role and opt-in
+  token scopes (`read`, `deploy`, `admin`, `tool:GLOB`) that only narrow a
+  role. A tool can name an argument that makes one call a secret read
+  (`isbSecretReadArg`, e.g. `database_get`'s `reveal`).
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
@@ -374,7 +381,7 @@ minime only runs binaries downloaded from our CI runs.
 - [ ] P5.2 Placement: orgs on servers; MCP/REST calls proxied to the owning
   server; secrets delivered only to servers that run their consumers.
   **Verify:** deploy to an org placed on the hcloud box from titan's UI.
-- [~] (subagent p5.3; scope extended 2026-10-03 with the persistent history) P5.3 Audit log and finer roles. **Verify:** actions appear in the log
+- [~] (8423ecc, f48d234: audit log, viewer role, token scopes done; the persistent history is next) P5.3 Audit log and finer roles. **Verify:** actions appear in the log
   with the acting user or agent.
 
 ## Log
