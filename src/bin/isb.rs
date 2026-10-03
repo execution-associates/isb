@@ -224,6 +224,9 @@ enum Cmd {
     /// Deploy and manage stacks on the `isb serve` daemon.
     #[command(subcommand)]
     Stack(StackCmd),
+    /// A live dashboard of stacks and sandboxes (`isb serve`'s view; with no
+    /// daemon, sandboxes only).
+    Tui,
 }
 
 #[derive(Args)]
@@ -636,6 +639,10 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         Cmd::Logs { service, lines, .. } => logs(ctx, &service, lines),
         Cmd::Serve(a) => serve(ctx, a),
         Cmd::Stack(s) => stack(ctx, s),
+        Cmd::Tui => {
+            isb::tui::run(ctx.client(None), isb::server::default_socket_path())?;
+            Ok(0)
+        }
         Cmd::Create(a) => create(ctx, a),
         Cmd::Start { names } => {
             let c = ctx.client(None);

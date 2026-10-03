@@ -37,6 +37,7 @@ isb stack deploy [NAME] [-d] [--timeout D]
 isb stack ls | ps NAME | logs NAME SERVICE | config NAME
 isb stack scale NAME SERVICE=N... | redeploy NAME SERVICE | rollback NAME
 isb stack rm NAME [--volumes]
+isb tui                                    live dashboard (docs/tui.md)
 ```
 
 **`up` runs in the foreground**, like `docker compose up`: it runs each

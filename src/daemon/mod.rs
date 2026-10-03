@@ -151,12 +151,72 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
                 "secrets": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Secret values by top-level secret name."},
                 "base_dir": {"type": "string", "description": "Host directory relative bind paths resolve against. Remote callers: must be under a --bind-root."},
                 "wait": {"type": "boolean", "description": "Wait until every service converges, pauses or fails (default false)."},
+                "dry_run": {"type": "boolean", "description": "Only report what would change."},
                 "timeout": {"type": "string", "description": "How long wait may take, e.g. 5m (default 10m)."}
             }),
             &["name", "compose"]
         ),
         write,
         stack_deploy
+    );
+    tool!(
+        "overview",
+        "Overview",
+        "Everything a dashboard shows in one call: the host's CPU and memory (with history), every stack in detail (as stack_status), the sandboxes (status, IP, CPU, memory), and the latest event number for the events tool.",
+        obj(json!({}), &[]),
+        ro,
+        |d: &Daemon, _a: Value, c: &Caller| -> Result<Value> {
+            let snap = d.ctl.snapshot();
+            let stacks = d.ctl.list();
+            let sandboxes: Vec<&crate::metrics::InstanceSample> = snap
+                .instances
+                .values()
+                .filter(|i| i.stack().is_none())
+                .filter(|i| {
+                    c.is_trusted() || d.policy.any_instance || i.labels.contains_key(LABEL_OWNER)
+                })
+                .collect();
+            let (seq, _) = d.ctl.events(u64::MAX, 0);
+            Ok(json!({
+                "isb": env!("CARGO_PKG_VERSION"),
+                "host": snap.host,
+                "sampled_at": snap.at,
+                "stacks": stacks,
+                "sandboxes": sandboxes,
+                "events_seq": seq,
+            }))
+        }
+    );
+    tool!(
+        "events",
+        "Events",
+        "What happened, newest last: deploys, rollouts, health changes, restarts, failures. Pass the last `seq` you saw as `since` to get only newer ones; `wait` (seconds, at most 30) holds the call until one arrives.",
+        obj(
+            json!({
+                "since": {"type": "integer", "minimum": 0},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 1000},
+                "wait": {"type": "integer", "minimum": 0, "maximum": 30}
+            }),
+            &[]
+        ),
+        ro,
+        |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
+            #[derive(Deserialize)]
+            struct A {
+                #[serde(default)]
+                since: u64,
+                limit: Option<usize>,
+                #[serde(default)]
+                wait: u64,
+            }
+            let a: A = args(a)?;
+            let (seq, events) = d.ctl.wait_events(
+                a.since,
+                a.limit.unwrap_or(200).min(1000),
+                Duration::from_secs(a.wait.min(30)),
+            );
+            Ok(json!({"seq": seq, "events": events}))
+        }
     );
     tool!(
         "stack_list",
@@ -260,6 +320,16 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             }
             let a: A = args(a)?;
             d.ctl.scale(&a.name, &a.service, a.replicas)?;
+            d.ctl.note(
+                "info",
+                &a.name,
+                format!(
+                    "{} scaled to {} by {}",
+                    a.service,
+                    a.replicas,
+                    caller_name(_c)
+                ),
+            );
             Ok(json!({"ok": true}))
         }
     );
@@ -280,6 +350,11 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             }
             let a: A = args(a)?;
             d.ctl.redeploy(&a.name, &a.service)?;
+            d.ctl.note(
+                "info",
+                &a.name,
+                format!("{} redeployed by {}", a.service, caller_name(_c)),
+            );
             Ok(json!({"ok": true}))
         }
     );
@@ -295,7 +370,13 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
                 name: String,
             }
             let a: A = args(a)?;
-            Ok(json!({"changes": d.ctl.rollback(&a.name)?}))
+            let changes = d.ctl.rollback(&a.name)?;
+            d.ctl.note(
+                "info",
+                &a.name,
+                format!("rolled back by {}", caller_name(_c)),
+            );
+            Ok(json!({"changes": changes}))
         }
     );
     tool!(
@@ -498,6 +579,8 @@ struct DeployArgs {
     #[serde(default)]
     wait: bool,
     #[serde(default)]
+    dry_run: bool,
+    #[serde(default)]
     timeout: Option<String>,
 }
 
@@ -575,7 +658,28 @@ fn stack_deploy(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         deployed_by: caller_name(c),
         previous: None,
     };
+    if a.dry_run {
+        return Ok(json!({"changes": d.ctl.plan(&def)?, "dry_run": true}));
+    }
+    let who = def.deployed_by.clone();
     let changes = d.ctl.deploy(def)?;
+    let summary: Vec<String> = changes
+        .iter()
+        .filter(|c| c.change != "unchanged")
+        .map(|c| format!("{} {}", c.service, c.change))
+        .collect();
+    d.ctl.note(
+        "info",
+        &a.name,
+        format!(
+            "deployed by {who}: {}",
+            if summary.is_empty() {
+                "no changes".to_string()
+            } else {
+                summary.join(", ")
+            }
+        ),
+    );
     if !a.wait {
         return Ok(json!({"changes": changes}));
     }

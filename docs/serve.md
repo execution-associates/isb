@@ -139,6 +139,12 @@ directly.
 | `sandbox_exec` | Run argv in a sandbox: exit code, stdout, stderr (each capped at 256 KiB, keeping the end), optional stdin text and timeout (default 10m). |
 | `sandbox_remove` | Delete a sandbox (not a stack replica). |
 | `server_status` | Versions, and the balancer's routes with live counters. |
+| `overview` | Everything a dashboard shows in one call: host CPU and memory with history, every stack in detail, sandboxes with their CPU and memory, the latest event number. |
+| `events` | The event feed (deploys, rollouts, health changes, restarts, failures) after a `since` cursor, optionally waiting up to 30 s for one. |
+
+`stack_deploy` also takes `dry_run: true`, which returns the per-service
+changes without deploying. `isb tui` ([tui.md](tui.md)) is built on
+`overview`, `events` and `dry_run`; a web UI can be too.
 
 The server speaks MCP's Streamable HTTP transport with plain JSON responses
 (no SSE stream; `GET /mcp` is 405), statelessly: `tools/call` works without a

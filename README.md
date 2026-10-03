@@ -80,7 +80,9 @@ $ isb stack rollback app
 
 The daemon load-balances published ports over healthy replicas, restarts
 unhealthy ones, rolls out changes with no downtime and rolls them back, and
-resumes every stack when it restarts. It also serves the same operations as
+resumes every stack when it restarts. `isb tui` shows all of it live, rollouts
+slot by slot, and drives it: logs, shells, scaling, deploys and rollbacks
+([docs/tui.md](docs/tui.md)). It also serves the same operations as
 **MCP tools**, so an agent behind Cloudflare Access can deploy apps and run
 sandboxes, held to a policy that keeps the host out of its reach. See
 [docs/stacks.md](docs/stacks.md) and [docs/serve.md](docs/serve.md).
@@ -282,6 +284,7 @@ filled in.
 - [docs/cli.md](docs/cli.md): every command and flag
 - [docs/stacks.md](docs/stacks.md): long-running stacks: replicas, health, rollouts
 - [docs/serve.md](docs/serve.md): the `isb serve` daemon and its MCP server behind Cloudflare Access
+- [docs/tui.md](docs/tui.md): `isb tui`, the live dashboard
 - [docs/rpc.md](docs/rpc.md): the protocol the SDKs speak, for other languages
 - [examples/](examples): a real per-worktree dev setup, and a VM
 - [SKILL.md](SKILL.md): an agent skill for isb. Put it in your agent's skills
