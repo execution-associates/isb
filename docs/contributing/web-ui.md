@@ -161,7 +161,7 @@ route; isb's own sign-in applies after it.
   lit from above with a peach wash at one corner, painted as `background-image`
   over the token colour on cards, dialogs, sheets, menus and the palette; a
   top-lit sheen on buttons; a faint recess on inputs and selects; the table
-  header row, the sidebar's current page and page headers (a dithered wash,
+  header row, the sidebar's current page and page headers (a faint wash,
   as they sit on the grain). `--ea-gk` scales every layer (1 on, 0.5 subtle,
   0 off, following `data-texture`), and `--ea-surface-gradient`, `--ea-sheen`
   and `--ea-field-gradient` are the recipes to tune. Plates carry a faint

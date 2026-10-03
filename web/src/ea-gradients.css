@@ -76,18 +76,17 @@ html.ea [data-slot="table-header"] {
     linear-gradient(180deg, rgb(253 246 250 / calc(0.055 * var(--ea-gk))), rgb(253 246 250 / calc(0.015 * var(--ea-gk))));
 }
 
-/* ---- page headers: a wash of glow from the left, in dither (they sit on the grain, not on a plate) ---- */
+/* ---- page headers: a faint wash of glow, noised against banding (they sit on the grain, not on a plate) ---- */
 html.ea [data-slot="page-header"] {
   isolation: isolate;
 }
 html.ea [data-slot="page-header"]::before {
   content: "";
   position: absolute;
-  inset: -0.75rem 0 -0.5rem -1.5rem;
+  inset: -0.5rem 0 -0.5rem 0;
   z-index: -1;
-  background: linear-gradient(90deg, rgb(240 153 191 / calc(0.1 * var(--ea-gk))), rgb(254 190 117 / calc(0.06 * var(--ea-gk))) 55%, transparent);
-  mask-image: var(--ea-ramp-x-l);
-  mask-size: 128px 16px;
-  mask-repeat: repeat-y;
+  background:
+    var(--ea-dither),
+    linear-gradient(90deg, transparent, rgb(240 153 191 / calc(0.07 * var(--ea-gk))) 12%, rgb(254 190 117 / calc(0.04 * var(--ea-gk))) 50%, transparent);
   pointer-events: none;
 }
