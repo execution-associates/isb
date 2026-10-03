@@ -34,6 +34,7 @@ pub mod balance;
 pub mod client;
 pub mod compose;
 pub mod daemon;
+pub mod discovery;
 pub mod error;
 pub mod exec;
 mod flex;

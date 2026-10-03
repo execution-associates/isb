@@ -38,6 +38,11 @@ isb stack ls | ps NAME | logs NAME SERVICE | config NAME
 isb stack scale NAME SERVICE=N... | redeploy NAME SERVICE | rollback NAME
 isb stack rm NAME [--volumes]
 
+# orgs: incus projects with their own network (docs/orgs.md)
+isb org create NAME [--cpus N] [--memory M] [--bind-root DIR]... [--allow-egress CIDR[:PORTS[/tcp|udp]]]...
+isb org ls [--json] | show NAME [--json] | rm NAME [--force]
+sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run]   firewall for org bridges, service-name dir
+
 # secrets, per org, on the isb serve daemon (docs/secrets.md); all take --org ORG
 isb secret create NAME [FILE|-] [--driver D] [-l k=v]   value from FILE or stdin, never argv
 isb secret set NAME [FILE|-]               a new version

@@ -23,6 +23,7 @@ use super::{
 use crate::balance::Balancer;
 use crate::client::{Client, encode_query, encode_segment};
 use crate::error::{Error, Result};
+use crate::org::OrgId;
 use crate::plan::{Desired, split_addr};
 use crate::sandbox::{EnsureOptions, Sandbox};
 use crate::spec::{
@@ -288,7 +289,19 @@ impl Controller {
                     std::thread::sleep(SAMPLE_EVERY);
                 }
             });
-        for def in c.inner.store.load_all()? {
+        let defs = c.inner.store.load_all()?;
+        // Service names of stacks removed while no daemon ran.
+        for def in &defs {
+            if let Some(dir) = crate::discovery::org_dir(&def.org) {
+                let keep: Vec<(String, String)> = defs
+                    .iter()
+                    .filter(|d| d.org == def.org)
+                    .flat_map(|d| d.file.services.keys().map(|s| (d.name.clone(), s.clone())))
+                    .collect();
+                crate::discovery::prune(&dir, &keep);
+            }
+        }
+        for def in defs {
             eprintln!("isb serve: resuming stack {}", def.name);
             c.apply(Arc::new(def));
         }
@@ -871,10 +884,14 @@ struct Worker {
     /// `depends_on` was met once: from then on the service is reconciled
     /// whatever its dependencies do.
     deps_met: bool,
+    org: OrgId,
+    /// The addresses last published as the service's name.
+    dns_last: Option<Vec<IpAddr>>,
+    dns_error: Option<String>,
 }
 
 fn spawn_worker(inner: Arc<Inner>, def: &StackDef, service: String, shared: Arc<WorkerShared>) {
-    let (stack, q) = (def.name.clone(), def.qualified());
+    let (stack, q, org) = (def.name.clone(), def.qualified(), def.org.clone());
     let oclient = crate::org::client(&inner.client, &def.org);
     let name = format!("isb-{q}-{service}");
     let r = std::thread::Builder::new().name(name).spawn(move || {
@@ -898,6 +915,9 @@ fn spawn_worker(inner: Arc<Inner>, def: &StackDef, service: String, shared: Arc<
             rollout: None,
             rates: BTreeMap::new(),
             deps_met: false,
+            org,
+            dns_last: None,
+            dns_error: None,
         };
         w.run();
     });
@@ -978,6 +998,15 @@ impl Worker {
 
     /// Delete this service's instances and routes, then leave.
     fn teardown(&mut self, def: &StackDef, volumes: bool) {
+        // The name goes first, whoever published it.
+        if let Some(dir) = crate::discovery::org_dir(&self.org).filter(|d| d.is_dir()) {
+            if let Err(e) =
+                crate::discovery::publish(&dir, &self.org, &self.stack, &self.service, &[])
+            {
+                self.log(&format!("cannot remove the service name: {e}"));
+            }
+        }
+        self.dns_last = Some(Vec::new());
         for (k, _) in std::mem::take(&mut self.routes) {
             self.inner.balancer.remove_route(&k);
         }
@@ -1767,9 +1796,52 @@ impl Worker {
             }
         }
         self.route_errors = errors;
+        self.sync_dns();
+    }
+
+    /// Publish the in-rotation replicas' addresses as the service's name
+    /// (see [`crate::discovery`]). Nothing to do in the default org, or in an
+    /// org created without service names.
+    fn sync_dns(&mut self) {
+        let Some(dir) = crate::discovery::org_dir(&self.org) else {
+            return;
+        };
+        let mut ips: Vec<IpAddr> = self
+            .rt
+            .values()
+            .filter(|r| r.in_rotation)
+            .filter_map(|r| r.ip)
+            .collect();
+        ips.sort();
+        // A worker that has published nothing yet (a daemon restart) leaves
+        // the last records alone until a replica is back in rotation, rather
+        // than blanking the name while health is being re-established.
+        let fresh = self.dns_last.is_none() && ips.is_empty();
+        if fresh || self.dns_last.as_ref() == Some(&ips) || !dir.is_dir() {
+            return;
+        }
+        match crate::discovery::publish(&dir, &self.org, &self.stack, &self.service, &ips) {
+            Ok(()) => {
+                self.dns_last = Some(ips);
+                self.dns_error = None;
+            }
+            Err(e) => {
+                let e = e.to_string();
+                if self.dns_error.as_deref() != Some(&e) {
+                    self.event(
+                        "warn",
+                        None,
+                        &format!("cannot publish the service name: {e}"),
+                    );
+                    self.dns_error = Some(e);
+                }
+            }
+        }
     }
 
     fn publish_status(&mut self, def: &StackDef) {
+        // An address can change without a rotation change (a restart).
+        self.sync_dns();
         let Ok(spec) = def.service(&self.service) else {
             return;
         };
