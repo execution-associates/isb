@@ -11,6 +11,7 @@ pub mod merge;
 pub mod pki;
 pub mod provision;
 pub mod store;
+pub mod upgrade;
 pub mod vm;
 pub mod wire;
 
@@ -46,6 +47,8 @@ pub struct Servers {
     /// Serializes record and placement changes (held briefly; a bootstrap
     /// runs outside it, one per name through `runs`).
     admin: Mutex<()>,
+    /// Servers being upgraded.
+    upgrading: Mutex<BTreeSet<String>>,
     stop: Arc<AtomicBool>,
 }
 
@@ -72,6 +75,7 @@ impl Servers {
             mirrored: Mutex::new(BTreeSet::new()),
             runs: provision::Runs::default(),
             admin: Mutex::new(()),
+            upgrading: Mutex::new(BTreeSet::new()),
             stop: Arc::new(AtomicBool::new(false)),
         }))
     }
@@ -131,10 +135,18 @@ impl Servers {
     /// A server as `server_list` and `server_show` answer it.
     pub fn view(&self, r: &ServerRecord) -> Value {
         let mut v = serde_json::to_value(r).unwrap_or_default();
+        let h = self.health(&r.name);
         v["kind"] = json!(if r.vm.is_some() { "vm" } else { "ssh" });
         v["orgs"] = json!(self.orgs_on(&r.name));
-        v["health"] = serde_json::to_value(self.health(&r.name)).unwrap_or_default();
+        v["version"] = version_view(&r.name, &h.heartbeat, r.vm.is_some());
+        v["health"] = serde_json::to_value(h).unwrap_or_default();
         v
+    }
+
+    /// Refuse to forward to `server` when its agent speaks a protocol this
+    /// control plane cannot (`need`: the oldest that will do).
+    pub fn check_protocol(&self, server: &str, need: u64) -> Result<()> {
+        upgrade::compatible(server, &self.health(server).heartbeat, need)
     }
 
     /// Place `org` on `server` (the agent is told first, so it accepts
@@ -188,6 +200,7 @@ impl Servers {
     ) -> Result<Value> {
         let who = Assertion::for_caller(caller)
             .ok_or_else(|| Error::Forbidden(format!("{caller} cannot act on server {server}")))?;
+        self.check_protocol(server, upgrade::MIN_PROTOCOL)?;
         self.client(server)?
             .call(tool, args, &who, org, request_id, CALL_TIMEOUT)
     }
@@ -536,6 +549,32 @@ impl Servers {
                 me.mirrored.lock().unwrap().remove(&name);
             });
     }
+}
+
+/// What a server runs next to what this control plane runs: the version,
+/// the build (a hash of the binary, so two builds of one version differ),
+/// and whether they speak the same protocol.
+fn version_view(name: &str, hb: &Value, vm: bool) -> Value {
+    let known = !hb.is_null();
+    let build = hb["build"].as_str().unwrap_or("");
+    json!({
+        "isb": hb["isb"],
+        "build": hb["build"],
+        "protocol": known.then(|| upgrade::protocol_of(hb)),
+        "control_plane": {
+            "isb": env!("CARGO_PKG_VERSION"),
+            "build": upgrade::build_id(),
+            "protocol": upgrade::PROTOCOL,
+        },
+        // Unknown until it answers; a different build of the same version
+        // is skew too.
+        "skew": known && (hb["isb"].as_str() != Some(env!("CARGO_PKG_VERSION")) || build != upgrade::build_id()),
+        "compatible": upgrade::compatible(name, hb, upgrade::MIN_PROTOCOL).is_ok(),
+        "ssh": upgrade::compatible(name, hb, upgrade::SSH_PROTOCOL).is_ok(),
+        // A dedicated VM is upgraded through incus, helper or not.
+        "upgradable": vm || hb["upgrade"]["helper"] == true,
+        "last_upgrade": hb["upgrade"]["last"],
+    })
 }
 
 /// Re-emit one of a server's events if it belongs to an org placed there.

@@ -332,7 +332,8 @@ chmod 0644 {tls}/ca.crt
 umask 022
 cat > /etc/systemd/system/{unit} <<'ISB_EOF'
 {unit_text}ISB_EOF
-systemctl daemon-reload
+# The upgrade helper: `isb server upgrade` stages a binary, this installs it.
+{helper}systemctl daemon-reload
 systemctl enable {unit} >/dev/null 2>&1
 systemctl restart {unit}
 echo "incus $(incus version 2>/dev/null | tail -n1 | awk '{{print $NF}}')"
@@ -346,6 +347,7 @@ echo "incus $(incus version 2>/dev/null | tail -n1 | awk '{{print $NF}}')"
         key = leaf.key,
         unit = AGENT_UNIT,
         unit_text = render_unit(port, public_ingress),
+        helper = super::upgrade::helper_install(),
         host_ingress = if public_ingress {
             " --public-ingress"
         } else {
@@ -536,6 +538,7 @@ mod tests {
         assert!(s.contains("pkgs.zabbly.com/incus/stable"));
         assert!(s.contains("--agent-listen 0.0.0.0:7443"));
         assert!(s.contains("--ingress-https 0.0.0.0:443") && s.contains("--public-ingress"));
+        assert!(s.contains("systemctl enable --now isb-agent-upgrade.path"));
         let open = render_script(
             "/tmp/isb-agent.x",
             "abc",

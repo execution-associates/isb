@@ -495,29 +495,12 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     });
     let mut listeners = vec![Listener::unix(&cfg.socket).hooks(hooks.clone())];
     if let Some(ac) = &cfg.agent {
-        let tls = crate::servers::pki::agent_server_config(&ac.tls_dir)?;
-        let state = Arc::new(servers::AgentState {
-            orgs: Arc::new(crate::servers::store::AgentOrgs::open(&cfg.state_dir)?),
-            tls: Arc::new(std::sync::RwLock::new(tls)),
-            tls_dir: ac.tls_dir.clone(),
-        });
-        eprintln!(
-            "isb serve: agent for a control plane; orgs placed here: {}",
-            state
-                .orgs
-                .list()
-                .iter()
-                .map(|o| o.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
         listeners.push(servers::agent_listener(
             d.clone(),
             &hooks,
-            &ac.listen,
-            state,
+            ac,
             webhooks.clone(),
-        ));
+        )?);
     }
     for addr in &cfg.listen {
         let tailnet = superadmin::is_tailnet_listen(addr);

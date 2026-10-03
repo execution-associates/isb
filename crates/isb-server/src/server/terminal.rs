@@ -106,6 +106,10 @@ pub enum PtyOutput {
     Exit(Option<i32>),
     /// It could not run, or the exec broke: shown to the person, then closed.
     Failed(String),
+    /// A control message for the other end, sent as a text frame (an
+    /// agent's SSH session telling its control plane which key sshd
+    /// accepted). Never content.
+    Note(serde_json::Value),
 }
 
 /// A pseudo-terminal the bridge drives.
@@ -412,6 +416,9 @@ pub fn bridge(
                     }
                 }
                 PtyOutput::Idle => break,
+                PtyOutput::Note(v) => {
+                    let _ = ws.send(control(v));
+                }
                 PtyOutput::Failed(m) => {
                     let _ = ws.send(control(json!({"type": "error", "message": m})));
                     let _ = ws.close(Some(CloseFrame {

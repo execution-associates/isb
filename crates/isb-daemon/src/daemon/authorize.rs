@@ -25,6 +25,7 @@ pub(super) const PLATFORM_TOOLS: &[&str] = &[
     "server_remove",
     "server_rotate_cert",
     "server_provision_get",
+    "server_upgrade",
     "user_list",
     "user_update",
 ];

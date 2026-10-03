@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 use super::wire::Assertion;
 use crate::error::{Error, Result};
 use crate::org::OrgId;
+use crate::server::ssh::{self, SshRequest};
 use crate::server::terminal::{Pty, PtyOutput, TermRequest};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -227,40 +228,64 @@ impl AgentClient {
             None => Vec::new(),
         };
         let a = self.request(method, path, &h, &body, timeout)?;
-        let v: Value = serde_json::from_slice(&a.body).unwrap_or(Value::Null);
-        if a.status != 200 {
-            return Err(Error::Remote {
-                code: v["error"].as_str().unwrap_or("server_error").into(),
-                message: format!(
-                    "server {}: {path}: HTTP {}: {}",
-                    self.name,
-                    a.status,
-                    v["message"]
-                        .as_str()
-                        .unwrap_or_else(|| std::str::from_utf8(&a.body).unwrap_or(""))
-                ),
-                data: Value::Null,
-            });
-        }
-        Ok(v)
+        internal_answer(&self.name, path, &a)
     }
 
     /// A terminal on the agent, as `who`.
     pub fn terminal(&self, who: &Assertion, org: &OrgId, t: &TermRequest) -> Result<Box<dyn Pty>> {
+        let path = format!("/orgs/{org}/api/v1/terminal?{}", t.query());
+        let target = format!("{}:{}", self.name, t.target());
+        Ok(Box::new(self.websocket(&path, who, &[], target)?))
+    }
+
+    /// An SSH session on the agent, as `who`, letting in `keys` (the
+    /// caller's account's keys, as the control plane read them just now).
+    pub fn ssh(
+        &self,
+        who: &Assertion,
+        org: &OrgId,
+        s: &SshRequest,
+        keys: &[String],
+    ) -> Result<Box<dyn Pty>> {
+        let req = SshRequest {
+            instance: s.instance.clone(),
+            keys_of: None,
+            forwarded_keys: None,
+        };
+        let path = format!("/orgs/{org}/api/v1/ssh?{}", req.query());
+        let header = (ssh::KEYS_HEADER, ssh::keys_header(keys));
+        let target = format!("{}:{}", self.name, s.instance);
+        Ok(Box::new(self.websocket(&path, who, &[header], target)?))
+    }
+
+    /// A websocket to `path` on the agent, as `who`.
+    fn websocket(
+        &self,
+        path: &str,
+        who: &Assertion,
+        headers: &[(&str, String)],
+        target: String,
+    ) -> Result<RemotePty> {
         use tungstenite::client::IntoClientRequest;
         let s = self.connect(CONNECT_TIMEOUT)?;
-        let q = t.query();
-        let url = format!("wss://{}/orgs/{org}/api/v1/terminal?{q}", self.authority());
+        let url = format!("wss://{}{path}", self.authority());
         let mut req = url
             .into_client_request()
             .map_err(|e| Error::WebSocket(e.to_string()))?;
-        req.headers_mut().insert(
-            "authorization",
-            who.header()
+        let mut put = |k: &str, v: &str| -> Result<()> {
+            let name = tungstenite::http::HeaderName::from_bytes(k.as_bytes())
+                .map_err(|_| Error::invalid(format!("header {k}")))?;
+            let value = v
                 .parse()
-                .map_err(|_| Error::invalid("assertion header"))?,
-        );
-        let (ws, resp) = tungstenite::client(req, s).map_err(|e| match e {
+                .map_err(|_| Error::invalid(format!("header {k}")))?;
+            req.headers_mut().insert(name, value);
+            Ok(())
+        };
+        put("authorization", &who.header())?;
+        for (k, v) in headers {
+            put(k, v)?;
+        }
+        let (ws, _) = tungstenite::client(req, s).map_err(|e| match e {
             tungstenite::HandshakeError::Failure(tungstenite::Error::Http(r)) => {
                 let body = r
                     .body()
@@ -268,20 +293,39 @@ impl AgentClient {
                     .map(|b| String::from_utf8_lossy(b).into_owned())
                     .unwrap_or_default();
                 let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
-                Error::Remote {
-                    code: v["error"].as_str().unwrap_or("server_error").into(),
-                    message: v["message"].as_str().unwrap_or(&body).to_string(),
-                    data: Value::Null,
+                let message = v["message"].as_str().unwrap_or(&body).to_string();
+                match v["error"].as_str() {
+                    Some("forbidden") => Error::Forbidden(message),
+                    code => Error::Remote {
+                        code: code.unwrap_or("server_error").into(),
+                        message,
+                        data: Value::Null,
+                    },
                 }
             }
             e => Error::WebSocket(format!("server {}: {e}", self.name)),
         })?;
-        let _ = resp;
-        Ok(Box::new(RemotePty {
+        Ok(RemotePty {
             ws,
             done: false,
-            target: format!("{}:{}", self.name, t.target()),
-        }))
+            target,
+        })
+    }
+
+    /// POST raw bytes to an internal route as the control plane itself.
+    pub fn internal_bytes(&self, path: &str, body: &[u8], timeout: Duration) -> Result<Value> {
+        let h = vec![
+            (
+                "Authorization".to_string(),
+                Assertion::control_plane().header(),
+            ),
+            (
+                "Content-Type".to_string(),
+                "application/octet-stream".to_string(),
+            ),
+        ];
+        let a = self.request("POST", path, &h, body, timeout)?;
+        internal_answer(&self.name, path, &a)
     }
 }
 
@@ -321,6 +365,25 @@ pub fn parse_answer(buf: &[u8]) -> Option<Answer> {
     })
 }
 
+/// An internal route's answer: its JSON on 200, else the error it gave.
+fn internal_answer(name: &str, path: &str, a: &Answer) -> Result<Value> {
+    let v: Value = serde_json::from_slice(&a.body).unwrap_or(Value::Null);
+    if a.status != 200 {
+        return Err(Error::Remote {
+            code: v["error"].as_str().unwrap_or("server_error").into(),
+            message: format!(
+                "server {name}: {path}: HTTP {}: {}",
+                a.status,
+                v["message"]
+                    .as_str()
+                    .unwrap_or_else(|| std::str::from_utf8(&a.body).unwrap_or(""))
+            ),
+            data: Value::Null,
+        });
+    }
+    Ok(v)
+}
+
 /// A REST tool answer: `{"result"}` on 200, else `{"error","message","data"}`.
 pub fn tool_answer(server: &str, a: &Answer) -> Result<Value> {
     let v: Value = serde_json::from_slice(&a.body).map_err(|e| {
@@ -356,7 +419,7 @@ pub fn tool_answer(server: &str, a: &Answer) -> Result<Value> {
     })
 }
 
-/// A terminal on an agent, bridged as if it were local.
+/// A terminal or SSH session on an agent, bridged as if it were local.
 struct RemotePty {
     ws: tungstenite::WebSocket<Tls>,
     done: bool,
@@ -417,6 +480,9 @@ impl Pty for RemotePty {
                         self.done = true;
                         PtyOutput::Failed(v["message"].as_str().unwrap_or("error").to_string())
                     }
+                    // What the agent's sshd accepted, for the control
+                    // plane's own checks; never passed on to the client.
+                    Some("accepted") => PtyOutput::Note(v),
                     _ => PtyOutput::Idle,
                 }
             }

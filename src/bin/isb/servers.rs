@@ -63,6 +63,75 @@ pub enum ServerCmd {
     Rm { name: String },
     /// Issue the server's agent a new certificate.
     RotateCert { name: String },
+    /// Replace a server's agent with this control plane's own isb (or a
+    /// release), and wait until it answers with it; the box puts the old
+    /// one back if it does not.
+    Upgrade {
+        /// The server.
+        #[arg(required_unless_present = "all", conflicts_with = "all")]
+        name: Option<String>,
+        /// Every server, one after another.
+        #[arg(long)]
+        all: bool,
+        /// Install this isb release instead (checked against its SHA256SUMS).
+        #[arg(long, conflicts_with = "isb_binary")]
+        isb_version: Option<String>,
+        /// Install this Linux isb binary instead.
+        #[arg(long)]
+        isb_binary: Option<PathBuf>,
+    },
+}
+
+/// `isb server upgrade`: one line per server, and a failure if any failed.
+fn upgrade(
+    name: Option<String>,
+    all: bool,
+    version: Option<String>,
+    binary: Option<PathBuf>,
+) -> Result<u8> {
+    let mut a = json!({});
+    match &name {
+        Some(n) => a["name"] = json!(n),
+        None => a["all"] = json!(all),
+    }
+    if let Some(v) = version {
+        a["version"] = json!(v);
+    }
+    if let Some(b) = binary {
+        a["isb_binary"] = json!(std::fs::canonicalize(&b).unwrap_or(b));
+    }
+    eprintln!(
+        "upgrading (a minute or two per server; calls for its orgs fail while its agent restarts)"
+    );
+    let v = call("server_upgrade", a, Duration::from_secs(3600))?;
+    let list = match name {
+        Some(_) => vec![v],
+        None => v["servers"].as_array().cloned().unwrap_or_default(),
+    };
+    let mut failed = 0;
+    for r in &list {
+        let short = |b: &Value| {
+            b.as_str()
+                .map(|s| s[..s.len().min(12)].to_string())
+                .unwrap_or_default()
+        };
+        let n = r["name"].as_str().unwrap_or("");
+        match (r.get("error"), r["upgraded"].as_bool()) {
+            (Some(e), _) => {
+                failed += 1;
+                eprintln!("{n}: failed: {}", e.as_str().unwrap_or(""));
+            }
+            (None, Some(true)) => println!(
+                "{n}: isb {} ({}) -> isb {} ({})",
+                r["from"]["isb"].as_str().unwrap_or("?"),
+                short(&r["from"]["build"]),
+                r["to"]["isb"].as_str().unwrap_or("?"),
+                short(&r["to"]["build"])
+            ),
+            _ => println!("{n}: {}", r["note"].as_str().unwrap_or("unchanged")),
+        }
+    }
+    Ok(u8::from(failed > 0))
 }
 
 /// Follow a server being added (`server_provision_get`) until it is done,
@@ -186,7 +255,11 @@ pub fn server(cmd: ServerCmd) -> Result<u8> {
                     },
                     format!("{}:{}", s["address"].as_str().unwrap_or(""), s["port"]),
                     s["health"]["state"].as_str().unwrap_or("").into(),
-                    hb["isb"].as_str().unwrap_or("-").into(),
+                    match (hb["isb"].as_str(), s["version"]["skew"].as_bool()) {
+                        (Some(v), Some(true)) => format!("{v} (differs)"),
+                        (Some(v), _) => v.into(),
+                        (None, _) => "-".into(),
+                    },
                     hb["host"]["cpu_pct"]
                         .as_f64()
                         .map(|p| format!("{p:.0}% of {}", hb["host"]["cpus"]))
@@ -221,6 +294,12 @@ pub fn server(cmd: ServerCmd) -> Result<u8> {
             }
             Ok(0)
         }
+        ServerCmd::Upgrade {
+            name,
+            all,
+            isb_version,
+            isb_binary,
+        } => upgrade(name, all, isb_version, isb_binary),
         ServerCmd::RotateCert { name } => {
             let v = call("server_rotate_cert", json!({"name": name}), SHORT)?;
             println!(

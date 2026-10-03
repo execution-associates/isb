@@ -79,6 +79,7 @@ pub(super) fn terminal(d: Arc<Daemon>) -> Terminal {
             if let Some((s, server)) = d.remote(org) {
                 let who = crate::servers::wire::Assertion::for_caller(c)
                     .ok_or_else(|| Error::Forbidden(format!("{c} cannot open a terminal")))?;
+                s.check_protocol(&server, crate::servers::upgrade::MIN_PROTOCOL)?;
                 return s.client(&server)?.terminal(&who, org, t);
             }
             let oc = crate::org::client(&d.client, org);

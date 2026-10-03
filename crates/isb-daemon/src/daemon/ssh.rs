@@ -172,15 +172,12 @@ pub(super) fn account(users: &AuthStore, c: &Caller, s: &SshRequest) -> Result<(
     Ok((user, grant))
 }
 
-/// The SSH hook: an `sshd -i` in the instance, for the caller's keys.
+/// The SSH hook: an `sshd -i` in the instance, for the caller's keys. For
+/// an org placed on a server, the session is bridged to that server's
+/// agent with the keys read here, and checked here as a local one is.
 pub(super) fn ssh(d: Arc<Daemon>, users: Arc<AuthStore>) -> Ssh {
     Arc::new(
         move |c: &Caller, org: &OrgId, s: &SshRequest| -> Result<Box<dyn Pty>> {
-            if d.remote(org).is_some() {
-                return Err(Error::invalid(format!(
-                    "org {org} is placed on a server, and SSH to such orgs is not forwarded yet; use the web terminal"
-                )));
-            }
             let (user, mut grant) = account(&users, c, s)?;
             grant.org = org.clone();
             let keys = users
@@ -192,53 +189,164 @@ pub(super) fn ssh(d: Arc<Daemon>, users: Arc<AuthStore>) -> Ssh {
                     user.email
                 )));
             }
-            let oc = crate::org::client(&d.client, org);
-            let info = d.reach(c, &oc, &s.instance)?;
-            if info.status != "Running" {
-                return Err(Error::invalid(format!(
-                    "{} is {}, not running",
-                    s.instance,
-                    info.status.to_lowercase()
-                )));
-            }
             let lines: Vec<String> = keys.iter().map(|k| k.public_key.clone()).collect();
-            let mut opts = ExecOptions::default()
-                .user("0:0")
-                .cwd("/")
-                .stdin(Stdin::Piped)
-                .env(
-                    "PATH",
-                    "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-                )
-                .env("ISB_SSH_KEYS", lines.join("\n"));
-            opts.tty = false;
-            let stream = Sandbox::get(&oc, &s.instance)?
-                .exec_stream(["/bin/sh", "-c", SCRIPT], opts)
-                .map_err(|e| Error::invalid(format!("cannot start sshd in {}: {e}", s.instance)))?;
             let u = users.clone();
-            let uid = user.id;
-            Ok(Box::new(SshPty {
-                ctl: stream.controller(),
-                stream,
-                done: false,
-                instance: s.instance.clone(),
-                log: Vec::new(),
-                partial: Vec::new(),
-                accepted: None,
-                checked: Instant::now(),
-                recheck: Box::new(move |fp| still_allowed(&u, &grant, fp)),
-                touch: {
-                    let u = users.clone();
-                    Box::new(move |fp| {
-                        let _ = u.touch_ssh_key(uid, fp);
-                    })
-                },
-            }))
+            let recheck: Recheck = Box::new(move |fp| still_allowed(&u, &grant, fp));
+            let touch: Touch = {
+                let (u, uid) = (users.clone(), user.id);
+                Box::new(move |fp| {
+                    let _ = u.touch_ssh_key(uid, fp);
+                })
+            };
+            if let Some((servers, server)) = d.remote(org) {
+                servers.check_protocol(&server, crate::servers::upgrade::SSH_PROTOCOL)?;
+                let who = crate::servers::wire::Assertion::for_caller(c)
+                    .ok_or_else(|| Error::Forbidden(format!("{c} cannot open SSH")))?;
+                let inner = servers.client(&server)?.ssh(&who, org, s, &lines)?;
+                return Ok(Box::new(Bridged {
+                    inner,
+                    server,
+                    accepted: None,
+                    checked: Instant::now(),
+                    recheck,
+                    touch,
+                }));
+            }
+            let mut pty = sshd(&d, c, org, &s.instance, &lines)?;
+            pty.recheck = recheck;
+            pty.touch = touch;
+            Ok(Box::new(pty))
         },
     )
 }
 
+/// On a server's agent: sessions its control plane forwards, letting in the
+/// keys the control plane read from the caller's account. The control
+/// plane re-checks the grant and ends the bridge; this end tells it which
+/// key sshd accepted.
+pub(super) fn forwarded(d: Arc<Daemon>) -> Ssh {
+    Arc::new(
+        move |c: &Caller, org: &OrgId, s: &SshRequest| -> Result<Box<dyn Pty>> {
+            let Some(sent) = &s.forwarded_keys else {
+                return Err(Error::Forbidden(
+                    "SSH to this server comes through its control plane".into(),
+                ));
+            };
+            // Only keys as isb stores them: no options, one per line.
+            let lines: Vec<String> = sent
+                .iter()
+                .map(|k| crate::auth::ssh_keys::PublicKey::parse(k).map(|k| k.line()))
+                .collect::<std::result::Result<_, _>>()
+                .map_err(|e| Error::invalid(format!("a forwarded SSH key: {e}")))?;
+            let mut pty = sshd(&d, c, org, &s.instance, &lines)?;
+            pty.announce = true;
+            Ok(Box::new(pty))
+        },
+    )
+}
+
+/// `sshd -i` in `instance` for `keys`, with no checks of its own yet.
+fn sshd(d: &Daemon, c: &Caller, org: &OrgId, instance: &str, keys: &[String]) -> Result<SshPty> {
+    let oc = crate::org::client(&d.client, org);
+    let info = d.reach(c, &oc, instance)?;
+    if info.status != "Running" {
+        return Err(Error::invalid(format!(
+            "{instance} is {}, not running",
+            info.status.to_lowercase()
+        )));
+    }
+    let mut opts = ExecOptions::default()
+        .user("0:0")
+        .cwd("/")
+        .stdin(Stdin::Piped)
+        .env(
+            "PATH",
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        )
+        .env("ISB_SSH_KEYS", keys.join("\n"));
+    opts.tty = false;
+    let stream = Sandbox::get(&oc, instance)?
+        .exec_stream(["/bin/sh", "-c", SCRIPT], opts)
+        .map_err(|e| Error::invalid(format!("cannot start sshd in {instance}: {e}")))?;
+    Ok(SshPty {
+        ctl: stream.controller(),
+        stream,
+        done: false,
+        instance: instance.to_string(),
+        log: Vec::new(),
+        partial: Vec::new(),
+        accepted: None,
+        announce: false,
+        announced: false,
+        checked: Instant::now(),
+        recheck: Box::new(|_| Ok(())),
+        touch: Box::new(|_| {}),
+    })
+}
+
+/// An SSH session on a server's agent, as the control plane sees it: the
+/// bytes pass through; the grant is checked every [`RECHECK`] here, where
+/// the account lives, and a failed check ends the bridge (and so the
+/// agent's sshd).
+struct Bridged {
+    inner: Box<dyn Pty>,
+    server: String,
+    accepted: Option<(String, String)>,
+    checked: Instant,
+    recheck: Recheck,
+    touch: Touch,
+}
+
+impl Pty for Bridged {
+    fn input(&mut self, data: &[u8]) -> Result<()> {
+        self.inner.input(data)
+    }
+
+    fn resize(&mut self, _cols: u16, _rows: u16) {}
+
+    fn output(&mut self, wait: Duration) -> PtyOutput {
+        if self.checked.elapsed() >= RECHECK {
+            self.checked = Instant::now();
+            let fp = self.accepted.as_ref().map(|a| a.1.clone());
+            if let Err(m) = (self.recheck)(fp.as_deref()) {
+                self.inner.close();
+                return PtyOutput::Failed(m);
+            }
+        }
+        match self.inner.output(wait) {
+            PtyOutput::Note(v) => {
+                let user = v["user"].as_str().unwrap_or("").to_string();
+                if let Some(fp) = v["fingerprint"].as_str() {
+                    (self.touch)(fp);
+                    self.accepted = Some((user, fp.to_string()));
+                }
+                PtyOutput::Idle
+            }
+            o => o,
+        }
+    }
+
+    fn close(&mut self) {
+        self.inner.close();
+    }
+
+    fn target(&self) -> Option<String> {
+        self.inner.target()
+    }
+
+    fn details(&self) -> Option<Map<String, Value>> {
+        let mut m = Map::new();
+        m.insert("server".into(), json!(self.server));
+        if let Some((user, fp)) = &self.accepted {
+            m.insert("ssh_user".into(), json!(user));
+            m.insert("fingerprint".into(), json!(fp));
+        }
+        Some(m)
+    }
+}
+
 type Recheck = Box<dyn FnMut(Option<&str>) -> std::result::Result<(), String> + Send>;
+type Touch = Box<dyn FnMut(&str) + Send>;
 
 /// An SSH connection's bytes to and from `sshd -i`.
 struct SshPty {
@@ -251,9 +359,13 @@ struct SshPty {
     partial: Vec<u8>,
     /// The user and key fingerprint sshd accepted.
     accepted: Option<(String, String)>,
+    /// Tell the other end of the websocket which key sshd accepted (an
+    /// agent's session, for its control plane), once.
+    announce: bool,
+    announced: bool,
     checked: Instant,
     recheck: Recheck,
-    touch: Box<dyn FnMut(&str) + Send>,
+    touch: Touch,
 }
 
 const LOG_KEEP: usize = 4096;
@@ -346,7 +458,15 @@ impl Pty for SshPty {
             Ok(Some(ExecEvent::Stdout(b))) => PtyOutput::Data(b),
             Ok(Some(ExecEvent::Stderr(b))) => {
                 self.note(&b);
-                PtyOutput::Idle
+                match &self.accepted {
+                    Some((user, fp)) if self.announce && !self.announced => {
+                        self.announced = true;
+                        PtyOutput::Note(
+                            json!({"type": "accepted", "user": user, "fingerprint": fp}),
+                        )
+                    }
+                    _ => PtyOutput::Idle,
+                }
             }
             Ok(None) => PtyOutput::Idle,
             Err(Ok(code)) => {
@@ -552,6 +672,76 @@ mod tests {
         );
     }
 
+    /// The agent's end of a bridged session: a note, then nothing.
+    struct Far {
+        noted: bool,
+        closed: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl Pty for Far {
+        fn input(&mut self, _: &[u8]) -> Result<()> {
+            Ok(())
+        }
+        fn resize(&mut self, _: u16, _: u16) {}
+        fn output(&mut self, _: Duration) -> PtyOutput {
+            if !self.noted {
+                self.noted = true;
+                return PtyOutput::Note(
+                    json!({"type": "accepted", "user": "dev", "fingerprint": "SHA256:k"}),
+                );
+            }
+            PtyOutput::Idle
+        }
+        fn close(&mut self) {
+            self.closed.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn a_bridged_session_is_checked_here_and_ends_the_far_side() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let closed = Arc::new(AtomicBool::new(false));
+        let revoked = Arc::new(AtomicBool::new(false));
+        let touched = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let (r, t) = (revoked.clone(), touched.clone());
+        let mut b = Bridged {
+            inner: Box::new(Far {
+                noted: false,
+                closed: closed.clone(),
+            }),
+            server: "box".into(),
+            accepted: None,
+            checked: Instant::now(),
+            recheck: Box::new(move |fp| {
+                if r.load(Ordering::SeqCst) {
+                    Err(format!(
+                        "the SSH key that opened this session ({}) was removed",
+                        fp.unwrap_or("?")
+                    ))
+                } else {
+                    Ok(())
+                }
+            }),
+            touch: Box::new(move |fp| t.lock().unwrap().push(fp.to_string())),
+        };
+        // The note is kept here, never passed on.
+        assert_eq!(b.output(Duration::ZERO), PtyOutput::Idle);
+        assert_eq!(*touched.lock().unwrap(), ["SHA256:k"]);
+        let d = b.details().unwrap();
+        assert_eq!(
+            (d["ssh_user"].clone(), d["server"].clone()),
+            (json!("dev"), json!("box"))
+        );
+        // Revoked: the next check ends it, naming the key, and closes the far side.
+        revoked.store(true, Ordering::SeqCst);
+        b.checked = Instant::now() - RECHECK;
+        match b.output(Duration::ZERO) {
+            PtyOutput::Failed(m) => assert!(m.contains("SHA256:k"), "{m}"),
+            o => panic!("{o:?}"),
+        }
+        assert!(closed.load(Ordering::SeqCst));
+    }
+
     #[test]
     fn whose_keys() {
         use crate::server::ssh::SshRequest;
@@ -559,6 +749,7 @@ mod tests {
         let req = |as_: Option<&str>| SshRequest {
             instance: "box".into(),
             keys_of: as_.map(String::from),
+            forwarded_keys: None,
         };
         let p = s.principal_for_email("dev@example.com").unwrap().unwrap();
         let me = Caller::User {
