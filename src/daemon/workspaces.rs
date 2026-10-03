@@ -1221,6 +1221,10 @@ fn workspace_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         rebuilt_at: None,
         token: None,
     };
+    if w.root_size.is_none() && project_has_disk_limit(&d.client, &org) {
+        // incus needs a root size in an org with a disk quota.
+        w.root_size = Some(DEFAULT_ROOT_SIZE.into());
+    }
     wsm.mint(&org, &mut w)?;
     wsm.store.put(&org, &w)?;
     let mut log = Vec::new();

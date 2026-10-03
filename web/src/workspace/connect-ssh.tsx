@@ -23,7 +23,7 @@ export function ConnectSsh({ org, ws }: { org: string; ws: Workspace }) {
         </>
       }
     >
-      <div className="space-y-3">
+      <div className="space-y-3 p-5">
         {sshSteps(org, ws.name, window.location.origin).map((s) => (
           <CodeBlock key={s.title} title={s.title} code={s.code} />
         ))}
