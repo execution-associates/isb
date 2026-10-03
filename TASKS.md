@@ -4,7 +4,8 @@ The work plan for turning isb into a multi-tenant platform: orgs as the trust
 boundary, built-in auth, pluggable secrets, a deploy loop, a web UI, day-2
 operations and remote servers. On Linux and macOS. Dokploy is the UX bar; its
 Apache-2.0 code is a reference for requirements, never copied (nothing under
-any `proprietary/` directory is read at all).
+any `proprietary/` directory is read at all). `notes/dokploy-requirements.md`
+condenses what it does.
 
 ## How to use this file
 
@@ -217,10 +218,11 @@ minime only runs binaries downloaded from our CI runs.
   schedule and its logs are visible.
 - [ ] P4.3 Notifications (Slack, Discord, Telegram, email, webhook) on deploy,
   failure, health, backup events. **Verify:** a webhook receives events.
-- [ ] P4.4 Template catalog (one-click apps), including running Dokploy's
+- [ ] P4.4 Template catalog (one-click apps). **Stretch goal:** running Dokploy's
   templates (docker-compose + `template.toml`: variables, domains, mounts)
   directly; check the Dokploy/templates repo license before shipping its
-  catalog. **Verify:** deploy two native and two Dokploy templates from the UI.
+  catalog. Only if it fits isb's architecture without bending it.
+  **Verify:** deploy two native (and, if done, two Dokploy) templates from the UI.
 - [ ] P4.5 Preview deployments per pull request. **Verify:** a PR on the test
   repo gets a URL; closing it removes it.
 - [ ] P4.6 Metrics history (retained samples) and monitoring pages.
