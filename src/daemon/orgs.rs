@@ -54,9 +54,9 @@ impl Settings {
                 .clone()
                 .ok_or_else(|| Error::invalid("org is required"))?,
         )?;
-        if o.is_default() {
+        if o.is_legacy_default() {
             return Err(Error::invalid(
-                "the default org is incus' default project; it has no settings",
+                "the default org on this host is incus' default project; it has no settings",
             ));
         }
         Ok(o)

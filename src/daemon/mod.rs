@@ -171,12 +171,74 @@ struct Daemon {
     servers: Option<Arc<crate::servers::Servers>>,
 }
 
+/// dnsmasq (as `incus`) reads service names from the DNS root. When that
+/// sits inside the state directory (a daemon running as root, or an agent
+/// whose home is `/var/lib/isb`), the private state directories on the way
+/// must let others pass through: execute only, never list or read. What is
+/// in them stays 0600/0700.
+fn open_dns_path(state_dir: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let dns = crate::discovery::root();
+    for dir in dns.ancestors().skip(1) {
+        if !dir.starts_with(state_dir) {
+            continue;
+        }
+        let Ok(m) = std::fs::metadata(dir) else {
+            continue;
+        };
+        let mode = m.permissions().mode() & 0o7777;
+        if mode & 0o011 != 0o011 {
+            let new = mode | 0o011;
+            match std::fs::set_permissions(dir, std::fs::Permissions::from_mode(new)) {
+                Ok(()) => eprintln!(
+                    "isb serve: {} is now {new:o} so dnsmasq can reach service names in {}",
+                    dir.display(),
+                    dns.display()
+                ),
+                Err(e) => eprintln!(
+                    "isb serve: WARNING: {} blocks dnsmasq from {} (service names will not resolve): {e}",
+                    dir.display(),
+                    dns.display()
+                ),
+            }
+        }
+    }
+}
+
 /// Run the daemon until SIGINT/SIGTERM. Apps keep running when it stops.
 pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     client
         .server_info()
         .map_err(|e| Error::invalid(format!("isb serve needs incusd: {e}")))?;
     let store = Store::open(&cfg.state_dir)?;
+    open_dns_path(&cfg.state_dir);
+    // Where the default org lives: a real org (`isb-default`) on a fresh
+    // host, the incus default project where workloads predate isb's orgs.
+    // Decided before anything maps the default org to a project.
+    if cfg.agent.is_none() {
+        let default = crate::org::OrgId::default_org();
+        let has_state = store.load_all()?.iter().any(|d| d.org.is_default())
+            || crate::app::org_root(&cfg.state_dir, &default)
+                .join("apps")
+                .read_dir()
+                .is_ok_and(|mut d| d.next().is_some());
+        match crate::org::adopt_default(
+            &client,
+            &crate::org::OrgOptions::default(),
+            has_state,
+            &mut |l| eprintln!("isb serve: default org: {l}"),
+        ) {
+            Ok(true) => eprintln!(
+                "isb serve: the default org is the incus project {} (its own network and service names)",
+                crate::org::DEFAULT_ORG_PROJECT
+            ),
+            Ok(false) => {}
+            Err(e) => {
+                eprintln!("isb serve: WARNING: could not make the default org a real org: {e}")
+            }
+        }
+    }
+    crate::org::resolve_default(&client);
     let secrets_config = crate::secrets::SecretsConfig::load(&cfg.secrets_config)?;
     let opened = crate::secrets::Secrets::open(&cfg.state_dir, &cfg.keys, &secrets_config)?;
     for n in &opened.notes {
@@ -754,14 +816,18 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
                     .is_none_or(|v| v.iter().any(|o| o.as_str() == org))
             };
             let stacks: Vec<_> = d.ctl.list().into_iter().filter(|s| sees(&s.org)).collect();
-            // Only isb's orgs: incus may hold other tools' projects too.
+            // Only isb's orgs: incus may hold other tools' projects too. Plain
+            // `isb create` sandboxes in incus' default project, where it is
+            // not an org on this host, are shown to local callers (the TUI).
             let sandboxes: Vec<&crate::metrics::InstanceSample> = snap
                 .instances
                 .values()
-                .filter(|i| {
-                    crate::org::OrgId::from_incus_project(&i.project)
-                        .is_some_and(|o| sees(o.as_str()))
-                })
+                .filter(
+                    |i| match crate::org::OrgId::from_incus_project(&i.project) {
+                        Some(o) => sees(o.as_str()),
+                        None => i.project == "default" && c.is_trusted(),
+                    },
+                )
                 .filter(|i| i.stack().is_none())
                 .filter(|i| {
                     c.is_trusted()

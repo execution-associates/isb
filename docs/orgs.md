@@ -60,9 +60,25 @@ directory.
 ## What an org is in incus
 
 Org `acme` is the incus project `isb-acme` (config `user.isb.org=acme`), its
-bridge `isbbr<hash>` and its network ACL `isb-acme`. The `default` org is incus'
-`default` project: everything that predates orgs keeps working there, without
-any of what follows.
+bridge `isbbr<hash>` and its network ACL `isb-acme`.
+
+The `default` org depends on the host:
+
+- **A fresh host** (incus' `default` project holds no instances and isb has
+  no default-org stacks or apps when `isb serve` first starts): the daemon
+  makes it a real org, the incus project `isb-default` with its own bridge,
+  ACL and service names, like any other. Multi-app templates work there.
+  incus' own `default` project is then not an org: plain `isb create` and
+  `isb up` (no `--org`) still put sandboxes there, and the TUI still shows
+  them to local callers.
+- **A host whose incus `default` project already held workloads** (titan):
+  the `default` org *is* incus' `default` project, so everything that
+  predates orgs keeps working where it is, without any of what follows: no
+  restrictions, no org network, no service names. Apps that reach each other
+  by name (multi-app templates) need another org there.
+
+`isb org ls` shows which: the default org's project is `isb-default` or
+`default`.
 
 The project is **restricted**, so incus itself refuses what would reach the
 host:
@@ -214,6 +230,11 @@ the org's dnsmasq.
   org's dnsmasq once).
 - `isb org rm` deletes the org's directory.
 - `ISB_DNS_DIR` moves the directory, for `isb org` and `isb serve` alike.
+- When the directory is inside the daemon's state directory (a daemon
+  running as root keeps its state in `/var/lib/isb`, as does a server's
+  agent), `isb serve` makes the state directories on the way traversable
+  (mode 0711: others may pass through, not list) so dnsmasq can reach the
+  hosts files; everything in them stays 0600/0700.
 
 Trade-off: incus runs a bridge's dnsmasq unconfined (no AppArmor profile) once
 `raw.dnsmasq` is set, and it is the only way to point dnsmasq at a directory.

@@ -1201,12 +1201,16 @@ impl Ctx {
             Some(s) => Client::with_socket(s),
             None => Client::new(),
         };
-        let org_project = self
+        let org = self
             .global
             .org
             .as_deref()
-            .and_then(|o| isb::org::OrgId::new(o).ok())
-            .map(|o| o.incus_project());
+            .and_then(|o| isb::org::OrgId::new(o).ok());
+        if org.as_ref().is_some_and(|o| o.is_default()) {
+            // Which project the default org is depends on the host.
+            isb::org::resolve_default(&c);
+        }
+        let org_project = org.map(|o| o.incus_project());
         if let Some(p) = self
             .global
             .project
@@ -3230,7 +3234,7 @@ fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
                     "names      {}",
                     match &o.dns_dir {
                         Some(d) => format!("<service>.<stack>.{}.isb (from {d})", o.name),
-                        None if o.name.is_default() => "instances only".to_string(),
+                        None if o.name.is_legacy_default() => "instances only (the default org is incus' default project here)".to_string(),
                         None => "instances only (service names are off: run `sudo isb host setup`, then `isb org create` again)".to_string(),
                     }
                 );

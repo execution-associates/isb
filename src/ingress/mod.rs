@@ -387,7 +387,7 @@ impl Manager {
             return Ok(());
         }
         let oi = self.org_settings(&def.org, true)?;
-        if oi.tunnel && def.org.is_default() {
+        if oi.tunnel && def.org.is_legacy_default() {
             return Err(Error::invalid(
                 "the default org cannot use a Cloudflare tunnel",
             ));
@@ -437,7 +437,7 @@ impl Manager {
                 }
             }
         }
-        let oi = if org.is_default() {
+        let oi = if org.is_legacy_default() {
             OrgIngress::default()
         } else {
             let info = crate::org::get(&self.client, org)?;

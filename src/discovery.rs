@@ -18,7 +18,8 @@
 //! dnsmasq runs as the `incus` user, so the root directory is owned by the
 //! daemon's user with group `incus` and the setgid bit (`isb host setup`
 //! makes it): what the daemon writes there is readable by dnsmasq and by
-//! nobody else. The default org has no isb bridge and no discovery.
+//! nobody else. A legacy default org (incus' own default project) has no isb
+//! bridge and no discovery.
 
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -41,7 +42,7 @@ pub fn root() -> PathBuf {
 
 /// The org's hosts directory, `None` for the default org.
 pub fn org_dir(org: &OrgId) -> Option<PathBuf> {
-    (!org.is_default()).then(|| root().join(org.as_str()))
+    (!org.is_legacy_default()).then(|| root().join(org.as_str()))
 }
 
 /// The `raw.dnsmasq` line that points an org's dnsmasq at its directory.

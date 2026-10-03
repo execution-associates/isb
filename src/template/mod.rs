@@ -708,9 +708,9 @@ impl Renderer<'_> {
             match p {
                 Part::Lit(l) => out.push(Seg::Lit(l)),
                 Part::Host(k) => {
-                    if self.p.org.is_default() {
+                    if self.p.org.is_legacy_default() {
                         return Err(Error::invalid(format!(
-                            "{at}: apps reach each other by service name, which the default org has none of; deploy this template in an org"
+                            "{at}: apps reach each other by service name, which this host's default org (incus' own default project) has none of; deploy this template in another org"
                         )));
                     }
                     let n = self.names.get(&k).ok_or_else(|| {

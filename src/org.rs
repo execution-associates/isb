@@ -1,9 +1,13 @@
 //! Orgs: the trust boundary. An org is an incus project; its people and
 //! agents fully administer what is in it, and nothing crosses orgs.
 //!
-//! The `default` org is the incus `default` project, so everything that
-//! predates orgs keeps working where it is. Any other org `x` is the incus
-//! project `isb-x`.
+//! Any org `x` is the incus project `isb-x`, and on a fresh host the
+//! `default` org is too (`isb-default`), with its own network and service
+//! names. A host whose incus `default` project already held workloads when
+//! isb first ran keeps the legacy mapping: the `default` org *is* the incus
+//! `default` project, unrestricted and without an org network, so what
+//! predates orgs keeps working where it is. [`resolve_default`] decides
+//! once per process; [`OrgId::is_legacy_default`] tells the two apart.
 
 use std::path::{Path, PathBuf};
 
@@ -17,6 +21,70 @@ use crate::error::{Error, Result};
 pub struct OrgId(String);
 
 pub const DEFAULT_ORG: &str = "default";
+/// The incus project of a non-legacy default org.
+pub const DEFAULT_ORG_PROJECT: &str = "isb-default";
+
+/// 0: not resolved (treated as legacy), 1: legacy, 2: `isb-default`.
+static DEFAULT_MODE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+fn default_is_legacy() -> bool {
+    DEFAULT_MODE.load(std::sync::atomic::Ordering::Relaxed) != 2
+}
+
+fn set_default_mode(legacy: bool) {
+    DEFAULT_MODE.store(
+        if legacy { 1 } else { 2 },
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// Decide where the default org lives on this host: `isb-default` when that
+/// project exists as isb's default org, else the legacy incus `default`
+/// project. Cheap after the first call; an unreachable incus means legacy.
+pub fn resolve_default(base: &Client) {
+    if DEFAULT_MODE.load(std::sync::atomic::Ordering::Relaxed) != 0 {
+        return;
+    }
+    let modern = host(base)
+        .get_opt(&format!("/1.0/projects/{DEFAULT_ORG_PROJECT}"))
+        .ok()
+        .flatten()
+        .is_some_and(|p| p["config"][KEY_ORG].as_str() == Some(DEFAULT_ORG));
+    set_default_mode(!modern);
+}
+
+/// On a fresh host (incus `default` holds no instances and isb has no
+/// default-org state, per `has_state`), make the default org a real org in
+/// `isb-default`. Returns whether it did. A host that already resolved to
+/// either mapping is left as it is.
+pub fn adopt_default(
+    base: &Client,
+    opts: &OrgOptions,
+    has_state: bool,
+    report: &mut dyn FnMut(&str),
+) -> Result<bool> {
+    DEFAULT_MODE.store(0, std::sync::atomic::Ordering::Relaxed);
+    resolve_default(base);
+    if !default_is_legacy() {
+        return Ok(false);
+    }
+    let in_default = host(base)
+        .get("/1.0/instances")?
+        .as_array()
+        .map(Vec::len)
+        .unwrap_or(0);
+    if has_state || in_default > 0 {
+        return Ok(false);
+    }
+    set_default_mode(false);
+    match ensure(base, &OrgId::default_org(), opts, report) {
+        Ok(_) => Ok(true),
+        Err(e) => {
+            set_default_mode(true);
+            Err(e)
+        }
+    }
+}
 /// Not an org: `isb-system` is [`crate::registry::PROJECT`].
 const RESERVED_SYSTEM: &str = "system";
 
@@ -54,9 +122,19 @@ impl OrgId {
         self.0 == DEFAULT_ORG
     }
 
+    /// The default org on a host that keeps the legacy mapping: the incus
+    /// `default` project, with no org network, ACL or service names.
+    pub fn is_legacy_default(&self) -> bool {
+        self.is_default() && default_is_legacy()
+    }
+
     /// The incus project holding this org.
     pub fn incus_project(&self) -> String {
-        if self.is_default() {
+        self.project_with(default_is_legacy())
+    }
+
+    fn project_with(&self, legacy: bool) -> String {
+        if self.is_default() && legacy {
             "default".into()
         } else {
             format!("isb-{}", self.0)
@@ -65,12 +143,17 @@ impl OrgId {
 
     /// The org a project belongs to, if it is one of isb's.
     pub fn from_incus_project(project: &str) -> Option<OrgId> {
+        Self::from_project_with(project, default_is_legacy())
+    }
+
+    fn from_project_with(project: &str, legacy: bool) -> Option<OrgId> {
         if project == "default" {
-            return Some(OrgId::default_org());
+            return legacy.then(OrgId::default_org);
         }
         project
             .strip_prefix("isb-")
             .and_then(|o| OrgId::new(o).ok())
+            .filter(|o| !o.is_default() || !legacy)
     }
 
     /// This org's directory under a daemon state directory.
@@ -512,6 +595,7 @@ fn egress_rules(own: Option<(u32, u32)>, egress: &[Egress]) -> Result<Vec<Value>
 
 /// The client to use for an org: its project.
 pub fn client(base: &Client, org: &OrgId) -> Client {
+    resolve_default(base);
     base.clone().project(org.incus_project())
 }
 
@@ -538,17 +622,18 @@ fn strmap(v: &Value) -> std::collections::BTreeMap<String, String> {
         .unwrap_or_default()
 }
 
-/// Create an org, or bring an existing one in line with `opts`. The default
-/// org is the incus default project and is never restricted.
+/// Create an org, or bring an existing one in line with `opts`. A legacy
+/// default org (the incus default project) has no settings.
 pub fn ensure(
     base: &Client,
     org: &OrgId,
     opts: &OrgOptions,
     report: &mut dyn FnMut(&str),
 ) -> Result<OrgInfo> {
-    if org.is_default() {
+    resolve_default(base);
+    if org.is_legacy_default() {
         return Err(Error::invalid(
-            "the default org is incus' default project; it has no settings",
+            "the default org on this host is incus' default project (it held workloads before isb's orgs); it has no settings",
         ));
     }
     let h = host(base);
@@ -899,6 +984,7 @@ fn info(base: &Client, org: OrgId, p: &Value) -> Result<OrgInfo> {
 
 /// One org.
 pub fn get(base: &Client, org: &OrgId) -> Result<OrgInfo> {
+    resolve_default(base);
     let h = host(base);
     let p = h
         .get_opt(&format!(
@@ -906,7 +992,7 @@ pub fn get(base: &Client, org: &OrgId) -> Result<OrgInfo> {
             encode_segment(&org.incus_project())
         ))?
         .ok_or_else(|| Error::NotFound(format!("org {org}")))?;
-    if !org.is_default() && p["config"][KEY_ORG].as_str() != Some(org.as_str()) {
+    if !org.is_legacy_default() && p["config"][KEY_ORG].as_str() != Some(org.as_str()) {
         return Err(Error::NotFound(format!("org {org}")));
     }
     info(base, org.clone(), &p)
@@ -914,6 +1000,7 @@ pub fn get(base: &Client, org: &OrgId) -> Result<OrgInfo> {
 
 /// Every org: the default one first, then isb's projects by name.
 pub fn list(base: &Client) -> Result<Vec<OrgInfo>> {
+    resolve_default(base);
     let h = host(base);
     let v = h.get("/1.0/projects?recursion=1")?;
     let mut out = Vec::new();
@@ -922,7 +1009,7 @@ pub fn list(base: &Client) -> Result<Vec<OrgInfo>> {
         let Some(org) = OrgId::from_incus_project(name) else {
             continue;
         };
-        if !org.is_default() && p["config"][KEY_ORG].as_str() != Some(org.as_str()) {
+        if !org.is_legacy_default() && p["config"][KEY_ORG].as_str() != Some(org.as_str()) {
             continue;
         }
         out.push(info(base, org, p)?);
@@ -997,6 +1084,31 @@ pub fn remove(base: &Client, org: &OrgId, force: bool, report: &mut dyn FnMut(&s
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_default_org_project_on_either_kind_of_host() {
+        let d = OrgId::default_org();
+        let acme = OrgId::new("acme").unwrap();
+        // Legacy: the incus default project; isb-default is nobody's.
+        assert_eq!(d.project_with(true), "default");
+        assert_eq!(OrgId::from_project_with("default", true), Some(d.clone()));
+        assert_eq!(OrgId::from_project_with("isb-default", true), None);
+        // Fresh host: a real org; the incus default project is no org.
+        assert_eq!(d.project_with(false), "isb-default");
+        assert_eq!(
+            OrgId::from_project_with("isb-default", false),
+            Some(d.clone())
+        );
+        assert_eq!(OrgId::from_project_with("default", false), None);
+        // Other orgs never change.
+        for legacy in [true, false] {
+            assert_eq!(acme.project_with(legacy), "isb-acme");
+            assert_eq!(
+                OrgId::from_project_with("isb-acme", legacy),
+                Some(acme.clone())
+            );
+        }
+    }
     use super::*;
 
     #[test]
