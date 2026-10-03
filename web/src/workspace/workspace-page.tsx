@@ -25,6 +25,8 @@ import { ConnectTab } from "./connect-tab";
 import { CreateWorkspace } from "./create-form";
 import { EnvironmentTab } from "./environment-tab";
 import { HomeTab } from "./home-tab";
+import { NestingBadge } from "./nesting-badge";
+import { PortsTab } from "./ports-tab";
 import { ResourcesTab, sessionsText } from "./resources-tab";
 import { SandboxesTab } from "./sandboxes-tab";
 import { activeTab, statusTone, TABS, tabsFor } from "./util";
@@ -71,6 +73,7 @@ export function WorkspacePage() {
         </Suspense>
       )}
       {active === "connect" && <ConnectTab org={org} ws={ws} admin={admin} />}
+      {active === "ports" && <PortsTab org={org} ws={ws} />}
       {active === "resources" && <ResourcesTab key={ws.updated_at} org={org} ws={ws} admin={admin} />}
       {active === "home" && <HomeTab org={org} ws={ws} admin={admin} />}
       {active === "environment" && <EnvironmentTab key={ws.updated_at} org={org} ws={ws} admin={admin} />}
@@ -115,6 +118,7 @@ function Header({ org, ws, writer, admin }: { org: string; ws: Workspace; writer
             <StatusBadge tone={statusTone(ws.status)} pulse={running}>
               {ws.status}
             </StatusBadge>
+            {ws.nesting?.allowed && <NestingBadge />}
           </>
         }
         description={

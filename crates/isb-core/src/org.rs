@@ -121,6 +121,7 @@ use std::collections::BTreeMap;
 mod ensure;
 mod homes;
 pub(crate) mod limits;
+pub mod nesting;
 
 pub use ensure::ensure;
 pub use homes::allow_home;
@@ -178,8 +179,7 @@ pub struct OrgOptions {
     pub domains: Option<Vec<String>>,
     /// `caddy` or `cloudflare-tunnel`; `None` keeps.
     pub ingress: Option<String>,
-    /// Cloudflare account and zone ids for the tunnel provider's API calls
-    /// (`Some("")` clears).
+    /// Cloudflare account and zone ids for the tunnel provider's API calls (`Some("")` clears).
     pub cloudflare_account: Option<String>,
     pub cloudflare_zone: Option<String>,
 }
@@ -197,8 +197,7 @@ pub struct OrgInfo {
     pub memory: Option<String>,
     pub disk: Option<String>,
     pub instances_limit: Option<String>,
-    /// What an instance gets when its spec sets no limits (the org's
-    /// default profile).
+    /// What an instance gets when its spec sets no limits (the org's default profile).
     pub default_cpus: Option<String>,
     pub default_memory: Option<String>,
     pub bind_roots: Vec<String>,
@@ -217,6 +216,8 @@ pub struct OrgInfo {
     pub dns_dir: Option<String>,
     /// Instances in the org right now.
     pub instances: usize,
+    /// Its workspace may run Docker (`security.nesting`): [`nesting`].
+    pub allow_nesting: bool,
 }
 
 /// The bridge for an org: `isbbr` + 8 hex digits of the name's hash, inside
@@ -448,8 +449,7 @@ fn fmt_ports(r: &[(u16, u16)]) -> String {
 }
 
 /// Exceptions for different networks must not overlap: a port-limited one
-/// would otherwise cut into the other. The same network may repeat (its
-/// ports add up).
+/// would otherwise cut into the other. The same network may repeat (its ports add up).
 pub fn check_egress(rules: &[Egress]) -> Result<()> {
     for (i, a) in rules.iter().enumerate() {
         for b in &rules[i + 1..] {
@@ -534,8 +534,7 @@ pub fn client(base: &Client, org: &OrgId) -> Client {
     base.clone().project(org.incus_project())
 }
 
-/// A client on the default project, for host-wide objects (networks, ACLs,
-/// projects).
+/// A client on the default project, for host-wide objects (networks, ACLs, projects).
 fn host(base: &Client) -> Client {
     base.clone().project("default")
 }
@@ -632,6 +631,7 @@ fn info(base: &Client, org: OrgId, p: &Value) -> Result<OrgInfo> {
         cloudflare_zone: cfg.get(KEY_CF_ZONE).filter(|s| !s.is_empty()).cloned(),
         dns_dir,
         instances,
+        allow_nesting: nesting::allowed(&p["config"]),
     })
 }
 

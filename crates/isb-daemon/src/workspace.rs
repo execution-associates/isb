@@ -99,7 +99,29 @@ pub struct Workspace {
     pub rebuilt_at: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token: Option<TokenMeta>,
+    /// The ports it publishes (`workspace_port_add`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ports: Vec<PublishedPort>,
 }
+
+/// A port the workspace publishes: always through isb's own preview proxy
+/// (for members, on a preview origin of its own), and on `host` through
+/// the org's ingress when one is given (docs/concepts/workspaces.md#ports).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublishedPort {
+    pub port: u16,
+    /// The hostname the org's ingress serves it on, like an app's domain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    /// `host` was generated (`auto`, under sslip.io): outside the allowlist.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto: bool,
+    pub added_by: String,
+    pub added_at: u64,
+}
+
+/// How many ports one workspace may publish.
+pub const MAX_PORTS: usize = 20;
 
 /// What is kept of the workspace's token: never the token.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -678,6 +700,7 @@ mod tests {
             updated_at: 1,
             rebuilt_at: None,
             token: None,
+            ports: vec![],
         };
         st.put(&org, &w).unwrap();
         st.put_settings(&org, &Settings::default()).unwrap();

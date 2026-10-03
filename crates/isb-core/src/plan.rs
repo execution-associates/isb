@@ -214,8 +214,7 @@ impl ImageSource {
                     Error::invalid(format!("{s:?}: an oci: image is oci:REGISTRY/PATH[:TAG]"))
                 })?;
                 // The local registry is on loopback and holds every org's
-                // images: it is reached only as `registry:`, which stays in
-                // the org.
+                // images: it is reached only as `registry:`, which stays in the org.
                 if is_loopback_host(host) {
                     return Err(Error::invalid(format!(
                         "{s:?}: a loopback registry is the local one; name its images as registry:APP:TAG"
@@ -699,6 +698,7 @@ pub fn resolve(
     for (k, v) in &spec.raw_config {
         config.insert(k.clone(), v.clone());
     }
+    crate::org::nesting::check_config(&name, host.org.as_ref(), &config, spec.workspace_nesting)?;
 
     let mut devices: BTreeMap<String, DesiredDevice> = BTreeMap::new();
     let mut add_dev = |dname: String, dev: DesiredDevice| -> Result<()> {

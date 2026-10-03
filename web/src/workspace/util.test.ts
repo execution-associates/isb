@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeTab, envProblems, gib, headroom, inWorkspaceEnv, expiresIn, expiringSoon, human, idleLabel, instanceTerminalUrl, sessionsNotice, sizeProblem, sshHost, sshSteps, statusTone, tabsFor } from "./util";
+import { activeTab, envProblems, gib, headroom, inWorkspaceEnv, expiresIn, expiringSoon, human, idleLabel, instanceTerminalUrl, portStateTone, sessionsNotice, sizeProblem, sshHost, sshSteps, statusTone, tabsFor } from "./util";
 
 describe("workspace helpers", () => {
   it("formats durations as the daemon does", () => {
@@ -26,6 +26,18 @@ describe("workspace helpers", () => {
     expect(activeTab("terminal", false)).toBe("connect");
     expect(activeTab("sandboxes", false)).toBe("sandboxes");
     expect(activeTab("nope", true)).toBe("terminal");
+    // Ports are for members: viewers neither see nor land on the tab.
+    expect(tabsFor(true)).toContain("ports");
+    expect(tabsFor(false)).not.toContain("ports");
+    expect(activeTab("ports", false)).toBe("connect");
+  });
+
+  it("colours a published port's ingress state", () => {
+    expect(portStateTone("serving")).toBe("success");
+    expect(portStateTone("refused")).toBe("danger");
+    expect(portStateTone("conflict")).toBe("danger");
+    expect(portStateTone("off")).toBe("warning");
+    expect(portStateTone("redirect")).toBe("info");
   });
 
   it("builds terminal URLs for the workspace and sandboxes", () => {

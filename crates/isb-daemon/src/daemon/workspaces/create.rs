@@ -128,6 +128,7 @@ fn checked(a: CreateArgs, c: &Caller) -> Result<Workspace> {
         updated_at: t,
         rebuilt_at: None,
         token: None,
+        ports: vec![],
     })
 }
 

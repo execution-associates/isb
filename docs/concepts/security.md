@@ -47,7 +47,7 @@ only by isb's checks ([What an org is in incus](orgs.md#what-an-org-is-in-incus)
 
 | Boundary | Enforced by |
 |---|---|
-| no privileged containers, nesting, `raw.lxc`, `raw.idmap` of root, proxy devices | the restricted incus project |
+| no privileged containers, nesting, `raw.lxc`, `raw.idmap` of root, proxy devices | the restricted incus project (nesting: [one exception](#the-docker-exception)) |
 | no host paths but the org's bind roots | `restricted.devices.disk` and its paths |
 | one network: the org's own bridge | `restricted.networks.access` |
 | a uid range per instance | `security.idmap.isolated` |
@@ -63,6 +63,42 @@ host.
 Local orgs share the host's kernel. When that is not enough, an org can run
 on another machine or in a dedicated VM with its own kernel
 ([Placement](placement.md)).
+
+## The Docker exception
+
+Docker needs `security.nesting`, which lets a container mount `proc` and
+`sysfs` and make namespaces of its own: more of the host kernel's surface,
+and the same kernel every other local org shares. So an org's project
+refuses nesting, and only a **superadmin** can make an exception, per org,
+for its **workspace** alone (`isb org nesting ORG on`, the `org_nesting`
+tool; platform admins, org owners and tokens without superadmin are
+refused, and every change is in the audit log and the history).
+
+- **The project** then allows nesting and system-call interception
+  (`restricted.containers.nesting=allow`,
+  `restricted.containers.interception=allow`), and the setting is recorded
+  as `user.isb.allow-nesting`.
+- **The workspace** gets `security.nesting=true`,
+  `security.syscalls.intercept.mknod=true` (Docker makes device nodes in
+  its images' layers) and `security.syscalls.intercept.setxattr=true` (the
+  overlay filesystem's extended attributes, from inside a user namespace).
+  It stays unprivileged, with its own uid range.
+- **Nothing else** in the org gets any of them: once the project allows
+  them, isb itself refuses `security.nesting` and every
+  `security.syscalls.intercept.*` key in every instance config of an org
+  project, unless the instance is the workspace the daemon builds. That
+  mark is set by the daemon's own code and no spec, compose file or tool
+  argument can carry it, so a sandbox, stack replica, app or build asking
+  for nesting is refused even from a superadmin or a daemon run with
+  `--allow-raw`.
+- **Turning it off** is refused while the workspace runs with nesting (its
+  containers live on it); with the workspace stopped, isb takes the keys
+  off it and the project blocks nesting again.
+
+The workspace and org settings pages show the warning badge **Nesting
+allowed: this workspace can run Docker; more of the host kernel is
+exposed.** An org that runs untrusted code and needs Docker belongs in a
+dedicated VM ([Placement](placement.md)), where the kernel is its own.
 
 ## The remote-spec policy
 
@@ -203,6 +239,43 @@ into the host's network:
 - Template logos are fetched and cached by the daemon, so a page view makes
   no request to anyone else's server.
 
+### Workspace port previews
+
+A preview ([Previews through isb](workspaces.md#previews-through-isb)) runs
+whatever the workspace serves, in the viewer's browser. Served on isb's
+own origin, its scripts could call isb's API as the viewer: a same-origin
+request carries the session cookie and may set `X-Isb-Csrf`. So:
+
+- **Each preview is an origin of its own**, `<port>-<workspace>-<org>`
+  under `--preview-domain` or `localhost`. Previews are apart from isb and
+  from each other, so one org's dev server cannot read another's preview or
+  isb's pages. `x.localhost` is not even the same site as `localhost` or
+  `127.0.0.1`, so a preview cannot set cookies for isb; with
+  `--preview-domain`, use a domain that is not a parent of isb's own host
+  (best: a registrable domain of its own), since a sibling can set cookies
+  for the parent domain.
+- **isb's credentials never reach the app.** The session cookie is
+  host-only, so browsers do not send it to a preview host, and the proxy
+  drops it anyway, with `isb_preview`, Cloudflare Access' assertion and
+  `CF_Authorization` cookie (which isb would accept as the viewer), isb
+  bearer tokens, and forwarding headers the client made up. The app's own
+  `Set-Cookie` headers lose their `Domain` attribute, and any named like
+  isb's cookies are dropped.
+- **Access is a one-time link, then a cookie for that preview alone.**
+  `workspace_port_open` (members and up, audited) returns a link with a
+  random 256-bit token, good once and for 60 seconds, bound to that
+  preview's host and the caller. Spending it sets `isb_preview` (random,
+  HttpOnly, `SameSite=Strict`, host-only, 8 hours) and answers with a page
+  that refreshes to the app (`Referrer-Policy: no-referrer`), so the token
+  reaches neither the app nor a `Referer`. The caller's membership is
+  checked again every minute; unpublishing the port ends its previews.
+- **Nothing of isb's UI applies there.** Preview hosts are taken by `Host`
+  before anything else on the listener: isb's pages, API and headers,
+  including its Content-Security-Policy, are never served on them, and the
+  app's own headers are passed as they are.
+- A port published with a **host** goes through the ingress instead and
+  is public, as an app's domain is, unless Cloudflare Access guards it.
+
 Details: [Developing the web UI](../contributing/web-ui.md).
 
 ## Accountability
@@ -216,7 +289,8 @@ every project, including changes made outside isb, with who requested them.
 ## What isb does not protect against
 
 - **A kernel exploit** in a container escapes to the host and every local
-  org. Use a VM (`type: vm`, `--untrusted` builds) for code you do not trust,
+  org, and a workspace allowed to nest ([The Docker
+  exception](#the-docker-exception)) reaches more of the kernel to try. Use a VM (`type: vm`, `--untrusted` builds) for code you do not trust,
   and a dedicated VM or another server for an org that must share no kernel.
 - **Anyone with the incus socket**, or in `incus-admin`, owns the host.
 - **The local registry has no authentication**: anything on the host that

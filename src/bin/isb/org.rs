@@ -84,6 +84,13 @@ pub(crate) enum OrgCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Superadmins: whether the org's workspace (and nothing else in it)
+    /// may run Docker, with `security.nesting`. `on` or `off` changes it.
+    Nesting {
+        name: String,
+        #[arg(value_parser = ["on", "off"])]
+        state: Option<String>,
+    },
     /// Delete an org (with --force, everything in it).
     #[command(alias = "remove")]
     Rm {
@@ -362,6 +369,11 @@ pub(crate) fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
                     }
                 }
                 println!("ingress    {ing}");
+                if o.allow_nesting {
+                    println!(
+                        "nesting    allowed for its workspace (Docker; more of the host kernel is exposed)"
+                    );
+                }
                 println!(
                     "names      {}",
                     match &o.dns_dir {
@@ -369,6 +381,32 @@ pub(crate) fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
                         None => "instances only (service names are off: run `sudo isb host setup`, then `isb org create` again)".to_string(),
                     }
                 );
+            }
+            Ok(0)
+        }
+        OrgCmd::Nesting { name, state } => {
+            let mut a = serde_json::json!({"org": OrgId::new(name)?});
+            if let Some(s) = state {
+                a["allow_nesting"] = serde_json::json!(s == "on");
+            }
+            let v = call("org_nesting", a, SHORT)?;
+            let on = v["allow_nesting"].as_bool() == Some(true);
+            println!(
+                "org {}: nesting {}",
+                v["org"].as_str().unwrap_or(""),
+                if on {
+                    "allowed for its workspace"
+                } else {
+                    "blocked"
+                }
+            );
+            for w in v["workspaces"].as_array().into_iter().flatten() {
+                if w["restart_needed"].as_bool() == Some(true) {
+                    println!(
+                        "workspace {}: restart it for Docker to work (isb workspace restart --yes)",
+                        w["name"].as_str().unwrap_or("")
+                    );
+                }
             }
             Ok(0)
         }

@@ -47,8 +47,8 @@ fills it in and refuses any other value. Then, in order:
   `ingress_status`) are open to anyone signed in and show only the caller's
   orgs. `audit_list` and `history_query` filter themselves the same way.
 - **Superadmin tools** (`host_inventory`, `host_policy`,
-  `superadmin_token_list`, `superadmin_token_revoke`) are refused to
-  everyone else, platform admins included.
+  `superadmin_token_list`, `superadmin_token_revoke`, `org_nesting`) are
+  refused to everyone else, platform admins included.
 - **API token scopes** narrow a token below its role: `read` (read-only
   tools), `deploy` (`read` plus `stack_deploy`, `stack_redeploy`,
   `stack_rollback`, `stack_scale`, `app_deploy`, `app_rollback`,
@@ -101,6 +101,10 @@ means every member of the org, *member* means members, admins and owners.
 | `workspace_delete` | admin | The machine and its token, and the home unless `keep_home`; `confirm`. |
 | `workspace_token_rotate` | admin | A new token, delivered inside; the old one stops at once. |
 | `workspace_settings` | member reads, admin changes | `sandbox_expiry`, `sandbox_idle`; `max_workspaces`, `home_kind`, `home_pool` are for platform admins. |
+| `workspace_port_list` | member | The published ports: each with its preview host, and its ingress hostname, URL and state. |
+| `workspace_port_add` | member | Publish `port`; with `host` (a hostname, `default` or `auto`) also through the org's ingress. |
+| `workspace_port_remove` | member | Stop publishing `port`. |
+| `workspace_port_open` | member | A one-time link (60 s) to the port's preview; `origin` when the daemon has no `--preview-domain`. |
 
 ## Secrets
 
@@ -326,3 +330,4 @@ says why for each.
 | `host_policy` | How the daemon serves: listen addresses, Access, the remote tool policy, what remote specs may ask for, and each superadmin source with its allow list and token count. |
 | `superadmin_token_list` | Superadmin tokens' metadata, never the token. |
 | `superadmin_token_revoke` | Revoke one by `id`. Minting is `isb token create NAME --superadmin`, on the host only. |
+| `org_nesting` | Read (`org`) or set (`allow_nesting`) whether the org's workspace may run Docker with `security.nesting` ([The Docker exception](../concepts/security.md#the-docker-exception)). Turning it off is refused while the workspace runs with nesting. |

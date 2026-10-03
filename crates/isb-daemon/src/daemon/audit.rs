@@ -76,6 +76,8 @@ const SAFE_KEYS: &[&str] = &[
     "backup",
     "instance",
     "stamp",
+    "port",
+    "allow_nesting",
 ];
 
 /// The target, in order of preference.
@@ -135,8 +137,7 @@ pub fn class_for(tool: &Tool, args: &Value) -> Class {
     }
 }
 
-/// May a token with `scopes` call `tool`? Empty scopes: anything the role
-/// allows.
+/// May a token with `scopes` call `tool`? Empty scopes: anything the role allows.
 pub fn scope_allows(scopes: &[String], tool: &str, c: Class) -> bool {
     scopes.is_empty()
         || scopes.iter().any(|s| match s.as_str() {
@@ -436,8 +437,7 @@ fn param(req: &Request, key: &str) -> Option<String> {
 }
 
 /// `GET /api/v1/audit/stream?org=ORG&after=ID`: new entries as server-sent
-/// events (`event: audit`), only those the caller may read. Signed in with
-/// a session or a token.
+/// events (`event: audit`), only those the caller may read. Signed in with a session or a token.
 pub fn stream_route(log: Arc<AuditLog>, users: Arc<AuthStore>) -> crate::server::Routes {
     Arc::new(move |req: &Request| {
         if req.path == "/api/v1/history/stream" {

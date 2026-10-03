@@ -549,11 +549,42 @@ minime only runs binaries downloaded from our CI runs.
   `dev-base` where it exists, else `images:ubuntu/24.04`, and the create
   form picks from the host's images and shows quota headroom. **Verified**
   on titan with a scratch `isb serve`, before and after.
+- [x] (ws-docker-ports) W6 Docker in the workspace and W3's ports
+  (docs/concepts/workspaces.md#ports, docs/concepts/security.md#the-docker-exception):
+  `org_nesting` / `isb org nesting` (superadmins only, audited) opens the
+  org's project to nesting and interception and gives only its workspace
+  `security.nesting` + `mknod`/`setxattr` interception; isb refuses those
+  keys for every other instance of an org project (a daemon-only mark on
+  the workspace's spec); off is refused while the workspace runs with
+  nesting. `workspace_port_add/list/remove/open` and `isb workspace port`:
+  hostnames through the org's ingress (allowlist, claims, Caddy or the
+  tunnel; `default`, `auto`), and previews through isb on an origin of
+  their own per port (`--preview-domain`, else `*.localhost`), a one-time
+  link then a Strict host-only cookie, isb's credentials stripped both ways,
+  websockets piped. The Ports tab, the Nesting allowed badge and the org
+  settings panel. Instance addresses prefer `eth0` (Docker's `docker0`
+  sorted first). **Verified** on titan with a scratch `isb serve`
+  (loopback listener, Caddy on loopback with its internal CA): `docker run
+  hello-world`, an alpine image and a build in the workspace with nesting
+  on, `permission denied` with it off (before and after); a platform admin's
+  token refused `org_nesting`; a sandbox and a stack asking for nesting (or
+  mknod interception) in that org refused even over the socket; off refused
+  while running, accepted stopped; a port on `3000-workspace.wsports.test`
+  through Caddy, one outside the allowlist refused; previews of
+  `python3 -m http.server` and a Vite 6 dev server in Chrome through
+  `*.localhost`, HMR over the proxied websocket after an edit, `isb_session`,
+  bearer, Access and forged forwarding headers absent upstream, a used link
+  403, another preview host 401, an unpublished port 404. Not tested live:
+  the Cloudflare Tunnel provider for a port (same code path as apps,
+  unit-tested), `--preview-domain` through a real wildcard name, the
+  nesting switch in the browser (superadmin sessions over HTTP need a
+  superadmin identity; the CLI and API were used).
 - [ ] Workspace follow-ups: `isb host setup` on titan for port 8481 (not
   run: the rule is in the code); titan's `--workspace-home-root
   /srv/workspaces` and migrating clem with `home_bind`; a workspace on an org placed on a server
   (the agent runs it and serves the bridge; untested); W3's terminal
-  reattach and ports; SSH to orgs placed on a server; Access credentials in
+  reattach; ports and nesting for orgs placed on a server (org_nesting
+  runs on that server's host); SSH to orgs placed on a server; Access credentials in
   `isb ssh-proxy`.
 
 ## Release 1.0
@@ -561,7 +592,7 @@ minime only runs binaries downloaded from our CI runs.
 Finishing this workstream is isb **1.0.0** (Stephan, 2026-10-03), not another 0.x.
 
 - [ ] Land the in-flight branches on `platform` (default org always `isb-default`, the EA theme and wordmark) and the docs pass that follows.
-- [ ] Workspaces W5 (workspace images/templates) and W6 (the per-org Docker exception), or an explicit decision to ship 1.0 without them.
+- [ ] Workspaces W5 (workspace images/templates), or an explicit decision to ship 1.0 without it (W6 shipped: ws-docker-ports).
 - [ ] Remote-server gaps: SSH and volume backups for orgs placed on a server; upgrading server agents and dedicated VMs.
 - [ ] Full CI green on `platform`, integration tests on titan, a fresh-host install test on a new hcloud box (README quick start as written).
 - [ ] PR `platform` → `main` with release notes (the user-visible changes since 0.7, and breaking changes: the default org, the crate split).

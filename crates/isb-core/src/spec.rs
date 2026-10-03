@@ -1,8 +1,7 @@
 //! The one spec model shared by the library API, the CLI and the compose YAML.
 //!
 //! Every struct denies unknown fields, so a typo is an error rather than a
-//! silently ignored setting. The JSON Schema (`isb schema`) is generated from
-//! these types.
+//! silently ignored setting. The JSON Schema (`isb schema`) is generated from these types.
 
 use std::collections::BTreeMap;
 
@@ -593,6 +592,9 @@ pub struct SandboxSpec {
     )]
     #[schemars(with = "BTreeMap<String, BTreeMap<String, flex::Scalar>>")]
     pub raw_devices: BTreeMap<String, BTreeMap<String, String>>,
+    /// Nesting keys allowed: only the daemon sets it, for a workspace ([`crate::org::nesting`]).
+    #[serde(skip)]
+    pub workspace_nesting: bool,
 }
 
 impl SandboxSpec {
@@ -1819,9 +1821,7 @@ impl SandboxSpec {
     }
 }
 
-// ----------------------------------------------------------------------------
-// Builder API.
-// ----------------------------------------------------------------------------
+// ---- Builder API -----------------------------------------------------------
 
 /// Mount builders: `Volume::bind(host)`, `Volume::named(name)`.
 pub struct Volume;
@@ -1894,8 +1894,7 @@ impl PortBinding {
         }
     }
 
-    /// Reach a host service from the guest: guest listens on `listen`, host
-    /// connects to `connect`.
+    /// Reach a host service from the guest: guest listens on `listen`, host connects to `connect`.
     pub fn guest(listen: impl Into<String>, connect: impl Into<String>) -> PortSpec {
         PortSpec {
             bind: PortBind::Guest,
