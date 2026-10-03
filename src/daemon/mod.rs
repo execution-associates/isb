@@ -12,6 +12,7 @@
 
 pub mod apps;
 pub mod builds;
+pub mod data;
 mod orgs;
 pub mod policy;
 pub mod secrets;
@@ -129,6 +130,8 @@ struct Daemon {
     ingress: Option<Arc<crate::ingress::Manager>>,
     /// The identity store: the org list memberships hang off.
     users: Arc<AuthStore>,
+    /// Databases' backups and scheduled jobs.
+    data: data::Ctx,
 }
 
 /// Run the daemon until SIGINT/SIGTERM. Apps keep running when it stops.
@@ -197,6 +200,15 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         m.start(ctl.clone())?;
     }
     let apps = crate::app::Apps::new(&cfg.state_dir, client.clone(), ctl.clone(), secrets.clone());
+    // Jobs and backups share one scheduler thread.
+    let jobs = crate::jobs::Jobs::new(&cfg.state_dir, apps.clone());
+    let backups = crate::backup::Backups::new(&cfg.state_dir, apps.clone());
+    let scheduler = crate::jobs::Scheduler::start(vec![
+        Arc::new(jobs.clone()) as Arc<dyn crate::jobs::Scheduled>,
+        Arc::new(backups.clone()),
+    ]);
+    jobs.set_scheduler(scheduler.clone());
+    backups.set_scheduler(scheduler.clone());
     let d = Arc::new(Daemon {
         client,
         ctl: ctl.clone(),
@@ -206,6 +218,11 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         apps: apps.clone(),
         ingress: ingress.clone(),
         users: users.clone(),
+        data: data::Ctx {
+            apps: apps.clone(),
+            jobs,
+            backups,
+        },
     });
     let registry = registry(d.clone())?;
     let hooks = hooks(d.clone(), users.clone(), cfg.allow_unauthenticated);
@@ -241,6 +258,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         )
     });
     let r = crate::server::serve(listeners, registry, healthz);
+    scheduler.shutdown();
     ctl.shutdown();
     if let Some(m) = &ingress {
         m.shutdown();
@@ -979,6 +997,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
         }
     );
     apps::register(&mut r, d.apps.clone())?;
+    data::register(&mut r, d.data.clone())?;
     tool!(
         "server_status",
         "Server status",
@@ -1021,7 +1040,10 @@ or the org's own builds in the local registry (registry:APP:TAG; build_run makes
 Deploys return immediately; poll stack_status, or pass wait=true. \
 Each org also has a secret store (secret_create, secret_set, secret_list; values are base64). \
 Apps (Dokploy-style): project_create, then app_create (an image, or a repository with a builder), \
-app_env_set, app_deploy; each project environment runs as one stack <project>-<env>.";
+app_env_set, app_deploy; each project environment runs as one stack <project>-<env>. \
+Databases are apps too (database_create; connection details via database_get), backed up to S3-compatible \
+destinations on a cron schedule (backup_destination_create, backup_create, backup_run, backup_restore). \
+Scheduled jobs run commands against an app on a cron schedule (job_create, job_runs, job_run_log).";
 
 impl Daemon {
     /// May this caller touch this instance? Local callers: always. Remote:

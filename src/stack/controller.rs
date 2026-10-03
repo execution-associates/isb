@@ -1057,6 +1057,10 @@ pub(crate) struct Inst {
 }
 
 impl Inst {
+    pub(crate) fn is_running(&self) -> bool {
+        self.running()
+    }
+
     fn running(&self) -> bool {
         self.status.eq_ignore_ascii_case("running")
     }

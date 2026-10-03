@@ -53,6 +53,8 @@ argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
 # The local registry's TLS: an isb CA and the registry's certificate, on ring.
 rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
 time = { version = "0.3", default-features = false, features = ["std"] }
+flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
+ruzstd = "0.8.2"
 
 # macOS has no /proc: process info, host stats and peer credentials come from
 # libproc, mach and getpeereid.
