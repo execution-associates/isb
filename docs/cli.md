@@ -48,6 +48,13 @@ isb secret encrypt [FILE|-] [-r RECIPIENT]...   armored age for a compose `age:`
 isb secret reencrypt [--all]               to the current recipients
 isb secret refresh NAME                    re-read from an external driver
 isb tui                                    live dashboard (docs/tui.md)
+
+# identity for isb serve, on <state>/isb.db directly (docs/auth.md)
+isb user create EMAIL [--admin] [--name N]  password from the terminal, or stdin's first line
+isb user ls [--json] | passwd EMAIL
+isb invite ORG EMAIL [--role member]       prints the invitation token (or link), once
+isb token create NAME [--org ORG] [--expires 90d] [--user EMAIL]   prints the token, once
+isb token ls [--json] | revoke ID...
 ```
 
 **`up` runs in the foreground**, like `docker compose up`: it runs each

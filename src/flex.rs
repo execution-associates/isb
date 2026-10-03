@@ -238,7 +238,7 @@ pub(crate) fn string_map_map<'de, D: Deserializer<'de>>(
         .collect())
 }
 
-/// Parse `90`, `90s`, `5m`, `1h`, `1500ms` into a duration.
+/// Parse `90`, `90s`, `5m`, `1h`, `90d`, `1500ms` into a duration.
 pub fn parse_duration(s: &str) -> Result<std::time::Duration, String> {
     let s = s.trim();
     let (num, unit) = match s.find(|c: char| !c.is_ascii_digit() && c != '.') {
@@ -253,7 +253,8 @@ pub fn parse_duration(s: &str) -> Result<std::time::Duration, String> {
         "s" | "sec" | "secs" => n,
         "m" | "min" | "mins" => n * 60.0,
         "h" => n * 3600.0,
-        _ => return Err(format!("invalid duration unit in {s:?} (ms, s, m, h)")),
+        "d" => n * 86400.0,
+        _ => return Err(format!("invalid duration unit in {s:?} (ms, s, m, h, d)")),
     };
     Ok(std::time::Duration::from_secs_f64(secs))
 }
@@ -269,6 +270,10 @@ mod tests {
         assert_eq!(parse_duration("90s").unwrap(), Duration::from_secs(90));
         assert_eq!(parse_duration("5m").unwrap(), Duration::from_secs(300));
         assert_eq!(parse_duration("1h").unwrap(), Duration::from_secs(3600));
+        assert_eq!(
+            parse_duration("90d").unwrap(),
+            Duration::from_secs(90 * 86400)
+        );
         assert_eq!(
             parse_duration("1500ms").unwrap(),
             Duration::from_millis(1500)

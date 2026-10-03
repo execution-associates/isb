@@ -44,6 +44,12 @@ age = { version = "0.12", default-features = false, features = ["armor", "ssh"] 
 # ~/.config/isb/secrets.toml
 toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
 
+# isb serve's identity store (src/auth): SQLite compiled from source, so the
+# static musl build needs no system library; argon2id for passwords, salted
+# from ring's OS randomness, so no getrandom/password-hash features.
+rusqlite = { version = "0.40", features = ["bundled"] }
+argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
+
 # macOS has no /proc: process info, host stats and peer credentials come from
 # libproc, mach and getpeereid.
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -51,6 +57,13 @@ libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
+
+# argon2 is unusably slow unoptimised, and debug builds hash passwords too.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
 
 [profile.release]
 lto = "thin"

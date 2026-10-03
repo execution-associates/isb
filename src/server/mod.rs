@@ -14,6 +14,9 @@
 //!   filesystem permissions are the gate, and its callers are
 //!   [`Caller::Local`], which [`Caller::is_trusted`] reports.
 //! - `/healthz` never requires auth and reveals only what the embedder puts in it.
+//! - A listener can carry extra [`Routes`] (`isb serve` mounts the identity
+//!   endpoints, `/api/v1/auth/*`, this way). They authenticate their own
+//!   callers; with Access configured they sit behind it, as `/mcp` does.
 
 pub mod access;
 pub mod client;
@@ -39,6 +42,10 @@ use mcp::Endpoint;
 /// every probe, so it must be cheap.
 pub type Healthz = Arc<dyn Fn() -> (bool, Value) + Send + Sync>;
 
+/// Extra routes on a listener: `Some` answers the request, `None` leaves it
+/// to the server (a 404).
+pub type Routes = Arc<dyn Fn(&http::Request) -> Option<http::Response> + Send + Sync>;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListenerKind {
     /// `host:port`, which must resolve to loopback only.
@@ -47,7 +54,7 @@ pub enum ListenerKind {
 }
 
 /// One address the server answers on, with its own gate and tool policy.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Listener {
     pub kind: ListenerKind,
     /// Required on TCP unless `allow_unauthenticated`; refused on unix.
@@ -55,6 +62,20 @@ pub struct Listener {
     pub policy: ToolPolicy,
     /// Serve TCP with no Access validation, trusting whatever reaches the port.
     pub allow_unauthenticated: bool,
+    /// Paths other than `/healthz` and `/mcp`.
+    pub routes: Option<Routes>,
+}
+
+impl std::fmt::Debug for Listener {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Listener")
+            .field("kind", &self.kind)
+            .field("access", &self.access)
+            .field("policy", &self.policy)
+            .field("allow_unauthenticated", &self.allow_unauthenticated)
+            .field("routes", &self.routes.is_some())
+            .finish()
+    }
 }
 
 impl Listener {
@@ -72,7 +93,14 @@ impl Listener {
             access: None,
             policy: ToolPolicy::default(),
             allow_unauthenticated: false,
+            routes: None,
         }
+    }
+
+    /// Serve `routes` on this listener too.
+    pub fn routes(mut self, r: Routes) -> Self {
+        self.routes = Some(r);
+        self
     }
 
     pub fn access(mut self, v: AccessValidator) -> Self {
@@ -182,6 +210,7 @@ pub fn serve_until(
             policy: l.policy.clone(),
             access: l.access.clone(),
             healthz: healthz.clone(),
+            routes: l.routes.clone(),
         };
         bound.push((sock, Arc::new(move |r: &http::Request| ep.handle(r))));
     }

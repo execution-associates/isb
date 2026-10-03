@@ -240,6 +240,96 @@ enum Cmd {
     /// A live dashboard of stacks and sandboxes (`isb serve`'s view; with no
     /// daemon, sandboxes only).
     Tui,
+    /// Users of `isb serve` (its identity store, `<state>/isb.db`).
+    #[command(subcommand)]
+    User(UserCmd),
+    /// Invite someone to an org: prints the invitation token, shown once
+    /// (and its link when ISB_PUBLIC_URL is set).
+    Invite {
+        org: String,
+        email: String,
+        /// owner, admin or member.
+        #[arg(long, default_value = "member")]
+        role: String,
+        #[command(flatten)]
+        db: AuthDb,
+    },
+    /// API tokens for `isb serve`.
+    #[command(subcommand)]
+    Token(TokenCmd),
+}
+
+/// The identity store the user/invite/token commands open directly.
+#[derive(Args, Clone)]
+struct AuthDb {
+    /// `isb serve`'s state directory (holds isb.db).
+    #[arg(long, env = "ISB_SERVE_STATE_DIR")]
+    state_dir: Option<PathBuf>,
+}
+
+#[derive(Subcommand)]
+enum UserCmd {
+    /// Create a user. Prompts for the password on a terminal; otherwise reads
+    /// it from the first line of stdin. The first user is always a platform
+    /// admin and owner of the default org.
+    Create {
+        email: String,
+        /// Make the user a platform admin (spans every org).
+        #[arg(long)]
+        admin: bool,
+        /// Display name.
+        #[arg(long, default_value = "")]
+        name: String,
+        #[command(flatten)]
+        db: AuthDb,
+    },
+    /// List users and their org memberships.
+    Ls {
+        #[arg(long)]
+        json: bool,
+        #[command(flatten)]
+        db: AuthDb,
+    },
+    /// Set a user's password (prompted, or stdin) and end their sessions.
+    Passwd {
+        email: String,
+        #[command(flatten)]
+        db: AuthDb,
+    },
+}
+
+#[derive(Subcommand)]
+enum TokenCmd {
+    /// Create an API token and print it, once.
+    Create {
+        name: String,
+        /// Confine the token to this org (required unless the user is a
+        /// platform admin).
+        #[arg(long)]
+        org: Option<String>,
+        /// Lifetime, e.g. 90d (default: never expires).
+        #[arg(long, value_parser = dur)]
+        expires: Option<Duration>,
+        /// Whose token (default: the only platform admin).
+        #[arg(long)]
+        user: Option<String>,
+        #[command(flatten)]
+        db: AuthDb,
+    },
+    /// List API tokens (metadata only; tokens are never shown again).
+    Ls {
+        #[arg(long)]
+        json: bool,
+        #[command(flatten)]
+        db: AuthDb,
+    },
+    /// Revoke API tokens by id.
+    Revoke {
+        #[arg(required = true)]
+        ids: Vec<i64>,
+        #[command(flatten)]
+        db: AuthDb,
+    },
 }
 
 #[derive(Args)]
@@ -289,6 +379,16 @@ struct ServeArgs {
     /// Let remote callers reach every instance, not only managed ones.
     #[arg(long, env = "ISB_SERVE_ANY_INSTANCE")]
     any_instance: bool,
+    /// Where users reach isb (https://isb.example.com), for invitation and
+    /// password-reset links.
+    #[arg(long, env = "ISB_PUBLIC_URL")]
+    public_url: Option<String>,
+    /// A browser session ends this long after sign-in.
+    #[arg(long, env = "ISB_SESSION_MAX_AGE", value_parser = dur, default_value = "30d")]
+    session_max_age: Duration,
+    /// A browser session ends after this long unused.
+    #[arg(long, env = "ISB_SESSION_IDLE", value_parser = dur, default_value = "7d")]
+    session_idle: Duration,
 }
 
 #[derive(Subcommand)]
@@ -790,6 +890,14 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
             isb::tui::run(ctx.client(None), isb::server::default_socket_path())?;
             Ok(0)
         }
+        Cmd::User(c) => user_cmd(c),
+        Cmd::Invite {
+            org,
+            email,
+            role,
+            db,
+        } => invite_cmd(&org, &email, &role, &db),
+        Cmd::Token(c) => token_cmd(c),
         Cmd::Create(a) => create(ctx, a),
         Cmd::Start { names } => {
             let c = ctx.client(None);
@@ -1457,6 +1565,12 @@ fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
         interval: a.interval,
         keys: isb::secrets::KeySources::from_env(),
         secrets_config: isb::secrets::SecretsConfig::default_path(),
+        auth: isb::auth::AuthConfig {
+            session_max_age: a.session_max_age,
+            session_idle: a.session_idle,
+            ..Default::default()
+        },
+        public_url: a.public_url.filter(|u| !u.is_empty()),
     };
     isb::daemon::serve(ctx.client(None), cfg)?;
     Ok(0)
@@ -2130,10 +2244,309 @@ fn default_route_iface() -> Option<String> {
         .map(|f| f[0].to_string())
 }
 
+// ---- identity: users, invitations, tokens ----
+//
+// These open `<state>/isb.db` directly rather than calling the daemon: the
+// first admin has to exist before anyone can authenticate to the daemon, they
+// work while it is down, and the file is the daemon's own (same uid, 0600).
+// SQLite in WAL mode lets the daemon and the CLI use it at once, and the
+// daemon reads sessions and tokens per request, so changes apply immediately.
+
+fn open_auth(db: &AuthDb) -> Result<isb::auth::AuthStore> {
+    let dir = db
+        .state_dir
+        .clone()
+        .unwrap_or_else(isb::daemon::default_state_dir);
+    let path = isb::auth::db_path(&dir);
+    isb::auth::AuthStore::open(&path)
+        .map_err(|e| Error::Invalid(format!("open {}: {e}", path.display())))
+}
+
+/// A password from the terminal (asked twice, not echoed) or, when stdin is
+/// not a terminal, its first line. Never from argv, where it would show up
+/// in `ps` and shell history.
+fn read_password(prompt: &str) -> Result<String> {
+    use std::io::BufRead;
+    let stdin = std::io::stdin();
+    if !rustix::termios::isatty(&stdin) {
+        let mut line = String::new();
+        stdin.lock().read_line(&mut line)?;
+        let pw = line.trim_end_matches(['\n', '\r']).to_string();
+        if pw.is_empty() {
+            return Err(Error::Invalid("no password on stdin".into()));
+        }
+        return Ok(pw);
+    }
+    let ask = |p: &str| -> Result<String> {
+        eprint!("{p}");
+        let saved = rustix::termios::tcgetattr(&stdin).map_err(std::io::Error::from)?;
+        let mut quiet = saved.clone();
+        quiet.local_modes -= rustix::termios::LocalModes::ECHO;
+        rustix::termios::tcsetattr(&stdin, rustix::termios::OptionalActions::Now, &quiet)
+            .map_err(std::io::Error::from)?;
+        let mut line = String::new();
+        let r = stdin.lock().read_line(&mut line);
+        let _ = rustix::termios::tcsetattr(&stdin, rustix::termios::OptionalActions::Now, &saved);
+        eprintln!();
+        r?;
+        Ok(line.trim_end_matches(['\n', '\r']).to_string())
+    };
+    let pw = ask(prompt)?;
+    if ask("again: ")? != pw {
+        return Err(Error::Invalid("the passwords differ".into()));
+    }
+    Ok(pw)
+}
+
+fn user_cmd(c: UserCmd) -> Result<u8> {
+    match c {
+        UserCmd::Create {
+            email,
+            admin,
+            name,
+            db,
+        } => {
+            let store = open_auth(&db)?;
+            let first = store.setup_needed()?;
+            let pw = read_password(&format!("password for {email}: "))?;
+            let u = if first {
+                store.create_first_admin(&email, &name, &pw)?
+            } else {
+                store.create_user(&email, &name, Some(&pw), admin)?
+            };
+            println!(
+                "created user {} (id {}){}",
+                u.email,
+                u.id,
+                if first {
+                    ": platform admin, owner of org default"
+                } else if u.platform_admin {
+                    ": platform admin"
+                } else {
+                    ""
+                }
+            );
+            Ok(0)
+        }
+        UserCmd::Ls { json, db } => {
+            let store = open_auth(&db)?;
+            let mut out = Vec::new();
+            for u in store.list_users()? {
+                let m = store.memberships(u.id)?;
+                out.push((u, m));
+            }
+            if json {
+                let v: Vec<serde_json::Value> = out
+                    .iter()
+                    .map(|(u, m)| serde_json::json!({"user": u, "memberships": m}))
+                    .collect();
+                print_json(&v);
+                return Ok(0);
+            }
+            let mut rows = vec![vec![
+                "ID".into(),
+                "EMAIL".into(),
+                "NAME".into(),
+                "FLAGS".into(),
+                "ORGS".into(),
+            ]];
+            for (u, m) in out {
+                let mut flags = Vec::new();
+                if u.platform_admin {
+                    flags.push("platform-admin");
+                }
+                if u.disabled {
+                    flags.push("disabled");
+                }
+                if !u.has_password {
+                    flags.push("no-password");
+                }
+                rows.push(vec![
+                    u.id.to_string(),
+                    u.email,
+                    u.name,
+                    flags.join(","),
+                    m.iter()
+                        .map(|m| format!("{}:{}", m.org, m.role))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                ]);
+            }
+            table(rows);
+            Ok(0)
+        }
+        UserCmd::Passwd { email, db } => {
+            let store = open_auth(&db)?;
+            let u = store
+                .user_by_email(&email)?
+                .ok_or_else(|| Error::NotFound(format!("user {email}")))?;
+            let pw = read_password(&format!("new password for {}: ", u.email))?;
+            store.set_password(u.id, &pw)?;
+            println!("password set for {}; their sessions have ended", u.email);
+            Ok(0)
+        }
+    }
+}
+
+fn invite_cmd(org: &str, email: &str, role: &str, db: &AuthDb) -> Result<u8> {
+    let store = open_auth(db)?;
+    let org = isb::org::OrgId::new(org)?;
+    let role = isb::auth::Role::parse(role)?;
+    let n = store.create_invitation(None, &org, email, role)?;
+    let days = (n.invitation.expires_at - n.invitation.created_at) / 86400;
+    eprintln!(
+        "invited {} to org {org} as {role}; valid for {days} days, shown once:",
+        n.invitation.email
+    );
+    match std::env::var("ISB_PUBLIC_URL")
+        .ok()
+        .filter(|u| !u.is_empty())
+    {
+        Some(u) => println!("{}/invite#{}", u.trim_end_matches('/'), n.token),
+        None => println!("{}", n.token),
+    }
+    Ok(0)
+}
+
+fn token_cmd(c: TokenCmd) -> Result<u8> {
+    match c {
+        TokenCmd::Create {
+            name,
+            org,
+            expires,
+            user,
+            db,
+        } => {
+            let store = open_auth(&db)?;
+            let u = match user {
+                Some(e) => store
+                    .user_by_email(&e)?
+                    .ok_or_else(|| Error::NotFound(format!("user {e}")))?,
+                None => {
+                    let admins: Vec<_> = store
+                        .list_users()?
+                        .into_iter()
+                        .filter(|u| u.platform_admin && !u.disabled)
+                        .collect();
+                    match <[_; 1]>::try_from(admins) {
+                        Ok([u]) => u,
+                        Err(v) => {
+                            return Err(Error::Invalid(format!(
+                                "{} platform admins: say whose token with --user EMAIL",
+                                v.len()
+                            )));
+                        }
+                    }
+                }
+            };
+            let org = org.map(isb::org::OrgId::new).transpose()?;
+            let t = store.create_api_token(u.id, org.as_ref(), &name, expires)?;
+            eprintln!(
+                "token {} ({}) for {}{}{}; shown once:",
+                t.info.id,
+                t.info.name,
+                u.email,
+                t.info
+                    .org
+                    .as_ref()
+                    .map(|o| format!(", org {o}"))
+                    .unwrap_or_else(|| ", all orgs (platform)".into()),
+                match t.info.expires_at {
+                    Some(e) => format!(", expires in {} days", (e - t.info.created_at) / 86400),
+                    None => ", never expires".into(),
+                }
+            );
+            println!("{}", t.token);
+            Ok(0)
+        }
+        TokenCmd::Ls { json, db } => {
+            let store = open_auth(&db)?;
+            let tokens = store.list_all_api_tokens()?;
+            if json {
+                print_json(&tokens);
+                return Ok(0);
+            }
+            let emails: BTreeMap<i64, String> = store
+                .list_users()?
+                .into_iter()
+                .map(|u| (u.id, u.email))
+                .collect();
+            let when = |t: Option<i64>| {
+                t.map(|t| fmt_time(t.max(0) as u64))
+                    .unwrap_or_else(|| "-".into())
+            };
+            let mut rows = vec![vec![
+                "ID".into(),
+                "NAME".into(),
+                "USER".into(),
+                "ORG".into(),
+                "CREATED".into(),
+                "LAST USED".into(),
+                "EXPIRES".into(),
+            ]];
+            for t in tokens {
+                rows.push(vec![
+                    t.id.to_string(),
+                    t.name,
+                    emails.get(&t.user_id).cloned().unwrap_or_default(),
+                    t.org.map(|o| o.to_string()).unwrap_or_else(|| "*".into()),
+                    fmt_time((t.created_at).max(0) as u64),
+                    when(t.last_used),
+                    when(t.expires_at),
+                ]);
+            }
+            table(rows);
+            Ok(0)
+        }
+        TokenCmd::Revoke { ids, db } => {
+            let store = open_auth(&db)?;
+            let mut code = 0;
+            for id in ids {
+                if store.revoke_api_token(id)? {
+                    println!("revoked token {id}");
+                } else {
+                    eprintln!("isb: token {id} not found");
+                    code = 1;
+                }
+            }
+            Ok(code)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn auth_commands_parse() {
+        let c = Cli::try_parse_from([
+            "isb",
+            "token",
+            "create",
+            "ci",
+            "--org",
+            "ocai",
+            "--expires",
+            "90d",
+        ])
+        .unwrap();
+        match c.cmd {
+            Cmd::Token(TokenCmd::Create { org, expires, .. }) => {
+                assert_eq!(org.as_deref(), Some("ocai"));
+                assert_eq!(expires, Some(Duration::from_secs(90 * 86400)));
+            }
+            _ => panic!("wrong command"),
+        }
+        let c = Cli::try_parse_from(["isb", "invite", "ocai", "a@x.io"]).unwrap();
+        assert!(matches!(c.cmd, Cmd::Invite { ref role, .. } if role == "member"));
+        // No way to pass a password on the command line.
+        assert!(
+            Cli::try_parse_from(["isb", "user", "create", "a@x.io", "--password", "x"]).is_err()
+        );
+        assert_eq!(fmt_time(1_800_000_000), "2027-01-15 08:00:00Z");
+    }
 
     #[test]
     fn cli_definition_is_valid() {
