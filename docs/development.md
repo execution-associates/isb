@@ -6,6 +6,12 @@ starts in can reach. The incus socket is root-equivalent, so the integration
 tests are compiled in the sandbox (`cargo test --no-run`) and run on the host
 (see the README).
 
+In a sandbox with the worktree bind-mounted, point `CARGO_TARGET_DIR` at the
+sandbox's own filesystem (for example `/home/dev/.cache/isb-target`), not at
+the worktree: a debug build of the workspace is tens of gigabytes, and there
+it goes away with the sandbox instead of piling up on the host. Copy out
+only what the host needs, such as an integration test binary.
+
 ## Layout
 
 isb is a cargo workspace. The `isb` package at the root is the CLI
@@ -95,10 +101,14 @@ RUNS=1 scripts/build-times.sh check    # one run per cell (default: best of 3)
 Debug builds keep line tables only (backtraces have file:line; set `debug =
 true` in `[profile.dev]` locally to step through code) and dependencies carry
 no debuginfo. The linker is the toolchain's default: on x86_64 Linux that is
-rust-lld since Rust 1.90, and mold measured no faster here.
+rust-lld since Rust 1.90. Linking is about 0.7 s of a 5 s edit-and-build, and
+mold saved 0.3 s of it, too little to make every contributor and CI job
+install it; to use it anyway, set it in your own `~/.cargo/config.toml`
+(`[target.x86_64-unknown-linux-gnu]` with `linker = "clang"` and
+`rustflags = ["-C", "link-arg=-fuse-ld=mold"]`).
 
 To see where a full build spends its time, `cargo build --timings` writes
-`target/cargo-timings/cargo-timing.html` (CI's `build timings` job uploads
+`cargo-timings/cargo-timing.html` under the target directory (CI's `build timings` job uploads
 one per run). To find monomorphization bloat, `cargo llvm-lines` lists the
 functions that generate the most LLVM IR, generic instantiations summed:
 
