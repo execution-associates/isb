@@ -1390,7 +1390,7 @@ mod tests {
             subids: SubIds {
                 subuid: TITAN.into(),
                 subgid: TITAN.into(),
-                owner: None,
+                caller_owned: false,
             },
             pools: vec!["container-roots".into(), "default".into()],
             path_map: None,

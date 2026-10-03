@@ -30,6 +30,10 @@ changing the env file or upgrading isb. If the binary path contains a version
 upgrade. Without lingering (`loginctl enable-linger $USER`), user services stop
 when you log out; the installer says so.
 
+On macOS the daemon runs inside the `isb machine` VM, and `isb serve install`
+writes a LaunchAgent that starts the machine at login instead; see
+[macos.md](macos.md#the-daemon-lives-in-the-vm).
+
 The daemon's user needs the incus socket (usually the `incus-admin` group).
 Stack definitions are kept in `$XDG_STATE_HOME/isb/stacks/` (0600 files;
 they hold secret values), override with `--state-dir`.

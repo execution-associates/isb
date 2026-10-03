@@ -28,6 +28,11 @@ If `isb` is missing: `mise use -g github:execution-associates/isb` (static
 binary), or `cargo install isb`. Access to the incus socket is root-equivalent
 on that host, so treat any isb call as privileged.
 
+On macOS, incus runs in a Lima VM that isb manages: `isb machine status`
+shows whether it is up (`isb machine init` creates it, `isb machine start`
+starts it). Only `$HOME` is shared with it, and only ports 1024 and above
+reach the Mac's localhost (docs/macos.md).
+
 ## Safety rules
 
 - **Mount only what the task needs.** Bind one project directory, never `$HOME`,

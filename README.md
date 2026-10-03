@@ -172,6 +172,11 @@ cargo add isb
 Prebuilt x86_64 and aarch64 binaries are also on the
 [releases page](https://github.com/execution-associates/isb/releases).
 
+**On macOS**, isb runs incus in a Lima VM it manages: `brew install lima`,
+then `isb machine init`. Your home directory is shared at the same path and
+published ports reach the Mac's localhost, so everything below works as on
+Linux. See [docs/macos.md](docs/macos.md).
+
 ## Use it from code
 
 ### Python
@@ -285,6 +290,7 @@ filled in.
 - [docs/stacks.md](docs/stacks.md): long-running stacks: replicas, health, rollouts
 - [docs/serve.md](docs/serve.md): the `isb serve` daemon and its MCP server behind Cloudflare Access
 - [docs/tui.md](docs/tui.md): `isb tui`, the live dashboard
+- [docs/macos.md](docs/macos.md): isb on a Mac, with `isb machine`
 - [docs/rpc.md](docs/rpc.md): the protocol the SDKs speak, for other languages
 - [examples/](examples): a real per-worktree dev setup, and a VM
 - [SKILL.md](SKILL.md): an agent skill for isb. Put it in your agent's skills

@@ -1,7 +1,7 @@
 //! Deciding whether a sandbox needs `raw.idmap`.
 //!
 //! The requirement is only ever that a host uid/gid lands on a guest uid/gid so a
-//! bind mount is writable. Two hosts, two answers:
+//! bind mount is writable. Three hosts, three answers:
 //!
 //! - A host whose `/etc/subuid` gives root a range that does NOT contain the uid
 //!   (plus a `root:1000:1` delegation): the default map puts the container
@@ -9,6 +9,9 @@
 //! - A nested box where root's range starts at 0: the default map is already the
 //!   identity, and asking for `raw.idmap` is refused ("Host ID is in the range of
 //!   subids").
+//! - macOS and its `isb machine` VM: bind sources are the Mac home over Apple's
+//!   virtiofs, which reports every file as owned by whoever asks and writes as
+//!   the Mac user, so every guest uid can already write them.
 //!
 //! Only a real RANGE (count > 1) counts. A `root:1000:1` line is the delegation
 //! that permits `raw.idmap` to map 1000 at all, not a range the default map draws
@@ -36,62 +39,44 @@ pub fn in_subid_range(content: &str, owner: &str, id: u32) -> bool {
     })
 }
 
-/// Host facts that decide the idmap. Read from `/etc/subuid` and `/etc/subgid`;
-/// empty where those do not exist (macOS), which `auto` reads as "map it".
+/// Host facts that decide the idmap. Read from `/etc/subuid` and `/etc/subgid`
+/// (empty where those do not exist).
 #[derive(Debug, Clone, Default)]
 pub struct SubIds {
     pub subuid: String,
     pub subgid: String,
-    /// The host uid/gid that own bind-mounted files, which `auto` and
-    /// `always` map onto guest 1000. `None` means 1000/1000.
-    pub owner: Option<(u32, u32)>,
+    /// Bind sources live on a filesystem that reports every file as owned by
+    /// whoever asks and writes as one fixed user: the `isb machine`'s macOS
+    /// home over virtiofs. Any guest user can then read and write them, so
+    /// `auto` maps nothing.
+    pub caller_owned: bool,
 }
+
+/// Set in the `isb machine` VM, whose bind sources are the shared Mac home.
+pub const CALLER_OWNED_ENV: &str = "ISB_BIND_CALLER_OWNED";
 
 impl SubIds {
     pub fn read_host() -> Self {
         SubIds {
             subuid: std::fs::read_to_string("/etc/subuid").unwrap_or_default(),
             subgid: std::fs::read_to_string("/etc/subgid").unwrap_or_default(),
-            owner: owner_from(
-                std::env::var("ISB_IDMAP_HOST_UID").ok().as_deref(),
-                std::env::var("ISB_IDMAP_HOST_GID").ok().as_deref(),
-            ),
+            caller_owned: cfg!(target_os = "macos")
+                || std::env::var(CALLER_OWNED_ENV).is_ok_and(|v| v == "1"),
         }
     }
-}
-
-/// `ISB_IDMAP_HOST_UID`/`GID` when both are set (the `isb machine` VM sets
-/// them to the Mac user's ids, which its shared home keeps), else on macOS
-/// this user's own ids, else none.
-fn owner_from(uid: Option<&str>, gid: Option<&str>) -> Option<(u32, u32)> {
-    if let (Some(u), Some(g)) = (
-        uid.and_then(|s| s.trim().parse().ok()),
-        gid.and_then(|s| s.trim().parse().ok()),
-    ) {
-        return Some((u, g));
-    }
-    if cfg!(target_os = "macos") {
-        return Some((
-            rustix::process::getuid().as_raw(),
-            rustix::process::getgid().as_raw(),
-        ));
-    }
-    None
 }
 
 /// The `raw.idmap` value for a spec on this host, or `None` if it should not be set.
 pub fn resolve(spec: &IdmapSpec, host: &SubIds) -> Option<String> {
     let (mode, hu, hg, gu, gg) = match spec {
         IdmapSpec::Raw(r) => return Some(r.raw.clone()),
-        IdmapSpec::Mode(m) => {
-            let (hu, hg) = host.owner.unwrap_or((1000, 1000));
-            (*m, hu, hg, 1000, 1000)
-        }
+        IdmapSpec::Mode(m) => (*m, 1000, 1000, 1000, 1000),
         IdmapSpec::Map(m) => (m.mode, m.host_uid, m.host_gid, m.guest_uid, m.guest_gid),
     };
     let (need_uid, need_gid) = match mode {
         IdmapMode::None => return None,
         IdmapMode::Always => (true, true),
+        IdmapMode::Auto if host.caller_owned => return None,
         IdmapMode::Auto => (
             !in_subid_range(&host.subuid, "root", hu),
             !in_subid_range(&host.subgid, "root", hg),
@@ -131,27 +116,20 @@ mod tests {
         SubIds {
             subuid: s.into(),
             subgid: s.into(),
-            owner: None,
+            caller_owned: false,
         }
     }
 
-    // The isb machine VM: root delegated 501 and 20, files owned by the Mac's ids.
+    // The isb machine: the shared home answers every caller as its owner.
     #[test]
-    fn auto_maps_the_owner() {
-        let vm = "lima:100000:65536\nroot:1000000:1000000000\nroot:501:1\n";
-        let mut h = host(vm);
-        h.subgid = "root:1000000:1000000000\nroot:20:1\n".into();
-        h.owner = owner_from(Some("501"), Some("20"));
-        let s = IdmapSpec::Mode(IdmapMode::Auto);
+    fn auto_maps_nothing_on_caller_owned_binds() {
+        let mut h = host(TITAN);
+        h.caller_owned = true;
+        assert_eq!(resolve(&IdmapSpec::Mode(IdmapMode::Auto), &h), None);
         assert_eq!(
-            resolve(&s, &h).as_deref(),
-            Some("uid 501 1000\ngid 20 1000")
+            resolve(&IdmapSpec::Mode(IdmapMode::Always), &h).as_deref(),
+            Some("both 1000 1000")
         );
-        assert_eq!(
-            owner_from(Some("501"), Some("x")).is_some(),
-            cfg!(target_os = "macos")
-        );
-        assert_eq!(owner_from(None, None).is_some(), cfg!(target_os = "macos"));
     }
 
     #[test]
@@ -183,7 +161,7 @@ mod tests {
         let h = SubIds {
             subuid: BOX.into(),
             subgid: TITAN.into(),
-            owner: None,
+            caller_owned: false,
         };
         assert_eq!(resolve(&s, &h).as_deref(), Some("gid 1000 1000"));
     }

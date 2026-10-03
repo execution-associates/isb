@@ -9,9 +9,9 @@
 //!   over an ssh connection that was opened before any group change.
 //! - `$HOME` mounted writable at the same path (virtiofs), so a bind source
 //!   like `./app` resolves to the same absolute path on the Mac and in the VM.
-//!   The guest user has the Mac user's uid, and files keep the Mac's uid/gid,
-//!   so `idmap: auto` maps those ids (not 1000) onto guest 1000; root is
-//!   delegated both in the VM's `/etc/subuid` and `/etc/subgid`.
+//!   Apple's virtiofs reports every file as owned by whoever asks and writes
+//!   as the Mac user, so any container uid can write a bind mount and
+//!   `idmap: auto` maps nothing (`ISB_BIND_CALLER_OWNED` tells the daemon).
 //! - The incus socket and `isb serve`'s socket forwarded to
 //!   `~/.isb/machine/<name>/{incus,serve}.sock`, and loopback listeners (incus
 //!   proxy devices, the stack balancer, the daemon's 8092) forwarded to the
@@ -93,9 +93,8 @@ pub struct LimaConfig {
     pub home: PathBuf,
     /// The guest user: the Mac user's name when Linux accepts it.
     pub user: String,
-    /// The Mac user's uid and primary gid, which own files in the shared home.
+    /// The guest user's uid: the Mac user's, as Lima defaults it.
     pub uid: u32,
-    pub gid: u32,
 }
 
 /// A JSON string is a valid YAML double-quoted scalar.
@@ -145,12 +144,12 @@ fn provision_script(c: &LimaConfig) -> String {
     format!(
         r#"#!/bin/bash
 set -eux -o pipefail
-# Files in the shared home keep the Mac's uid {uid} and gid {gid}: let root
-# map them into containers (raw.idmap), beside the usual container range.
+# Containers get their own range, and root may map 1000 through (raw.idmap)
+# for `idmap: always`, as on a Linux host.
 grep -qx 'root:1000000:1000000000' /etc/subuid || echo 'root:1000000:1000000000' >> /etc/subuid
 grep -qx 'root:1000000:1000000000' /etc/subgid || echo 'root:1000000:1000000000' >> /etc/subgid
-grep -qx 'root:{uid}:1' /etc/subuid || echo 'root:{uid}:1' >> /etc/subuid
-grep -qx 'root:{gid}:1' /etc/subgid || echo 'root:{gid}:1' >> /etc/subgid
+grep -qx 'root:1000:1' /etc/subuid || echo 'root:1000:1' >> /etc/subuid
+grep -qx 'root:1000:1' /etc/subgid || echo 'root:1000:1' >> /etc/subgid
 # Lima forwards the socket over an ssh connection opened before the user
 # joins incus-admin, so the user owns the socket instead.
 mkdir -p /etc/systemd/system/incus.socket.d
@@ -203,8 +202,6 @@ EOF
   touch {marker}
 fi
 "#,
-        uid = c.uid,
-        gid = c.gid,
         user = c.user,
         marker = PROVISIONED_MARKER,
         bridge = BRIDGE_ADDRESS,
@@ -252,9 +249,9 @@ mountType: virtiofs
 containerd:
   system: false
   user: false
+# For isb run inside the VM (`isb machine ssh`), as the daemon has them.
 env:
-  ISB_IDMAP_HOST_UID: "{uid}"
-  ISB_IDMAP_HOST_GID: "{gid}"
+  {caller_owned}: "1"
   ISB_SERVE_SOCKET: {guest_serve}
 provision:
 - mode: system
@@ -280,6 +277,14 @@ portForwards:
   guestPort: {serve_port}
   hostIP: 127.0.0.1
   hostPort: {serve_port}
+# Lima can forward a port below 1024 only by listening on every Mac
+# interface (macOS lets a user bind those on the wildcard address alone),
+# which would expose a published port to the network. It also keeps incus's
+# DHCP server (udp/67) off the Mac.
+- guestIP: 127.0.0.1
+  guestPortRange: [1, 1023]
+  proto: any
+  ignore: true
 # Lima's built-in last rule forwards every other guest loopback listener
 # (published ports, the stack balancer) to the same port on the Mac.
 "#,
@@ -289,7 +294,7 @@ portForwards:
         disk = q(&c.disk),
         user = q(&c.user),
         uid = c.uid,
-        gid = c.gid,
+        caller_owned = crate::idmap::CALLER_OWNED_ENV,
         home = q(&home),
         guest_serve = q(GUEST_SERVE_SOCKET),
         guest_incus = q(GUEST_INCUS_SOCKET),
@@ -301,7 +306,8 @@ portForwards:
 }
 
 /// The `isb serve` unit in the guest. `@HOME@` is filled in there.
-pub fn render_guest_unit(user: &str, uid: u32, gid: u32) -> String {
+pub fn render_guest_unit(user: &str) -> String {
+    let caller_owned = crate::idmap::CALLER_OWNED_ENV;
     format!(
         "[Unit]
 Description=isb serve (managed by isb machine)
@@ -316,8 +322,7 @@ WorkingDirectory=@HOME@
 Environment=HOME=@HOME@
 Environment=ISB_SERVE_SOCKET={GUEST_SERVE_SOCKET}
 Environment=ISB_SERVE_LISTEN={SERVE_LISTEN}
-Environment=ISB_IDMAP_HOST_UID={uid}
-Environment=ISB_IDMAP_HOST_GID={gid}
+Environment={caller_owned}=1
 RuntimeDirectory=isb
 RuntimeDirectoryMode=0700
 ExecStart=/usr/local/bin/isb serve
@@ -484,13 +489,6 @@ impl Default for InitOptions {
     }
 }
 
-fn mac_ids() -> (u32, u32) {
-    (
-        rustix::process::getuid().as_raw(),
-        rustix::process::getgid().as_raw(),
-    )
-}
-
 /// Create and start the machine, install incus and the guest's `isb serve`.
 /// `log` receives one progress line per step.
 pub fn init(opts: &InitOptions, log: &dyn Fn(&str)) -> Result<Status> {
@@ -532,7 +530,7 @@ pub fn init(opts: &InitOptions, log: &dyn Fn(&str)) -> Result<Status> {
         }
     }
 
-    let (uid, gid) = mac_ids();
+    let uid = rustix::process::getuid().as_raw();
     let user = guest_user(&std::env::var("USER").unwrap_or_default());
     let cfg = LimaConfig {
         name: opts.name.clone(),
@@ -542,7 +540,6 @@ pub fn init(opts: &InitOptions, log: &dyn Fn(&str)) -> Result<Status> {
         home,
         user: user.clone(),
         uid,
-        gid,
     };
     let yaml = d.join("lima.yaml");
     std::fs::write(&yaml, render_lima_yaml(&cfg))?;
@@ -554,12 +551,21 @@ pub fn init(opts: &InitOptions, log: &dyn Fn(&str)) -> Result<Status> {
     let timeout = format!("--timeout={}s", opts.timeout.as_secs());
     let name_arg = format!("--name={}", opts.name);
     let yaml_s = yaml.to_string_lossy().into_owned();
-    limactl_passthrough(&["start", &name_arg, "--tty=false", &timeout, &yaml_s])?;
+    limactl_passthrough(&["start", &name_arg, "--tty=false", &timeout, &yaml_s]).map_err(|e| {
+        Error::OperationFailed {
+            step: format!("first boot of machine {}", opts.name),
+            message: format!(
+                "{e}; look inside with `isb machine ssh {0} -- sudo tail -50 \
+                 /var/log/cloud-init-output.log`, start over with `isb machine rm {0}`",
+                opts.name
+            ),
+        }
+    })?;
 
     log("installing isb serve in the machine");
     guest_shell_root(
         &opts.name,
-        &guest_setup_script(&staged, &render_guest_unit(&user, uid, gid)),
+        &guest_setup_script(&staged, &render_guest_unit(&user)),
     )?;
     wait_ready(&opts.name, Duration::from_secs(90))?;
     status(&opts.name)
@@ -1029,7 +1035,6 @@ mod tests {
             home: "/Users/me".into(),
             user: "me".into(),
             uid: 501,
-            gid: 20,
         }
     }
 
@@ -1045,7 +1050,9 @@ mod tests {
         assert_eq!(v["mounts"][0]["location"], "/Users/me");
         assert_eq!(v["mounts"][0]["mountPoint"], "/Users/me");
         assert_eq!(v["mounts"][0]["writable"], true);
-        assert_eq!(v["env"]["ISB_IDMAP_HOST_GID"], "20");
+        assert_eq!(v["env"]["ISB_BIND_CALLER_OWNED"], "1");
+        assert_eq!(v["portForwards"][3]["ignore"], true);
+        assert_eq!(v["portForwards"][3]["guestPortRange"][1], 1023);
         let pf = &v["portForwards"];
         assert_eq!(pf[0]["guestSocket"], "/var/lib/incus/unix.socket");
         assert_eq!(pf[0]["hostSocket"], "/Users/me/.isb/machine/isb/incus.sock");
@@ -1055,8 +1062,7 @@ mod tests {
         assert_eq!(pf[2]["hostPort"], 8092);
         let script = v["provision"][0]["script"].as_str().unwrap();
         assert!(script.starts_with("#!/bin/bash\n"), "{script}");
-        assert!(script.contains("root:501:1"));
-        assert!(script.contains("root:20:1"));
+        assert!(script.contains("root:1000:1"));
         assert!(script.contains("SocketUser=me"));
         assert!(script.contains("pkgs.zabbly.com/incus/stable"));
         assert!(script.contains("ipv4.address: 10.177.0.1/24"));
@@ -1105,11 +1111,11 @@ mod tests {
 
     #[test]
     fn guest_unit_and_setup() {
-        let u = render_guest_unit("me", 501, 20);
+        let u = render_guest_unit("me");
         assert!(u.contains("\nUser=me\n"));
         assert!(u.contains("\nEnvironment=ISB_SERVE_SOCKET=/run/isb/serve.sock\n"));
         assert!(u.contains("\nEnvironment=ISB_SERVE_LISTEN=127.0.0.1:8092\n"));
-        assert!(u.contains("\nEnvironment=ISB_IDMAP_HOST_UID=501\n"));
+        assert!(u.contains("\nEnvironment=ISB_BIND_CALLER_OWNED=1\n"));
         assert!(u.contains("\nRuntimeDirectory=isb\n"));
         let s = guest_setup_script(Path::new("/Users/me/.isb/machine/isb/isb-linux"), &u);
         assert!(
