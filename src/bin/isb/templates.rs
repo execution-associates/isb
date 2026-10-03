@@ -100,7 +100,7 @@ fn s(v: &Value) -> String {
     }
 }
 
-#[allow(
+#[expect(
     clippy::too_many_lines,
     clippy::cognitive_complexity,
     reason = "predates the lint ratchet; split it when next changed"

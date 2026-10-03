@@ -1042,7 +1042,7 @@ mod tests {
     }
 
     /// A fake HTTP receiver answering each request with the next status.
-    #[allow(
+    #[expect(
         clippy::excessive_nesting,
         reason = "predates the lint ratchet; split it when next changed"
     )]

@@ -220,7 +220,7 @@ fn would_block(e: &tungstenite::Error) -> bool {
 
 /// Shuttle bytes between the websocket and the terminal until either ends,
 /// the session idles for `idle`, or it reaches `max_age`.
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]

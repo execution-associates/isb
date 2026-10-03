@@ -265,7 +265,7 @@ fn create_ready_and_noop_ensure_keeps_watches() {
 
 /// Streaming, exit codes, argv fidelity, users, tty and stdin handling.
 #[test]
-#[allow(
+#[expect(
     clippy::too_many_lines,
     clippy::cognitive_complexity,
     reason = "predates the lint ratchet; split it when next changed"
@@ -496,7 +496,7 @@ fn cli_exec() {
 
 /// A named volume with an owner, and both proxy directions.
 #[test]
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]
@@ -782,7 +782,7 @@ fn stuck_operation_paths() {
 
 /// Compose: up, plan, exec a service, down, through the CLI.
 #[test]
-#[allow(
+#[expect(
     clippy::too_many_lines,
     clippy::cognitive_complexity,
     reason = "predates the lint ratchet; split it when next changed"
@@ -1903,7 +1903,7 @@ impl Drop for GitDaemon {
 /// "built" by a stand-in builder; a signed webhook deploying it and a
 /// forged one refused.
 #[test]
-#[allow(
+#[expect(
     clippy::too_many_lines,
     clippy::cognitive_complexity,
     reason = "predates the lint ratchet; split it when next changed"
@@ -2176,7 +2176,7 @@ fn curl(url: &str, resolve: &str, cacert: Option<&std::path::Path>) -> (u16, Str
 /// request, and removing the stack removes its routes. `ISB_CADDY_BIN`
 /// skips the download of the pinned Caddy.
 #[test]
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]

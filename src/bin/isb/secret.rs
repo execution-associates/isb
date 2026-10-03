@@ -82,7 +82,7 @@ pub(crate) fn read_value(file: Option<&std::path::Path>) -> Result<Vec<u8>> {
     Ok(v)
 }
 
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]

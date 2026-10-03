@@ -246,7 +246,7 @@ fn only_hashes_are_stored() {
 }
 
 #[test]
-#[allow(
+#[expect(
     clippy::cognitive_complexity,
     reason = "predates the lint ratchet; split it when next changed"
 )]
@@ -337,7 +337,7 @@ fn invitations() {
 }
 
 #[test]
-#[allow(
+#[expect(
     clippy::cognitive_complexity,
     reason = "predates the lint ratchet; split it when next changed"
 )]

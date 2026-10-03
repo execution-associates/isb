@@ -776,7 +776,7 @@ pub fn has_default_route(route_v4: &str, route_v6: &str) -> bool {
 }
 
 /// Run readiness checks in order, each polled until the shared deadline.
-#[allow(
+#[expect(
     clippy::excessive_nesting,
     reason = "predates the lint ratchet; split it when next changed"
 )]

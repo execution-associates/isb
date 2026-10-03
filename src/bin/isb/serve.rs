@@ -162,7 +162,7 @@ pub(crate) enum ServeAction {
     },
 }
 
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]
@@ -305,7 +305,7 @@ pub(crate) fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
 }
 
 /// The ingress settings from `isb serve`'s flags; `None` when it is off.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub(crate) fn ingress_config(
     http: Option<String>,
     https: Option<String>,

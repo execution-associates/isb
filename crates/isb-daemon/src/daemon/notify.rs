@@ -19,7 +19,7 @@ fn channel_json(c: &Channel) -> Value {
     serde_json::to_value(c).unwrap_or_default()
 }
 
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]

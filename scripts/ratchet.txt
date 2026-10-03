@@ -23,7 +23,7 @@ crates/isb-core/src/sandbox.rs 1391
 crates/isb-core/src/spec.rs 2226
 crates/isb-core/src/stack/controller.rs 2565
 crates/isb-daemon/src/daemon/audit.rs 1019
-crates/isb-daemon/src/daemon/mod.rs 2074
+crates/isb-daemon/src/daemon/mod.rs 1606
 crates/isb-daemon/src/daemon/servers.rs 1056
 crates/isb-server/src/audit.rs 1152
 crates/isb-server/src/auth/http.rs 1378
@@ -35,8 +35,8 @@ crates/isb-tui/src/tui/app.rs 1067
 crates/isb-tui/src/tui/ui.rs 1628
 lint:cognitive_complexity 16
 lint:excessive_nesting 11
-lint:too_many_arguments 13
-lint:too_many_lines 78
+lint:too_many_arguments 12
+lint:too_many_lines 75
 lint:type_complexity 0
 src/bin/isb/data.rs 1061
 tests/integration.rs 2355

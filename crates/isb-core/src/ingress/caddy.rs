@@ -145,7 +145,7 @@ pub fn needs_dns_challenge(host: &str, ca: &Ca) -> bool {
 }
 
 /// Caddy's whole config.
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]
@@ -739,7 +739,7 @@ impl Edge {
     }
 
     /// Run Caddy until it exits (or we are stopped).
-    #[allow(
+    #[expect(
         clippy::too_many_lines,
         reason = "predates the lint ratchet; split it when next changed"
     )]

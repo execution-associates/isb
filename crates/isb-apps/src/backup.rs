@@ -1108,7 +1108,7 @@ impl Backups {
         Ok(r)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn restore_run(
         &self,
         org: &OrgId,
@@ -1172,7 +1172,7 @@ impl Backups {
             .event(kind, level, &q, &target, msg);
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn restore_once(
         &self,
         org: &OrgId,
@@ -1269,7 +1269,7 @@ impl Backups {
 
 /// Stream a dump out of `instance`, compressed, into `key`. Returns the
 /// dump's size and the object's.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn dump_to(
     client: &crate::client::Client,
     org: &OrgId,

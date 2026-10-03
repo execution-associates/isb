@@ -1504,7 +1504,7 @@ impl Worker {
     }
 
     /// One reconcile pass.
-    #[allow(
+    #[expect(
         clippy::too_many_lines,
         reason = "predates the lint ratchet; split it when next changed"
     )]
@@ -1705,8 +1705,8 @@ impl Worker {
 
     /// Replace the pending slots in batches. Ok(true) when every slot made
     /// it, Ok(false) when the rollout stopped (paused, rolled back, retrying).
-    #[allow(clippy::too_many_arguments)]
-    #[allow(
+    #[expect(clippy::too_many_arguments)]
+    #[expect(
         clippy::excessive_nesting,
         reason = "predates the lint ratchet; split it when next changed"
     )]
@@ -1838,7 +1838,7 @@ impl Worker {
 
     /// Keep one instance running, set up after every boot, health-checked,
     /// and in or out of rotation.
-    #[allow(
+    #[expect(
         clippy::too_many_lines,
         reason = "predates the lint ratchet; split it when next changed"
     )]
@@ -2060,7 +2060,7 @@ impl Worker {
     }
 
     /// Replace (or fill) one slot with an instance of the current revision.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn replace(
         &mut self,
         def: &StackDef,
@@ -2351,7 +2351,7 @@ impl Worker {
         }
     }
 
-    #[allow(
+    #[expect(
         clippy::too_many_lines,
         reason = "predates the lint ratchet; split it when next changed"
     )]

@@ -155,7 +155,7 @@ impl Templates {
 
     /// Plan, and unless `dry_run`, create the secrets and apps and deploy
     /// them in order (in the background, or before returning with `wait`).
-    #[allow(
+    #[expect(
         clippy::too_many_lines,
         reason = "predates the lint ratchet; split it when next changed"
     )]
@@ -457,7 +457,7 @@ fn string_map<'de, D: serde::Deserializer<'de>>(
         .collect()
 }
 
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]

@@ -956,7 +956,7 @@ impl Apps {
         Ok(())
     }
 
-    #[allow(
+    #[expect(
         clippy::too_many_lines,
         reason = "predates the lint ratchet; split it when next changed"
     )]
@@ -1613,7 +1613,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(
+    #[expect(
         clippy::too_many_lines,
         clippy::cognitive_complexity,
         reason = "predates the lint ratchet; split it when next changed"
@@ -1845,7 +1845,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(
+    #[expect(
         clippy::too_many_lines,
         clippy::cognitive_complexity,
         reason = "predates the lint ratchet; split it when next changed"

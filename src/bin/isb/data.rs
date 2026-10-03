@@ -469,7 +469,7 @@ fn confirm(question: &str) -> Result<bool> {
     Ok(matches!(line.trim(), "y" | "Y" | "yes"))
 }
 
-#[allow(
+#[expect(
     clippy::too_many_lines,
     clippy::cognitive_complexity,
     reason = "predates the lint ratchet; split it when next changed"
@@ -882,7 +882,7 @@ pub enum JobCmd {
     },
 }
 
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]

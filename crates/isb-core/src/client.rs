@@ -492,7 +492,7 @@ impl Client {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn file_request(
         &self,
         instance: &str,

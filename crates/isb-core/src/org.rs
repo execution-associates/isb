@@ -624,7 +624,7 @@ fn strmap(v: &Value) -> std::collections::BTreeMap<String, String> {
 
 /// Create an org, or bring an existing one in line with `opts`. A legacy
 /// default org (the incus default project) has no settings.
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]

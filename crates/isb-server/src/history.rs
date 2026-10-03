@@ -1214,7 +1214,7 @@ impl Repeats {
 /// Follow incus' lifecycle events, in every project, until `stop`: each
 /// one recorded, reconnecting with backoff, and every stretch without a
 /// connection recorded as an `incus.gap`.
-#[allow(
+#[expect(
     clippy::excessive_nesting,
     reason = "predates the lint ratchet; split it when next changed"
 )]

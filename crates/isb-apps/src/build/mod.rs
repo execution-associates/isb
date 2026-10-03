@@ -174,7 +174,7 @@ pub fn run(base: &Client, req: &BuildRequest, log: &mut dyn FnMut(&str)) -> Resu
 }
 
 /// [`run`] with explicit limits.
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]
@@ -478,7 +478,7 @@ fn ensure_cache(
     Ok(name)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn create_sandbox(
     oc: &Client,
     name: &str,
@@ -742,7 +742,7 @@ static PREPARE: Mutex<()> = Mutex::new(());
 /// The builder image's alias, made from `builder-image.sh` when missing: in the
 /// `isb-system` project, never in an org (an org could otherwise tamper
 /// with an image every org builds with).
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]

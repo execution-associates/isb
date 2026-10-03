@@ -699,7 +699,7 @@ impl AuditLog {
 
     /// Rows matching `q` that `vis` may see: newest first, or oldest first
     /// with `after` (for tailing).
-    #[allow(
+    #[expect(
         clippy::too_many_lines,
         reason = "predates the lint ratchet; split it when next changed"
     )]

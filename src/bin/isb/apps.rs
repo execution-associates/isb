@@ -454,7 +454,7 @@ fn print_app(a: &Value) {
     }
 }
 
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]
@@ -676,7 +676,7 @@ pub fn app(org: &Option<String>, cmd: AppCmd) -> Result<u8> {
     Ok(0)
 }
 
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]

@@ -6,7 +6,7 @@
 #    (`path lines`), each capped at its listed size. Once a listed file is
 #    under LIMIT it must leave the list.
 #  - Lint exemptions: clippy enforces the thresholds in clippy.toml, and an
-#    existing offender carries an `#[allow(clippy::<lint>, reason = ...)]`.
+#    existing offender carries an `#[expect(clippy::<lint>, reason = ...)]`.
 #    The number of times each ratcheted lint is named in the source
 #    (`lint:<name> count`) may not grow, so new code cannot opt out quietly.
 #
@@ -52,7 +52,7 @@ out=$(awk -v limit="$LIMIT" -v update="$update" '
       n = size[f]
       if (f ~ /^lint:/) {
         b = (f in budget) ? budget[f] : 0
-        if (n > b) { printf "FAIL %s: named %d times, budget %d (fix the function instead of allowing the lint)\n", f, n, b; bad = 1 }
+        if (n > b) { printf "FAIL %s: named %d times, budget %d (split the function instead of exempting it)\n", f, n, b; bad = 1 }
         else if (n < b) printf "%s %s: named %d times, budget %d\n", verb, f, n, b
       } else if (f in budget) {
         if (n > budget[f]) { printf "FAIL %s: %d lines, budget %d (split it)\n", f, n, budget[f]; bad = 1 }

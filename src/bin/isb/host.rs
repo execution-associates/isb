@@ -132,7 +132,7 @@ pub(crate) fn group_exists(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]

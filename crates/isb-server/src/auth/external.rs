@@ -152,7 +152,7 @@ impl AuthStore {
 
     /// Sign in with a provider's identity, by the rules in the module docs.
     /// `invite` is an invitation token carried through the flow.
-    #[allow(
+    #[expect(
         clippy::too_many_lines,
         reason = "predates the lint ratchet; split it when next changed"
     )]

@@ -130,7 +130,7 @@ pub(crate) fn read_password(prompt: &str) -> Result<String> {
     Ok(pw)
 }
 
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]
@@ -265,7 +265,7 @@ pub(crate) fn invite_cmd(org: &str, email: &str, role: &str, db: &AuthDb) -> Res
     Ok(0)
 }
 
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]

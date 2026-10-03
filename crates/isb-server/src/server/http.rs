@@ -623,7 +623,7 @@ pub(crate) fn handle<S: Duplex>(stream: &mut S, peer: Peer, limits: &Limits, han
 
 /// Read and parse one request. `Err(Some(resp))` is a refusal to send back;
 /// `Err(None)` means the peer went away and there is nobody to answer.
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]

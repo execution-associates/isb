@@ -10,6 +10,22 @@
 //! services), apps over them ([`crate::app`]), plain sandboxes (an isolated
 //! machine for an agent), and each org's secrets ([`crate::secrets`]).
 
+/// Register one tool: `tool!(registry, ctx, name, title, description,
+/// input_schema, annotations, handler)`. The handler is called with its own
+/// clone of `ctx`, the arguments and the caller. Defined before the
+/// submodules so their tool tables use it too.
+macro_rules! tool {
+    ($r:expr, $ctx:expr, $name:expr, $title:expr, $desc:expr, $schema:expr, $ann:expr, $f:expr) => {{
+        let ctx = $ctx.clone();
+        let f = $f;
+        $r.register(
+            Tool::new($name, $desc, $schema, move |a, c| f(&ctx, a, c))
+                .title($title)
+                .annotations($ann.clone()),
+        )?;
+    }};
+}
+
 pub mod apps;
 pub mod audit;
 pub mod builds;
@@ -23,6 +39,7 @@ mod servers;
 pub mod superadmin;
 pub mod templates;
 mod terminal;
+mod tools;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -44,6 +61,7 @@ use crate::server::{AccessValidator, Caller, Listener, Registry, Tool, ToolPolic
 use crate::spec::{ComposeFile, SandboxSpec};
 use crate::stack::{Controller, StackDef, Store, now_secs};
 use policy::RemotePolicy;
+use tools::Ann;
 
 /// Marks an instance a remote caller created with `sandbox_create`.
 pub const LABEL_OWNER: &str = "isb.owner";
@@ -225,7 +243,7 @@ fn open_dns_path(state_dir: &std::path::Path) {
 }
 
 /// Run the daemon until SIGINT/SIGTERM. Apps keep running when it stops.
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]
@@ -815,405 +833,28 @@ fn caller_name(c: &Caller) -> String {
 }
 
 /// Build the tool registry.
-#[allow(
-    clippy::too_many_lines,
-    reason = "predates the lint ratchet; split it when next changed"
-)]
 fn registry(d: Arc<Daemon>) -> Result<Registry> {
     let mut r = Registry::new().instructions(INSTRUCTIONS);
     superadmin::register(&mut r, d.clone())?;
-    let ro = json!({"readOnlyHint": true, "openWorldHint": false});
-    let destructive = json!({"destructiveHint": true, "openWorldHint": false});
-    let write = json!({"destructiveHint": false, "openWorldHint": false});
+    let ann = Ann {
+        ro: json!({"readOnlyHint": true, "openWorldHint": false}),
+        destructive: json!({"destructiveHint": true, "openWorldHint": false}),
+        write: json!({"destructiveHint": false, "openWorldHint": false}),
+    };
 
-    macro_rules! tool {
-        ($name:expr, $title:expr, $desc:expr, $schema:expr, $ann:expr, $f:expr) => {{
-            let d = d.clone();
-            let f = $f;
-            r.register(
-                Tool::new($name, $desc, $schema, move |a, c| f(&d, a, c))
-                    .title($title)
-                    .annotations($ann.clone()),
-            )?;
-        }};
-    }
-
-    tool!(
-        "stack_deploy",
-        "Deploy a stack",
-        "Deploy or update a stack from a docker-compose-style file (isb's format: docs/spec.md). Each service runs `deploy.replicas` incus instances, supervised inside their guests so they survive restarts of this server and of the host. Published ports are load-balanced over healthy replicas. A changed service is rolled out per `deploy.update_config` (stop-first by default; `order: start-first` for no downtime). Returns the change per service; pass wait=true to block until the rollout settles.",
-        obj(
-            json!({
-                "name": {"type": "string", "description": "Stack name: [a-z0-9-], starts with a letter, at most 30 characters."},
-                "compose": {"type": "string", "description": "The compose file, as YAML text. ${VAR} is filled from `vars` only."},
-                "vars": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Variables for ${VAR} and for secrets with `environment:`."},
-                "secrets": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Values of `file:`/`environment:` secrets by top-level secret name. They are stored in the org's store as <stack>_<name>; `external`, `age` and `driver` secrets need none."},
-                "base_dir": {"type": "string", "description": "Host directory relative bind paths resolve against. Remote callers: must be under a --bind-root."},
-                "wait": {"type": "boolean", "description": "Wait until every service converges, pauses or fails (default false)."},
-                "dry_run": {"type": "boolean", "description": "Only report what would change."},
-                "timeout": {"type": "string", "description": "How long wait may take, e.g. 5m (default 10m)."}
-            }),
-            &["name", "compose"]
-        ),
-        write,
-        stack_deploy
-    );
-    tool!(
-        "overview",
-        "Overview",
-        "Everything a dashboard shows in one call: the host's CPU and memory (with history), every stack in detail (as stack_status), the sandboxes (status, IP, CPU, memory), and the latest event number for the events tool.",
-        obj(json!({}), &[]),
-        ro,
-        |d: &Daemon, _a: Value, c: &Caller| -> Result<Value> {
-            let snap = d.ctl.snapshot();
-            let orgs = visible_orgs(c);
-            let sees = |org: &str| {
-                orgs.as_ref()
-                    .is_none_or(|v| v.iter().any(|o| o.as_str() == org))
-            };
-            let stacks: Vec<_> = d.ctl.list().into_iter().filter(|s| sees(&s.org)).collect();
-            // Only isb's orgs: incus may hold other tools' projects too. Plain
-            // `isb create` sandboxes in incus' default project, where it is
-            // not an org on this host, are shown to local callers (the TUI).
-            let sandboxes: Vec<&crate::metrics::InstanceSample> = snap
-                .instances
-                .values()
-                .filter(
-                    |i| match crate::org::OrgId::from_incus_project(&i.project) {
-                        Some(o) => sees(o.as_str()),
-                        None => i.project == "default" && c.is_trusted(),
-                    },
-                )
-                .filter(|i| i.stack().is_none())
-                .filter(|i| {
-                    c.is_trusted()
-                        || c.principal().is_some()
-                        || d.policy.any_instance
-                        || i.labels.contains_key(LABEL_OWNER)
-                })
-                .collect();
-            let (seq, _) = d.ctl.events(u64::MAX, 0);
-            Ok(json!({
-                "isb": env!("CARGO_PKG_VERSION"),
-                "host": snap.host,
-                "sampled_at": snap.at,
-                "stacks": stacks,
-                "sandboxes": sandboxes,
-                "events_seq": seq,
-            }))
-        }
-    );
-    tool!(
-        "events",
-        "Events",
-        "What happened, newest last: deploys, rollouts, health changes, restarts, failures. Pass the last `seq` you saw as `since` to get only newer ones; `wait` (seconds, at most 30) holds the call until one arrives.",
-        obj(
-            json!({
-                "since": {"type": "integer", "minimum": 0},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 1000},
-                "wait": {"type": "integer", "minimum": 0, "maximum": 30}
-            }),
-            &[]
-        ),
-        ro,
-        |d: &Daemon, a: Value, c: &Caller| -> Result<Value> {
-            #[derive(Deserialize)]
-            struct A {
-                #[serde(default)]
-                since: u64,
-                limit: Option<usize>,
-                #[serde(default)]
-                wait: u64,
-                #[serde(default)]
-                #[allow(dead_code)]
-                org: Option<String>,
-            }
-            let a: A = args(a)?;
-            let (seq, events) = d.ctl.wait_events(
-                a.since,
-                a.limit.unwrap_or(200).min(1000),
-                Duration::from_secs(a.wait.min(30)),
-            );
-            let orgs = visible_orgs(c);
-            let events: Vec<_> = events
-                .into_iter()
-                .filter(|e| event_visible(&orgs, &e.stack))
-                .collect();
-            Ok(json!({"seq": seq, "events": events}))
-        }
-    );
-    tool!(
-        "ingress_status",
-        "Ingress status",
-        "The HTTP(S) edge: its listeners, CA and Caddy process; every routed domain with its URL, certificate state (issued, pending, failed, unsupported, cloudflare, none) and live upstreams; domain conflicts and refusals; and each Cloudflare-tunnel org's cloudflared and API sync. Shows the caller's orgs only.",
-        obj(json!({}), &[]),
-        ro,
-        |d: &Daemon, _a: Value, c: &Caller| -> Result<Value> {
-            let Some(m) = &d.ingress else {
-                return Ok(json!({
-                    "enabled": false,
-                    "message": "isb serve runs without an ingress (--ingress-http, --ingress-https or --ingress-tunnels)",
-                }));
-            };
-            let orgs = visible_orgs(c);
-            Ok(m.status(orgs.as_deref()))
-        }
-    );
-    tool!(
-        "stack_list",
-        "List stacks",
-        "List deployed stacks with each service's replica, health and rollout state.",
-        obj(json!({}), &[]),
-        ro,
-        |d: &Daemon, _a: Value, c: &Caller| -> Result<Value> {
-            let orgs = visible_orgs(c);
-            let stacks: Vec<_> = d
-                .ctl
-                .list()
-                .into_iter()
-                .filter(|s| {
-                    orgs.as_ref()
-                        .is_none_or(|v| v.iter().any(|o| o.as_str() == s.org))
-                })
-                .collect();
-            Ok(json!({"stacks": stacks}))
-        }
-    );
-    tool!(
-        "stack_status",
-        "Stack status",
-        "One stack in detail: per service its revision, state (converged, updating, paused, waiting, failing), message, every replica (status, health, IP, in rotation, restarts, last probe output) and published ports with their live backends.",
-        obj(json!({"name": {"type": "string"}}), &["name"]),
-        ro,
-        |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
-            #[derive(Deserialize)]
-            struct A {
-                name: String,
-                #[serde(default)]
-                org: Option<String>,
-            }
-            let a: A = args(a)?;
-            Ok(serde_json::to_value(
-                d.ctl.status(&qname(&a.org, &a.name)?)?,
-            )?)
-        }
-    );
-    tool!(
-        "stack_config",
-        "Stack config",
-        "The compose file a stack was deployed with, resolved, and its secrets as references (store name, driver, version; never values).",
-        obj(json!({"name": {"type": "string"}}), &["name"]),
-        ro,
-        |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
-            #[derive(Deserialize)]
-            struct A {
-                name: String,
-                #[serde(default)]
-                org: Option<String>,
-            }
-            let a: A = args(a)?;
-            let def = d.ctl.definition(&qname(&a.org, &a.name)?)?;
-            Ok(json!({
-                "name": def.name,
-                "base_dir": def.base_dir,
-                "deployed_at": def.deployed_at,
-                "deployed_by": def.deployed_by,
-                "file": def.file,
-                // References only: store name, driver, version.
-                "secrets": def.secrets,
-            }))
-        }
-    );
-    tool!(
-        "stack_logs",
-        "Stack logs",
-        "Recent output of a service's replicas: the journal of its supervised command, or an OCI image's console.",
-        obj(
-            json!({
-                "name": {"type": "string"},
-                "service": {"type": "string"},
-                "slot": {"type": "integer", "minimum": 1, "description": "One replica only."},
-                "lines": {"type": "integer", "minimum": 1, "maximum": 5000, "description": "Default 200."}
-            }),
-            &["name", "service"]
-        ),
-        ro,
-        |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
-            #[derive(Deserialize)]
-            struct A {
-                name: String,
-                #[serde(default)]
-                org: Option<String>,
-                service: String,
-                slot: Option<u32>,
-                lines: Option<usize>,
-            }
-            let a: A = args(a)?;
-            let logs = d.ctl.logs(
-                &qname(&a.org, &a.name)?,
-                &a.service,
-                a.slot,
-                a.lines.unwrap_or(200).min(5000),
-            )?;
-            Ok(json!({"logs": logs}))
-        }
-    );
-    tool!(
-        "stack_scale",
-        "Scale a service",
-        "Set a service's replica count (0 stops it without removing it).",
-        obj(
-            json!({
-                "name": {"type": "string"},
-                "service": {"type": "string"},
-                "replicas": {"type": "integer", "minimum": 0, "maximum": 100}
-            }),
-            &["name", "service", "replicas"]
-        ),
-        write,
-        |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
-            #[derive(Deserialize)]
-            struct A {
-                name: String,
-                #[serde(default)]
-                org: Option<String>,
-                service: String,
-                replicas: u32,
-            }
-            let a: A = args(a)?;
-            d.ctl
-                .scale(&qname(&a.org, &a.name)?, &a.service, a.replicas)?;
-            d.ctl.note(
-                "info",
-                &qname(&a.org, &a.name)?,
-                format!(
-                    "{} scaled to {} by {}",
-                    a.service,
-                    a.replicas,
-                    caller_name(_c)
-                ),
-            );
-            Ok(json!({"ok": true}))
-        }
-    );
-    tool!(
-        "stack_redeploy",
-        "Redeploy a service",
-        "Replace every replica of a service with a fresh instance, rolling, even though its spec did not change: picks up a moved image tag (docker:app:latest) or changed bind-mounted files.",
-        obj(
-            json!({"name": {"type": "string"}, "service": {"type": "string"}}),
-            &["name", "service"]
-        ),
-        write,
-        |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
-            #[derive(Deserialize)]
-            struct A {
-                name: String,
-                #[serde(default)]
-                org: Option<String>,
-                service: String,
-            }
-            let a: A = args(a)?;
-            d.ctl.redeploy(&qname(&a.org, &a.name)?, &a.service)?;
-            d.ctl.note(
-                "info",
-                &qname(&a.org, &a.name)?,
-                format!("{} redeployed by {}", a.service, caller_name(_c)),
-            );
-            Ok(json!({"ok": true}))
-        }
-    );
-    tool!(
-        "stack_rollback",
-        "Roll back a stack",
-        "Go back to the stack's previous deployment. A second rollback undoes the first.",
-        obj(json!({"name": {"type": "string"}}), &["name"]),
-        write,
-        |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
-            #[derive(Deserialize)]
-            struct A {
-                name: String,
-                #[serde(default)]
-                org: Option<String>,
-            }
-            let a: A = args(a)?;
-            let changes = d.ctl.rollback(&qname(&a.org, &a.name)?)?;
-            d.ctl.note(
-                "info",
-                &qname(&a.org, &a.name)?,
-                format!("rolled back by {}", caller_name(_c)),
-            );
-            Ok(json!({"changes": changes}))
-        }
-    );
-    tool!(
-        "stack_remove",
-        "Remove a stack",
-        "Delete a stack's instances and published ports. Named volumes are kept unless volumes=true.",
-        obj(
-            json!({"name": {"type": "string"}, "volumes": {"type": "boolean"}}),
-            &["name"]
-        ),
-        destructive,
-        |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
-            #[derive(Deserialize)]
-            struct A {
-                name: String,
-                #[serde(default)]
-                org: Option<String>,
-                #[serde(default)]
-                volumes: bool,
-            }
-            let a: A = args(a)?;
-            let q = qname(&a.org, &a.name)?;
-            let def = d.ctl.definition(&q)?;
-            d.ctl.remove(&q, a.volumes, Duration::from_secs(300))?;
-            // As swarm does: the secrets the stack made go with it, unless
-            // another stack has come to use them.
-            let mut removed: Vec<String> = Vec::new();
-            let owned = def
-                .secrets
-                .values()
-                .chain(def.previous.iter().flat_map(|p| p.secrets.values()))
-                .filter(|b| b.owned);
-            for b in owned {
-                if removed.contains(&b.name) {
-                    continue;
-                }
-                let used = d
-                    .ctl
-                    .definitions()
-                    .iter()
-                    .any(|o| o.org == def.org && o.store_secrets().contains(&b.name));
-                if used {
-                    continue;
-                }
-                match d.secrets.delete(&def.org, &b.name) {
-                    Ok(()) => removed.push(b.name.clone()),
-                    Err(e) if e.is_not_found() => {}
-                    Err(e) => {
-                        d.ctl
-                            .note("warn", &q, format!("secret {}: not removed: {e}", b.name))
-                    }
-                }
-            }
-            Ok(json!({"ok": true, "secrets_removed": removed}))
-        }
-    );
-    tool!(
-        "sandbox_create",
-        "Create a sandbox",
-        "Create (or reconcile) one sandbox: an incus container or VM to run code in isolation. `spec` is one compose service (docs/spec.md) with container_name set, as an object or YAML text. Remote callers' sandboxes are labelled with their identity, and only managed sandboxes are reachable remotely.",
-        obj(
-            json!({
-                "spec": {"description": "The service spec: an object, or YAML text."},
-                "wait_ready": {"type": "boolean", "description": "Run readiness checks (default true)."}
-            }),
-            &["spec"]
-        ),
-        write,
-        sandbox_create
-    );
+    tools::stack_deploy_tool(&mut r, &d, &ann)?;
+    tools::overview_tool(&mut r, &d, &ann)?;
+    tools::events_tool(&mut r, &d, &ann)?;
+    tools::ingress_status_tool(&mut r, &d, &ann)?;
+    tools::stack_list_tool(&mut r, &d, &ann)?;
+    tools::stack_status_tool(&mut r, &d, &ann)?;
+    tools::stack_config_tool(&mut r, &d, &ann)?;
+    tools::stack_logs_tool(&mut r, &d, &ann)?;
+    tools::stack_scale_tool(&mut r, &d, &ann)?;
+    tools::stack_redeploy_tool(&mut r, &d, &ann)?;
+    tools::stack_rollback_tool(&mut r, &d, &ann)?;
+    tools::stack_remove_tool(&mut r, &d, &ann)?;
+    tools::sandbox_create_tool(&mut r, &d, &ann)?;
     let ctl = d.ctl.clone();
     let bindings: secrets::Bindings = Arc::new(move |org: &crate::org::OrgId| {
         let mut out = Vec::new();
@@ -1262,90 +903,9 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             ctl: d.ctl.clone(),
         },
     )?;
-    tool!(
-        "sandbox_list",
-        "List sandboxes",
-        "List instances (for remote callers: only the ones isb serve manages), optionally filtered by labels (`key` or `key=value`).",
-        obj(
-            json!({"labels": {"type": "array", "items": {"type": "string"}}}),
-            &[]
-        ),
-        ro,
-        |d: &Daemon, a: Value, c: &Caller| -> Result<Value> {
-            #[derive(Deserialize)]
-            struct A {
-                #[serde(default)]
-                labels: Vec<String>,
-                #[serde(default)]
-                org: Option<String>,
-            }
-            let a: A = args(a)?;
-            let filters: Vec<_> = a
-                .labels
-                .iter()
-                .map(|l| crate::sandbox::LabelFilter::parse(l))
-                .collect();
-            let all = Sandbox::list_with(&d.oc(&a.org)?, &filters)?;
-            let out: Vec<Value> = all
-                .into_iter()
-                .filter(|i| d.reachable(c, i))
-                .map(|i| {
-                    json!({
-                        "name": i.name, "status": i.status, "type": i.instance_type,
-                        "labels": i.labels,
-                        "stack": i.config.get("user.isb.stack"),
-                        "owner": i.config.get("user.isb.owner"),
-                    })
-                })
-                .collect();
-            Ok(json!({"sandboxes": out}))
-        }
-    );
-    tool!(
-        "sandbox_exec",
-        "Run a command in a sandbox",
-        "Run argv in a sandbox (no shell unless you run one: [\"sh\", \"-c\", \"...\"]) and return its exit code and output (each stream capped at 256 KiB, keeping the end). Uses the sandbox's user and working_dir unless given.",
-        obj(
-            json!({
-                "name": {"type": "string"},
-                "argv": {"type": "array", "items": {"type": "string"}, "minItems": 1},
-                "cwd": {"type": "string"},
-                "user": {"type": "string"},
-                "env": {"type": "object", "additionalProperties": {"type": "string"}},
-                "stdin": {"type": "string", "description": "Text fed to the command's stdin."},
-                "timeout": {"type": "string", "description": "Kill after this long, e.g. 30s (default 10m)."}
-            }),
-            &["name", "argv"]
-        ),
-        write,
-        sandbox_exec
-    );
-    tool!(
-        "sandbox_remove",
-        "Remove a sandbox",
-        "Delete a sandbox (stopping it first). Not for stack replicas: remove or scale the stack.",
-        obj(json!({"name": {"type": "string"}}), &["name"]),
-        destructive,
-        |d: &Daemon, a: Value, c: &Caller| -> Result<Value> {
-            #[derive(Deserialize)]
-            struct A {
-                name: String,
-                #[serde(default)]
-                org: Option<String>,
-            }
-            let a: A = args(a)?;
-            let oc = d.oc(&a.org)?;
-            let info = d.reach(c, &oc, &a.name)?;
-            if info.config.contains_key("user.isb.stack") {
-                return Err(Error::invalid(format!(
-                    "{} belongs to stack {}; scale or remove the stack instead",
-                    a.name, info.config["user.isb.stack"]
-                )));
-            }
-            Sandbox::remove(&oc, &a.name, true)?;
-            Ok(json!({"ok": true}))
-        }
-    );
+    tools::sandbox_list_tool(&mut r, &d, &ann)?;
+    tools::sandbox_exec_tool(&mut r, &d, &ann)?;
+    tools::sandbox_remove_tool(&mut r, &d, &ann)?;
     apps::register(&mut r, d.apps.clone())?;
     previews::register(&mut r, d.apps.clone())?;
     templates::register(
@@ -1358,35 +918,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
         ),
     )?;
     data::register(&mut r, d.data.clone())?;
-    tool!(
-        "server_status",
-        "Server status",
-        "isb's version, incus' version, and the load balancer's routes with their backends and counters.",
-        obj(json!({}), &[]),
-        ro,
-        |d: &Daemon, _a: Value, _c: &Caller| -> Result<Value> {
-            let info = d.client.server_info()?;
-            let routes: Vec<Value> = d
-                .ctl
-                .balancer()
-                .routes()
-                .into_iter()
-                .map(|r| {
-                    json!({
-                        "route": r.key, "listen": r.listen.to_string(),
-                        "backends": r.backends.iter().map(|b| json!({"addr": b.addr.to_string(), "active": b.active, "down": b.down})).collect::<Vec<_>>(),
-                        "accepted": r.accepted, "failures": r.failures, "rejected": r.rejected,
-                    })
-                })
-                .collect();
-            Ok(json!({
-                "isb": env!("CARGO_PKG_VERSION"),
-                "incus": info["environment"]["server_version"],
-                "state_dir": d.state_dir,
-                "routes": routes,
-            }))
-        }
-    );
+    tools::server_status_tool(&mut r, &d, &ann)?;
     orgs::register(&mut r, d.clone())?;
     notify::register(
         &mut r,
@@ -1481,7 +1013,7 @@ struct DeployArgs {
     timeout: Option<String>,
 }
 
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]

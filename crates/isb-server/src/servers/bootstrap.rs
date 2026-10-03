@@ -241,7 +241,7 @@ WantedBy=multi-user.target
 
 /// The root script: everything idempotent, so a second `server add` (or a
 /// rerun after a failure) converges.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn render_script(
     upload: &str,
     sha256: &str,

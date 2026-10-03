@@ -956,7 +956,7 @@ mod tests {
 
     /// A loopback S3 that records requests, stores objects, and answers the
     /// multipart calls. Checks every request's signature with the secret.
-    #[allow(
+    #[expect(
         clippy::too_many_lines,
         clippy::excessive_nesting,
         reason = "predates the lint ratchet; split it when next changed"

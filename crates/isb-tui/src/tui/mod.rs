@@ -83,7 +83,6 @@ pub fn run(client: Client, socket: PathBuf) -> Result<()> {
     r
 }
 
-#[allow(clippy::too_many_arguments)]
 fn event_loop(
     terminal: &mut DefaultTerminal,
     app: &mut App,

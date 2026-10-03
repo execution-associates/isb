@@ -403,7 +403,7 @@ pub fn compose_takes_domains() -> bool {
 
 /// Render `spec` running `image` as its stack service. `notes` gets what
 /// was left out and why.
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]

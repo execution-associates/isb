@@ -146,7 +146,7 @@ fn listing(stored: Vec<crate::secrets::SecretMeta>, used: Vec<Binding>) -> Resul
 }
 
 /// Register the secret tools.
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]

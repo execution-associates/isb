@@ -395,7 +395,7 @@ pub fn image_ref(image: &str) -> String {
 
 /// Compose `${VAR}` interpolation, against the template's `.env`, written
 /// as a native expression.
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]
@@ -614,7 +614,7 @@ struct Toml {
     mounts: BTreeMap<String, String>,
 }
 
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]
@@ -912,7 +912,7 @@ fn traefik_rule(rule: &str) -> Option<(Vec<String>, Option<String>)> {
 }
 
 /// Domains from a service's Traefik labels (already interpolated).
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]
@@ -1062,7 +1062,7 @@ pub fn translate(meta: &Meta, compose: &str, toml_text: &str) -> (Option<Templat
     )
 }
 
-#[allow(
+#[expect(
     clippy::too_many_lines,
     clippy::cognitive_complexity,
     clippy::excessive_nesting,

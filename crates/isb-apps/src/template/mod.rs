@@ -880,7 +880,7 @@ fn secret_env_name(var: &str) -> String {
 
 /// Render a template into what a deploy creates. Pure apart from the
 /// generators and `ctx`.
-#[allow(
+#[expect(
     clippy::too_many_lines,
     clippy::cognitive_complexity,
     clippy::excessive_nesting,

@@ -350,7 +350,7 @@ mod tests {
         base: String,
     }
 
-    #[allow(
+    #[expect(
         clippy::too_many_lines,
         clippy::excessive_nesting,
         reason = "predates the lint ratchet; split it when next changed"

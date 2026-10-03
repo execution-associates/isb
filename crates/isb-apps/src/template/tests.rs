@@ -134,7 +134,7 @@ fn validation_catches_mistakes() {
 }
 
 #[test]
-#[allow(
+#[expect(
     clippy::cognitive_complexity,
     reason = "predates the lint ratchet; split it when next changed"
 )]

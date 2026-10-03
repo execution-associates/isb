@@ -73,7 +73,7 @@ enum Msg {
 /// them. Returns the exit code: the first failing command's status (0 if all
 /// succeeded), 128+N for signal N, 129 when a parent process went away, and
 /// 141 when stdout closed.
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]

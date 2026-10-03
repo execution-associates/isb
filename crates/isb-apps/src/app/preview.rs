@@ -740,7 +740,7 @@ impl super::Apps {
     }
 
     /// Create or update the preview of `pr` and queue a deploy of it.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn preview_request(
         &self,
         org: &OrgId,
@@ -1019,7 +1019,7 @@ impl super::Apps {
         self.pdep_save(org, n, dep)
     }
 
-    #[allow(
+    #[expect(
         clippy::too_many_lines,
         reason = "predates the lint ratchet; split it when next changed"
     )]
@@ -1211,7 +1211,7 @@ impl super::Apps {
 
     /// Post a commit status when the app's previews have `status` set.
     /// Never fails the deploy: problems go to the log.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn forge_status(
         &self,
         org: &OrgId,

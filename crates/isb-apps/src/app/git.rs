@@ -481,7 +481,7 @@ fn git(
 
 /// Fetch `src` into `dir` (`<sources>/<app>`) and check out the exact
 /// commit its ref names now.
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]

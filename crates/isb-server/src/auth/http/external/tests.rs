@@ -60,7 +60,7 @@ fn get<'a>(q: &'a [(String, String)], k: &str) -> Option<&'a str> {
     q.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str())
 }
 
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]

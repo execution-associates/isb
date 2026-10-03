@@ -372,7 +372,7 @@ pub fn verify_registration(
 
 /// Verify `navigator.credentials.get()`'s answer to `challenge` against a
 /// stored credential. Returns the new signature counter.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn verify_assertion(
     rp: &RelyingParty,
     challenge: &[u8],

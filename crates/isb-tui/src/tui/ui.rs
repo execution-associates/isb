@@ -88,7 +88,7 @@ fn status_word<'a>(t: &Theme, state: &str) -> Vec<Span<'a>> {
 
 // ---- header -----------------------------------------------------------
 
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]
@@ -1338,7 +1338,7 @@ mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
-    #[allow(
+    #[expect(
         clippy::too_many_lines,
         reason = "predates the lint ratchet; split it when next changed"
     )]

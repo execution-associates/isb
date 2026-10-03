@@ -486,7 +486,7 @@ impl Manager {
     }
 
     /// Compute the routes and load them into Caddy when they changed.
-    #[allow(
+    #[expect(
         clippy::too_many_lines,
         clippy::excessive_nesting,
         reason = "predates the lint ratchet; split it when next changed"
@@ -666,7 +666,7 @@ impl Manager {
 
     /// Run each tunnel org's cloudflared stack, and sync its tunnel through
     /// the API when the org gave a token for it.
-    #[allow(
+    #[expect(
         clippy::too_many_lines,
         reason = "predates the lint ratchet; split it when next changed"
     )]

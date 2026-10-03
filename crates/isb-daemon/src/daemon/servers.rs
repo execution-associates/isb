@@ -73,7 +73,7 @@ fn servers(d: &Daemon) -> Result<&Arc<Servers>> {
     })
 }
 
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]
@@ -435,7 +435,7 @@ fn org_other(
 
 /// Run a cross-org read here and on every server holding an org the
 /// caller sees, and merge the answers.
-#[allow(
+#[expect(
     clippy::excessive_nesting,
     reason = "predates the lint ratchet; split it when next changed"
 )]

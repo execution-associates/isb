@@ -64,10 +64,13 @@ better but never worse.
   The thresholds are the targets, not today's worst case: a threshold set
   just above the worst function would let new code grow to that size. Each
   function that already exceeded one carries
-  `#[allow(clippy::<lint>, reason = "predates the lint ratchet; ...")]`.
+  `#[expect(clippy::<lint>, reason = "predates the lint ratchet; ...")]`.
+  An `expect` that no longer fires is itself a warning
+  (`unfulfilled_lint_expectations`), so once such a function is split under
+  the limit, clippy insists the exemption goes too.
 - **Exemption budget**: `scripts/ratchet.sh` counts how often each of those
   lints is named in the source and fails when a count exceeds its budget in
-  `scripts/ratchet.txt`, so a new `#[allow]` cannot slip in unnoticed.
+  `scripts/ratchet.txt`, so a new exemption cannot slip in unnoticed.
 - **File size**: the same script fails any `.rs` file over 1000 lines, except
   the files listed in `scripts/ratchet.txt`, each capped at its listed size.
 
@@ -75,7 +78,7 @@ Both budgets go down only. After splitting a long function or file, run
 `scripts/ratchet.sh --update` to lower them (it never raises one) and commit
 the new `scripts/ratchet.txt`. Raising a budget is a hand edit a reviewer
 sees; splitting is almost always the better fix. When you change a function
-that carries an exemption, split it and drop the `#[allow]`.
+that carries an exemption, split it and drop the `#[expect]`.
 
 ## Compile time
 

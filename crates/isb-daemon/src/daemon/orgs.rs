@@ -173,7 +173,7 @@ fn settings_props() -> Value {
     })
 }
 
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
 )]
