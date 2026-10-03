@@ -24,6 +24,7 @@ toml.workspace = true
 rcgen.workspace = true
 flate2.workspace = true
 ruzstd.workspace = true
+rusqlite.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc.workspace = true

@@ -33,6 +33,8 @@ mod authorize;
 pub mod builds;
 pub mod data;
 mod default_org;
+mod dns;
+mod monitors;
 mod notify;
 mod orgs;
 pub mod policy;
@@ -132,6 +134,8 @@ pub struct ServeConfig {
     /// `--superadmin-access`: Access emails and service token client ids
     /// with the unix socket's reach.
     pub superadmin_access: Option<superadmin::AccessAllowList>,
+    /// `--heartbeat-url`: a dead man's switch pinged every interval.
+    pub heartbeat: Option<crate::monitor::heartbeat::Heartbeat>,
 }
 
 /// `isb serve --agent`.
@@ -213,6 +217,7 @@ struct Daemon {
     /// The identity store: the org list memberships hang off.
     users: Arc<AuthStore>,
     notifier: crate::notify::Notifier,
+    monitors: crate::monitor::Monitors,
     history: crate::metrics_history::History,
     /// Databases' backups and scheduled jobs.
     data: data::Ctx,
@@ -234,40 +239,6 @@ struct Daemon {
     public_url: Option<String>,
 }
 
-/// dnsmasq (as `incus`) reads service names from the DNS root. When that
-/// sits inside the state directory (a daemon running as root, or an agent
-/// whose home is `/var/lib/isb`), the private state directories on the way
-/// must let others pass through: execute only, never list or read. What is
-/// in them stays 0600/0700.
-fn open_dns_path(state_dir: &std::path::Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let dns = crate::discovery::root();
-    for dir in dns.ancestors().skip(1) {
-        if !dir.starts_with(state_dir) {
-            continue;
-        }
-        let Ok(m) = std::fs::metadata(dir) else {
-            continue;
-        };
-        let mode = m.permissions().mode() & 0o7777;
-        if mode & 0o011 != 0o011 {
-            let new = mode | 0o011;
-            match std::fs::set_permissions(dir, std::fs::Permissions::from_mode(new)) {
-                Ok(()) => eprintln!(
-                    "isb serve: {} is now {new:o} so dnsmasq can reach service names in {}",
-                    dir.display(),
-                    dns.display()
-                ),
-                Err(e) => eprintln!(
-                    "isb serve: WARNING: {} blocks dnsmasq from {} (service names will not resolve): {e}",
-                    dir.display(),
-                    dns.display()
-                ),
-            }
-        }
-    }
-}
-
 /// Run the daemon until SIGINT/SIGTERM. Apps keep running when it stops.
 #[expect(
     clippy::too_many_lines,
@@ -278,7 +249,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         .server_info()
         .map_err(|e| Error::invalid(format!("isb serve needs incusd: {e}")))?;
     let store = Store::open(&cfg.state_dir)?;
-    open_dns_path(&cfg.state_dir);
+    dns::open_dns_path(&cfg.state_dir);
     // The default org is the incus project `isb-default`, made here when
     // it is missing. A server's agent has no default org of its own.
     if cfg.agent.is_none() {
@@ -397,6 +368,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     });
     let notifier = crate::notify::Notifier::new(&cfg.state_dir, secrets.clone(), resolve)?;
     notifier.start(ctl.clone());
+    let monitors = monitors::start(&cfg, &apps, &secrets, &notifier);
     // Every controller event goes to the history (the ones already emitted at startup first).
     ctl.set_event_sink(recorder.controller_sink());
     // Every metrics sample also goes to the history.
@@ -445,6 +417,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         ingress: ingress.clone(),
         users: users.clone(),
         notifier: notifier.clone(),
+        monitors: monitors.clone(),
         history,
         data: data::Ctx {
             apps: apps.clone(),
@@ -566,6 +539,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         s.shutdown();
     }
     notifier.shutdown();
+    monitors.shutdown();
     scheduler.shutdown();
     ctl.shutdown();
     if let Some(m) = &ingress {
@@ -882,6 +856,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
         d.history.clone(),
         d.apps.clone(),
     )?;
+    monitors::register(&mut r, d.monitors.clone())?;
     audit::register(&mut r, d.audit.clone())?;
     audit::register_history(&mut r, d.audit.clone())?;
     servers::register(&mut r, d.clone())?;

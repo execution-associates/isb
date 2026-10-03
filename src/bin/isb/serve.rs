@@ -64,6 +64,15 @@ pub(crate) struct ServeArgs {
     /// password-reset links.
     #[arg(long, env = "ISB_PUBLIC_URL")]
     pub(crate) public_url: Option<String>,
+    /// A dead man's switch: GET this URL every --heartbeat-interval
+    /// (healthchecks.io, Uptime Kuma push, ...), so an outside service
+    /// alerts when the host or daemon dies. Its path is usually a token:
+    /// prefer the environment variable to the flag.
+    #[arg(long, env = "ISB_HEARTBEAT_URL", hide_env_values = true)]
+    pub(crate) heartbeat_url: Option<String>,
+    /// How often the heartbeat is sent.
+    #[arg(long, env = "ISB_HEARTBEAT_INTERVAL", value_parser = dur, default_value = "60s")]
+    pub(crate) heartbeat_interval: Duration,
     /// A browser session ends this long after sign-in.
     #[arg(long, env = "ISB_SESSION_MAX_AGE", value_parser = dur, default_value = "30d")]
     pub(crate) session_max_age: Duration,
@@ -336,6 +345,13 @@ pub(crate) fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
             .as_deref()
             .map(isb::daemon::superadmin::AccessAllowList::parse)
             .transpose()?,
+        heartbeat: match a.heartbeat_url.filter(|u| !u.trim().is_empty()) {
+            Some(u) => Some(
+                isb::monitor::heartbeat::Heartbeat::new(&u, a.heartbeat_interval)
+                    .map_err(Error::Invalid)?,
+            ),
+            None => None,
+        },
     };
     isb::daemon::serve(ctx.client(None), cfg)?;
     Ok(0)

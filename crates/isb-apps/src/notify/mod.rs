@@ -1,6 +1,7 @@
 //! Notifications: per-org channels (webhook, Slack, Discord, Telegram,
 //! email) told about events of chosen kinds (`deploy.*`, `health.*`,
-//! `backup.*`, `job.*`, `cert.*`; see [`crate::stack::controller::Event`]).
+//! `backup.*`, `job.*`, `cert.*`, `monitor.*`; see
+//! [`crate::stack::controller::Event`]).
 //!
 //! A dispatcher thread follows the controller's event feed and queues a
 //! delivery per matching channel. Each channel has its own bounded queue and
@@ -17,6 +18,7 @@
 
 pub use isb_core::net;
 pub mod provider;
+mod rate;
 pub mod smtp;
 
 use std::collections::{BTreeMap, VecDeque};
@@ -33,6 +35,7 @@ use crate::secrets::Secrets;
 use crate::stack::controller::{Controller, Event, now_ms};
 use net::{Net, SendError};
 pub use provider::{Message, Provider};
+pub use rate::{BACKOFF_MAX, RateLimit, backoff};
 
 /// Deliveries waiting per channel; the oldest is dropped past this.
 pub const QUEUE_MAX: usize = 100;
@@ -44,8 +47,6 @@ pub const ATTEMPTS: u32 = 6;
 pub const PER_MINUTE: usize = 20;
 /// The first retry's wait; it doubles per attempt.
 const BACKOFF: Duration = Duration::from_secs(5);
-/// The longest wait between attempts (Retry-After included).
-const BACKOFF_MAX: Duration = Duration::from_secs(300);
 /// A channel's sender thread exits after this long with nothing to send.
 const IDLE: Duration = Duration::from_secs(60);
 
@@ -238,42 +239,12 @@ pub struct Settings {
     pub allow_private_targets: bool,
 }
 
-/// The wait before attempt `attempt + 1` (attempt counts from 1): the base
-/// doubling per attempt, at least what the server asked for, capped.
-pub fn backoff(base: Duration, attempt: u32, retry_after: Option<Duration>) -> Duration {
-    let exp = base.saturating_mul(1u32 << attempt.saturating_sub(1).min(16));
-    exp.max(retry_after.unwrap_or_default()).min(BACKOFF_MAX)
-}
-
-/// Sliding one-minute window of sends.
-#[derive(Debug, Default)]
-pub struct RateLimit {
-    sent: VecDeque<Instant>,
-}
-
-impl RateLimit {
-    /// How long to wait before the next send may go, at `now`.
-    pub fn wait(&mut self, now: Instant, per_minute: usize) -> Duration {
-        while self
-            .sent
-            .front()
-            .is_some_and(|t| now.duration_since(*t) >= Duration::from_secs(60))
-        {
-            self.sent.pop_front();
-        }
-        if self.sent.len() < per_minute {
-            return Duration::ZERO;
-        }
-        (self.sent[0] + Duration::from_secs(60)).saturating_duration_since(now)
-    }
-
-    pub fn record(&mut self, now: Instant) {
-        self.sent.push_back(now);
-    }
-}
-
 /// The app project a service belongs to: `(org, stack, service)`.
 pub type Resolve = Arc<dyn Fn(&OrgId, &str, &str) -> Option<String> + Send + Sync>;
+
+/// Structured details of an event, from its producer (a monitor's URL,
+/// status and latency), for [`Message::details`].
+pub type Details = Arc<dyn Fn(&OrgId, &Event) -> Option<serde_json::Value> + Send + Sync>;
 
 /// The org of an event and its stack's own name. Events name their stack
 /// `org/stack`, or just `stack` in the default org.
@@ -304,6 +275,7 @@ struct Inner {
     queues: Mutex<BTreeMap<(OrgId, String), Arc<Queue>>>,
     logs: Mutex<BTreeMap<(OrgId, String), VecDeque<Delivery>>>,
     resolve: Resolve,
+    details: Mutex<Option<Details>>,
     next_id: AtomicU64,
     stop: AtomicBool,
     backoff: Duration,
@@ -351,6 +323,7 @@ impl Notifier {
                 queues: Mutex::new(BTreeMap::new()),
                 logs: Mutex::new(BTreeMap::new()),
                 resolve,
+                details: Mutex::new(None),
                 next_id: AtomicU64::new(1),
                 stop: AtomicBool::new(false),
                 backoff: BACKOFF,
@@ -377,6 +350,11 @@ impl Notifier {
                     since = since.max(seq);
                 }
             });
+    }
+
+    /// Where events' details come from.
+    pub fn set_details(&self, d: Details) {
+        *self.inner.details.lock().unwrap() = Some(d);
     }
 
     pub fn shutdown(&self) {
@@ -611,6 +589,13 @@ impl Notifier {
             service: &e.service,
             project: project.as_deref(),
         };
+        let details = self
+            .inner
+            .details
+            .lock()
+            .unwrap()
+            .clone()
+            .and_then(|d| d(&org, e));
         for c in chans.iter().filter(|c| c.matches(&subject)) {
             let msg = Message {
                 id: self.new_id(),
@@ -622,6 +607,7 @@ impl Notifier {
                 project: project.clone(),
                 instance: e.instance.clone(),
                 message: e.message.clone(),
+                details: details.clone(),
                 at: e.at,
                 seq: e.seq,
                 test: false,
@@ -834,8 +820,9 @@ impl Notifier {
                 None => None,
             };
             let body = format!(
-                "{}\n\nlevel: {}\norg: {}\nstack: {}\n{}{}at: {}\n",
+                "{}{}\n\nlevel: {}\norg: {}\nstack: {}\n{}{}at: {}\n",
                 msg.message,
+                provider::detail_lines(msg),
                 msg.level,
                 msg.org,
                 msg.stack,
@@ -913,6 +900,7 @@ impl Notifier {
             project: None,
             instance: None,
             message: format!("A test notification from isb for channel {name}, sent by {by}."),
+            details: None,
             at: now_ms(),
             seq: 0,
             test: true,

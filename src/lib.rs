@@ -30,7 +30,7 @@
 //! minimal set of changes. A device that is already correct is never touched.
 
 #[doc(inline)]
-pub use isb_apps::{app, backup, build, jobs, notify, s3, template, volume_backup};
+pub use isb_apps::{app, backup, build, jobs, monitor, notify, s3, template, volume_backup};
 #[doc(inline)]
 pub use isb_core::{
     balance, client, compose, cron, discovery, error, exec, foreground, idmap, ingress, interp,

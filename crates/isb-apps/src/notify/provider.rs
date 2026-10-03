@@ -154,6 +154,10 @@ pub struct Message {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance: Option<String>,
     pub message: String,
+    /// What the event's producer adds: for `monitor.*`, the monitor, URL,
+    /// HTTP status, latency, error, downtime and a link to its page.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
     /// Unix milliseconds of the event.
     pub at: u64,
     /// The event's number on the daemon's feed (0 for a test).
@@ -271,6 +275,30 @@ pub fn text(m: &Message) -> String {
     if let Some(i) = &m.instance {
         t.push_str(&format!("\ninstance: {i}"));
     }
+    t.push_str(&detail_lines(m));
+    t
+}
+
+/// The details people want at a glance (a monitor's latency, its page),
+/// one `\nkey: value` line each; empty without details.
+pub fn detail_lines(m: &Message) -> String {
+    let Some(d) = &m.details else {
+        return String::new();
+    };
+    let mut t = String::new();
+    if let Some(l) = d.get("latency_ms").and_then(|v| v.as_u64()) {
+        t.push_str(&format!("\nlatency: {l} ms"));
+    }
+    if let Some(v) = d
+        .get("via")
+        .and_then(|v| v.as_str())
+        .filter(|v| *v != "public")
+    {
+        t.push_str(&format!("\nchecked: {v}"));
+    }
+    if let Some(l) = d.get("link").and_then(|v| v.as_str()) {
+        t.push_str(&format!("\n{l}"));
+    }
     t
 }
 
@@ -376,6 +404,7 @@ mod tests {
             project: Some("shop".into()),
             instance: None,
             message: "app web: deployment 3 failed: <boom> & more".into(),
+            details: None,
             at: 1,
             seq: 9,
             test: false,
