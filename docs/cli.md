@@ -32,7 +32,7 @@ isb config
 
 # stacks, on the isb serve daemon (docs/stacks.md, docs/serve.md)
 isb serve [--listen 127.0.0.1:8092] [...]  run the daemon
-isb serve install                          as a systemd user service
+isb serve install                          as a systemd user service (macOS: a LaunchAgent starting the machine)
 isb stack deploy [NAME] [-d] [--timeout D]
 isb stack ls | ps NAME | logs NAME SERVICE | config NAME
 isb stack scale NAME SERVICE=N... | redeploy NAME SERVICE | rollback NAME
@@ -60,6 +60,12 @@ isb user ls [--json] | passwd EMAIL
 isb invite ORG EMAIL [--role member]       prints the invitation token (or link), once
 isb token create NAME [--org ORG] [--expires 90d] [--user EMAIL]   prints the token, once
 isb token ls [--json] | revoke ID...
+
+# macOS: the Lima VM that runs incus and isb serve (docs/macos.md); NAME defaults to isb
+isb machine init [NAME] [--cpus 4] [--memory 4GiB] [--disk 10GiB] [--isb-binary PATH] [--timeout 20m]
+isb machine start|stop|rm [NAME]
+isb machine status [NAME] [--json]
+isb machine ssh [NAME] [-- ARGV...]
 ```
 
 **`up` runs in the foreground**, like `docker compose up`: it runs each
@@ -91,6 +97,7 @@ several `-f` files merge in order. `.env` next to the first file supplies
 [spec.md](spec.md#files-and-validation).
 
 **Global flags:** `--socket PATH` (default `$INCUS_SOCKET`, else
-`$INCUS_DIR/unix.socket`, else `/var/lib/incus/unix.socket`), `--project NAME`
+`$INCUS_DIR/unix.socket`, else `/var/lib/incus/unix.socket`; on macOS,
+`~/.isb/machine/isb/incus.sock`), `--project NAME`
 (incus project), `-f FILE` (compose file, repeatable), `-P NAME` (compose
 project name), `--env-file FILE`, `--create-timeout DURATION`, `-q`.

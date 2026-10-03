@@ -74,6 +74,10 @@ break-glass recipient first. On an older systemd the daemon keeps reading
 `~/.config/isb/age.txt`, and the installer says to keep that file out of
 backups. See [secrets.md](secrets.md#the-daemons-key).
 
+On macOS the daemon runs inside the `isb machine` VM, and `isb serve install`
+writes a LaunchAgent that starts the machine at login instead; see
+[macos.md](macos.md#the-daemon-lives-in-the-vm).
+
 The daemon's user needs the incus socket (usually the `incus-admin` group).
 Stack definitions are kept in `$XDG_STATE_HOME/isb/stacks/` (0600 files;
 they hold references to secrets, never values), override with `--state-dir`.

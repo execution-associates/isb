@@ -75,13 +75,19 @@ pub(crate) enum Reply {
 
 impl Client {
     /// Locate the socket the way the incus tools do: `$INCUS_SOCKET`, else
-    /// `$INCUS_DIR/unix.socket`, else `/var/lib/incus/unix.socket`.
+    /// `$INCUS_DIR/unix.socket`, else `/var/lib/incus/unix.socket`. On macOS
+    /// the last fallback is the default `isb machine`'s forwarded socket,
+    /// `~/.isb/machine/isb/incus.sock`.
     pub fn default_socket() -> PathBuf {
         if let Some(s) = std::env::var_os("INCUS_SOCKET").filter(|s| !s.is_empty()) {
             return PathBuf::from(s);
         }
         if let Some(d) = std::env::var_os("INCUS_DIR").filter(|s| !s.is_empty()) {
             return PathBuf::from(d).join("unix.socket");
+        }
+        #[cfg(target_os = "macos")]
+        if let Ok(s) = crate::machine::incus_socket(crate::machine::DEFAULT_NAME) {
+            return s;
         }
         PathBuf::from("/var/lib/incus/unix.socket")
     }

@@ -170,9 +170,15 @@ impl Listener {
 
 /// Where the CLI and the server meet: `$ISB_SERVE_SOCKET`, else
 /// `$XDG_RUNTIME_DIR/isb/serve.sock`, else a per-uid directory under /tmp.
+/// On macOS, where the daemon runs inside the `isb machine`, it is that
+/// machine's forwarded socket, `~/.isb/machine/isb/serve.sock`.
 pub fn default_socket_path() -> PathBuf {
     if let Some(s) = std::env::var_os("ISB_SERVE_SOCKET").filter(|s| !s.is_empty()) {
         return PathBuf::from(s);
+    }
+    #[cfg(target_os = "macos")]
+    if let Ok(s) = crate::machine::serve_socket(crate::machine::DEFAULT_NAME) {
+        return s;
     }
     if let Some(d) = std::env::var_os("XDG_RUNTIME_DIR").filter(|s| !s.is_empty()) {
         return PathBuf::from(d).join("isb/serve.sock");

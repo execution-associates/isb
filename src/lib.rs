@@ -42,6 +42,7 @@ pub mod foreground;
 pub mod idmap;
 pub mod interp;
 pub mod lock;
+pub mod machine;
 pub mod metrics;
 pub mod org;
 pub mod plan;

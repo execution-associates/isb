@@ -39,6 +39,9 @@ pub struct HostFacts {
     pub path_map: Option<(String, String)>,
     /// The server can seed a new volume from the image (`disk_initial_copy`).
     pub initial_copy: bool,
+    /// The only directory incusd can see bind sources under, when it runs
+    /// elsewhere: on macOS, the home directory shared with the `isb machine`.
+    pub shared_root: Option<String>,
 }
 
 impl HostFacts {
@@ -675,6 +678,15 @@ pub fn resolve(
                     )));
                 }
                 let src = resolve_host_path(&v.source, base)?;
+                if let Some(root) = &host.shared_root {
+                    let r = root.trim_end_matches('/');
+                    if src != r && !src.starts_with(&format!("{r}/")) {
+                        return Err(Error::invalid(format!(
+                            "{name}: {guest}: bind source {src} is outside {r}, the only \
+                             directory shared with the isb machine"
+                        )));
+                    }
+                }
                 props.insert("source".into(), host.translate(&src));
             }
             MountType::Volume => {
@@ -1410,10 +1422,12 @@ mod tests {
             subids: SubIds {
                 subuid: TITAN.into(),
                 subgid: TITAN.into(),
+                caller_owned: false,
             },
             pools: vec!["container-roots".into(), "default".into()],
             path_map: None,
             initial_copy: false,
+            shared_root: None,
         }
     }
 
@@ -1945,6 +1959,21 @@ mod tests {
         let d = resolve(&spec, &VolumeDefs::new(), &host(), Path::new("/")).unwrap();
         assert_eq!(d.devices["port-guest-8190"].props["bind"], "guest");
         assert_eq!(d.devices["port-host-5173"].props["bind"], "host");
+    }
+
+    #[test]
+    fn bind_sources_stay_under_the_shared_root() {
+        let t = tmp();
+        let root = t.path().canonicalize().unwrap();
+        let mut h = host();
+        h.shared_root = Some(root.to_string_lossy().into_owned());
+        let base = lasso_spec(root.to_str().unwrap());
+        let r = |s: &SandboxSpec| resolve(s, &VolumeDefs::new(), &h, Path::new("/"));
+        assert!(r(&base).is_ok());
+        let e = r(&base.clone().volume("/x", Volume::bind("/")))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("shared with the isb machine"), "{e}");
     }
 
     #[test]

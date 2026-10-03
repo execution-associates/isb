@@ -38,7 +38,7 @@ condenses what it does.
 | hcloud EU box (Linux, cheapest that runs incus) | a clean-install target: installer, remote server, public ingress + ACME, federation | `hcloud` with `HCLOUD_TOKEN`; label `owner=isb-platform`; delete when idle |
 | browser | web UI end to end | lasso's shared browser (titan-local URLs) or minime-chrome (tailnet/public URLs); close every page opened |
 
-Installed for testing: (none yet)
+Installed for testing: lima 2.2.0 on minime (`brew install lima`).
 
 **minime disk is tight: 21 GiB free after a cleanup (2026-10-03).** Keep the
 Lima VM disk ≤ 10 GiB for tests, delete test VMs and downloaded binaries when
@@ -125,14 +125,14 @@ minime only runs binaries downloaded from our CI runs.
   optionalDependencies + `os`, `platformPackage()` in `src/binary.ts`, darwin
   rows in `sdk-typescript.yml`. bun.lock needs the packages published first
   (or regenerated). PyPI darwin wheels are in the workflow, untested until a tag.
-- [~] (subagent p0.2) P0.2 `isb machine`: Lima-backed incus VM on macOS (init with CPU/memory/
+- [x] (b9c6df4, a1f5cf5, 9b125e2) P0.2 `isb machine`: Lima-backed incus VM on macOS (init with CPU/memory/
   disk, start, stop, rm, status, ssh), incus installed from Zabbly, socket
   forwarded to `~/.isb/machine/<name>/incus.sock`, `$HOME` shared at the same
   path (so bind mounts work), default socket discovery uses it. Published
   ports reachable from the Mac's localhost. **Verify:** on minime, from
   nothing: `isb machine init && isb up` of the README example, port reachable
   from macOS; `isb tui` works.
-- [~] (subagent p0.2) P0.3 `isb serve` on macOS: launchd agent install (`isb serve install`
+- [x] (b9c6df4) P0.3 `isb serve` on macOS: launchd agent install (`isb serve install`
   writes a LaunchAgent plist), balancer listening on the Mac, reaching
   replicas in the VM. **Verify:** a 2-replica stack on minime, curl from
   macOS spreads across both.

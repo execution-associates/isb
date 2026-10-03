@@ -327,7 +327,10 @@ id unless that id lies inside a subordinate id RANGE owned by `root` (or `0`),
 that is a line `root:START:COUNT` in `/etc/subuid` (for the uid) or `/etc/subgid`
 (for the gid) with `COUNT > 1` and `START <= id < START + COUNT`. A `root:1000:1`
 delegation line is not a range and does not count. A missing file counts as no
-range. uid and gid are decided separately.
+range. uid and gid are decided separately. On macOS (and inside its
+`isb machine`, which sets `ISB_BIND_CALLER_OWNED=1`) `auto` never maps: bind
+sources are the Mac home over virtiofs, which every guest uid can already
+write ([macos.md](macos.md#users-and-file-ownership)).
 
 The value is `both H G` when uid and gid need mapping with the same pair,
 otherwise one line per id that needs it: `uid HOST GUEST` and/or
