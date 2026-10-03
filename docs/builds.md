@@ -190,7 +190,9 @@ has moved on gets a tag of retention's own (`isb-keep-<digest>`), so the
 registry's collection of untagged manifests spares it; the tag goes once no
 deployment uses the digest. Then the registry's `garbage-collect
 --delete-untagged` frees the unreferenced blobs (pushes wait meanwhile) and
-the registry restarts. `--dry-run` lists what would go.
+the registry restarts. `--dry-run` lists what would go. Preview images
+(`pr-<n>-<sha>`, [previews.md](previews.md)) never count among the newest:
+they are kept while deployed and deleted otherwise.
 
 ### What it does not do (yet)
 

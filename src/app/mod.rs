@@ -24,7 +24,9 @@
 
 pub mod deploy;
 pub mod env;
+pub mod forge;
 pub mod git;
+pub mod preview;
 pub mod webhook;
 
 use std::collections::BTreeMap;
@@ -41,6 +43,7 @@ use crate::spec::{NamedVolumeSpec, SandboxSpec, SecretDef};
 pub use deploy::{Apps, BuildFn, DigestFn};
 pub use env::{EnvFile, EnvValue};
 pub use git::{GitAuth, GitSource};
+pub use preview::{Preview, PreviewSettings};
 
 /// The environment a project starts with.
 pub const DEFAULT_ENVIRONMENT: &str = "production";
@@ -75,13 +78,18 @@ pub fn validate_part(kind: &str, s: &str) -> Result<()> {
         && !s.ends_with('-')
         && s.chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-    if ok {
-        Ok(())
-    } else {
-        Err(Error::invalid(format!(
+    if !ok {
+        return Err(Error::invalid(format!(
             "{kind} name {s:?}: up to 24 characters of [a-z0-9-], starting with a letter"
-        )))
+        )));
     }
+    // `<project>-<env>-pr-<n>` is a preview's stack.
+    if kind == "environment" && preview::is_pr_suffix(s) {
+        return Err(Error::invalid(format!(
+            "environment name {s:?}: names ending in pr-<number> are kept for previews"
+        )));
+    }
+    Ok(())
 }
 
 /// The stack a project's environment renders to.
@@ -175,6 +183,9 @@ pub struct AppSpec {
     /// A compose `command`: argv, or a line split like a shell would.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<Value>,
+    /// Preview deployments per pull request (git sources).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previews: Option<PreviewSettings>,
 }
 
 fn default_env() -> String {
@@ -242,6 +253,9 @@ impl AppSpec {
         for v in &self.volumes {
             parse_volume(v)?;
         }
+        if let Some(p) = &self.previews {
+            p.validate(self)?;
+        }
         for d in &self.domains {
             let host = d.get("host").and_then(Value::as_str).unwrap_or("");
             if host.is_empty() {
@@ -288,7 +302,7 @@ pub fn validate_app_name(s: &str) -> Result<()> {
 }
 
 /// `NAME:/path[:ro|rw]`: a named volume.
-fn parse_volume(v: &str) -> Result<(String, String, Option<String>)> {
+pub(crate) fn parse_volume(v: &str) -> Result<(String, String, Option<String>)> {
     let mut parts = v.splitn(3, ':');
     let name = parts.next().unwrap_or("");
     let target = parts.next().unwrap_or("");

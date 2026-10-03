@@ -69,6 +69,8 @@ isb app rollback NAME [ID] [-d]            a previous deployment's image and set
 isb app deployments NAME [--json] | logs NAME [ID] [-f]
 isb app env NAME | env-set NAME [FILE|-] [--deploy]   the environment as .env text
 isb app webhook NAME [--rotate] | deploy-key NAME
+isb app previews ls [NAME] [--json] | show NAME PR    preview deployments per pull request (docs/previews.md)
+isb app previews logs NAME PR [ID] [-f] | redeploy NAME PR [-d] | rm NAME PR
 
 # builds and the local registry, on the isb serve daemon (docs/builds.md); --org ORG
 isb build DIR --app APP [--tag T] [--builder railpack|nixpacks|dockerfile] [--dockerfile PATH]

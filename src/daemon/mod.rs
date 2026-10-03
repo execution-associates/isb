@@ -15,6 +15,7 @@ pub mod builds;
 mod notify;
 mod orgs;
 pub mod policy;
+pub mod previews;
 pub mod secrets;
 mod terminal;
 
@@ -205,13 +206,19 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     let ra = apps.clone();
     let resolve: crate::notify::Resolve = Arc::new(move |org, stack, service| {
         let a = ra.get(org, service).ok()?;
-        (a.spec.stack().ok()? == stack).then_some(a.spec.project)
+        // The app's own stack, or one of its previews' (`<project>-...-pr-<n>`).
+        let own = a.spec.stack().ok()? == stack;
+        let preview = stack.starts_with(&format!("{}-", a.spec.project))
+            && crate::app::preview::is_pr_suffix(stack);
+        (own || preview).then_some(a.spec.project)
     });
     let notifier = crate::notify::Notifier::new(&cfg.state_dir, secrets.clone(), resolve)?;
     notifier.start(ctl.clone());
     // Every metrics sample also goes to the history.
     let history = crate::metrics_history::History::new(&cfg.state_dir);
     ctl.set_metrics_sink(history.start());
+    // Previews past their TTL, and removals that did not finish.
+    apps.start_preview_upkeep();
     let d = Arc::new(Daemon {
         client,
         ctl: ctl.clone(),
@@ -1000,6 +1007,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
         }
     );
     apps::register(&mut r, d.apps.clone())?;
+    previews::register(&mut r, d.apps.clone())?;
     tool!(
         "server_status",
         "Server status",

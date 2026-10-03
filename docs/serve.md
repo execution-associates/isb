@@ -230,6 +230,7 @@ directly.
 | `app_create`, `app_get`, `app_list`, `app_update`, `app_delete` | Apps: an image or a repository with a builder, plus env, domains, volumes, ports, replicas, port, health check, resources, command. |
 | `app_deploy`, `app_rollback`, `app_deployments`, `app_deployment_log` | Deployments: queue one (`wait` blocks), go back to an earlier one's image and settings, the history, a deployment's log from an offset. |
 | `app_env_get`, `app_env_set`, `app_webhook`, `app_deploy_key` | An app's environment as `.env` text; its webhook path and secret (`rotate`); a new SSH deploy key. |
+| `preview_list`, `preview_get`, `preview_log`, `preview_redeploy`, `preview_delete` | Preview deployments per pull request (settings: the app's `previews`, through `app_update`): list (one app or all), one with its deployments, a deployment's log from an offset, build the head again, remove one now. See [previews.md](previews.md). |
 | `build_run` | Start a build of a host directory (`app`, `context`, `builder`, `dockerfile`, `target`, `args`, `tag`, `untrusted`, `timeout`) into the org's registry repository; returns an id. Remote callers: `context` under a `--bind-root`. See [builds.md](builds.md). |
 | `build_logs` | A build's state and log lines from `since`, waiting up to 30 s for more; `image` and `digest` when it succeeded. |
 | `build_list` | The org's recent builds. |

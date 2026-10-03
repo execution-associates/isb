@@ -52,13 +52,14 @@ token deploys an app.
 | `build` | Git sources only: `{builder: {type: railpack \| nixpacks \| dockerfile (path, target) \| buildpacks (builder)}, args: {K: V}, untrusted: true}`. `untrusted` (the default) builds in a VM. |
 | `env` | `.env` text, or a map `{KEY: value \| {secret: NAME}}`. |
 | `domains` | `[{host, path?, port?, https?, redirect?}]` for the ingress; `port` defaults to the app's `port`. |
-| `volumes` | Named volumes, `NAME:/path[:ro]`: the incus volume `<stack>_<app>_<NAME>`, shared by the app's replicas. Host paths are not allowed. |
+| `volumes` | Named volumes, `NAME:/path[:ro]`: the incus volume `<app>_<NAME>` (app names are unique per org), shared by the app's replicas. Host paths are not allowed. |
 | `ports` | Published host ports in compose syntax (`127.0.0.1:8080:80`), load-balanced over healthy replicas. |
 | `replicas` | Default 1. |
 | `port` | The port the app listens on. |
 | `healthcheck` | A compose `healthcheck`. Without one, a running replica is in rotation. |
 | `resources` | `{cpus, memory}` per replica. |
 | `command` | argv, or a line split like a shell would. |
+| `previews` | Preview deployments per pull request: see [previews.md](previews.md). |
 
 Changing a setting (`app_update`, a JSON merge patch where `null` clears a
 field; `isb app update NAME -f patch.yaml`) takes effect at the next deploy.
@@ -198,8 +199,9 @@ and stored as the org secret `app.<app>.webhook`. `isb app webhook NAME`
 
 - A missing or wrong signature, an unknown org or an unknown app all answer
   401 and do nothing, so the endpoint reveals nothing about what exists.
-- `ping` answers 200. Other events (issues, pull requests) answer 200 and are
-  ignored. A delivery id seen before (`X-GitHub-Delivery`, ...) is ignored.
+- `ping` answers 200. Pull (merge) request events drive the app's
+  [previews](previews.md) when it has them on. Other events (issues,
+  comments) answer 200 and are ignored. A delivery id seen before (`X-GitHub-Delivery`, ...) is ignored.
 - A push deploys a git app only when its ref matches the app's `ref`: branch
   `main` matches `refs/heads/main` (or a tag `main`), a full `refs/...` ref
   matches only itself, and a pinned SHA never deploys from a push. A branch
@@ -234,6 +236,7 @@ serves that path ahead of its Access check, since each request is signed).
 <state>/apps/projects/<project>.json          (<state>/orgs/<org>/apps/... in other orgs)
 <state>/apps/<app>/app.json
 <state>/apps/<app>/deployments/<id>.json, <id>.log
+<state>/apps/<app>/previews/<n>/preview.json, deployments/<id>.json, <id>.log
 <state>/sources/<app>/repo, known_hosts
 ```
 

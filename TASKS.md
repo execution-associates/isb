@@ -179,6 +179,15 @@ minime only runs binaries downloaded from our CI runs.
   replica, only for services healthy once in this run, never mid-rollout.
 - **Metrics history** (P4.6): SQLite per org (`orgs/<org>/metrics.db`), tiers
   10 s/24 h, 1 min/7 d, 10 min/30 d; ~20 MiB for 20 instances over 31 days.
+- **Previews** (P4.5) run in their own stack `<project>-<env>-pr-<n>` with
+  their own volumes, build cache and `pr-<n>-<sha>` tags, and start with an
+  empty env (`inherit_env` opts in) so they never point at production's data
+  by default. Fork PRs are off by default; when allowed they build in a VM,
+  get no app secrets (only `fork_secrets`) and a per-PR cache, since a PR
+  could otherwise poison the cache production builds read.
+- **Known flaky test:** `balance::tests::changing_listen_moves_the_route`
+  failed once in a P4.5 run, then passed three times. Investigate if seen
+  again.
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
@@ -321,7 +330,7 @@ minime only runs binaries downloaded from our CI runs.
   directly; check the Dokploy/templates repo license before shipping its
   catalog. Only if it fits isb's architecture without bending it.
   **Verify:** deploy two native (and, if done, two Dokploy) templates from the UI.
-- [~] (subagent p4.5) P4.5 Preview deployments per pull request. **Verify:** a PR on the test
+- [x] (1502ebd; Gitea live; GitLab and fork previews unit-tested only) P4.5 Preview deployments per pull request. **Verify:** a PR on the test
   repo gets a URL; closing it removes it.
 - [~] (6d71ea9: history + `metrics_query` done; the web Monitoring tab still reads live samples only) P4.6 Metrics history (retained samples) and monitoring pages.
 
