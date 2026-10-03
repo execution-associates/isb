@@ -323,7 +323,7 @@ minime only runs binaries downloaded from our CI runs.
 - [ ] P5.2 Placement: orgs on servers; MCP/REST calls proxied to the owning
   server; secrets delivered only to servers that run their consumers.
   **Verify:** deploy to an org placed on the hcloud box from titan's UI.
-- [ ] P5.3 Audit log and finer roles. **Verify:** actions appear in the log
+- [~] (subagent p5.3) P5.3 Audit log and finer roles. **Verify:** actions appear in the log
   with the acting user or agent.
 
 ## Log
