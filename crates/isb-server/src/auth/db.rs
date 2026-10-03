@@ -134,6 +134,21 @@ const MIGRATIONS: &[&str] = &[
         expires_at INTEGER
     );
     ",
+    // 5: SSH public keys on accounts (`isb ssh-proxy` lets them into an
+    // instance). `public_key` is `algorithm base64`, nothing else.
+    "
+    CREATE TABLE ssh_keys (
+        id          INTEGER PRIMARY KEY,
+        user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name        TEXT NOT NULL DEFAULT '',
+        algorithm   TEXT NOT NULL,
+        public_key  TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        created_at  INTEGER NOT NULL,
+        last_used   INTEGER,
+        UNIQUE (user_id, fingerprint)
+    );
+    ",
 ];
 
 /// The schema version this build writes.

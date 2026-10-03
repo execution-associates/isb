@@ -35,6 +35,21 @@ plane is away, and an org never spans servers.
    +--------------------------+     +--------------------------+
 ```
 
+## Placement and isolation
+
+Where an org runs decides what keeps it apart from other orgs. It is chosen
+once, when the org is created (`org_create` with `placement`, or the web
+UI's New org dialog), and shown wherever the org is (`org_get` and
+`org_list` answer `placement: {kind, server, isolation}`):
+
+| Placement | `placement` | Isolation | What shares its kernel |
+|---|---|---|---|
+| This host | `"local"` (default) | `shared-kernel`: an incus project with its own bridge, network ACL and quotas ([orgs.md](orgs.md#what-an-org-is-in-incus)); unprivileged containers | every other local org, and the host |
+| A server | `{"server": "hel-1"}` | `own-host`: another machine, added with `isb server add` | the other orgs placed on that server |
+| A dedicated VM | `{"vm": {"cpus": 2, "memory": "4GiB", "disk": "40GiB"}}` | `own-kernel`: a VM on this host made for the org alone, with its own incus | nothing |
+
+An org does not move afterwards ([Moving an org](#moving-an-org)).
+
 ## Adding a server
 
 ```sh
@@ -48,9 +63,11 @@ isb server show hel-1
 box (Ubuntu or Debian, x86_64 or aarch64) reachable over SSH as root or as a
 user with passwordless sudo. Over SSH it:
 
-1. checks the box's architecture and uploads the isb binary: `--isb-binary`
-   (a Linux build, checked to be one for the box's architecture), or by
-   default this version's release, checked against the release's
+1. checks the box's architecture (and, for a user other than root,
+   passwordless sudo) and uploads the isb binary: `--isb-binary` (a Linux
+   build, checked to be one for the box's architecture), `--self-binary`
+   (the daemon's own executable: the same build as the control plane), or
+   by default this version's release, checked against the release's
    `SHA256SUMS`. The box checks the upload's SHA-256 again before installing it
    at `/usr/local/bin/isb`;
 2. creates the system user `isb` (home `/var/lib/isb`), gives the incus
@@ -70,7 +87,15 @@ user with passwordless sudo. Over SSH it:
    certificate just issued.
 
 Every step is idempotent: rerunning `isb server add` after a failure
-converges. The SSH key is used for this and never again; the control plane
+converges. The CLI prints each step and the box's output as they happen:
+it calls `server_add` with `wait: false`, which answers at once, and
+follows `server_provision_get` (steps with their state and times, the log,
+the error). The web UI's Add server wizard does the same. A run's progress
+stays readable for an hour after it fails (and ten minutes after it
+succeeds), in memory only; one run per server name at a time. Without
+`wait: false`, `server_add` answers when the server is up, as before.
+
+The SSH key is used for this and never again; the control plane
 keeps only `user@host`, the box's host key (`servers/known_hosts`) and what
 it dials. SSH runs with exactly that key (`-F /dev/null`, `IdentitiesOnly`,
 no agent). Through the API, `key` (a path) is for the local CLI only; a remote
@@ -87,11 +112,13 @@ bootstrap and deleted after.
 | `--allow-from CIDR` | none | who the box's firewall lets reach the agent port (repeatable) |
 | `--isb-binary FILE` | this version's release | the Linux binary to install |
 | `--isb-version V` | this version | the release to install |
+| `--self-binary` | off | install the daemon's own executable instead (`self_binary`) |
 | `--public-ingress` | off | serve the server's orgs' domains on its own 80 and 443 (`isb host setup --public-ingress`, the agent's `--ingress-http`/`--ingress-https`) |
 
 `isb server rm NAME` forgets a server; it is refused while orgs are placed on
 it. The agent keeps running on the box until it is stopped there
-(`systemctl disable --now isb-agent`). `isb server rotate-cert NAME` issues the
+(`systemctl disable --now isb-agent`); a [dedicated VM](#dedicated-vms) is
+deleted with its server. `isb server rotate-cert NAME` issues the
 agent a new certificate and key over the current mTLS connection; the agent
 writes them and uses them for every new connection, and the control plane
 checks that it does.
@@ -120,14 +147,16 @@ believes it only because the connection is the control plane's.
 
 ## Placement
 
-Every org is placed `local` (this daemon, the default) or on a server, once,
-at creation:
+Every org is placed `local` (this daemon, the default), on a server, or in
+a [dedicated VM](#dedicated-vms), once, at creation:
 
 ```sh
 isb org create acme --server hel-1 [--cpus 4] [--memory 8GiB] [--allow-egress ...]
+isb org create beta --vm [--vm-cpus 4 --vm-memory 8GiB --vm-disk 100GiB]
 ```
 
-(`org_create` with `server`; platform admins.) The control plane tells the
+(`org_create` with `placement: {"server": "hel-1"}`, or the older `server:
+"hel-1"`; platform admins.) The control plane tells the
 agent the org is placed on it, creates it there (its incus project, bridge
 and ACL), and adds it to its own identity store for members, invitations and
 tokens. The default org is always local. Bind roots, the domain allowlist and
@@ -172,11 +201,82 @@ too), template catalogs, `registry_gc`, `notification_settings`,
 
 ### Moving an org
 
-Not supported: `org_update` with another `server` is refused. To move one by
+Not supported: `org_update` with another `server` or `placement` is
+refused, and the web UI says so on the org's Settings page. To move one by
 hand: back up its databases (`isb backup run`), note its apps
 (`isb app ls`, `isb app show`) and secrets, remove its stacks and apps,
-`isb org rm`, `isb org create NAME --server OTHER`, then recreate its secrets
-and apps and restore its databases (`isb backup restore`).
+`isb org rm`, `isb org create NAME --server OTHER` (or `--vm`, or neither
+for this host), then recreate its secrets and apps and restore its
+databases (`isb backup restore`).
+
+## Dedicated VMs
+
+For an org that should share a kernel with nobody, the control plane makes
+it a VM of its own on its own host and runs the org there:
+
+```sh
+isb org create acme --vm --vm-cpus 4 --vm-memory 8GiB --vm-disk 100GiB
+isb org rm acme --delete-vm
+```
+
+`org_create` with `placement: {"vm": {"cpus": 4, "memory": "8GiB", "disk":
+"100GiB"}}` (each optional: 2 CPUs, 4GiB, 40GiB; at least 2GiB of memory
+and 10GiB of disk), and `wait: false` to answer at once and follow
+`server_provision_get` with name `vm-acme`, as the CLI and the web UI do.
+The org's own settings (quota, egress) go with it as for any placement and
+are checked before the VM is made.
+
+A dedicated VM is just a server the control plane provisioned itself,
+through incus rather than SSH:
+
+1. checks the host can run VMs: incus lists the `qemu` driver and
+   `/dev/kvm` exists. A host without (a cloud VM without nested
+   virtualization, such as Hetzner's cx line) refuses with the reason, and
+   the web UI shows the option disabled with it (`server_list` answers
+   `dedicated_vm: {supported, reason}`);
+2. creates the VM `vm-acme` in the `isb-system` project (made if missing,
+   as `isb registry setup` makes it) from `images:ubuntu/24.04`, with
+   `limits.cpu`, `limits.memory` and a root disk of that size, on the host's
+   managed bridge (`incusbr0`, never an org's), labelled
+   `user.isb.dedicated-vm=acme` and `user.isb.server=vm-acme`, and starts it;
+3. waits for its guest agent and its address, then reserves that address
+   on the NIC (`ipv4.address`), since the control plane dials it and the
+   agent's certificate names it;
+4. copies the control plane's own isb executable into it (file push) and
+   runs the same root script `server add` runs (exec, the script on stdin,
+   so the agent's key is never written to the guest's disk but as its TLS
+   file): incus from Zabbly, `isb registry setup`, `isb host setup`, the
+   agent's TLS material and `isb-agent.service`, and ufw enabled with
+   only the agent port open, and only to the host's address on that bridge.
+   No SSH is installed or opened;
+5. waits for the heartbeat over mTLS, checks the certificate, records server
+   `vm-acme` (with a `vm` block: org, project, instance, size), and creates
+   the org on it as for any server.
+
+Every step is idempotent: run the same command (or press Retry) after a
+failure and it reuses the VM and the record. Deleting the org with
+`delete_vm` (`--delete-vm`, a checkbox in the web UI, on by default there)
+deletes the VM and forgets the server once the org is gone; without it the
+VM keeps running as an empty server, and `isb server rm vm-acme` deletes it
+later.
+
+What it costs and what it means:
+
+- The VM's CPUs, memory and disk are its own incus limits on the host. They
+  count against nothing else: not the org's quota (which applies inside the
+  VM), not another org's, and isb keeps no host-wide budget. Size it so the
+  host can hold it.
+- The agent port is reachable from the host only: the VM's firewall drops
+  everything else, and the agent takes only the control plane's client
+  certificate. Other instances on `incusbr0` can reach the VM's address,
+  not its agent.
+- The org's domains: the VM's agent runs no public listeners, so an org in
+  a dedicated VM serves its domains through its own Cloudflare Tunnel
+  (`--ingress cloudflare-tunnel`, outbound only, [ingress.md](ingress.md)).
+  Its published ports and the load balancer are the VM's own, reached from
+  inside it.
+- Its isb is the control plane's build, copied at creation; it is not
+  upgraded with the control plane.
 
 ## Secrets
 
@@ -192,7 +292,7 @@ written on the control plane. Add a break-glass recipient on each server
 | Control plane (`<state>/`) | Agent (`/var/lib/isb/`, `/etc/isb-agent/`) |
 |---|---|
 | `servers/pki/`: the CA and its client certificate | `ca.crt`, `tls.crt`, `tls.key` (0600) |
-| `servers/servers.json`: name, address, port, `user@host`, certificate fingerprint and expiry, isb version, firewall sources | `state/agent/orgs.json`: the orgs placed on it |
+| `servers/servers.json`: name, address, port, `user@host`, certificate fingerprint and expiry, isb version, firewall sources, and for a dedicated VM its org, project, instance and size | `state/agent/orgs.json`: the orgs placed on it |
 | `servers/placement.json`: org to server | everything about those orgs: stacks, apps, deployments, secrets (its own age key), builds, registry, metrics, notifications, jobs, backups, its own audit log |
 | `servers/known_hosts`: the boxes' SSH host keys | |
 | the identity store (members, invitations, tokens of every org) and the audit log of every call | no users: an internal identity file only for its org bookkeeping |

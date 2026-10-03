@@ -121,6 +121,20 @@ pub(crate) struct ServeArgs {
     /// The port each tunnel org's listener takes on its bridge address.
     #[arg(long, env = "ISB_INGRESS_TUNNEL_PORT", default_value_t = isb::ingress::DEFAULT_TUNNEL_PORT)]
     pub(crate) ingress_tunnel_port: u16,
+    /// The port each org's workspace reaches isb's MCP on, on its bridge
+    /// address (docs/workspaces.md).
+    #[arg(long, env = "ISB_WORKSPACE_MCP_PORT", default_value_t = isb::daemon::workspaces::DEFAULT_PORT)]
+    pub(crate) workspace_mcp_port: u16,
+    /// The storage pool new workspace homes go in (an org's own setting
+    /// wins); default: the org's default pool. Prefer a copy-on-write pool
+    /// (zfs, btrfs): on `dir` every home snapshot is a full copy.
+    #[arg(long, env = "ISB_WORKSPACE_POOL")]
+    pub(crate) workspace_pool: Option<String>,
+    /// Make workspace homes host folders, `<DIR>/<org>/home`, bound into
+    /// the workspace (the host backs them up, e.g. restic) instead of
+    /// managed volumes. An org's home_kind setting can opt out.
+    #[arg(long, env = "ISB_WORKSPACE_HOME_ROOT", value_name = "DIR")]
+    pub(crate) workspace_home_root: Option<PathBuf>,
     /// The public IPv4 address `host: auto` names resolve to (sslip.io);
     /// default: the default route's source address, if it is public.
     #[arg(long, env = "ISB_INGRESS_PUBLIC_IP", value_name = "IP")]
@@ -271,6 +285,18 @@ pub(crate) fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
         audit_all: a.audit_all,
         history_retention: a.history_retention,
         history_max_rows: a.history_max_rows,
+        workspace_mcp_port: a.workspace_mcp_port,
+        workspace_pool: a.workspace_pool.filter(|p| !p.trim().is_empty()),
+        workspace_home_root: match a.workspace_home_root {
+            Some(r) if r.as_os_str().is_empty() => None,
+            Some(r) if !r.is_absolute() => {
+                return Err(Error::Invalid(format!(
+                    "--workspace-home-root {}: an absolute path",
+                    r.display()
+                )));
+            }
+            r => r,
+        },
         ingress: ingress_config(
             a.ingress_http,
             a.ingress_https,

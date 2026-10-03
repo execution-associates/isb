@@ -18,7 +18,8 @@ or a tool's arguments as a whole.
 | Orgs | `auth.invitation_create`, `auth.invitation_accept`, `auth.invitation_revoke`, `auth.role_change`, `auth.member_remove` | |
 | Users | `auth.user_create`, `auth.user_disable`, `auth.user_enable`, `auth.platform_admin_grant`, `auth.platform_admin_revoke` | |
 | Webhooks | `webhook.deploy` | every delivery to `/api/v1/webhooks/<org>/<app>`: `ok` (deployed), `ignored` (another branch, a ping), `unauthorized` |
-| Terminals | `terminal.open`, `terminal.close` | with the app, the replica and (on close) how long it ran; never what was typed |
+| Terminals | `terminal.open`, `terminal.close` | with the app and replica (or the instance) and (on close) how long it ran; never what was typed |
+| SSH | `ssh.open`, `ssh.close`, `auth.ssh_key_add`, `auth.ssh_key_remove` | a session with its instance, and on close the guest user, the key's fingerprint and how long it ran; a key change with its fingerprint ([ssh.md](ssh.md)) |
 
 Recording happens where every call passes (the dispatch hook in front of the
 tool registry, the identity endpoints' router), so a new tool is recorded

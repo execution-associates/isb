@@ -25,6 +25,8 @@ age.workspace = true
 toml.workspace = true
 rusqlite.workspace = true
 rcgen.workspace = true
+rustls.workspace = true
+webpki-roots.workspace = true
 time.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]

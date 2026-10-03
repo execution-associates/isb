@@ -69,6 +69,13 @@ const SAFE_KEYS: &[&str] = &[
     "event",
     "status",
     "scopes_count",
+    "ssh_user",
+    "fingerprint",
+    "volume",
+    "snapshot",
+    "backup",
+    "instance",
+    "stamp",
 ];
 
 /// The target, in order of preference.
@@ -217,7 +224,7 @@ fn row_org(action: &str, args: &Value) -> Option<String> {
 /// The row for a call, or `None` when it is not worth recording: reads are
 /// skipped unless `record_all`, but secret reads and refusals never are.
 pub fn entry(a: &Audited, record_all: bool) -> Option<NewEntry> {
-    let terminal = a.action.starts_with("terminal.");
+    let terminal = a.action.starts_with("terminal.") || a.action.starts_with("ssh.");
     let cls = a.tool.map(|t| class_for(t, a.args)).unwrap_or_default();
     let refused = matches!(a.outcome, Err(Error::Forbidden(_)));
     // A superadmin over HTTP is recorded whatever it does, reads included.
@@ -762,6 +769,7 @@ mod tests {
                 })),
                 events: None,
                 terminal: None,
+                ssh: None,
                 audit: Some(hook(log.clone(), false)),
                 route: None,
             },
@@ -1015,5 +1023,41 @@ mod tests {
         assert_eq!(r["result"]["isError"], true);
         let v = t.mcp("root", "audit_verify", json!({}));
         assert_eq!(v["result"]["structuredContent"]["ok"], true);
+    }
+
+    #[test]
+    fn ssh_sessions_are_recorded_with_user_and_key() {
+        use super::super::tests::token;
+        let c = token(&[("acme", Role::Member)], &[]);
+        let args = json!({
+            "org": "acme", "name": "box", "ssh_user": "dev",
+            "fingerprint": "SHA256:OGav3hSvMQSOfHiDB0OdyYFOPHDbUJTzSsNvCdLadvQ",
+            "duration_s": 42,
+        });
+        let origin = Origin::default();
+        for action in ["ssh.open", "ssh.close"] {
+            let e = entry(
+                &Audited {
+                    caller: &c,
+                    action,
+                    tool: None,
+                    args: &args,
+                    outcome: Ok(()),
+                    origin: &origin,
+                },
+                false,
+            )
+            .expect("SSH sessions are always recorded");
+            assert_eq!(e.org.as_deref(), Some("acme"));
+            assert_eq!(e.target.as_deref(), Some("box"));
+            assert_eq!(e.details["ssh_user"], "dev");
+            assert_eq!(e.details["duration_s"], 42);
+            assert!(
+                e.details["fingerprint"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("SHA256:")
+            );
+        }
     }
 }

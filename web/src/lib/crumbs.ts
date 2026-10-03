@@ -29,11 +29,14 @@ export function useCrumbs(): Crumb[] | null {
 }
 
 const SECTION: Record<string, string> = {
+  workspace: "Workspace",
   projects: "Projects",
   templates: "Templates",
   backups: "Backups",
+  volumes: "Volumes",
   notifications: "Notifications",
   members: "Members",
+  agents: "MCP",
   secrets: "Secrets",
   settings: "Settings",
   history: "History",
@@ -50,5 +53,6 @@ export function crumbsFor(path: string): Crumb[] {
   if (path.startsWith("/admin")) return [{ label: "Platform", to: "/admin" }];
   if (path.startsWith("/host")) return [{ label: "Host", to: "/host" }];
   if (path.startsWith("/account")) return [{ label: "Account" }];
+  if (path.startsWith("/agents")) return [{ label: "MCP" }];
   return [];
 }

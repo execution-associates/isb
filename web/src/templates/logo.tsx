@@ -1,6 +1,9 @@
-// A template's mark: its initials on a colour picked from its name. Logos
-// are third-party URLs (trademarks, and a request to someone else's server
-// per page view); the CSP keeps img-src to this origin, so none are loaded.
+// A template's mark: its logo when it has one, else its initials on a
+// colour picked from its name. Logos are third-party URLs (trademarks);
+// the daemon fetches and caches them and the browser loads isb's copy
+// (logoSrc), so the CSP keeps img-src to this origin and no page view
+// reaches someone else's server.
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { initialsOf } from "./api";
 
@@ -21,16 +24,22 @@ export function hueOf(name: string): number {
   return h % HUES.length;
 }
 
-export function TemplateLogo({ name, className }: { name: string; className?: string }) {
+const TILE = "flex size-10 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset";
+
+export function TemplateLogo({ name, src, className }: { name: string; src?: string; className?: string }) {
+  // The src that failed to load, so a template whose logo changes tries again.
+  const [failed, setFailed] = useState<string>();
+  if (src && failed !== src) {
+    // Logos are drawn for light backgrounds (often dark on transparent), so
+    // the tile stays light in dark mode too.
+    return (
+      <span aria-hidden className={cn(TILE, "overflow-hidden bg-white p-1.5 ring-black/10 dark:bg-zinc-100 dark:ring-white/10", className)}>
+        <img src={src} alt="" loading="lazy" decoding="async" draggable={false} className="size-full object-contain" onError={() => setFailed(src)} />
+      </span>
+    );
+  }
   return (
-    <span
-      aria-hidden
-      className={cn(
-        "flex size-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br text-sm font-semibold tracking-tight ring-1 ring-inset",
-        HUES[hueOf(name)],
-        className,
-      )}
-    >
+    <span aria-hidden className={cn(TILE, "bg-gradient-to-br text-sm font-semibold tracking-tight", HUES[hueOf(name)], className)}>
       {initialsOf(name)}
     </span>
   );

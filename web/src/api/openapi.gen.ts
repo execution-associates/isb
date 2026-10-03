@@ -315,7 +315,7 @@ export interface paths {
         put?: never;
         /**
          * Schedule a backup
-         * @description Back a database up on a cron schedule to a destination: the engine's own dump (pg_dump, mysqldump, mariadb-dump, mongodump, a Redis RDB) runs in the database's instance, is compressed and streamed to the bucket by the daemon, checked with HEAD, and the oldest beyond `keep` are deleted. Emits backup.succeeded / backup.failed events.
+         * @description Back a database (or a named `volume`) up on a cron schedule to a destination. A database: the engine's own dump (pg_dump, mysqldump, mariadb-dump, mongodump, a Redis RDB) runs in the database's instance, is compressed and streamed to the bucket by the daemon, checked with HEAD, and the oldest beyond `keep` are deleted. Emits backup.succeeded / backup.failed events.
          */
         post: operations["backup_create"];
         delete?: never;
@@ -1495,7 +1495,7 @@ export interface paths {
         put?: never;
         /**
          * Create a sandbox
-         * @description Create (or reconcile) one sandbox: an incus container or VM to run code in isolation. `spec` is one compose service (docs/spec.md) with container_name set, as an object or YAML text. Remote callers' sandboxes are labelled with their identity, and only managed sandboxes are reachable remotely.
+         * @description Create (or reconcile) one sandbox: an incus container or VM to run code in isolation. `spec` is one compose service (docs/spec.md) with container_name set, as an object or YAML text. Remote callers' sandboxes are labelled with their identity, and only managed sandboxes are reachable remotely. Sandboxes are short-lived: each expires (the org's default, 24h, unless `expires` says otherwise; sandbox_extend pushes it out) and is deleted after sitting idle (`idle_timeout`, default 2h; `none` turns it off).
          */
         post: operations["sandbox_create"];
         delete?: never;
@@ -1524,6 +1524,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/sandbox_extend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Extend a sandbox
+         * @description Push a sandbox's expiry out by `by` (from the later of now and its current expiry; at most 30 days from now), or change its idle timeout. Its creator, or the org's admins and above.
+         */
+        post: operations["sandbox_extend"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/sandbox_list": {
         parameters: {
             query?: never;
@@ -1535,7 +1555,7 @@ export interface paths {
         put?: never;
         /**
          * List sandboxes
-         * @description List instances (for remote callers: only the ones isb serve manages), optionally filtered by labels (`key` or `key=value`).
+         * @description List instances (for remote callers: only the ones isb serve manages), optionally filtered by labels (`key` or `key=value`) and kind (`sandbox`, `workspace`, `replica`, `build`). Each with who created it (owner), when, its expiry and idle timeout, its last activity, and its CPU and memory.
          */
         post: operations["sandbox_list"];
         delete?: never;
@@ -1795,9 +1815,29 @@ export interface paths {
         put?: never;
         /**
          * List servers
-         * @description Platform admins: the servers orgs can be placed on, with their health (up, unreachable, unknown), last heartbeat (versions, CPU, memory, disk) and the orgs on each.
+         * @description Platform admins: the servers orgs can be placed on, with their health (up, unreachable, unknown), last heartbeat (versions, CPU, memory, disk) and the orgs on each; `provisions`, servers being added (and recent failures); `dedicated_vm`, whether this host can run dedicated VMs; `suggested_allow_from`, addresses this control plane's traffic leaves from.
          */
         post: operations["server_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/server_provision_get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Follow a server being added
+         * @description Platform admins: how far adding a server (server_add with wait=false) or making an org's dedicated VM (org_create with placement vm) got: its steps, log, state (running, done, failed) and error. Kept for an hour after a failure.
+         */
+        post: operations["server_provision_get"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1815,7 +1855,7 @@ export interface paths {
         put?: never;
         /**
          * Remove a server
-         * @description Platform admins: forget a server. Refused while orgs are placed on it (delete them first). The agent keeps running on the box until it is stopped there (systemctl disable --now isb-agent).
+         * @description Platform admins: forget a server. Refused while orgs are placed on it (delete them first). A box added over SSH keeps running its agent until it is stopped there (systemctl disable --now isb-agent); a dedicated VM this control plane made is deleted with it.
          */
         post: operations["server_remove"];
         delete?: never;
@@ -1878,6 +1918,26 @@ export interface paths {
          * @description isb's version, incus' version, and the load balancer's routes with their backends and counters.
          */
         post: operations["server_status"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/ssh_host_keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * SSH host keys
+         * @description An instance's SSH host public keys (from /etc/ssh), for pinning in known_hosts, and the user `isb ssh-config` logs in as by default (the first ordinary user, else root). Empty keys: no host keys yet (the first `isb ssh-proxy` connection generates them) or no OpenSSH server installed.
+         */
+        post: operations["ssh_host_keys"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2258,6 +2318,446 @@ export interface paths {
          * @description One-click apps: the built-in catalog and any a platform admin added (isb's own format, or Dokploy's, translated). Each has a ref (catalog/id) for template_get and template_deploy. Filter with query (words in the name, description or tags), tag or catalog.
          */
         post: operations["template_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Show a volume
+         * @description One volume: the instances using it, its snapshot schedule and hook settings with the next run, its snapshots (newest first), its staged restores and the backups of it.
+         */
+        post: operations["volume_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List volumes
+         * @description The org's named volumes (an app's <app>_<NAME>, a database's data, a workspace's home): instances using each, its snapshot schedule, and which are staged restores.
+         */
+        post: operations["volume_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore a volume (staged)
+         * @description Restore a volume's `snapshot`, or a volume `backup` (its newest file, or `key`), or a `destination` + `key`, into a NEW volume <name>-restore-<stamp>, mounted read-write at /restore/<stamp> in the instance using the volume (or `instance`); left detached when that instance is stopped. The live volume is never touched: diff and copy back what you need, then discard it with volume_restore_discard. Org admins and owners; audited.
+         */
+        post: operations["volume_restore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_restore_discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discard a staged restore
+         * @description Detach and delete a staged restore of volume `name` (by its `stamp`). Only volumes isb staged can be discarded this way. Org admins and owners.
+         */
+        post: operations["volume_restore_discard"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_restore_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List staged restores
+         * @description Staged restores (of `name`, or every volume): the new volume, what it came from, where it is mounted.
+         */
+        post: operations["volume_restore_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_snapshot_create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Snapshot a volume now
+         * @description Snapshot a volume now. First every running instance using it runs its executable /etc/isb/pre-snapshot (if any; as root, with the volume's hook_timeout; output in the run log). Named `snapshot`, or manual-<stamp>; kept until deleted. wait=true returns when done (at most `timeout`, default 10m). Org admins and owners.
+         */
+        post: operations["volume_snapshot_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_snapshot_delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete a snapshot
+         * @description Delete one snapshot of a volume. Org admins and owners.
+         */
+        post: operations["volume_snapshot_delete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_snapshot_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List snapshots
+         * @description A volume's snapshots, newest first: auto-* (scheduled, pruned to keep), manual-* and named ones (kept until deleted).
+         */
+        post: operations["volume_snapshot_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_snapshot_run_log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Snapshot run log
+         * @description One snapshot run's log (the pre-snapshot hook's output included) from byte `offset`; poll with the returned offset until finished.
+         */
+        post: operations["volume_snapshot_run_log"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_snapshot_runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Snapshot runs
+         * @description A volume's snapshot runs, newest first (status, trigger, the hook's outcome, what was pruned).
+         */
+        post: operations["volume_snapshot_runs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_snapshot_schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Schedule snapshots
+         * @description Set a volume's snapshot schedule and hook (a merge patch): schedule (cron: five fields or @hourly, @daily, ...; empty or null removes it), timezone, keep (auto-* snapshots kept, default 7), enabled, missed_grace, hook_timeout (default 5m, at most 1h), hook_required (a failing hook stops the snapshot; default false: reported, snapshot taken). Org admins and owners.
+         */
+        post: operations["volume_snapshot_schedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/workspace_create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create the workspace
+         * @description Create the org's workspace: an unprivileged container from `image` with a managed home volume (`home_size`, counted against the org's disk quota) at the workspace user's home, and an org token (role `token_role`, default admin) delivered inside as /run/isb/token and $ISB_TOKEN, with $ISB_URL and $ISB_ORG, so the isb CLI and MCP clients inside work with no setup. One per org. Org admins and above.
+         */
+        post: operations["workspace_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/workspace_delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete the workspace
+         * @description Delete the workspace: its machine, its token (revoked at once) and, unless keep_home, its home volume. Needs confirm: true. Org admins and above.
+         */
+        post: operations["workspace_delete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/workspace_get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get the workspace
+         * @description The org's workspace (its long-lived machine, docs/workspaces.md): image, size, home volume, status, CPU and memory, live sessions (web terminals, SSH), last activity, its token's metadata (never the token) and how to connect; `workspace` is null when the org has none yet. Also the org's workspace settings.
+         */
+        post: operations["workspace_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/workspace_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List workspaces
+         * @description The org's workspaces (one per org unless a platform admin raised max_workspaces), as workspace_get shows each, without the session count.
+         */
+        post: operations["workspace_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/workspace_rebuild": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rebuild the workspace
+         * @description Replace the workspace's machine with a fresh one from its image (or `image`), keeping its home volume and token: what to do when the root is damaged. Ends every session; needs confirm: true. Software installed outside the home is gone. Org admins and above.
+         */
+        post: operations["workspace_rebuild"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/workspace_restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restart the workspace
+         * @description Restart the workspace. This ends every session on it: without confirm: true it only reports the live sessions. Org members and above.
+         */
+        post: operations["workspace_restart"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/workspace_settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Workspace settings
+         * @description The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none). Without changes it reads them; org admins change the sandbox defaults.
+         */
+        post: operations["workspace_settings"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/workspace_start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start the workspace
+         * @description Start the workspace and deliver its credentials. Org members and above.
+         */
+        post: operations["workspace_start"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/workspace_stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop the workspace
+         * @description Stop the workspace. This ends every session on it (terminals, SSH, the agents running there): without confirm: true it only reports the live sessions. Org members and above.
+         */
+        post: operations["workspace_stop"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/workspace_token_rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate the workspace's token
+         * @description Mint the workspace a new token and deliver it inside; the old one stops working at once. The token is never returned. Org admins and above.
+         */
+        post: operations["workspace_token_rotate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/workspace_update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change the workspace
+         * @description Change the workspace: cpus, memory, root_size and home_size apply at once (resizing needs confirm: true, since it can end sessions); env and secrets are delivered again (new login shells see them); image applies on the next rebuild; labels; token_role. Fields left out are kept. Org admins and above.
+         */
+        post: operations["workspace_update"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2940,8 +3440,8 @@ export interface operations {
                 "application/json": {
                     /** @enum {string} */
                     compression?: "gzip" | "zstd" | "none";
-                    /** @description The database app. */
-                    database: string;
+                    /** @description The database app (or give `volume`). */
+                    database?: string;
                     destination: string;
                     enabled?: boolean;
                     /** @description Backups kept in the bucket (default 7). */
@@ -2955,6 +3455,8 @@ export interface operations {
                     schedule: string;
                     /** @description UTC (default) or a fixed offset such as +02:00. */
                     timezone?: string;
+                    /** @description Or a named volume in the org: its snapshot is exported (incus' tar) and streamed to the bucket; restore with volume_restore. */
+                    volume?: string;
                 };
             };
         };
@@ -3393,7 +3895,7 @@ export interface operations {
                 "application/json": {
                     /** @enum {string} */
                     compression?: "gzip" | "zstd" | "none";
-                    /** @description The database app. */
+                    /** @description The database app (or give `volume`). */
                     database?: string;
                     destination?: string;
                     enabled?: boolean;
@@ -3408,6 +3910,8 @@ export interface operations {
                     schedule?: string;
                     /** @description UTC (default) or a fixed offset such as +02:00. */
                     timezone?: string;
+                    /** @description Or a named volume in the org: its snapshot is exported (incus' tar) and streamed to the bucket; restore with volume_restore. */
+                    volume?: string;
                 };
             };
         };
@@ -4760,8 +5264,22 @@ export interface operations {
                     memory?: string;
                     /** @description The new org's name: [a-z0-9-], starts with a letter. */
                     org: string;
-                    /** @description Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. */
+                    /** @description Where the org runs, set at creation: "local" (this host: an incus project sharing its kernel), {"server": NAME} (another host, server_list), or {"vm": {"cpus", "memory", "disk"}} (a dedicated VM this control plane makes on its own host: the org's own kernel; defaults 2 CPUs, 4GiB, 40GiB). An org is not moved afterwards. */
+                    placement?: "local" | {
+                        server: string;
+                    } | {
+                        vm: {
+                            cpus?: number;
+                            /** @description At least 10GiB (default 40GiB). */
+                            disk?: string;
+                            /** @description At least 2GiB (default 4GiB). */
+                            memory?: string;
+                        };
+                    };
+                    /** @description Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. Same as placement {"server": NAME}. */
                     server?: string;
+                    /** @description With a dedicated VM: wait until it is made and the org created (default true; minutes). false answers at once with `provision`; follow it with server_provision_get (name vm-<org>). */
+                    wait?: boolean;
                 };
             };
         };
@@ -4796,6 +5314,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description For an org in a dedicated VM: delete the VM and its server registration too (default false: the VM keeps running as an empty server). */
+                    delete_vm?: boolean;
                     /** @description Also delete the org's sandboxes. */
                     force?: boolean;
                     /** @description The org to delete. */
@@ -4922,8 +5442,22 @@ export interface operations {
                     memory?: string;
                     /** @description The org. */
                     org: string;
-                    /** @description Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. */
+                    /** @description Where the org runs, set at creation: "local" (this host: an incus project sharing its kernel), {"server": NAME} (another host, server_list), or {"vm": {"cpus", "memory", "disk"}} (a dedicated VM this control plane makes on its own host: the org's own kernel; defaults 2 CPUs, 4GiB, 40GiB). An org is not moved afterwards. */
+                    placement?: "local" | {
+                        server: string;
+                    } | {
+                        vm: {
+                            cpus?: number;
+                            /** @description At least 10GiB (default 40GiB). */
+                            disk?: string;
+                            /** @description At least 2GiB (default 4GiB). */
+                            memory?: string;
+                        };
+                    };
+                    /** @description Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. Same as placement {"server": NAME}. */
                     server?: string;
+                    /** @description With a dedicated VM: wait until it is made and the org created (default true; minutes). false answers at once with `provision`; follow it with server_provision_get (name vm-<org>). */
+                    wait?: boolean;
                 };
             };
         };
@@ -5389,6 +5923,10 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description Lifetime from now, e.g. 4h or 7d (at most 30d; default: the org's, 24h). */
+                    expires?: string;
+                    /** @description Delete after this long without use (exec, a terminal, CPU), e.g. 2h; `none` for never (default: the org's, 2h). */
+                    idle_timeout?: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
                     /** @description The service spec: an object, or YAML text. */
@@ -5466,6 +6004,47 @@ export interface operations {
             };
         };
     };
+    sandbox_extend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description e.g. 24h (default 24h). */
+                    by?: string;
+                    /** @description A new idle timeout, e.g. 4h, or none. */
+                    idle_timeout?: string;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     sandbox_list: {
         parameters: {
             query?: never;
@@ -5476,6 +6055,11 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /**
+                     * @description Only this kind of instance.
+                     * @enum {string}
+                     */
+                    kind?: "sandbox" | "workspace" | "replica" | "build";
                     labels?: string[];
                     /** @description The org to act in (default: default). */
                     org?: string;
@@ -5949,6 +6533,8 @@ export interface operations {
                     name: string;
                     /** @description Serve the server's orgs' domains on its own ports 80 and 443 (opened in its firewall). */
                     public_ingress?: boolean;
+                    /** @description Install this control plane's own isb executable instead of a release (same version and build; the box must have the same architecture). */
+                    self_binary?: boolean;
                     /** @description user@host */
                     ssh: string;
                     /** @description The private key itself (kept only for the bootstrap). */
@@ -5956,6 +6542,8 @@ export interface operations {
                     ssh_port?: number;
                     /** @description The isb release to install (default this daemon's). */
                     version?: string;
+                    /** @description Wait for the bootstrap to finish (default true). false answers at once with `provision`; follow it with server_provision_get. */
+                    wait?: boolean;
                 };
             };
         };
@@ -5990,6 +6578,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    server_provision_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                };
             };
         };
         responses: {
@@ -6128,6 +6751,43 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ssh_host_keys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
                 };
@@ -6876,6 +7536,921 @@ export interface operations {
                     org?: string;
                     query?: string;
                     tag?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The volume. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_restore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    backup?: string;
+                    destination?: string;
+                    instance?: string;
+                    key?: string;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    snapshot?: string;
+                    timeout?: string;
+                    wait?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_restore_discard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    stamp: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_restore_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_snapshot_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    snapshot?: string;
+                    timeout?: string;
+                    wait?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_snapshot_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    snapshot: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_snapshot_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The volume. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_snapshot_run_log: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    offset?: number;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    run: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_snapshot_runs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    limit?: number;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    volume_snapshot_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled?: boolean;
+                    hook_required?: boolean;
+                    hook_timeout?: string | null;
+                    keep?: number;
+                    missed_grace?: string | null;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    schedule?: string | null;
+                    timezone?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    workspace_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    cpus?: number;
+                    /** @description Plain variables for login shells. */
+                    env?: {
+                        [key: string]: string;
+                    };
+                    /** @description Superadmins only: this host directory as the home (an existing box's, when migrating), instead of the default home. */
+                    home_bind?: string;
+                    /** @description The home volume (default 20GiB). */
+                    home_size?: string;
+                    /** @description An incus image (dev-base, images:ubuntu/24.04) or registry:APP:TAG. */
+                    image: string;
+                    labels?: {
+                        [key: string]: string;
+                    };
+                    /** @description e.g. 8GiB. */
+                    memory?: string;
+                    /** @description Default: workspace. */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description The root disk, e.g. 30GiB (default: the pool's). */
+                    root_size?: string;
+                    /** @description Org secrets delivered as /run/isb/secrets/NAME. */
+                    secrets?: string[];
+                    /**
+                     * @description The workspace token's role in the org (default admin).
+                     * @enum {string}
+                     */
+                    token_role?: "viewer" | "member" | "admin";
+                    /** @description The workspace user (default dev); created when the image lacks it. */
+                    user?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    workspace_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Required: this ends live sessions on the workspace. Without it the call only says what would end. */
+                    confirm?: boolean;
+                    /** @description Keep the home volume (it can be attached to a new workspace of the same name). */
+                    keep_home?: boolean;
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    workspace_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    workspace_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    workspace_rebuild: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Required: this ends live sessions on the workspace. Without it the call only says what would end. */
+                    confirm?: boolean;
+                    /** @description Rebuild from this image instead (it becomes the workspace's). */
+                    image?: string;
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    workspace_restart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Required: this ends live sessions on the workspace. Without it the call only says what would end. */
+                    confirm?: boolean;
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    workspace_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Platform admins: where new workspace homes go: a managed volume, or a host folder under isb serve's --workspace-home-root ("": the daemon's default).
+                     * @enum {string}
+                     */
+                    home_kind?: "" | "volume" | "host";
+                    /** @description Platform admins: the storage pool new workspace homes go in ("" clears it: the daemon's --workspace-pool, else the org's default pool). */
+                    home_pool?: string;
+                    max_workspaces?: number;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description e.g. 24h, 7d. */
+                    sandbox_expiry?: string;
+                    /** @description e.g. 2h, or none. */
+                    sandbox_idle?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    workspace_start: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    workspace_stop: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Required: this ends live sessions on the workspace. Without it the call only says what would end. */
+                    confirm?: boolean;
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    workspace_token_rotate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    workspace_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Required: this ends live sessions on the workspace. Without it the call only says what would end. */
+                    confirm?: boolean;
+                    cpus?: number;
+                    /** @description Replaces the variables. */
+                    env?: {
+                        [key: string]: string;
+                    };
+                    /** @description Grow the home volume. */
+                    home_size?: string;
+                    image?: string;
+                    /** @description Replaces the labels. */
+                    labels?: {
+                        [key: string]: string;
+                    };
+                    memory?: string;
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    root_size?: string;
+                    /** @description Replaces the delivered secrets. */
+                    secrets?: string[];
+                    /** @enum {string} */
+                    token_role?: "viewer" | "member" | "admin";
                 };
             };
         };

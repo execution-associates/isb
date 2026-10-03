@@ -20,8 +20,8 @@ of it) in a browser:
 - **Signed in**: a sidebar with an org switcher (the orgs you can open: your
   memberships, or every org for a platform admin; switching keeps the
   section you are in), a search button, the selected org's sections (Org:
-  Overview, Projects, Templates, Backups, Notifications; Manage: Members,
-  Secrets, Settings, History), Platform for platform admins, and your
+  Workspace, Overview, Projects, Templates, Backups, Notifications; Manage: Members,
+  MCP, Secrets, Settings, History), Platform for platform admins, and your
   account menu (account, theme, sign out). The page sits in a panel with a
   top bar that holds its breadcrumbs (the last two on a phone) and the
   state of the live event stream.
@@ -31,21 +31,31 @@ of it) in a browser:
   you typed ranks first; letters in order still match). Typing "deploy"
   lists Deploy/Redeploy for each app (writers only), which opens the
   deployment live. `G` then a letter jumps to a section anywhere outside a
-  text field: `G O` Overview, `G P` Projects, `G T` Templates, `G B`
-  Backups, `G N` Notifications, `G M` Members, `G S` Secrets, `G ,`
+  text field: `G W` Workspace, `G O` Overview, `G P` Projects, `G T` Templates, `G B`
+  Backups, `G N` Notifications, `G M` Members, `G A` MCP, `G S` Secrets, `G ,`
   Settings, `G H` History. **Account** changes your password, links and
-  unlinks providers, adds and deletes passkeys, makes and revokes API tokens
-  (shown once), and lists your sessions.
+  unlinks providers, adds and deletes passkeys and SSH keys
+  ([ssh.md](ssh.md)), makes and revokes API tokens (shown once), and lists
+  your sessions.
 
 Each org has these sections:
 
-- **Overview** (`/orgs/ORG`): its projects with their health, the latest
+- **Workspace** (`/orgs/ORG/workspace`): the org's machine and its
+  sandboxes ([below](#the-workspace)).
+- **Overview** (`/orgs/ORG`): the workspace first (status, live sessions,
+  CPU and memory with a sparkline, last activity, sandbox count; or a
+  "Create the workspace" button for admins), then its projects with their health, the latest
   deployments of every app, its stacks and a live activity feed.
 - **Projects** (`/orgs/ORG/projects`): projects, their environments and the
   apps in each, with every app's pages (see below).
 - **Templates** (`/orgs/ORG/templates`): the template catalog, what the org
   deployed from it, and for platform admins the catalogs (see
   [Day 2](#day-2-databases-backups-jobs-notifications-templates-previews)).
+- **Volumes** (`/orgs/ORG/volumes`, linked from Backups): the org's named
+  volumes; one volume's page is the **Volume panel** (`web/src/volumes/`):
+  snapshots with Snapshot now, the schedule and pre-snapshot hook, the
+  volume's backups with their files, and staged restores with Discard.
+  Admins and owners act; members and viewers read ([volumes.md](volumes.md)).
 - **Backups** (`/orgs/ORG/backups`): backup destinations, every database's
   backup schedules, and the restore history.
 - **Notifications** (`/orgs/ORG/notifications`): notification channels, their
@@ -58,6 +68,28 @@ Each org has these sections:
   out viewer, member and admin, only an owner touches an owner, and the
   last owner stays. Anyone can leave. A viewer sees the org but changes
   nothing; the server refuses what the UI still offers them.
+- **MCP** (`/orgs/ORG/agents`; `/orgs/ORG/mcp` is the endpoint itself):
+  how to connect an agent. The org endpoint's URL (`/orgs/ORG/mcp` on the
+  origin the page is open at), a form that makes an API token for the org
+  (name, Access, expiry; the server's rules: members, viewers with a
+  read-only reach, platform admins; not an accountless superadmin or a
+  narrowed token) and shows it once, and install snippets with copy
+  buttons for Claude Code (`claude mcp add` and `.mcp.json`), Codex
+  (`codex mcp add` and `config.toml`), Cursor and other `mcpServers`
+  clients, and a `curl` `tools/list` test. The snippets read the token
+  from `ISB_TOKEN`, and the token just made fills the `export` line. A
+  switch adds Cloudflare Access service token headers for an address
+  behind Access (on by default for one that is not localhost or the
+  tailnet). The tools the endpoint lists (`GET /api/v1/tools`) fold out
+  below, and a note says claude.ai and Claude Desktop connectors need
+  Access Managed OAuth ([serve.md](serve.md#remote-mcp-through-cloudflare-tunnel-and-access)).
+  A superadmin also sees the unbound `/mcp` endpoint, with a warning that
+  it is root on the host, and for each source (a token minted on the host
+  with `isb token create NAME --superadmin`, a `--superadmin-tailnet`
+  identity with the allow list and tailnet URL from `host_policy`, a
+  `--superadmin-access` identity) whether it is on and its snippets; the
+  web makes no superadmin token. `/agents` opens the remembered org's
+  page, or the superadmin part alone when there is no org.
 - **Secrets** (`/orgs/ORG/secrets`): the org's secrets with driver, version,
   update time, labels and the stacks using each, plus the driver references
   stacks read (refresh one to check it now). Create one or give it a new
@@ -82,10 +114,39 @@ Each org has these sections:
   everything matching. `/orgs/ORG/audit` opens it on the audit log.
 
 Platform admins also get **Platform** (`/admin/orgs`, `/admin/users`,
-`/admin/server`, `/admin/history`): every org (create, delete), every user
-(disable, enable, make or unmake platform admin), the server's status, and
-the whole history (every org and the host, host-level rows only, or one
-org).
+`/admin/servers`, `/admin/server`, `/admin/history`): every org (create,
+delete), every user (disable, enable, make or unmake platform admin), the
+servers, this host's status, and the whole history (every org and the
+host, host-level rows only, or one org).
+
+- **Orgs** shows where each org runs (this host, a server, or a dedicated
+  VM). **New org** asks where it should run, each choice with what keeps
+  the org apart: this host (an incus project; containers share the host's
+  kernel), each server that is up (another machine), or a dedicated VM
+  (its own kernel; with the VM's CPUs, memory and disk), disabled with the
+  reason when this host cannot run VMs ([servers.md](servers.md#placement-and-isolation)).
+  A dedicated VM takes minutes: the dialog follows its steps and log and
+  offers Retry on a failure. The org's quota and egress are set alongside.
+- **Servers** (`/admin/servers`, also under Platform in the sidebar): each
+  server with its kind (added over SSH, or a dedicated VM and its org),
+  health (up, unreachable, unknown, and how long since its last
+  heartbeat), isb version, CPU, memory and disk from the heartbeat, and the
+  orgs on it; servers being added, with their progress. A server's details
+  (address, how it was added, certificate fingerprint and expiry, firewall
+  sources, last error) open from its row, with **Remove**, offered only
+  while no org is placed on it (a dedicated VM is deleted with it). **Add
+  server** is a wizard over `server_add`: name, `user@host`, the SSH
+  private key (pasted, sent once as `ssh_key`, never stored, cleared from
+  the form on submit), the addresses allowed to reach the agent port
+  (prefilled with the addresses this control plane's traffic leaves from,
+  `suggested_allow_from`), and the binary to install (this version's
+  release, the control plane's own build, or another release). It then
+  follows the bootstrap step by step (`server_provision_get`) and, on a
+  failure, shows the error with **Retry**, which keeps everything but the
+  key.
+- An org's **Settings** shows its placement and isolation, and that moving
+  it is not supported (with the manual procedure); deleting an org in a
+  dedicated VM offers to delete the VM too.
 
 **Superadmins** ([auth.md](auth.md#superadmins)) carry a **Superadmin**
 badge in the top bar (its tooltip says how they are signed in) and get
@@ -125,12 +186,17 @@ Light, dark and system themes; it works down to phone width.
 
 ### Design system
 
-- **Tokens** (`web/src/index.css`): neutrals with a faint cool tint, the
-  logo's emerald as the one brand colour (active navigation, switches,
+- **Tokens** (`web/src/index.css`): neutrals with a faint cool tint,
+  emerald as the one brand colour (active navigation, switches,
   focus rings), and semantic status colours: success (running, done),
   info (building, deploying), warning (degraded), destructive (failed);
   queued and stopped are neutral. Log panels use a dark terminal surface
   in both themes.
+- **Logo**: the Execution Associates (EXA) monogram, a raster mark
+  (`web/src/assets/brand/exa-mark@{1,2,3}x.png`) drawn as a CSS mask
+  filled with `currentColor` (`.exa-mark`, `<Logo>`), so one asset reads
+  on light and dark. The favicons and `apple-touch-icon.png` in
+  `web/public` are the same mark, white on a dark tile.
 - **Status** goes through `lib/status.ts` (status to tone, tone to
   classes) and `<StatusBadge>`/`<StatusDot>` (`components/status.tsx`); a
   pulsing dot means in progress or live. No page picks status colours by
@@ -145,6 +211,36 @@ Light, dark and system themes; it works down to phone width.
   typed confirmation for destructive actions, toasts for outcomes.
 - **Motion** is short and optional: content fades up as it appears, live
   dots pulse; `prefers-reduced-motion` turns animation off.
+
+## The workspace
+
+`/orgs/ORG/workspace[/TAB]`, over the `workspace_*` tools
+([workspaces.md](workspaces.md)). With no workspace yet, the page is the
+create form: image (suggestions `dev-base`, `images:ubuntu/24.04`), name,
+user, CPUs, memory, root size, home size, the token's role (viewer, member,
+admin; admin by default, with what each grants) and environment, with the
+org's placement (where it runs, its project, network and limits) shown
+read-only. Members and viewers see the form read-only with why.
+
+The header shows the status, image, user, live sessions and sandbox count.
+Members get Start, Stop and Restart; admins also Rebuild (type the name)
+and Delete (type the name; a switch keeps the home volume). Each
+disruptive action first asks the daemon without `confirm` and shows its
+answer, the live sessions it would end, in the dialog; confirming calls
+again with `confirm: true`. The tabs:
+
+| Tab | Shows |
+|---|---|
+| **Terminal** | Shells as tabs: **New** opens another as the workspace user in its home (`?instance=`); hidden tabs stay connected, closing one ends its shell. A sandbox's **Shell** (Sandboxes tab, or `?sandbox=NAME`) opens as its own tab, as root. Not for viewers. |
+| **Connect** | The workspace's MCP credential: role, created, last used, path inside (`/run/isb/token`), id, audit actor `workspace`, and Rotate for admins (no token value is ever shown); the variables login shells get; MCP client snippets for use inside the workspace (`$ISB_URL/orgs/ORG/mcp`, `$ISB_TOKEN`); SSH and herdr: `isb key add`, `isb workspace ssh-config`, `ssh NAME.ORG.isb` and the `herdr machine add` line ([ssh.md](ssh.md)). |
+| **Resources** | CPU, memory, disk, address, last activity, sessions, a CPU sparkline; admins resize CPUs, memory and the root disk (confirmed). |
+| **Home** | The volume, pool, size, mount path (or the bind); admins grow it (confirmed). Snapshots, backups and staged restore come here. |
+| **Environment** | `KEY=VALUE` variables for login shells (`ISB_*` refused) and the org secrets delivered as files; admins save, which delivers them again. |
+| **Sandboxes** | Each sandbox: status, creator, age, expiry (highlighted in its last hour), idle limit, last activity, limits and use; Shell, Extend by 4h, 24h or 7d (its creator, or admins) and Delete; the org's expiry and idle defaults. |
+| **History** | The history panel, filtered to the workspace. |
+
+Viewers see Connect, Resources, Home, Environment, Sandboxes and History,
+without actions.
 
 ## Projects and apps
 
@@ -280,9 +376,11 @@ what an event in its org touches.
   Platform admins also see the server-wide switch for private destinations
   (`notification_settings`).
 - **Templates** section: the catalog (`template_list`) with search and
-  tags; cards show a template's initials, not its logo (logos are
-  third-party URLs: the CSP keeps `img-src` to this origin, and the page
-  makes no requests to other servers). A template's page lists what it
+  tags; cards show a template's logo, loaded from isb's cached copy
+  (`/api/v1/templates/<catalog>/<id>/logo`, see
+  [templates.md](templates.md#logos)), so the CSP keeps `img-src` to this
+  origin and the page makes no requests to other servers. A template
+  without a logo, or whose logo fails to load, shows its initials. A template's page lists what it
   creates, its links and notes (and a Dokploy template's translation notes
   or refusals), and a form generated from its variables: each typed
   (email, URL, number, domain, choices) and checked as the daemon checks

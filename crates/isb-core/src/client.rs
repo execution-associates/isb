@@ -16,6 +16,8 @@ use serde_json::Value;
 
 use crate::error::{Error, Result};
 
+mod stream;
+
 /// Deadlines used by the client. Every request has one; there is no unbounded wait
 /// anywhere except the output of `exec`, which by design has no default timeout.
 #[derive(Debug, Clone)]
@@ -50,7 +52,8 @@ impl Default for Timeouts {
 pub struct Client {
     socket: PathBuf,
     project: Option<String>,
-    pub(crate) timeouts: Timeouts,
+    #[doc(hidden)]
+    pub timeouts: Timeouts,
 }
 
 /// The standard incusd response envelope.
@@ -68,7 +71,8 @@ struct Envelope {
 
 /// What a request returned: sync metadata, or an operation to wait on.
 #[derive(Debug)]
-pub(crate) enum Reply {
+#[doc(hidden)]
+pub enum Reply {
     Sync(Value),
     Async { operation: String, metadata: Value },
 }
@@ -303,7 +307,8 @@ impl Client {
     }
 
     /// `GET` returning the body and its ETag.
-    pub(crate) fn get_etag(&self, path: &str) -> Result<(Value, Option<String>)> {
+    #[doc(hidden)]
+    pub fn get_etag(&self, path: &str) -> Result<(Value, Option<String>)> {
         match self.request_etag("GET", path, None, None, self.timeouts.request)? {
             (Reply::Sync(v), e) => Ok((v, e)),
             (Reply::Async { metadata, .. }, e) => Ok((metadata, e)),
@@ -311,7 +316,8 @@ impl Client {
     }
 
     /// A mutation guarded by `If-Match`, waited on like [`Client::mutate`].
-    pub(crate) fn mutate_if_match(
+    #[doc(hidden)]
+    pub fn mutate_if_match(
         &self,
         method: &str,
         path: &str,

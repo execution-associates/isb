@@ -36,10 +36,13 @@ pub mod policy;
 pub mod previews;
 pub mod secrets;
 mod servers;
+mod ssh;
 pub mod superadmin;
 pub mod templates;
 mod terminal;
 mod tools;
+pub mod volumes;
+pub mod workspaces;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -98,6 +101,15 @@ pub struct ServeConfig {
     pub open_signup: bool,
     /// The HTTP(S) edge for stack domains; `None` leaves domains unserved.
     pub ingress: Option<crate::ingress::IngressConfig>,
+    /// The port each org's workspace reaches the org-bound MCP on, on the
+    /// org bridge's address.
+    pub workspace_mcp_port: u16,
+    /// `--workspace-pool`: the storage pool new workspace homes go in,
+    /// unless the org sets its own; none: the org's default pool.
+    pub workspace_pool: Option<String>,
+    /// `--workspace-home-root`: workspace homes are host folders
+    /// `<root>/<org>/home` instead of managed volumes.
+    pub workspace_home_root: Option<PathBuf>,
     /// How long audit rows are kept.
     pub audit_retention: Duration,
     /// Record read-only tool calls too (secret reads always are).
@@ -199,6 +211,8 @@ struct Daemon {
     history: crate::metrics_history::History,
     /// Databases' backups and scheduled jobs.
     data: data::Ctx,
+    /// Named volumes' snapshots and staged restores.
+    volumes: crate::volume_backup::VolumeBackups,
     audit: Arc<crate::audit::AuditLog>,
     /// The servers orgs can be placed on (a control plane; `None` on an
     /// agent).
@@ -206,6 +220,11 @@ struct Daemon {
     /// Who is a superadmin, and what `host_policy` reports.
     gate: Arc<superadmin::Gate>,
     host: Value,
+    /// The template catalogs, shared by the tools and the logo route.
+    catalogs: Arc<crate::template::catalog::Catalogs>,
+    /// Each org's workspace, its token and its bridge listener; the
+    /// sandbox reaper.
+    workspaces: Arc<workspaces::Workspaces>,
 }
 
 /// dnsmasq (as `incus`) reads service names from the DNS root. When that
@@ -404,12 +423,33 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     // Jobs and backups share one scheduler thread.
     let jobs = crate::jobs::Jobs::new(&cfg.state_dir, apps.clone());
     let backups = crate::backup::Backups::new(&cfg.state_dir, apps.clone());
+    let volumes =
+        crate::volume_backup::VolumeBackups::new(&cfg.state_dir, apps.clone(), backups.clone());
     let scheduler = crate::jobs::Scheduler::start(vec![
         Arc::new(jobs.clone()) as Arc<dyn crate::jobs::Scheduled>,
         Arc::new(backups.clone()),
+        Arc::new(volumes.clone()),
     ]);
     jobs.set_scheduler(scheduler.clone());
     backups.set_scheduler(scheduler.clone());
+    volumes.set_scheduler(scheduler.clone());
+    if let Some(ic) = &cfg.ingress {
+        if ic.tunnel_port == cfg.workspace_mcp_port {
+            return Err(Error::invalid(format!(
+                "--workspace-mcp-port {} is the ingress's tunnel port; pick another",
+                cfg.workspace_mcp_port
+            )));
+        }
+    }
+    let workspaces = workspaces::Workspaces::new(
+        &cfg.state_dir,
+        client.clone(),
+        secrets.clone(),
+        recorder.clone(),
+        cfg.workspace_mcp_port,
+        cfg.workspace_pool.clone(),
+        cfg.workspace_home_root.clone(),
+    );
     let d = Arc::new(Daemon {
         client,
         ctl: ctl.clone(),
@@ -426,10 +466,13 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
             jobs,
             backups,
         },
+        volumes,
         audit: audit_log.clone(),
         servers: servers.clone(),
         gate: gate.clone(),
         host: superadmin::host_summary(&cfg, &gate),
+        catalogs: Arc::new(crate::template::catalog::Catalogs::new(&cfg.state_dir)),
+        workspaces: workspaces.clone(),
     });
     if let Some(s) = &servers {
         s.start(ctl.clone());
@@ -452,6 +495,19 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         };
         audit::audited_webhooks(w, audit_log.clone())
     };
+    // Template logos from isb's own cache, ahead of the web UI.
+    let auth = auth.map(|a| -> crate::server::Routes {
+        let logo = templates::logo::route(
+            d.catalogs.clone(),
+            Arc::new(templates::logo::Logos::new(&cfg.state_dir)),
+            templates::logo::admit(
+                hooks.authn.clone().expect("the daemon authenticates"),
+                access.clone(),
+                cfg.allow_unauthenticated,
+            ),
+        );
+        Arc::new(move |r| logo(r).or_else(|| a(r)))
+    });
     let mut listeners = vec![Listener::unix(&cfg.socket).hooks(hooks.clone())];
     if let Some(ac) = &cfg.agent {
         let tls = crate::servers::pki::agent_server_config(&ac.tls_dir)?;
@@ -510,7 +566,25 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
             json!({"ok": true, "isb": env!("CARGO_PKG_VERSION"), "stacks": stacks}),
         )
     });
-    let r = crate::server::serve(listeners, registry, healthz);
+    // Each org's workspace reaches the org-bound surface on its bridge:
+    // the hooks and tool policy of the TCP listeners, no Access (only the
+    // org's own subnet, with bearer tokens, gets in).
+    let registry = Arc::new(registry);
+    workspaces.set_serving(
+        Listener::tcp("org-bridge")
+            .policy(cfg.remote_tools.clone())
+            .hooks(hooks.clone())
+            .allow_unauthenticated(true),
+        registry.clone(),
+        healthz.clone(),
+    );
+    let local: workspaces::LocalOrg = {
+        let d = d.clone();
+        Arc::new(move |o: &crate::org::OrgId| d.remote(o).is_none())
+    };
+    workspaces.start(ctl.clone(), local);
+    let r = crate::server::serve_shared(listeners, registry, healthz);
+    workspaces.shutdown();
     stop_history.store(true, std::sync::atomic::Ordering::Relaxed);
     recorder.record(crate::history::marker(
         "serve.stopped",
@@ -617,6 +691,7 @@ const PLATFORM_TOOLS: &[&str] = &[
     "server_show",
     "server_remove",
     "server_rotate_cert",
+    "server_provision_get",
 ];
 
 /// Read-only tools that span orgs: any signed-in user, filtered to their
@@ -643,13 +718,24 @@ fn visible_orgs(c: &Caller) -> Option<Vec<crate::org::OrgId>> {
 fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate::server::Hooks {
     use crate::server::Authenticated;
     let term = terminal::terminal(d.clone());
+    let ssh = ssh::ssh(d.clone(), users.clone());
     let u = users.clone();
     let gate = d.gate.clone();
+    let wsa = d.workspaces.clone();
     let authn: crate::server::mcp::Authn = Arc::new(move |req, id| {
         match gate.resolve(req, id) {
             superadmin::Resolved::Superadmin(s) => return Authenticated::Superadmin(s),
             superadmin::Resolved::Refused => return Authenticated::Refused,
             superadmin::Resolved::None => {}
+        }
+        // An org's workspace token: judged by the workspaces, which keep it.
+        if let Some(t) = bearer(req) {
+            if t.starts_with(crate::auth::secret::TokenKind::Workspace.prefix()) {
+                return match wsa.authenticate(t) {
+                    Some(p) => Authenticated::User(Arc::new(p)),
+                    None => Authenticated::Refused,
+                };
+            }
         }
         if req.header("authorization").is_some()
             || req
@@ -718,9 +804,16 @@ fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate:
         authorize: Some(authorize),
         events: Some(events),
         terminal: Some(term),
+        ssh: Some(ssh),
         audit: None,
         route: None,
     }
+}
+
+/// The bearer token a request carries, if any.
+fn bearer(req: &crate::server::http::Request) -> Option<&str> {
+    let (scheme, token) = req.header("authorization")?.trim().split_once(' ')?;
+    scheme.eq_ignore_ascii_case("bearer").then(|| token.trim())
 }
 
 /// May `c` call `tool` (of class `cls`) with `args`? The arguments to use
@@ -906,18 +999,19 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
     tools::sandbox_list_tool(&mut r, &d, &ann)?;
     tools::sandbox_exec_tool(&mut r, &d, &ann)?;
     tools::sandbox_remove_tool(&mut r, &d, &ann)?;
+    tools::sandbox_extend_tool(&mut r, &d, &ann)?;
     apps::register(&mut r, d.apps.clone())?;
     previews::register(&mut r, d.apps.clone())?;
-    templates::register(
-        &mut r,
-        templates::Templates::new(
-            &d.state_dir,
-            d.apps.clone(),
-            d.secrets.clone(),
-            d.ingress.as_ref().and_then(|m| m.public_ip()),
-        ),
-    )?;
+    let mut t = templates::Templates::new(
+        &d.state_dir,
+        d.apps.clone(),
+        d.secrets.clone(),
+        d.ingress.as_ref().and_then(|m| m.public_ip()),
+    );
+    t.catalogs = d.catalogs.clone();
+    templates::register(&mut r, t)?;
     data::register(&mut r, d.data.clone())?;
+    volumes::register(&mut r, d.volumes.clone())?;
     tools::server_status_tool(&mut r, &d, &ann)?;
     orgs::register(&mut r, d.clone())?;
     notify::register(
@@ -929,6 +1023,8 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
     audit::register(&mut r, d.audit.clone())?;
     audit::register_history(&mut r, d.audit.clone())?;
     servers::register(&mut r, d.clone())?;
+    ssh::register(&mut r, d.clone())?;
+    workspaces::register(&mut r, d.clone())?;
     Ok(r)
 }
 
@@ -980,6 +1076,17 @@ impl Daemon {
     }
 
     /// Where a remote stack's relative paths resolve by default.
+    /// An org's workspace definition, by name.
+    fn workspaces_def(
+        &self,
+        org: &crate::org::OrgId,
+        name: &str,
+    ) -> Result<crate::workspace::Workspace> {
+        crate::workspace::Store::new(&self.state_dir)
+            .get(org, name)?
+            .ok_or_else(|| Error::NotFound(format!("org {org} has no workspace {name}")))
+    }
+
     fn files_dir(&self, stack: &str) -> Result<PathBuf> {
         let p = self.state_dir.join("files").join(stack);
         std::fs::create_dir_all(&p)?;
@@ -1170,6 +1277,10 @@ enum SpecArg {
     Object(Box<SandboxSpec>),
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn sandbox_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     #[derive(Deserialize)]
     struct A {
@@ -1177,8 +1288,13 @@ fn sandbox_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         #[serde(default)]
         wait_ready: Option<bool>,
         #[serde(default)]
+        expires: Option<String>,
+        #[serde(default)]
+        idle_timeout: Option<String>,
+        #[serde(default)]
         org: Option<String>,
     }
+    let org = arg_org(&a)?;
     let a: A = args(a)?;
     let mut spec = match serde_json::from_value::<SpecArg>(a.spec)
         .map_err(|e| Error::invalid(format!("spec: {e}")))?
@@ -1208,8 +1324,47 @@ fn sandbox_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
                 return Err(Error::AlreadyExists(name));
             }
         }
-        spec.labels
-            .insert(LABEL_OWNER.into(), format!("mcp:{}", caller_name(c)));
+        spec.labels.insert(LABEL_OWNER.into(), owner_label(c));
+    }
+    if let Ok(sb) = Sandbox::get(&d.oc(&a.org)?, &name) {
+        let info = sb.info()?;
+        // A sandbox spec over the workspace would replace the org's machine.
+        if info.config.contains_key(crate::workspace::KEY_WORKSPACE) {
+            return Err(Error::invalid(format!(
+                "{name} is the org's workspace; pick another name"
+            )));
+        }
+    }
+    // incus counts every disk against an org's disk quota, and refuses a
+    // root disk without a size there.
+    if !spec
+        .raw_devices
+        .get("root")
+        .is_some_and(|r| r.contains_key("size"))
+        && workspaces::project_has_disk_limit(&d.client, &org)
+    {
+        spec.raw_devices
+            .entry("root".into())
+            .or_default()
+            .insert("size".into(), workspaces::SANDBOX_ROOT_SIZE.into());
+    }
+    // Short-lived by rule: the org's defaults unless the call says otherwise.
+    let settings = d.workspaces.settings(&org)?;
+    let (expires_at, idle) = crate::workspace::sandbox_deadlines(
+        &settings,
+        a.expires.as_deref(),
+        a.idle_timeout.as_deref(),
+        now_secs(),
+    )?;
+    spec.labels
+        .insert("isb.expires_at".into(), expires_at.to_string());
+    match idle {
+        Some(s) => {
+            spec.labels.insert("isb.idle_timeout".into(), s.to_string());
+        }
+        None => {
+            spec.labels.insert("isb.idle_timeout".into(), "0".into());
+        }
     }
     let opts = EnsureOptions {
         wait_ready: a.wait_ready.unwrap_or(true),
@@ -1224,7 +1379,135 @@ fn sandbox_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         opts,
         &mut |m| log.push(m.to_string()),
     )?;
-    Ok(json!({"info": sb.info()?, "report": report, "log": log}))
+    d.workspaces.mark_active(&org.incus_project(), &name);
+    Ok(json!({
+        "info": sb.info()?,
+        "report": report,
+        "log": log,
+        "expires_at": expires_at,
+        "idle_timeout": idle,
+        "message": format!(
+            "{name} expires {} from now{}; sandbox_extend pushes it out.",
+            crate::workspace::human(expires_at.saturating_sub(now_secs())),
+            match idle {
+                Some(s) => format!(" and is deleted after {} idle", crate::workspace::human(s)),
+                None => String::new(),
+            }
+        ),
+    }))
+}
+
+/// What `isb.owner` says about a sandbox this caller creates.
+fn owner_label(c: &Caller) -> String {
+    match c {
+        Caller::Superadmin(s) => s.label(),
+        Caller::User { principal } if principal.is_workspace() => {
+            crate::auth::WORKSPACE_ACTOR.to_string()
+        }
+        _ => format!("mcp:{}", caller_name(c)),
+    }
+}
+
+fn sandbox_extend(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct A {
+        name: String,
+        #[serde(default)]
+        by: Option<String>,
+        #[serde(default)]
+        idle_timeout: Option<String>,
+        #[serde(default)]
+        org: Option<String>,
+    }
+    let org = arg_org(&a)?;
+    let a: A = args(a)?;
+    let oc = d.oc(&a.org)?;
+    let info = d.reach(c, &oc, &a.name)?;
+    let labels: BTreeMap<String, String> = info
+        .config
+        .iter()
+        .filter_map(|(k, v)| k.strip_prefix("user.").map(|k| (k.to_string(), v.clone())))
+        .collect();
+    if crate::workspace::kind_of(&labels) != "sandbox" {
+        return Err(Error::invalid(format!(
+            "{} is a {}, not a sandbox: it does not expire",
+            a.name,
+            crate::workspace::kind_of(&labels)
+        )));
+    }
+    // Its creator, or the org's admins.
+    let mine = labels
+        .get("isb.owner")
+        .is_some_and(|o| *o == owner_label(c));
+    let admin = match c {
+        Caller::Local { .. } | Caller::Superadmin(_) => true,
+        Caller::User { principal } => {
+            principal.platform_admin
+                || principal
+                    .role_in(&org)
+                    .is_some_and(|r| r >= crate::auth::Role::Admin)
+        }
+        _ => false,
+    };
+    if !mine && !admin {
+        return Err(Error::Forbidden(format!(
+            "{} was created by {}; its creator or the org's admins extend it",
+            a.name,
+            labels
+                .get("isb.owner")
+                .map(String::as_str)
+                .unwrap_or("someone else")
+        )));
+    }
+    let now = now_secs();
+    let mut patch = serde_json::Map::new();
+    let current = labels
+        .get("isb.expires_at")
+        .and_then(|v| v.parse::<u64>().ok());
+    let by = match &a.by {
+        Some(b) => crate::flex::parse_duration(b).map_err(Error::invalid)?,
+        None if a.idle_timeout.is_some() => Duration::ZERO,
+        None => Duration::from_secs(86400),
+    };
+    let mut expires_at = current;
+    if !by.is_zero() {
+        let e = crate::workspace::extended(current, by, now)?;
+        patch.insert(
+            crate::workspace::KEY_EXPIRES_AT.into(),
+            json!(e.to_string()),
+        );
+        expires_at = Some(e);
+    }
+    let mut idle = labels
+        .get("isb.idle_timeout")
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|s| *s > 0);
+    if let Some(t) = &a.idle_timeout {
+        idle = crate::workspace::idle(t)?.map(|d| d.as_secs());
+        patch.insert(
+            crate::workspace::KEY_IDLE_TIMEOUT.into(),
+            json!(idle.unwrap_or(0).to_string()),
+        );
+    }
+    oc.mutate(
+        "PATCH",
+        &format!("/1.0/instances/{}", crate::client::encode_segment(&a.name)),
+        Some(&json!({"config": patch})),
+        &format!("extend sandbox {}", a.name),
+        oc.timeouts.other,
+    )?;
+    d.workspaces.mark_active(&org.incus_project(), &a.name);
+    Ok(json!({
+        "name": a.name,
+        "expires_at": expires_at,
+        "idle_timeout": idle,
+        "message": format!(
+            "{} now expires {} from now.",
+            a.name,
+            crate::workspace::human(expires_at.unwrap_or(now).saturating_sub(now))
+        ),
+    }))
 }
 
 const OUTPUT_CAP: usize = 256 * 1024;
@@ -1253,9 +1536,11 @@ fn sandbox_exec(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         stdin: Option<String>,
         timeout: Option<String>,
     }
+    let org = arg_org(&a)?;
     let a: A = args(a)?;
     let oc = d.oc(&a.org)?;
     d.reach(c, &oc, &a.name)?;
+    d.workspaces.mark_active(&org.incus_project(), &a.name);
     let timeout = match &a.timeout {
         Some(t) => crate::flex::parse_duration(t).map_err(Error::invalid)?,
         None => Duration::from_secs(600),
@@ -1413,6 +1698,58 @@ mod tests {
         assert_eq!(a.kind, Some(crate::audit::ActorKind::Superadmin));
         assert_eq!(a.token_name.as_deref(), Some("ci"));
         assert_eq!(a.user_id, None);
+    }
+
+    #[test]
+    fn a_workspace_token_administers_its_org_and_nothing_else() {
+        let acme = OrgId::new("acme").unwrap();
+        let ws = |r| Caller::User {
+            principal: Arc::new(Principal::workspace(&acme, "workspace", r)),
+        };
+        let admin = ws(Role::Admin);
+        let a = |org: &str| json!({"org": org, "name": "web"});
+        for t in [
+            "app_deploy",
+            "secret_get",
+            "sandbox_create",
+            "workspace_get",
+        ] {
+            assert!(ok(&admin, t, a("acme")), "{t}");
+            assert!(!ok(&admin, t, a("beta")), "{t}: another org");
+        }
+        assert!(
+            !ok(&admin, "secret_get", json!({"name": "x"})),
+            "default org"
+        );
+        for t in ["org_update", "org_delete", "org_list", "server_add"] {
+            assert!(!ok(&admin, t, a("acme")), "{t}");
+        }
+        for t in superadmin::TOOLS {
+            assert!(!ok(&admin, t, json!({})), "{t}");
+        }
+        // An org-bound endpoint pins it to its org.
+        assert!(
+            authorize(
+                &admin,
+                "app_list",
+                json!({"org": "beta"}),
+                Some(&acme),
+                false
+            )
+            .is_err()
+        );
+        // Narrowed at create: a viewer workspace only reads.
+        let viewer = ws(Role::Viewer);
+        assert!(ok(&viewer, "stack_status", a("acme")));
+        assert!(!ok(&viewer, "secret_get", a("acme")));
+        assert!(!ok(&viewer, "sandbox_exec", a("acme")));
+        // Audit rows and owner labels name it `workspace`.
+        let act = audit::actor(&admin);
+        assert_eq!(act.name, "workspace");
+        assert_eq!(act.user_id, None);
+        assert_eq!(act.token_name.as_deref(), Some("workspace:workspace"));
+        assert_eq!(owner_label(&admin), "workspace");
+        assert_eq!(admin.to_string(), "workspace");
     }
 
     #[test]

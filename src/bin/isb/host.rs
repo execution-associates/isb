@@ -41,11 +41,19 @@ pub(crate) fn host_rules(uplink: &str, public_ingress: bool) -> Vec<Vec<String>>
             "ufw allow in on isbbr+ to any port {} proto tcp comment",
             isb::ingress::DEFAULT_TUNNEL_PORT
         )),
+        // An org's workspace reaches the org-bound MCP on its own bridge
+        // address; the daemon answers only that org's subnet, and other
+        // orgs' ACLs keep them off it.
+        v(&format!(
+            "ufw allow in on isbbr+ to any port {} proto tcp comment",
+            isb::daemon::workspaces::DEFAULT_PORT
+        )),
     ];
     let mut comments = vec![
         "isb org bridges: DNS",
         "isb org bridges: egress",
         "isb org bridges: tunnel ingress",
+        "isb org bridges: workspace MCP",
     ];
     if public_ingress {
         out.push(v("ufw allow 80/tcp comment"));

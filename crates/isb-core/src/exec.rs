@@ -147,7 +147,8 @@ pub fn parse_passwd(line: &str) -> Option<GuestUser> {
 }
 
 /// Resolve `dev`, `1000` or `1000:1000` to ids inside the guest.
-pub(crate) fn resolve_user(client: &Client, instance: &str, user: &str) -> Result<GuestUser> {
+#[doc(hidden)]
+pub fn resolve_user(client: &Client, instance: &str, user: &str) -> Result<GuestUser> {
     if let Some((u, g)) = user.split_once(':') {
         if let (Ok(uid), Ok(gid)) = (u.parse::<u32>(), g.parse::<u32>()) {
             let mut gu = lookup_passwd(client, instance, u)?.unwrap_or_default();

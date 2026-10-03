@@ -1,6 +1,7 @@
 //! A terminal over a websocket: `GET /orgs/<org>/api/v1/terminal?app=NAME`
-//! upgrades to a websocket bridged to a pseudo-terminal the embedder opens
-//! (`isb serve`: a shell in one of the app's replicas).
+//! (or `?instance=NAME`) upgrades to a websocket bridged to a
+//! pseudo-terminal the embedder opens (`isb serve`: a shell in one of the
+//! app's replicas, or in an instance of the org).
 //!
 //! The gate is the REST surface's: the caller authenticates as for any tool
 //! (session, API token, Access), and is admitted as if calling
@@ -39,12 +40,55 @@ const POLL: Duration = Duration::from_millis(15);
 /// What the browser asked for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TermRequest {
+    /// The app, or empty when `instance` names the target.
     pub app: String,
     /// A replica's slot; `None` picks one.
     pub slot: Option<u32>,
+    /// An instance of the org (a workspace, a sandbox) instead of an app.
+    pub instance: Option<String>,
     pub cols: u16,
     pub rows: u16,
 }
+
+impl TermRequest {
+    /// The query string that asks for this terminal again (forwarding).
+    pub fn query(&self) -> String {
+        let mut q = match &self.instance {
+            Some(i) => format!("instance={i}"),
+            None => format!("app={}", self.app),
+        };
+        q.push_str(&format!("&cols={}&rows={}", self.cols, self.rows));
+        if let Some(n) = self.slot {
+            q.push_str(&format!("&slot={n}"));
+        }
+        q
+    }
+
+    /// What it opens on, for logs: the app or the instance.
+    pub fn target(&self) -> &str {
+        self.instance.as_deref().unwrap_or(&self.app)
+    }
+}
+
+/// How many sessions of one kind may be open at once, and for how long.
+#[derive(Debug)]
+pub struct Limits {
+    pub active: &'static AtomicUsize,
+    pub max_sessions: usize,
+    pub idle: Duration,
+    pub max_age: Duration,
+    /// Said when `max_sessions` are open.
+    pub busy: &'static str,
+}
+
+/// The web terminal's limits.
+pub static TERMINALS: Limits = Limits {
+    active: &ACTIVE,
+    max_sessions: MAX_SESSIONS,
+    idle: IDLE,
+    max_age: MAX_AGE,
+    busy: "too many terminals are open on this server; close one and try again",
+};
 
 /// One terminal session's output, polled.
 #[derive(Debug, PartialEq, Eq)]
@@ -69,6 +113,11 @@ pub trait Pty: Send {
     fn target(&self) -> Option<String> {
         None
     }
+    /// What it learnt while running that the audit log's closing row should
+    /// keep (an SSH session's user and key fingerprint). Never content.
+    fn details(&self) -> Option<serde_json::Map<String, serde_json::Value>> {
+        None
+    }
 }
 
 /// Opens a terminal for `caller` in `org`; refusals become an error frame.
@@ -78,11 +127,11 @@ pub type Terminal = Arc<
 
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 
-struct Slot;
+struct Slot(&'static AtomicUsize);
 
 impl Drop for Slot {
     fn drop(&mut self) {
-        ACTIVE.fetch_sub(1, Ordering::SeqCst);
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -93,17 +142,30 @@ fn param(req: &Request, key: &str) -> Option<String> {
     })
 }
 
+/// A lower-case name of letters, digits and dashes, at most 64 long (an
+/// app's or an instance's).
+pub fn plain_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && s.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// A query parameter's raw value.
+pub fn query_param(req: &Request, key: &str) -> Option<String> {
+    param(req, key)
+}
+
 /// The request's terminal parameters, or what is wrong with them.
 pub fn term_request(req: &Request) -> std::result::Result<TermRequest, String> {
-    let app = param(req, "app").ok_or("app= is required")?;
-    if app.is_empty()
-        || app.len() > 64
-        || !app
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-    {
-        return Err("app= is not an app name".into());
-    }
+    let (app, instance) = match (param(req, "app"), param(req, "instance")) {
+        (Some(a), None) if plain_name(&a) => (a, None),
+        (Some(_), None) => return Err("app= is not an app name".into()),
+        (None, Some(i)) if plain_name(&i) => (String::new(), Some(i)),
+        (None, Some(_)) => return Err("instance= is not an instance name".into()),
+        (Some(_), Some(_)) => return Err("give app= or instance=, not both".into()),
+        (None, None) => return Err("app= (or instance=) is required".into()),
+    };
     let num = |k: &str, lo: u32, hi: u32, def: u32| -> std::result::Result<u32, String> {
         match param(req, k) {
             None => Ok(def),
@@ -116,11 +178,13 @@ pub fn term_request(req: &Request) -> std::result::Result<TermRequest, String> {
     };
     let slot = match param(req, "slot") {
         None => None,
+        Some(_) if instance.is_some() => return Err("slot= is for apps".into()),
         Some(_) => Some(num("slot", 1, 1000, 1)?),
     };
     Ok(TermRequest {
         app,
         slot,
+        instance,
         cols: num("cols", 2, 1000, 80)? as u16,
         rows: num("rows", 2, 1000, 24)? as u16,
     })
@@ -170,6 +234,14 @@ pub fn upgrade<F>(key: &str, open: F) -> Response
 where
     F: FnOnce() -> crate::Result<Box<dyn Pty>> + Send + 'static,
 {
+    upgrade_with(key, &TERMINALS, open)
+}
+
+/// [`upgrade`] under `limits` (the SSH bridge has its own).
+pub fn upgrade_with<F>(key: &str, limits: &'static Limits, open: F) -> Response
+where
+    F: FnOnce() -> crate::Result<Box<dyn Pty>> + Send + 'static,
+{
     let accept = tungstenite::handshake::derive_accept_key(key.as_bytes());
     Response::upgrade(
         "websocket",
@@ -183,17 +255,14 @@ where
                         .max_frame_size(Some(MAX_MESSAGE)),
                 ),
             );
-            if ACTIVE.fetch_add(1, Ordering::SeqCst) >= MAX_SESSIONS {
-                ACTIVE.fetch_sub(1, Ordering::SeqCst);
-                refuse(
-                    &mut ws,
-                    "too many terminals are open on this server; close one and try again",
-                );
+            if limits.active.fetch_add(1, Ordering::SeqCst) >= limits.max_sessions {
+                limits.active.fetch_sub(1, Ordering::SeqCst);
+                refuse(&mut ws, limits.busy);
                 return;
             }
-            let _slot = Slot;
+            let _slot = Slot(limits.active);
             match open() {
-                Ok(pty) => bridge(&mut ws, pty, IDLE, MAX_AGE),
+                Ok(pty) => bridge(&mut ws, pty, limits.idle, limits.max_age),
                 Err(e) => refuse(&mut ws, &e.to_string()),
             }
         }),
@@ -365,10 +434,15 @@ mod tests {
             TermRequest {
                 app: "web".into(),
                 slot: Some(2),
+                instance: None,
                 cols: 120,
                 rows: 40
             }
         );
+        let t = term_request(&req("instance=box-1", &[])).unwrap();
+        assert_eq!((t.app.as_str(), t.instance.as_deref()), ("", Some("box-1")));
+        assert_eq!(t.query(), "instance=box-1&cols=80&rows=24");
+        assert_eq!(t.target(), "box-1");
         let t = term_request(&req("app=web", &[])).unwrap();
         assert_eq!((t.slot, t.cols, t.rows), (None, 80, 24));
         for bad in [
@@ -379,6 +453,9 @@ mod tests {
             "app=web&slot=0",
             "app=web&cols=1",
             "app=web&rows=x",
+            "instance=Box",
+            "instance=a&app=b",
+            "instance=a&slot=1",
         ] {
             assert!(term_request(&req(bad, &[])).is_err(), "{bad}");
         }

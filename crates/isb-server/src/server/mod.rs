@@ -27,6 +27,8 @@ mod client_tests;
 pub mod http;
 pub mod mcp;
 pub mod service;
+pub mod ssh;
+pub mod ssh_config;
 pub mod tailnet;
 pub mod terminal;
 
@@ -259,6 +261,53 @@ pub fn serve(listeners: Vec<Listener>, registry: Registry, healthz: Healthz) -> 
     serve_until(listeners, registry, healthz, Shutdown::on_signals()?)
 }
 
+/// [`serve`], with a registry the embedder also keeps (to serve it on
+/// listeners it adds later, [`spawn_private`]).
+pub fn serve_shared(
+    listeners: Vec<Listener>,
+    registry: Arc<Registry>,
+    healthz: Healthz,
+) -> Result<()> {
+    serve_until_shared(listeners, registry, healthz, Shutdown::on_signals()?)
+}
+
+/// What a listener's requests go to: `/healthz`, `/mcp`, the REST surface
+/// and its routes, through its hooks and policy.
+pub fn handler(l: &Listener, registry: Arc<Registry>, healthz: Healthz) -> Handler {
+    let ep = Endpoint {
+        registry,
+        policy: l.policy.clone(),
+        access: l.access.clone(),
+        healthz,
+        routes: l.routes.clone(),
+        public_routes: l.public_routes.clone(),
+        hooks: l.hooks.clone(),
+    };
+    Arc::new(move |r: &http::Request| ep.handle(r))
+}
+
+/// Serve `handler` on a private (RFC 1918) address that is not loopback,
+/// such as an org bridge's, until `stop` (or a bind failure, returned at
+/// once). The caller's `handler` decides who gets in: nothing about such
+/// an address keeps anyone out.
+pub fn spawn_private(
+    addr: std::net::SocketAddr,
+    handler: Handler,
+    stop: Shutdown,
+) -> Result<std::thread::JoinHandle<()>> {
+    let sock = HttpListener::bind_tcp_private(addr)?;
+    let server = HttpServer::new(Limits::default(), stop);
+    std::thread::Builder::new()
+        .name(format!("isb-listen-{addr}"))
+        .spawn(move || {
+            if let Err(e) = server.run(sock, handler) {
+                eprintln!("isb serve: listener {addr}: {e}");
+            }
+            server.drain(Duration::from_secs(5));
+        })
+        .map_err(|e| Error::Protocol(format!("cannot start a listener thread: {e}")))
+}
+
 /// Serve until `shutdown` is triggered, then give in-flight requests up to 10s.
 /// Every listener is bound before any is served, so a bad one fails startup.
 pub fn serve_until(
@@ -267,10 +316,19 @@ pub fn serve_until(
     healthz: Healthz,
     shutdown: Shutdown,
 ) -> Result<()> {
+    serve_until_shared(listeners, Arc::new(registry), healthz, shutdown)
+}
+
+/// [`serve_until`] with a shared registry.
+pub fn serve_until_shared(
+    listeners: Vec<Listener>,
+    registry: Arc<Registry>,
+    healthz: Healthz,
+    shutdown: Shutdown,
+) -> Result<()> {
     if listeners.is_empty() {
         return Err(Error::invalid("isb serve needs at least one listener"));
     }
-    let registry = Arc::new(registry);
     let mut bound: Vec<(HttpListener, Handler)> = Vec::new();
     for l in &listeners {
         l.check()?;
@@ -292,16 +350,7 @@ pub fn serve_until(
         } else {
             eprintln!("isb serve: listening on {line}");
         }
-        let ep = Endpoint {
-            registry: registry.clone(),
-            policy: l.policy.clone(),
-            access: l.access.clone(),
-            healthz: healthz.clone(),
-            routes: l.routes.clone(),
-            public_routes: l.public_routes.clone(),
-            hooks: l.hooks.clone(),
-        };
-        bound.push((sock, Arc::new(move |r: &http::Request| ep.handle(r))));
+        bound.push((sock, handler(l, registry.clone(), healthz.clone())));
     }
     let server = HttpServer::new(Limits::default(), shutdown.clone());
     let threads: Vec<_> = bound

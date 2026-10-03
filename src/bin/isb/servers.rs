@@ -42,6 +42,10 @@ pub enum ServerCmd {
         /// The isb release to install.
         #[arg(long)]
         isb_version: Option<String>,
+        /// Install the daemon's own isb binary instead of a release (the
+        /// same build; the box must have the same architecture).
+        #[arg(long, conflicts_with_all = ["isb_binary", "isb_version"])]
+        self_binary: bool,
         /// Serve the server's orgs' domains on its own ports 80 and 443.
         #[arg(long)]
         public_ingress: bool,
@@ -61,6 +65,46 @@ pub enum ServerCmd {
     RotateCert { name: String },
 }
 
+/// Follow a server being added (`server_provision_get`) until it is done,
+/// printing each step as it starts and each line of its log; the result
+/// (the server, or the org made in a dedicated VM), or its error.
+pub fn follow(name: &str) -> Result<Value> {
+    let mut steps_seen = 0usize;
+    let mut lines_seen = 0usize;
+    loop {
+        let v = call("server_provision_get", json!({"name": name}), SHORT)?;
+        let steps = v["steps"].as_array().cloned().unwrap_or_default();
+        let started = steps.iter().filter(|s| s["state"] != "pending").count();
+        for s in steps.iter().take(started).skip(steps_seen) {
+            eprintln!("==> {}", s["title"].as_str().unwrap_or(""));
+        }
+        steps_seen = steps_seen.max(started);
+        // Line numbers count from the run's start; the server keeps the
+        // last few hundred.
+        let log = v["log"].as_array().cloned().unwrap_or_default();
+        let start = v["log_start"].as_u64().unwrap_or(0) as usize;
+        for (i, l) in log.iter().enumerate() {
+            if start + i >= lines_seen {
+                eprintln!("    {}", l.as_str().unwrap_or(""));
+            }
+        }
+        lines_seen = lines_seen.max(start + log.len());
+        match v["state"].as_str() {
+            Some("done") => return Ok(v["result"].clone()),
+            Some("failed") => {
+                return Err(isb::Error::OperationFailed {
+                    step: format!("add server {name}"),
+                    message: format!(
+                        "{} (every step is idempotent: run the same command again to retry)",
+                        v["error"].as_str().unwrap_or("failed")
+                    ),
+                });
+            }
+            _ => std::thread::sleep(Duration::from_secs(1)),
+        }
+    }
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "predates the lint ratchet; split it when next changed"
@@ -77,6 +121,7 @@ pub fn server(cmd: ServerCmd) -> Result<u8> {
             allow_from,
             isb_binary,
             isb_version,
+            self_binary,
             public_ingress,
         } => {
             let abs = |p: PathBuf| std::fs::canonicalize(&p).unwrap_or(p);
@@ -94,13 +139,11 @@ pub fn server(cmd: ServerCmd) -> Result<u8> {
             if let Some(x) = isb_version {
                 a["version"] = json!(x);
             }
-            eprintln!(
-                "bootstrapping {name} (a few minutes on a fresh box; the daemon's log shows each step)"
-            );
-            let v = call("server_add", a, Duration::from_secs(30 * 60))?;
-            for l in v["log"].as_array().into_iter().flatten() {
-                eprintln!("  {}", l.as_str().unwrap_or(""));
-            }
+            a["self_binary"] = json!(self_binary);
+            a["wait"] = json!(false);
+            eprintln!("bootstrapping {name} (a few minutes on a fresh box)");
+            call("server_add", a, SHORT)?;
+            let v = follow(&name)?;
             println!(
                 "{} at {}:{} ({})",
                 v["name"].as_str().unwrap_or(""),
@@ -121,6 +164,7 @@ pub fn server(cmd: ServerCmd) -> Result<u8> {
             }
             let mut rows = vec![vec![
                 "SERVER".into(),
+                "KIND".into(),
                 "ADDRESS".into(),
                 "STATE".into(),
                 "ISB".into(),
@@ -136,6 +180,10 @@ pub fn server(cmd: ServerCmd) -> Result<u8> {
                 };
                 rows.push(vec![
                     s["name"].as_str().unwrap_or("").into(),
+                    match s["kind"].as_str() {
+                        Some("vm") => "dedicated vm".into(),
+                        _ => "ssh".into(),
+                    },
                     format!("{}:{}", s["address"].as_str().unwrap_or(""), s["port"]),
                     s["health"]["state"].as_str().unwrap_or("").into(),
                     hb["isb"].as_str().unwrap_or("-").into(),

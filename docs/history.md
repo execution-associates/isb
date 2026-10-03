@@ -8,7 +8,7 @@ One timeline, four sources:
 
 | Source | What | Actor |
 |---|---|---|
-| `controller` | every event the stack controller emits: deploys, rollouts and each replica they create or retire, health changes, restarts, failures, backups, jobs, certificates, with their `kind` (`deploy.succeeded`, ...) | `isb` |
+| `controller` | every event the stack controller emits: deploys, rollouts and each replica they create or retire, health changes, restarts, failures, backups, jobs, certificates, volume snapshots and staged restores (`volume.*`, about the volume: [volumes.md](volumes.md)), with their `kind` (`deploy.succeeded`, ...) | `isb` |
 | `incus` | every incus **lifecycle event in every project**, including changes made outside isb (`incus delete`, `incus image alias delete`, the incus UI): `instance-created/started/stopped/restarted/updated/deleted`, `instance-exec`, `image-deleted`, `image-alias-deleted`, `storage-volume-*`, `network-*`, `profile-*`, `project-*`, ... | the incus **requestor**: the unix user for the local socket, or the TLS/OIDC user with its protocol |
 | `audit` | the audit rows ([audit.md](audit.md)): tool calls, sign-ins, account and token changes | the isb user, token, `local(uid N)`, `webhook:...` |
 | `marker` | what isb itself saw: `serve.started`, `serve.stopped`, `incus.gap` (events between two times not observed, and why), `history.dropped` (events lost to a full queue) | `isb` |

@@ -16,3 +16,4 @@ pub mod jobs;
 pub mod notify;
 pub mod s3;
 pub mod template;
+pub mod volume_backup;

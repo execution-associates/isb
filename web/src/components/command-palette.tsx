@@ -16,6 +16,8 @@ import {
   LayoutTemplate,
   LogOut,
   Monitor,
+  Plug,
+  SquareTerminal,
   Moon,
   Rocket,
   ScrollText,
@@ -52,13 +54,15 @@ const Ctx = createContext<(open: boolean) => void>(() => {});
 export const usePalette = () => useContext(Ctx);
 
 /** Org sections in nav order, with their `g` shortcut keys. */
-export const SECTIONS: { path: string; label: string; icon: LucideIcon; key: string }[] = [
+export const SECTIONS: { path: string; label: string; icon: LucideIcon; key: string; keywords?: string[] }[] = [
+  { path: "/workspace", label: "Workspace", icon: SquareTerminal, key: "w", keywords: ["machine", "box", "terminal", "sandboxes", "home"] },
   { path: "", label: "Overview", icon: LayoutDashboard, key: "o" },
   { path: "/projects", label: "Projects", icon: FolderKanban, key: "p" },
   { path: "/templates", label: "Templates", icon: LayoutTemplate, key: "t" },
   { path: "/backups", label: "Backups", icon: DatabaseBackup, key: "b" },
   { path: "/notifications", label: "Notifications", icon: Bell, key: "n" },
   { path: "/members", label: "Members", icon: Users, key: "m" },
+  { path: "/agents", label: "MCP", icon: Plug, key: "a", keywords: ["agents", "connect", "claude", "codex", "cursor", "token"] },
   { path: "/secrets", label: "Secrets", icon: KeyRound, key: "s" },
   { path: "/settings", label: "Settings", icon: Settings, key: "," },
   { path: "/history", label: "History", icon: ScrollText, key: "h" },
@@ -150,7 +154,7 @@ function Palette({ me, org, close }: { me: Me; org: string | null; close: () => 
     const out: Item[] = [];
     if (known) {
       for (const s of SECTIONS) {
-        out.push({ id: `nav:${s.path}`, group: "Navigate", title: s.label, icon: s.icon, shortcut: `G ${s.key.toUpperCase()}`, hint: org!, run: go(`/orgs/${o}${s.path}`) });
+        out.push({ id: `nav:${s.path}`, group: "Navigate", title: s.label, icon: s.icon, keywords: s.keywords, shortcut: `G ${s.key.toUpperCase()}`, hint: org!, run: go(`/orgs/${o}${s.path}`) });
       }
     }
     for (const a of apps.data ?? []) {
@@ -208,9 +212,13 @@ function Palette({ me, org, close }: { me: Me; org: string | null; close: () => 
       out.push({ id: "admin:orgs", group: "Platform", title: "All orgs", icon: ShieldCheck, keywords: ["platform", "admin"], run: go("/admin/orgs") });
       out.push({ id: "admin:users", group: "Platform", title: "All users", icon: ShieldCheck, keywords: ["platform", "admin"], run: go("/admin/users") });
       out.push({ id: "admin:server", group: "Platform", title: "Server status", icon: ShieldCheck, keywords: ["platform", "admin"], run: go("/admin/server") });
+      out.push({ id: "admin:servers", group: "Platform", title: "Servers", icon: ShieldCheck, keywords: ["platform", "admin", "servers", "placement", "vm", "agent"], run: go("/admin/servers") });
     }
     if (me.superadmin) {
       out.push({ id: "host", group: "Platform", title: "Host: instances, policy, superadmin tokens", icon: ShieldCheck, keywords: ["superadmin", "incus", "host", "policy"], run: go("/host") });
+    }
+    if (!known && me.superadmin) {
+      out.push({ id: "mcp", group: "Platform", title: "MCP: connect an agent", icon: Plug, keywords: ["agents", "superadmin", "claude", "codex"], run: go("/agents") });
     }
     out.push({ id: "account", group: "You", title: "Account and API tokens", icon: UserRound, keywords: ["passkey", "password", "token", "profile"], run: go("/account") });
     out.push({ id: "theme:light", group: "You", title: "Light theme", icon: Sun, keywords: ["theme", "appearance"], run: () => setTheme("light") });

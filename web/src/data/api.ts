@@ -72,7 +72,10 @@ export interface Destination {
 
 export interface BackupSpec {
   name: string;
-  database: string;
+  /** The database app; absent on a volume backup. */
+  database?: string;
+  /** A named volume (docs/volumes.md). */
+  volume?: string;
   destination: string;
   schedule: string;
   timezone?: string;
@@ -117,7 +120,9 @@ export interface BackupFile {
   key: string;
   size: number;
   taken_at: string;
-  engine: Engine;
+  /** A database dump's engine; absent on a volume backup. */
+  engine?: Engine;
+  volume?: string;
   compression: Compression;
 }
 

@@ -1,7 +1,7 @@
 // /orgs/:org/backups: the org's backup destinations (S3-compatible
 // buckets), every database's schedules, and the restore history.
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Cloud, DatabaseBackup, FlaskConical, KeyRound, Loader2, Plus, Trash2 } from "lucide-react";
+import { ChevronRight, Cloud, DatabaseBackup, FlaskConical, HardDrive, KeyRound, Loader2, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
@@ -39,7 +39,15 @@ export function BackupsPage() {
     <>
       <PageHeader
         title="Backups"
-        description="Where databases are backed up to, what runs when, and what was restored."
+        description={
+          <>
+            Where databases and{" "}
+            <Link className="underline underline-offset-2" to={`/orgs/${o}/volumes`}>
+              volumes
+            </Link>{" "}
+            are backed up to, what runs when, and what was restored.
+          </>
+        }
         actions={
           <>
             {canWrite && !!dests.data?.length && (
@@ -71,7 +79,7 @@ export function BackupsPage() {
                 )
               }
             >
-              Add a bucket, then schedule backups from a database's Backups tab.
+              Add a bucket, then schedule backups from a database's Backups tab or a volume's page.
             </EmptyState>
           ) : (
             <ul className="-mx-5 -mb-5 divide-y border-t">
@@ -82,7 +90,7 @@ export function BackupsPage() {
           )}
         </Section>
 
-        <Section title="Schedules" description="Every database's backups. Open a database to run, edit or restore one.">
+        <Section title="Schedules" description="Every database's and volume's backups. Open one to run, edit or restore it.">
           {backups.isLoading ? (
             <RowsSkeleton />
           ) : backups.error ? (
@@ -96,17 +104,17 @@ export function BackupsPage() {
               {backups.data.map((b) => (
                 <li key={b.backup.name}>
                   <Link
-                    to={`/orgs/${o}/apps/${b.backup.database}/backups`}
+                    to={b.backup.volume ? `/orgs/${o}/volumes/${encodeURIComponent(b.backup.volume)}` : `/orgs/${o}/apps/${b.backup.database}/backups`}
                     className="group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1.5 px-5 py-3 text-sm transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none sm:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_10rem_1rem]"
                   >
                     <div className="flex min-w-0 items-center gap-3">
                       <span className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-muted/50">
-                        <DatabaseBackup className="size-4 text-muted-foreground" />
+                        {b.backup.volume ? <HardDrive className="size-4 text-muted-foreground" /> : <DatabaseBackup className="size-4 text-muted-foreground" />}
                       </span>
                       <div className="min-w-0">
                         <p className="truncate font-semibold">{b.backup.name}</p>
                         <p className="truncate text-xs text-muted-foreground">
-                          {b.backup.database} → {b.backup.destination}
+                          {b.backup.volume ? `volume ${b.backup.volume}` : b.backup.database} → {b.backup.destination}
                         </p>
                       </div>
                     </div>
@@ -145,7 +153,7 @@ export function BackupsPage() {
                 detail={(r) => (
                   <span className="text-xs">
                     into <span className="font-mono">{String(r.detail?.target ?? "")}</span>
-                    {r.detail?.new ? " (new)" : ""}
+                    {r.detail?.staged ? " (staged)" : r.detail?.new ? " (new)" : ""}
                     {r.detail?.bytes ? <span className="text-muted-foreground"> · {bytes(r.detail.bytes as number)}</span> : null}
                   </span>
                 )}
@@ -160,7 +168,15 @@ export function BackupsPage() {
         onOpenChange={(o2) => !o2 && setLog(null)}
         title={log ? `Restore #${log.id}` : ""}
         description={
-          log?.detail?.target ? (
+          log?.detail?.staged ? (
+            <>
+              A staged restore of{" "}
+              <Link className="font-mono text-foreground underline-offset-2 hover:underline" to={`/orgs/${o}/volumes/${encodeURIComponent(String(log.detail.volume))}`}>
+                {String(log.detail.volume)}
+              </Link>{" "}
+              into the new volume <span className="font-mono">{String(log.detail.target)}</span>.
+            </>
+          ) : log?.detail?.target ? (
             <>
               Into{" "}
               <Link className="font-mono text-foreground underline-offset-2 hover:underline" to={`/orgs/${o}/apps/${encodeURIComponent(String(log.detail.target))}/database`}>

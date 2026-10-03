@@ -11,10 +11,10 @@ isb org create NAME [--cpus N] [--memory 16GiB] [--disk 100GiB] [--instances N]
                     [--bind-root DIR]... [--allow-egress DEST]...
                     [--allow-domain SUFFIX]... [--ingress caddy|cloudflare-tunnel]
                     [--cloudflare-account ID] [--cloudflare-zone ID]
-                    [--server SERVER]
+                    [--server SERVER | --vm [--vm-cpus N] [--vm-memory 4GiB] [--vm-disk 40GiB]]
 isb org ls [--json]
 isb org show NAME [--json]
-isb org rm NAME [--force]
+isb org rm NAME [--force] [--delete-vm]
 sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run] [--public-ingress]
 ```
 
@@ -29,6 +29,12 @@ live on that server, and every call for it goes there; `isb org show` and
 `isb org rm` find it through the daemon. An org is placed once: it does not
 move between servers.
 
+`--vm` runs the org in a **dedicated VM** instead: the local daemon makes a
+VM on this host for the org alone, with its own kernel and its own incus,
+registers it as server `vm-NAME` and places the org there
+([servers.md](servers.md#dedicated-vms)). `isb org rm NAME --delete-vm`
+deletes the VM with the org.
+
 An org's builds ([builds.md](builds.md)) run in its own project too, as
 ordinary unprivileged containers (or VMs for untrusted source) that count
 against its quota, and its images are the registry repositories `<org>/*`,
@@ -42,10 +48,10 @@ web UI's org Settings and Platform pages use them:
 | Tool | Who | Does |
 |---|---|---|
 | `org_get` | the org's members | limits, defaults, network, egress, bind roots, service-name domain (`<org>.isb`), counts |
-| `org_list` | platform admins | every org, each with the `server` it runs on (`local` for this daemon) |
-| `org_create` | platform admins | `isb org create` without `--bind-root`; `server` places it on a server |
+| `org_list` | platform admins | every org, each with the `server` it runs on (`local` for this daemon) and its `placement` |
+| `org_create` | platform admins | `isb org create` without `--bind-root`; `placement` puts it on a server or in a dedicated VM |
 | `org_update` | platform admins | limits, per-instance defaults, egress exceptions (a different `server` is refused) |
-| `org_delete` | platform admins | `isb org rm`, refused while stacks are deployed in the org |
+| `org_delete` | platform admins | `isb org rm`, refused while stacks are deployed in the org; `delete_vm` also deletes a dedicated VM |
 
 Limits and egress exceptions are what keep one org from the others and from
 the host's networks, so changing them is for platform admins, not the org's
@@ -58,6 +64,12 @@ memberships, invitations and tokens; its secrets stay under the state
 directory.
 
 ## What an org is in incus
+
+An org on this host shares the host's kernel with every other local org:
+the project, bridge and ACL below keep them apart, and the kernel is what
+they all trust. `org_get` says so as `placement.isolation`:
+`shared-kernel` here, `own-host` on a server, `own-kernel` in a dedicated
+VM ([servers.md](servers.md#placement-and-isolation)).
 
 Org `acme` is the incus project `isb-acme` (config `user.isb.org=acme`), its
 bridge `isbbr<hash>` and its network ACL `isb-acme`.
@@ -90,7 +102,9 @@ host:
 - the org's own bridge is the only network;
 - each instance gets its own uid range (`security.idmap.isolated`), and only
   the daemon's own uid may be mapped 1:1 (so `idmap: auto` keeps bind-mounted
-  files writable).
+  files writable);
+- snapshots and exports are allowed (`restricted.snapshots`,
+  `restricted.backups`): isb takes them for [volumes](volumes.md).
 
 `--cpus`, `--memory`, `--disk` and `--instances` limit the org as a whole.
 Once a project has limits, incus wants limits on every instance, so the org's
@@ -168,7 +182,11 @@ bridges. `sudo isb host setup` once lets every org bridge (`isbbr+`) through:
 - egress through the uplink (`ufw route allow in on isbbr+ out on <uplink>`);
 - the ingress's tunnel listener on each org's own bridge address (`ufw allow
   in on isbbr+ to any port 8480 proto tcp`), which a Cloudflare-tunnel org's
-  cloudflared sends its requests to.
+  cloudflared sends its requests to;
+- the org-bound MCP for each org's workspace on its own bridge address
+  (`ufw allow in on isbbr+ to any port 8481 proto tcp`;
+  [workspaces.md](workspaces.md#reaching-isb-from-inside-the-bridge-listener)).
+  The daemon answers only the org's own subnet there.
 
 `--public-ingress` also opens 80 and 443 (`ufw allow 80/tcp`, `443/tcp`)
 and writes `/etc/sysctl.d/60-isb-ingress.conf` with

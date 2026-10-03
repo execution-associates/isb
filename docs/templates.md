@@ -94,7 +94,7 @@ id: umami                     # [a-z0-9-]
 name: Umami
 description: Simple, privacy-focused web analytics, with a Postgres database.
 version: "2"                  # the template's own version
-logo: https://...             # optional
+logo: https://...             # optional: an https image URL (see Logos)
 tags: [analytics]
 links: {website: https://umami.is, source: https://github.com/umami-software/umami}
 variables:
@@ -284,5 +284,27 @@ The [Dokploy/templates](https://github.com/Dokploy/templates) repository is
 MIT-licensed (Copyright (c) 2024 Dokploy and Carlos Ortiz); its templates
 carry no licenses of their own. isb does not bundle it: a platform admin
 adds it as a catalog, and isb fetches it at runtime from its public URL (or
-reads a checkout). Its logos are the projects' trademarks; isb links to them
-and does not copy them.
+reads a checkout). Its logos are the projects' trademarks, as are the
+built-in templates' (each links to an image in the project's own repository
+or site); isb links to them and does not copy them into its source.
+
+### Logos
+
+A browser never loads a logo from its upstream URL. The web UI asks isb for
+`GET /api/v1/templates/<catalog>/<id>/logo` (whoever may call
+`template_list` may read it), and the daemon fetches the image once, keeps
+it under `<state>/templates/logos/` for a week, and serves that copy. So the
+page's CSP keeps `img-src` to isb's own origin, and a page view sends no
+request to anyone else's server.
+
+What the daemon fetches is third-party data, held to the same rules as a
+notification webhook: https only, every address checked against the SSRF
+policy (no loopback, private, link-local or other non-public destination,
+whatever the server-wide setting for notifications), at most three
+redirects and all on https, 15 seconds and 512 KiB at most. Only bytes that
+are a PNG, JPEG, GIF, WebP, ICO or SVG image are kept, decided from the
+bytes rather than the server's Content-Type; they are served with that
+type, `X-Content-Type-Options: nosniff`, and a CSP that sandboxes an SVG
+opened directly. A logo that cannot be fetched is a 404 (the UI shows the
+template's initials instead) and is not tried again for ten minutes; a
+stale copy is served while a refresh fails.

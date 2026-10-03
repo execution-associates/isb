@@ -741,7 +741,7 @@ impl Drop for Upload {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::io::BufRead;
     use std::sync::{Arc, Mutex};
@@ -947,7 +947,7 @@ mod tests {
 
     /// One request as the fake S3 saw it.
     #[derive(Debug, Clone)]
-    struct Seen {
+    pub(crate) struct Seen {
         method: String,
         target: String,
         headers: Vec<(String, String)>,
@@ -961,7 +961,7 @@ mod tests {
         clippy::excessive_nesting,
         reason = "predates the lint ratchet; split it when next changed"
     )]
-    fn fake_s3(secret: &'static str) -> (String, Arc<Mutex<Vec<Seen>>>) {
+    pub(crate) fn fake_s3(secret: &'static str) -> (String, Arc<Mutex<Vec<Seen>>>) {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = l.local_addr().unwrap();
         let seen = Arc::new(Mutex::new(Vec::<Seen>::new()));
@@ -1163,7 +1163,7 @@ mod tests {
         String::from_utf8(out).unwrap()
     }
 
-    fn client(endpoint: &str, secret: &str) -> Client {
+    pub(crate) fn client(endpoint: &str, secret: &str) -> Client {
         Client::new(Bucket {
             endpoint: endpoint.into(),
             region: "us-east-1".into(),

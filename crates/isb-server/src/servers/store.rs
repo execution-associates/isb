@@ -34,6 +34,23 @@ pub struct ServerRecord {
     /// Who the agent's firewall lets reach its port (empty: not managed).
     #[serde(default)]
     pub allow_from: Vec<String>,
+    /// Set when this control plane made the server itself: a dedicated VM
+    /// on its own host for one org.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vm: Option<VmRecord>,
+}
+
+/// A dedicated VM this control plane runs a server in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VmRecord {
+    /// The org it was made for.
+    pub org: OrgId,
+    /// The incus project and instance on the control plane's host.
+    pub project: String,
+    pub instance: String,
+    pub cpus: u32,
+    pub memory: String,
+    pub disk: String,
 }
 
 fn read<T: DeserializeOwned + Default>(p: &Path) -> Result<T> {

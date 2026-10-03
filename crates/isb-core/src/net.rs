@@ -1,4 +1,5 @@
-//! Outbound connections for notifications, held to an address policy.
+//! Outbound connections held to an address policy (notifications, and
+//! whatever else dials an address an org member chose).
 //!
 //! A notification target is chosen by an org member, so it must not become a
 //! way into the host's own network (SSRF). Every destination is resolved

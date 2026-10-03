@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fingerprint, KeyRound, Laptop, Link2, Loader2, LockKeyhole, Plus, Trash2, User } from "lucide-react";
+import { Fingerprint, KeyRound, Laptop, Link2, Loader2, LockKeyhole, Plus, TerminalSquare, Trash2, User } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { type ApiToken, auth, type Me } from "@/api/auth";
 import { ApiError } from "@/api/client";
@@ -15,11 +15,13 @@ import { Section as AppSection } from "@/apps/components";
 import { PersonAvatar } from "@/components/confirm";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ACCESS, type Access, describeScopes, scopesFor } from "@/lib/admin";
+import { ACCESS, type Access, describeScopes, EXPIRY, scopesFor } from "@/lib/admin";
 import { dateTime, describeAgent, relativeTime } from "@/lib/format";
 import { errorMessage, signInErrorMessage } from "@/lib/messages";
+import { keyComment, publicKeyProblem } from "@/lib/ssh";
 import { useMe, useProviders } from "@/lib/session";
 import { creationOptions, credentialJSON, passkeysSupported, webauthnErrorMessage } from "@/lib/webauthn";
 
@@ -180,6 +182,7 @@ export function AccountPage() {
                     ["passkeys", "Passkeys", Fingerprint],
                   ]
                 : []),
+              ["ssh-keys", "SSH keys", TerminalSquare],
               ["tokens", "API tokens", KeyRound],
               ...(session ? [["sessions", "Sessions", Laptop]] : []),
             ] as [string, string, typeof User][]
@@ -203,6 +206,7 @@ export function AccountPage() {
               <Passkeys />
             </>
           ) : null}
+          <SshKeys />
           <Tokens me={me} />
           {session && <Sessions />}
         </div>
@@ -469,12 +473,130 @@ function Passkeys() {
   );
 }
 
-const EXPIRY = [
-  { value: "30d", label: "30 days" },
-  { value: "90d", label: "90 days" },
-  { value: "365d", label: "1 year" },
-  { value: "never", label: "Never" },
-];
+function SshKeys() {
+  const qc = useQueryClient();
+  const list = useQuery({ queryKey: ["ssh-keys"], queryFn: auth.sshKeys });
+  const [open, setOpen] = useState(false);
+  const [key, setKey] = useState("");
+  const [name, setName] = useState("");
+  const [touched, setTouched] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const problem = publicKeyProblem(key);
+  const add = useMutation({
+    mutationFn: () => auth.addSshKey({ public_key: key.trim(), name: name.trim() || undefined }),
+    onSuccess: async ({ ssh_key }) => {
+      await qc.invalidateQueries({ queryKey: ["ssh-keys"] });
+      toast.success(`SSH key added (${ssh_key.fingerprint})`);
+      setOpen(false);
+      setKey("");
+      setName("");
+      setTouched(false);
+    },
+    onError: (e) => setError(errorMessage(e)),
+  });
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setTouched(true);
+    setError(null);
+    if (!problem) add.mutate();
+  };
+
+  return (
+    <Section
+      id="ssh-keys"
+      title="SSH keys"
+      description={
+        <>
+          What <span className="font-mono">isb ssh-proxy</span> lets into the instances of your orgs (members and up), with nothing listening and no port open.{" "}
+          <span className="font-mono">isb ssh-config ORG/INSTANCE</span> writes the <span className="font-mono">~/.ssh/config</span> lines.
+        </>
+      }
+      action={
+        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+          <Plus />
+          Add SSH key
+        </Button>
+      }
+    >
+      {list.isLoading ? (
+        <ListSkeleton />
+      ) : list.data?.ssh_keys.length ? (
+        <ul className="divide-y">
+          {list.data.ssh_keys.map((k) => (
+            <Row
+              key={k.id}
+              icon={<TerminalSquare />}
+              title={
+                <>
+                  {k.name || k.algorithm}
+                  <Tag className="h-5 text-[11px]">{k.algorithm}</Tag>
+                </>
+              }
+              meta={
+                <>
+                  <span className="font-mono">{k.fingerprint}</span> · added {relativeTime(k.created_at)} ·{" "}
+                  {k.last_used ? `last used ${relativeTime(k.last_used)}` : "never used"}
+                </>
+              }
+            >
+              <ConfirmButton
+                label={`Remove ${k.name || "SSH key"}`}
+                title="Remove this SSH key?"
+                description={`“${k.name || k.fingerprint}” stops opening SSH sessions at once, and sessions it opened end within seconds.`}
+                confirm="Remove"
+                onConfirm={async () => {
+                  await auth.deleteSshKey(k.id);
+                  await qc.invalidateQueries({ queryKey: ["ssh-keys"] });
+                  toast.success("SSH key removed");
+                }}
+              />
+            </Row>
+          ))}
+        </ul>
+      ) : (
+        <None icon={<TerminalSquare />}>No SSH keys yet.</None>
+      )}
+      <Dialog open={open} onOpenChange={(o) => (setOpen(o), o || (setError(null), setTouched(false)))}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add an SSH key</DialogTitle>
+            <DialogDescription>
+              Paste a public key, such as the contents of <span className="font-mono">~/.ssh/id_ed25519.pub</span>. Never the private key.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={submit} className="grid gap-4" noValidate>
+            <FormError>{error}</FormError>
+            <Field label="Public key" error={touched ? problem : null}>
+              {(id, d) => (
+                <Textarea
+                  id={id}
+                  aria-describedby={d}
+                  autoFocus
+                  rows={4}
+                  spellCheck={false}
+                  className="font-mono text-xs break-all"
+                  placeholder="ssh-ed25519 AAAA… you@laptop"
+                  value={key}
+                  onChange={(e) => setKey(e.target.value)}
+                />
+              )}
+            </Field>
+            <Field label="Name" hint={`Optional. Default: the key's comment${keyComment(key) ? ` (“${keyComment(key)}”)` : ""}.`}>
+              {(id, d) => <Input id={id} aria-describedby={d} maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />}
+            </Field>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                Cancel
+              </Button>
+              <SubmitButton pending={add.isPending}>Add key</SubmitButton>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </Section>
+  );
+}
+
 const PLATFORM = "__platform__";
 
 function Tokens({ me }: { me: Me }) {
@@ -583,7 +705,11 @@ function Tokens({ me }: { me: Me }) {
                 {created.info.org ? (
                   <>
                     Reaches org <span className="font-medium text-foreground">{created.info.org}</span>; its MCP endpoint
-                    is <code className="font-mono text-xs">/orgs/{created.info.org}/mcp</code>.
+                    is <code className="font-mono text-xs">/orgs/{created.info.org}/mcp</code> (see{" "}
+                    <Link to={`/orgs/${encodeURIComponent(created.info.org)}/agents`} className="text-foreground underline-offset-4 hover:underline" onClick={() => close(false)}>
+                      MCP
+                    </Link>
+                    ).
                   </>
                 ) : (
                   "A platform token: it reaches every org you can."

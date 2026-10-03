@@ -15,7 +15,7 @@
 //! Channels and delivery logs are kept under `<state>/orgs/<org>/notify/`.
 //! Destinations are held to [`net`]'s address policy.
 
-pub mod net;
+pub use isb_core::net;
 pub mod provider;
 pub mod smtp;
 

@@ -21,11 +21,11 @@ which re-exports the internal crates' modules under their original paths
 
 | crate | modules |
 |---|---|
-| `crates/isb-core` | the incus client, spec, plan, sandbox, compose, stack, org, registry, ingress, secrets, rpc, machine, metrics, `serve_client` (the CLI's client for `isb serve`) |
+| `crates/isb-core` | the incus client, spec, plan, sandbox, compose, stack, org, registry, ingress, secrets, rpc, machine, metrics, net (outbound connections under the SSRF policy), `serve_client` (the CLI's client for `isb serve`) |
 | `crates/isb-server` | auth, audit, history, server, servers, web (its `build.rs` embeds `web/dist`) |
-| `crates/isb-apps` | app, build, jobs, backup, s3, template, notify |
+| `crates/isb-apps` | app, build, jobs, backup, s3, template, notify, volume_backup |
 | `crates/isb-tui` | tui |
-| `crates/isb-daemon` | daemon |
+| `crates/isb-daemon` | daemon, workspace |
 
 `isb-server`, `isb-apps` and `isb-tui` depend only on `isb-core`, so they
 compile in parallel; `isb-daemon` needs all but the TUI. An edit recompiles

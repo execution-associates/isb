@@ -57,6 +57,20 @@ pub(crate) enum OrgCmd {
         /// host, through the local daemon. Set once: orgs do not move.
         #[arg(long, value_name = "SERVER")]
         server: Option<String>,
+        /// Run the org in a dedicated VM the local daemon makes on this
+        /// host: its own kernel, registered as server vm-<org>. Takes a few
+        /// minutes; rerun to retry.
+        #[arg(long, conflicts_with = "server")]
+        vm: bool,
+        /// The dedicated VM's CPUs (default 2).
+        #[arg(long, requires = "vm", value_name = "N")]
+        vm_cpus: Option<u32>,
+        /// The dedicated VM's memory (default 4GiB, at least 2GiB).
+        #[arg(long, requires = "vm", value_name = "SIZE")]
+        vm_memory: Option<String>,
+        /// The dedicated VM's disk (default 40GiB, at least 10GiB).
+        #[arg(long, requires = "vm", value_name = "SIZE")]
+        vm_disk: Option<String>,
     },
     /// List orgs.
     #[command(alias = "list")]
@@ -76,11 +90,19 @@ pub(crate) enum OrgCmd {
         name: String,
         #[arg(long)]
         force: bool,
+        /// For an org in a dedicated VM: delete the VM (and its server
+        /// registration) too.
+        #[arg(long)]
+        delete_vm: bool,
     },
 }
 
 #[expect(
     clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
+#[expect(
+    clippy::cognitive_complexity,
     reason = "predates the lint ratchet; split it when next changed"
 )]
 pub(crate) fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
@@ -103,8 +125,29 @@ pub(crate) fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
             cloudflare_account,
             cloudflare_zone,
             server,
+            vm,
+            vm_cpus,
+            vm_memory,
+            vm_disk,
         } => {
-            if let Some(server) = server.filter(|s| s != "local") {
+            let placement = if vm {
+                let mut size = serde_json::json!({});
+                if let Some(c) = vm_cpus {
+                    size["cpus"] = serde_json::json!(c);
+                }
+                if let Some(m) = vm_memory {
+                    size["memory"] = serde_json::json!(m);
+                }
+                if let Some(d) = vm_disk {
+                    size["disk"] = serde_json::json!(d);
+                }
+                Some(serde_json::json!({"vm": size}))
+            } else {
+                server
+                    .filter(|s| s != "local")
+                    .map(|s| serde_json::json!({"server": s}))
+            };
+            if let Some(placement) = placement {
                 if !bind_root.is_empty()
                     || !allow_domain.is_empty()
                     || ingress.is_some()
@@ -112,10 +155,10 @@ pub(crate) fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
                     || cloudflare_zone.is_some()
                 {
                     return Err(Error::Invalid(
-                        "--server: bind roots, domains and the ingress provider of an org on a server are not set from here yet".into(),
+                        "--server, --vm: bind roots, domains and the ingress provider of an org on a server are not set from here yet".into(),
                     ));
                 }
-                let mut a = serde_json::json!({"org": name, "server": server});
+                let mut a = serde_json::json!({"org": name, "placement": placement});
                 for (k, v) in [
                     ("cpus", cpus),
                     ("instances", instances),
@@ -142,7 +185,16 @@ pub(crate) fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
                     };
                     a["egress"] = serde_json::json!(e);
                 }
-                let v = call("org_create", a, Duration::from_secs(300))?;
+                let v = if vm {
+                    a["wait"] = serde_json::json!(false);
+                    eprintln!(
+                        "making a dedicated VM for {name} (vm-{name}; a few minutes the first time)"
+                    );
+                    call("org_create", a, SHORT)?;
+                    servers::follow(&format!("vm-{name}"))?
+                } else {
+                    call("org_create", a, Duration::from_secs(300))?
+                };
                 println!(
                     "{} on server {} (project {}, network {} {})",
                     v["name"].as_str().unwrap_or(""),
@@ -321,19 +373,34 @@ pub(crate) fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
             }
             Ok(0)
         }
-        OrgCmd::Rm { name, force } => {
+        OrgCmd::Rm {
+            name,
+            force,
+            delete_vm,
+        } => {
             let id = OrgId::new(name)?;
             if let Err(e) = org::get(&c, &id) {
                 if e.is_not_found() {
                     // Perhaps an org on a server: the daemon deletes it there.
-                    call(
+                    let v = call(
                         "org_delete",
-                        serde_json::json!({"org": id, "force": force}),
+                        serde_json::json!({"org": id, "force": force, "delete_vm": delete_vm}),
                         Duration::from_secs(300),
                     )
-                    .map_err(|_| e)?;
+                    .map_err(|d| if d.is_not_found() { e } else { d })?;
+                    if let Some(vm) = v["deleted_vm"].as_str() {
+                        eprintln!("deleted its VM {vm}");
+                    }
+                    for n in v["notes"].as_array().into_iter().flatten() {
+                        eprintln!("note: {}", n.as_str().unwrap_or(""));
+                    }
                     return Ok(0);
                 }
+            }
+            if delete_vm {
+                return Err(Error::Invalid(format!(
+                    "--delete-vm: org {id} runs on this host, not in a dedicated VM"
+                )));
             }
             org::remove(&c, &id, force, &mut rep)?;
             // Memberships, invitations and tokens for it go with it.

@@ -47,7 +47,7 @@ fn trusted(c: &Caller) -> bool {
     c.is_trusted() || c.principal().is_some_and(|p| p.platform_admin)
 }
 
-fn unix_rfc3339(t: Option<i64>) -> Value {
+pub(super) fn unix_rfc3339(t: Option<i64>) -> Value {
     match t {
         Some(t) => json!(crate::cron::rfc3339(t)),
         None => Value::Null,
@@ -55,7 +55,7 @@ fn unix_rfc3339(t: Option<i64>) -> Value {
 }
 
 /// Wait (bounded) until run `id` in `store` finishes.
-fn wait_run(store: &RunStore, id: u64, timeout: Duration) -> Result<crate::jobs::Run> {
+pub(super) fn wait_run(store: &RunStore, id: u64, timeout: Duration) -> Result<crate::jobs::Run> {
     let started = Instant::now();
     loop {
         let r = store.get(id)?;
@@ -66,13 +66,24 @@ fn wait_run(store: &RunStore, id: u64, timeout: Duration) -> Result<crate::jobs:
     }
 }
 
-fn timeout_arg(t: &Option<String>, default: Duration) -> Result<Duration> {
+pub(super) fn timeout_arg(t: &Option<String>, default: Duration) -> Result<Duration> {
     match t {
         Some(t) => crate::flex::parse_duration(t)
             .map_err(Error::invalid)
             .map(|d| d.min(Duration::from_secs(3600))),
         None => Ok(default),
     }
+}
+
+/// Volume backups, like the rest of a volume's care, are for org admins.
+fn volume_backup_admin(x: &Ctx, org: &OrgId, name: &str, c: &Caller) -> Result<()> {
+    if x.backups
+        .get(org, name)
+        .is_ok_and(|b| b.spec.volume.is_some())
+    {
+        super::volumes::require_admin(c, org, "changing or running a volume backup")?;
+    }
+    Ok(())
 }
 
 /// A database app with its connection details (password as a secret
@@ -89,7 +100,8 @@ pub fn database_json(org: &OrgId, a: &crate::app::App, password: Option<&str>) -
 fn backup_props() -> Value {
     json!({
         "name": {"type": "string"},
-        "database": {"type": "string", "description": "The database app."},
+        "database": {"type": "string", "description": "The database app (or give `volume`)."},
+        "volume": {"type": "string", "description": "Or a named volume in the org: its snapshot is exported (incus' tar) and streamed to the bucket; restore with volume_restore."},
         "destination": {"type": "string"},
         "schedule": {"type": "string", "description": "Cron: five fields (minute hour day-of-month month day-of-week) or @hourly, @daily, @weekly, @monthly, @yearly."},
         "timezone": {"type": "string", "description": "UTC (default) or a fixed offset such as +02:00."},
@@ -479,16 +491,16 @@ fn backup_create_tool(r: &mut Registry, ctx: &Ctx, ann: &Ann) -> Result<()> {
         ctx,
         "backup_create",
         "Schedule a backup",
-        "Back a database up on a cron schedule to a destination: the engine's own dump (pg_dump, mysqldump, mariadb-dump, mongodump, a Redis RDB) runs in the database's instance, is compressed and streamed to the bucket by the daemon, checked with HEAD, and the oldest beyond `keep` are deleted. Emits backup.succeeded / backup.failed events.",
-        obj(
-            backup_props(),
-            &["name", "database", "destination", "schedule"]
-        ),
+        "Back a database (or a named `volume`) up on a cron schedule to a destination. A database: the engine's own dump (pg_dump, mysqldump, mariadb-dump, mongodump, a Redis RDB) runs in the database's instance, is compressed and streamed to the bucket by the daemon, checked with HEAD, and the oldest beyond `keep` are deleted. Emits backup.succeeded / backup.failed events.",
+        obj(backup_props(), &["name", "destination", "schedule"]),
         ann.write,
-        |x: &Ctx, mut a: Value, _c: &Caller| -> Result<Value> {
+        |x: &Ctx, mut a: Value, c: &Caller| -> Result<Value> {
             let org = org_of(&a)?;
             take(&mut a, &["org"]);
             let spec: BackupSpec = args(a)?;
+            if spec.volume.is_some() {
+                super::volumes::require_admin(c, &org, "backing up a volume")?;
+            }
             let b = x.backups.create(&org, spec)?;
             let next = x.backups.next_run(&b);
             Ok(json!({"backup": b, "next_run": unix_rfc3339(next)}))
@@ -506,13 +518,14 @@ fn backup_update_tool(r: &mut Registry, ctx: &Ctx, ann: &Ann) -> Result<()> {
         "Change a backup's settings (a merge patch: schedule, timezone, destination, keep, compression, enabled, missed_grace). A changed schedule counts from now.",
         obj(backup_props(), &["name"]),
         ann.write,
-        |x: &Ctx, mut a: Value, _c: &Caller| -> Result<Value> {
+        |x: &Ctx, mut a: Value, c: &Caller| -> Result<Value> {
             let org = org_of(&a)?;
             let name = a
                 .get("name")
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
+            volume_backup_admin(x, &org, &name, c)?;
             take(&mut a, &["org", "name"]);
             let b = x.backups.update(&org, &name, &a)?;
             let next = x.backups.next_run(&b);
@@ -575,9 +588,10 @@ fn backup_delete_tool(r: &mut Registry, ctx: &Ctx, ann: &Ann) -> Result<()> {
         "Delete a backup schedule and its run records. Its files stay in the bucket (restore them with destination and key).",
         obj(json!({"name": {"type": "string"}}), &["name"]),
         ann.destructive,
-        |x: &Ctx, a: Value, _c: &Caller| -> Result<Value> {
+        |x: &Ctx, a: Value, c: &Caller| -> Result<Value> {
             let org = org_of(&a)?;
             let a: Named = args(a)?;
+            volume_backup_admin(x, &org, &a.name, c)?;
             x.backups.delete(&org, &a.name)?;
             Ok(json!({"ok": true}))
         }
@@ -612,6 +626,7 @@ fn backup_run_tool(r: &mut Registry, ctx: &Ctx, ann: &Ann) -> Result<()> {
             }
             let org = org_of(&a)?;
             let a: A = args(a)?;
+            volume_backup_admin(x, &org, &a.name, c)?;
             let r = x.backups.run_now(&org, &a.name, &caller_name(c))?;
             let r = if a.wait {
                 wait_run(

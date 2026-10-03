@@ -125,6 +125,86 @@ export interface OrgView {
   members: number;
   stacks: number;
   notes?: string[];
+  /** The server it runs on (`local` for this daemon), on a control plane. */
+  server?: string;
+  placement?: Placement;
+}
+
+/** Where an org runs and how it is kept apart (src/daemon/servers.rs placement_view). */
+export interface Placement {
+  kind: "local" | "server" | "vm";
+  server: string;
+  isolation: "shared-kernel" | "own-host" | "own-kernel";
+  vm?: { cpus: number; memory: string; disk: string; project: string; instance: string };
+}
+
+// Servers (src/daemon/servers.rs, src/servers/).
+
+export interface Heartbeat {
+  isb?: string;
+  incus?: string | null;
+  host?: {
+    hostname?: string;
+    cpus?: number;
+    cpu_pct?: number;
+    load1?: number;
+    mem_used?: number;
+    mem_total?: number;
+    disk_used?: number;
+    disk_total?: number;
+  };
+  orgs?: string[];
+  stacks?: number;
+  last_error?: { at: number; stack: string; message: string } | null;
+}
+
+export interface ServerView {
+  name: string;
+  kind: "ssh" | "vm";
+  address: string;
+  port: number;
+  ssh: string;
+  ssh_port: number;
+  added_at: number;
+  fingerprint: string;
+  cert_not_after: number | null;
+  isb_version: string;
+  allow_from: string[];
+  vm?: { org: string; project: string; instance: string; cpus: number; memory: string; disk: string };
+  orgs: string[];
+  health: {
+    state: "unknown" | "up" | "unreachable";
+    failures: number;
+    last_ok: number | null;
+    last_checked: number | null;
+    last_error: string | null;
+    heartbeat: Heartbeat | null;
+  };
+}
+
+export type StepState = "pending" | "running" | "done" | "failed";
+
+export interface ProvisionView {
+  name: string;
+  kind: "ssh" | "vm";
+  org?: string;
+  state: "running" | "done" | "failed";
+  started_at: number;
+  finished_at: number | null;
+  steps: { id: string; title: string; state: StepState; started_at: number | null; finished_at: number | null }[];
+  log: string[];
+  /** Lines dropped off the top of `log` (the server keeps the last 400). */
+  log_start?: number;
+  error: string | null;
+  request: Record<string, unknown>;
+  result?: unknown;
+}
+
+export interface ServerList {
+  servers: ServerView[];
+  provisions: ProvisionView[];
+  dedicated_vm: { supported: boolean; reason?: string };
+  suggested_allow_from: { address: string; via: string }[];
 }
 
 export interface ServerStatus {

@@ -987,7 +987,7 @@
     },
     "/api/v1/tools/backup_create": {
       "post": {
-        "description": "Back a database up on a cron schedule to a destination: the engine's own dump (pg_dump, mysqldump, mariadb-dump, mongodump, a Redis RDB) runs in the database's instance, is compressed and streamed to the bucket by the daemon, checked with HEAD, and the oldest beyond `keep` are deleted. Emits backup.succeeded / backup.failed events.",
+        "description": "Back a database (or a named `volume`) up on a cron schedule to a destination. A database: the engine's own dump (pg_dump, mysqldump, mariadb-dump, mongodump, a Redis RDB) runs in the database's instance, is compressed and streamed to the bucket by the daemon, checked with HEAD, and the oldest beyond `keep` are deleted. Emits backup.succeeded / backup.failed events.",
         "operationId": "backup_create",
         "requestBody": {
           "content": {
@@ -1004,7 +1004,7 @@
                     "type": "string"
                   },
                   "database": {
-                    "description": "The database app.",
+                    "description": "The database app (or give `volume`).",
                     "type": "string"
                   },
                   "destination": {
@@ -1037,11 +1037,14 @@
                   "timezone": {
                     "description": "UTC (default) or a fixed offset such as +02:00.",
                     "type": "string"
+                  },
+                  "volume": {
+                    "description": "Or a named volume in the org: its snapshot is exported (incus' tar) and streamed to the bucket; restore with volume_restore.",
+                    "type": "string"
                   }
                 },
                 "required": [
                   "name",
-                  "database",
                   "destination",
                   "schedule"
                 ],
@@ -1663,7 +1666,7 @@
                     "type": "string"
                   },
                   "database": {
-                    "description": "The database app.",
+                    "description": "The database app (or give `volume`).",
                     "type": "string"
                   },
                   "destination": {
@@ -1695,6 +1698,10 @@
                   },
                   "timezone": {
                     "description": "UTC (default) or a fixed offset such as +02:00.",
+                    "type": "string"
+                  },
+                  "volume": {
+                    "description": "Or a named volume in the org: its snapshot is exported (incus' tar) and streamed to the bucket; restore with volume_restore.",
                     "type": "string"
                   }
                 },
@@ -3617,9 +3624,64 @@
                     "description": "The new org's name: [a-z0-9-], starts with a letter.",
                     "type": "string"
                   },
+                  "placement": {
+                    "description": "Where the org runs, set at creation: \"local\" (this host: an incus project sharing its kernel), {\"server\": NAME} (another host, server_list), or {\"vm\": {\"cpus\", \"memory\", \"disk\"}} (a dedicated VM this control plane makes on its own host: the org's own kernel; defaults 2 CPUs, 4GiB, 40GiB). An org is not moved afterwards.",
+                    "oneOf": [
+                      {
+                        "enum": [
+                          "local"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "server": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "server"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "vm": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "cpus": {
+                                "maximum": 256,
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              "disk": {
+                                "description": "At least 10GiB (default 40GiB).",
+                                "type": "string"
+                              },
+                              "memory": {
+                                "description": "At least 2GiB (default 4GiB).",
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "vm"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
                   "server": {
-                    "description": "Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers.",
+                    "description": "Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. Same as placement {\"server\": NAME}.",
                     "type": "string"
+                  },
+                  "wait": {
+                    "description": "With a dedicated VM: wait until it is made and the org created (default true; minutes). false answers at once with `provision`; follow it with server_provision_get (name vm-<org>).",
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -3662,6 +3724,10 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "delete_vm": {
+                    "description": "For an org in a dedicated VM: delete the VM and its server registration too (default false: the VM keeps running as an empty server).",
+                    "type": "boolean"
+                  },
                   "force": {
                     "description": "Also delete the org's sandboxes.",
                     "type": "boolean"
@@ -3835,9 +3901,64 @@
                     "description": "The org.",
                     "type": "string"
                   },
+                  "placement": {
+                    "description": "Where the org runs, set at creation: \"local\" (this host: an incus project sharing its kernel), {\"server\": NAME} (another host, server_list), or {\"vm\": {\"cpus\", \"memory\", \"disk\"}} (a dedicated VM this control plane makes on its own host: the org's own kernel; defaults 2 CPUs, 4GiB, 40GiB). An org is not moved afterwards.",
+                    "oneOf": [
+                      {
+                        "enum": [
+                          "local"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "server": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "server"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "vm": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "cpus": {
+                                "maximum": 256,
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              "disk": {
+                                "description": "At least 10GiB (default 40GiB).",
+                                "type": "string"
+                              },
+                              "memory": {
+                                "description": "At least 2GiB (default 4GiB).",
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "vm"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
                   "server": {
-                    "description": "Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers.",
+                    "description": "Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. Same as placement {\"server\": NAME}.",
                     "type": "string"
+                  },
+                  "wait": {
+                    "description": "With a dedicated VM: wait until it is made and the org created (default true; minutes). false answers at once with `provision`; follow it with server_provision_get (name vm-<org>).",
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -4449,7 +4570,7 @@
     },
     "/api/v1/tools/sandbox_create": {
       "post": {
-        "description": "Create (or reconcile) one sandbox: an incus container or VM to run code in isolation. `spec` is one compose service (docs/spec.md) with container_name set, as an object or YAML text. Remote callers' sandboxes are labelled with their identity, and only managed sandboxes are reachable remotely.",
+        "description": "Create (or reconcile) one sandbox: an incus container or VM to run code in isolation. `spec` is one compose service (docs/spec.md) with container_name set, as an object or YAML text. Remote callers' sandboxes are labelled with their identity, and only managed sandboxes are reachable remotely. Sandboxes are short-lived: each expires (the org's default, 24h, unless `expires` says otherwise; sandbox_extend pushes it out) and is deleted after sitting idle (`idle_timeout`, default 2h; `none` turns it off).",
         "operationId": "sandbox_create",
         "requestBody": {
           "content": {
@@ -4457,6 +4578,14 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "expires": {
+                    "description": "Lifetime from now, e.g. 4h or 7d (at most 30d; default: the org's, 24h).",
+                    "type": "string"
+                  },
+                  "idle_timeout": {
+                    "description": "Delete after this long without use (exec, a terminal, CPU), e.g. 2h; `none` for never (default: the org's, 2h).",
+                    "type": "string"
+                  },
                   "org": {
                     "description": "The org to act in (default: default).",
                     "type": "string"
@@ -4575,9 +4704,65 @@
         "summary": "Run a command in a sandbox"
       }
     },
+    "/api/v1/tools/sandbox_extend": {
+      "post": {
+        "description": "Push a sandbox's expiry out by `by` (from the later of now and its current expiry; at most 30 days from now), or change its idle timeout. Its creator, or the org's admins and above.",
+        "operationId": "sandbox_extend",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "by": {
+                    "description": "e.g. 24h (default 24h).",
+                    "type": "string"
+                  },
+                  "idle_timeout": {
+                    "description": "A new idle timeout, e.g. 4h, or none.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Extend a sandbox"
+      }
+    },
     "/api/v1/tools/sandbox_list": {
       "post": {
-        "description": "List instances (for remote callers: only the ones isb serve manages), optionally filtered by labels (`key` or `key=value`).",
+        "description": "List instances (for remote callers: only the ones isb serve manages), optionally filtered by labels (`key` or `key=value`) and kind (`sandbox`, `workspace`, `replica`, `build`). Each with who created it (owner), when, its expiry and idle timeout, its last activity, and its CPU and memory.",
         "operationId": "sandbox_list",
         "requestBody": {
           "content": {
@@ -4585,6 +4770,16 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "kind": {
+                    "description": "Only this kind of instance.",
+                    "enum": [
+                      "sandbox",
+                      "workspace",
+                      "replica",
+                      "build"
+                    ],
+                    "type": "string"
+                  },
                   "labels": {
                     "items": {
                       "type": "string"
@@ -5211,6 +5406,10 @@
                     "description": "Serve the server's orgs' domains on its own ports 80 and 443 (opened in its firewall).",
                     "type": "boolean"
                   },
+                  "self_binary": {
+                    "description": "Install this control plane's own isb executable instead of a release (same version and build; the box must have the same architecture).",
+                    "type": "boolean"
+                  },
                   "ssh": {
                     "description": "user@host",
                     "type": "string"
@@ -5227,6 +5426,10 @@
                   "version": {
                     "description": "The isb release to install (default this daemon's).",
                     "type": "string"
+                  },
+                  "wait": {
+                    "description": "Wait for the bootstrap to finish (default true). false answers at once with `provision`; follow it with server_provision_get.",
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -5262,7 +5465,7 @@
     },
     "/api/v1/tools/server_list": {
       "post": {
-        "description": "Platform admins: the servers orgs can be placed on, with their health (up, unreachable, unknown), last heartbeat (versions, CPU, memory, disk) and the orgs on each.",
+        "description": "Platform admins: the servers orgs can be placed on, with their health (up, unreachable, unknown), last heartbeat (versions, CPU, memory, disk) and the orgs on each; `provisions`, servers being added (and recent failures); `dedicated_vm`, whether this host can run dedicated VMs; `suggested_allow_from`, addresses this control plane's traffic leaves from.",
         "operationId": "server_list",
         "requestBody": {
           "content": {
@@ -5297,9 +5500,53 @@
         "summary": "List servers"
       }
     },
+    "/api/v1/tools/server_provision_get": {
+      "post": {
+        "description": "Platform admins: how far adding a server (server_add with wait=false) or making an org's dedicated VM (org_create with placement vm) got: its steps, log, state (running, done, failed) and error. Kept for an hour after a failure.",
+        "operationId": "server_provision_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Follow a server being added"
+      }
+    },
     "/api/v1/tools/server_remove": {
       "post": {
-        "description": "Platform admins: forget a server. Refused while orgs are placed on it (delete them first). The agent keeps running on the box until it is stopped there (systemctl disable --now isb-agent).",
+        "description": "Platform admins: forget a server. Refused while orgs are placed on it (delete them first). A box added over SSH keeps running its agent until it is stopped there (systemctl disable --now isb-agent); a dedicated VM this control plane made is deleted with it.",
         "operationId": "server_remove",
         "requestBody": {
           "content": {
@@ -5470,6 +5717,54 @@
           }
         },
         "summary": "Server status"
+      }
+    },
+    "/api/v1/tools/ssh_host_keys": {
+      "post": {
+        "description": "An instance's SSH host public keys (from /etc/ssh), for pinning in known_hosts, and the user `isb ssh-config` logs in as by default (the first ordinary user, else root). Empty keys: no host keys yet (the first `isb ssh-proxy` connection generates them) or no OpenSSH server installed.",
+        "operationId": "ssh_host_keys",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "SSH host keys"
       }
     },
     "/api/v1/tools/stack_config": {
@@ -6475,6 +6770,1284 @@
           }
         },
         "summary": "List templates"
+      }
+    },
+    "/api/v1/tools/volume_get": {
+      "post": {
+        "description": "One volume: the instances using it, its snapshot schedule and hook settings with the next run, its snapshots (newest first), its staged restores and the backups of it.",
+        "operationId": "volume_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The volume.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Show a volume"
+      }
+    },
+    "/api/v1/tools/volume_list": {
+      "post": {
+        "description": "The org's named volumes (an app's <app>_<NAME>, a database's data, a workspace's home): instances using each, its snapshot schedule, and which are staged restores.",
+        "operationId": "volume_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List volumes"
+      }
+    },
+    "/api/v1/tools/volume_restore": {
+      "post": {
+        "description": "Restore a volume's `snapshot`, or a volume `backup` (its newest file, or `key`), or a `destination` + `key`, into a NEW volume <name>-restore-<stamp>, mounted read-write at /restore/<stamp> in the instance using the volume (or `instance`); left detached when that instance is stopped. The live volume is never touched: diff and copy back what you need, then discard it with volume_restore_discard. Org admins and owners; audited.",
+        "operationId": "volume_restore",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "backup": {
+                    "type": "string"
+                  },
+                  "destination": {
+                    "type": "string"
+                  },
+                  "instance": {
+                    "type": "string"
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "snapshot": {
+                    "type": "string"
+                  },
+                  "timeout": {
+                    "type": "string"
+                  },
+                  "wait": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Restore a volume (staged)"
+      }
+    },
+    "/api/v1/tools/volume_restore_discard": {
+      "post": {
+        "description": "Detach and delete a staged restore of volume `name` (by its `stamp`). Only volumes isb staged can be discarded this way. Org admins and owners.",
+        "operationId": "volume_restore_discard",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "stamp": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "stamp"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Discard a staged restore"
+      }
+    },
+    "/api/v1/tools/volume_restore_list": {
+      "post": {
+        "description": "Staged restores (of `name`, or every volume): the new volume, what it came from, where it is mounted.",
+        "operationId": "volume_restore_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List staged restores"
+      }
+    },
+    "/api/v1/tools/volume_snapshot_create": {
+      "post": {
+        "description": "Snapshot a volume now. First every running instance using it runs its executable /etc/isb/pre-snapshot (if any; as root, with the volume's hook_timeout; output in the run log). Named `snapshot`, or manual-<stamp>; kept until deleted. wait=true returns when done (at most `timeout`, default 10m). Org admins and owners.",
+        "operationId": "volume_snapshot_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "snapshot": {
+                    "type": "string"
+                  },
+                  "timeout": {
+                    "type": "string"
+                  },
+                  "wait": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Snapshot a volume now"
+      }
+    },
+    "/api/v1/tools/volume_snapshot_delete": {
+      "post": {
+        "description": "Delete one snapshot of a volume. Org admins and owners.",
+        "operationId": "volume_snapshot_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "snapshot": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "snapshot"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Delete a snapshot"
+      }
+    },
+    "/api/v1/tools/volume_snapshot_list": {
+      "post": {
+        "description": "A volume's snapshots, newest first: auto-* (scheduled, pruned to keep), manual-* and named ones (kept until deleted).",
+        "operationId": "volume_snapshot_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The volume.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List snapshots"
+      }
+    },
+    "/api/v1/tools/volume_snapshot_run_log": {
+      "post": {
+        "description": "One snapshot run's log (the pre-snapshot hook's output included) from byte `offset`; poll with the returned offset until finished.",
+        "operationId": "volume_snapshot_run_log",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "offset": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "run": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "name",
+                  "run"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Snapshot run log"
+      }
+    },
+    "/api/v1/tools/volume_snapshot_runs": {
+      "post": {
+        "description": "A volume's snapshot runs, newest first (status, trigger, the hook's outcome, what was pruned).",
+        "operationId": "volume_snapshot_runs",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "limit": {
+                    "maximum": 1000,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Snapshot runs"
+      }
+    },
+    "/api/v1/tools/volume_snapshot_schedule": {
+      "post": {
+        "description": "Set a volume's snapshot schedule and hook (a merge patch): schedule (cron: five fields or @hourly, @daily, ...; empty or null removes it), timezone, keep (auto-* snapshots kept, default 7), enabled, missed_grace, hook_timeout (default 5m, at most 1h), hook_required (a failing hook stops the snapshot; default false: reported, snapshot taken). Org admins and owners.",
+        "operationId": "volume_snapshot_schedule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "hook_required": {
+                    "type": "boolean"
+                  },
+                  "hook_timeout": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "keep": {
+                    "maximum": 1000,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "missed_grace": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "schedule": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "timezone": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Schedule snapshots"
+      }
+    },
+    "/api/v1/tools/workspace_create": {
+      "post": {
+        "description": "Create the org's workspace: an unprivileged container from `image` with a managed home volume (`home_size`, counted against the org's disk quota) at the workspace user's home, and an org token (role `token_role`, default admin) delivered inside as /run/isb/token and $ISB_TOKEN, with $ISB_URL and $ISB_ORG, so the isb CLI and MCP clients inside work with no setup. One per org. Org admins and above.",
+        "operationId": "workspace_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "cpus": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "env": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Plain variables for login shells.",
+                    "type": "object"
+                  },
+                  "home_bind": {
+                    "description": "Superadmins only: this host directory as the home (an existing box's, when migrating), instead of the default home.",
+                    "type": "string"
+                  },
+                  "home_size": {
+                    "description": "The home volume (default 20GiB).",
+                    "type": "string"
+                  },
+                  "image": {
+                    "description": "An incus image (dev-base, images:ubuntu/24.04) or registry:APP:TAG.",
+                    "type": "string"
+                  },
+                  "labels": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "memory": {
+                    "description": "e.g. 8GiB.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "Default: workspace.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "root_size": {
+                    "description": "The root disk, e.g. 30GiB (default: the pool's).",
+                    "type": "string"
+                  },
+                  "secrets": {
+                    "description": "Org secrets delivered as /run/isb/secrets/NAME.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "token_role": {
+                    "description": "The workspace token's role in the org (default admin).",
+                    "enum": [
+                      "viewer",
+                      "member",
+                      "admin"
+                    ],
+                    "type": "string"
+                  },
+                  "user": {
+                    "description": "The workspace user (default dev); created when the image lacks it.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "image"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Create the workspace"
+      }
+    },
+    "/api/v1/tools/workspace_delete": {
+      "post": {
+        "description": "Delete the workspace: its machine, its token (revoked at once) and, unless keep_home, its home volume. Needs confirm: true. Org admins and above.",
+        "operationId": "workspace_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "confirm": {
+                    "description": "Required: this ends live sessions on the workspace. Without it the call only says what would end.",
+                    "type": "boolean"
+                  },
+                  "keep_home": {
+                    "description": "Keep the home volume (it can be attached to a new workspace of the same name).",
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Delete the workspace"
+      }
+    },
+    "/api/v1/tools/workspace_get": {
+      "post": {
+        "description": "The org's workspace (its long-lived machine, docs/workspaces.md): image, size, home volume, status, CPU and memory, live sessions (web terminals, SSH), last activity, its token's metadata (never the token) and how to connect; `workspace` is null when the org has none yet. Also the org's workspace settings.",
+        "operationId": "workspace_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Get the workspace"
+      }
+    },
+    "/api/v1/tools/workspace_list": {
+      "post": {
+        "description": "The org's workspaces (one per org unless a platform admin raised max_workspaces), as workspace_get shows each, without the session count.",
+        "operationId": "workspace_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List workspaces"
+      }
+    },
+    "/api/v1/tools/workspace_rebuild": {
+      "post": {
+        "description": "Replace the workspace's machine with a fresh one from its image (or `image`), keeping its home volume and token: what to do when the root is damaged. Ends every session; needs confirm: true. Software installed outside the home is gone. Org admins and above.",
+        "operationId": "workspace_rebuild",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "confirm": {
+                    "description": "Required: this ends live sessions on the workspace. Without it the call only says what would end.",
+                    "type": "boolean"
+                  },
+                  "image": {
+                    "description": "Rebuild from this image instead (it becomes the workspace's).",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Rebuild the workspace"
+      }
+    },
+    "/api/v1/tools/workspace_restart": {
+      "post": {
+        "description": "Restart the workspace. This ends every session on it: without confirm: true it only reports the live sessions. Org members and above.",
+        "operationId": "workspace_restart",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "confirm": {
+                    "description": "Required: this ends live sessions on the workspace. Without it the call only says what would end.",
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Restart the workspace"
+      }
+    },
+    "/api/v1/tools/workspace_settings": {
+      "post": {
+        "description": "The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none). Without changes it reads them; org admins change the sandbox defaults.",
+        "operationId": "workspace_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "home_kind": {
+                    "description": "Platform admins: where new workspace homes go: a managed volume, or a host folder under isb serve's --workspace-home-root (\"\": the daemon's default).",
+                    "enum": [
+                      "",
+                      "volume",
+                      "host"
+                    ],
+                    "type": "string"
+                  },
+                  "home_pool": {
+                    "description": "Platform admins: the storage pool new workspace homes go in (\"\" clears it: the daemon's --workspace-pool, else the org's default pool).",
+                    "type": "string"
+                  },
+                  "max_workspaces": {
+                    "maximum": 100,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "sandbox_expiry": {
+                    "description": "e.g. 24h, 7d.",
+                    "type": "string"
+                  },
+                  "sandbox_idle": {
+                    "description": "e.g. 2h, or none.",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Workspace settings"
+      }
+    },
+    "/api/v1/tools/workspace_start": {
+      "post": {
+        "description": "Start the workspace and deliver its credentials. Org members and above.",
+        "operationId": "workspace_start",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Start the workspace"
+      }
+    },
+    "/api/v1/tools/workspace_stop": {
+      "post": {
+        "description": "Stop the workspace. This ends every session on it (terminals, SSH, the agents running there): without confirm: true it only reports the live sessions. Org members and above.",
+        "operationId": "workspace_stop",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "confirm": {
+                    "description": "Required: this ends live sessions on the workspace. Without it the call only says what would end.",
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Stop the workspace"
+      }
+    },
+    "/api/v1/tools/workspace_token_rotate": {
+      "post": {
+        "description": "Mint the workspace a new token and deliver it inside; the old one stops working at once. The token is never returned. Org admins and above.",
+        "operationId": "workspace_token_rotate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Rotate the workspace's token"
+      }
+    },
+    "/api/v1/tools/workspace_update": {
+      "post": {
+        "description": "Change the workspace: cpus, memory, root_size and home_size apply at once (resizing needs confirm: true, since it can end sessions); env and secrets are delivered again (new login shells see them); image applies on the next rebuild; labels; token_role. Fields left out are kept. Org admins and above.",
+        "operationId": "workspace_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "confirm": {
+                    "description": "Required: this ends live sessions on the workspace. Without it the call only says what would end.",
+                    "type": "boolean"
+                  },
+                  "cpus": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "env": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Replaces the variables.",
+                    "type": "object"
+                  },
+                  "home_size": {
+                    "description": "Grow the home volume.",
+                    "type": "string"
+                  },
+                  "image": {
+                    "type": "string"
+                  },
+                  "labels": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Replaces the labels.",
+                    "type": "object"
+                  },
+                  "memory": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "root_size": {
+                    "type": "string"
+                  },
+                  "secrets": {
+                    "description": "Replaces the delivered secrets.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "token_role": {
+                    "enum": [
+                      "viewer",
+                      "member",
+                      "admin"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Change the workspace"
       }
     }
   },

@@ -451,11 +451,13 @@ pub(super) fn sandbox_create_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) 
         d,
         "sandbox_create",
         "Create a sandbox",
-        "Create (or reconcile) one sandbox: an incus container or VM to run code in isolation. `spec` is one compose service (docs/spec.md) with container_name set, as an object or YAML text. Remote callers' sandboxes are labelled with their identity, and only managed sandboxes are reachable remotely.",
+        "Create (or reconcile) one sandbox: an incus container or VM to run code in isolation. `spec` is one compose service (docs/spec.md) with container_name set, as an object or YAML text. Remote callers' sandboxes are labelled with their identity, and only managed sandboxes are reachable remotely. Sandboxes are short-lived: each expires (the org's default, 24h, unless `expires` says otherwise; sandbox_extend pushes it out) and is deleted after sitting idle (`idle_timeout`, default 2h; `none` turns it off).",
         obj(
             json!({
                 "spec": {"description": "The service spec: an object, or YAML text."},
-                "wait_ready": {"type": "boolean", "description": "Run readiness checks (default true)."}
+                "wait_ready": {"type": "boolean", "description": "Run readiness checks (default true)."},
+                "expires": {"type": "string", "description": "Lifetime from now, e.g. 4h or 7d (at most 30d; default: the org's, 24h)."},
+                "idle_timeout": {"type": "string", "description": "Delete after this long without use (exec, a terminal, CPU), e.g. 2h; `none` for never (default: the org's, 2h)."}
             }),
             &["spec"]
         ),
@@ -471,9 +473,12 @@ pub(super) fn sandbox_list_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) ->
         d,
         "sandbox_list",
         "List sandboxes",
-        "List instances (for remote callers: only the ones isb serve manages), optionally filtered by labels (`key` or `key=value`).",
+        "List instances (for remote callers: only the ones isb serve manages), optionally filtered by labels (`key` or `key=value`) and kind (`sandbox`, `workspace`, `replica`, `build`). Each with who created it (owner), when, its expiry and idle timeout, its last activity, and its CPU and memory.",
         obj(
-            json!({"labels": {"type": "array", "items": {"type": "string"}}}),
+            json!({
+                "labels": {"type": "array", "items": {"type": "string"}},
+                "kind": {"type": "string", "enum": ["sandbox", "workspace", "replica", "build"], "description": "Only this kind of instance."}
+            }),
             &[]
         ),
         ann.ro,
@@ -483,25 +488,59 @@ pub(super) fn sandbox_list_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) ->
                 #[serde(default)]
                 labels: Vec<String>,
                 #[serde(default)]
+                kind: Option<String>,
+                #[serde(default)]
                 org: Option<String>,
             }
+            let project = arg_org(&a)?.incus_project();
             let a: A = args(a)?;
             let filters: Vec<_> = a
                 .labels
                 .iter()
                 .map(|l| crate::sandbox::LabelFilter::parse(l))
                 .collect();
-            let all = Sandbox::list_with(&d.oc(&a.org)?, &filters)?;
+            let oc = d.oc(&a.org)?;
+            let all = Sandbox::list_with(&oc, &filters)?;
+            let snap = d.ctl.snapshot();
+            let now = now_secs();
             let out: Vec<Value> = all
                 .into_iter()
                 .filter(|i| d.reachable(c, i))
-                .map(|i| {
-                    json!({
+                .filter_map(|i| {
+                    let isb: BTreeMap<String, String> = i
+                        .config
+                        .iter()
+                        .filter_map(|(k, v)| {
+                            k.strip_prefix("user.").map(|k| (k.to_string(), v.clone()))
+                        })
+                        .collect();
+                    let kind = crate::workspace::kind_of(&isb);
+                    if a.kind.as_deref().is_some_and(|k| k != kind) {
+                        return None;
+                    }
+                    let num = |k: &str| i.config.get(k).and_then(|v| v.parse::<u64>().ok());
+                    let created = crate::history::rfc3339_ms(&i.created_at).map(|ms| ms / 1000);
+                    let s = snap.instances.get(&format!("{project}/{}", i.name));
+                    Some(json!({
                         "name": i.name, "status": i.status, "type": i.instance_type,
+                        "kind": kind,
                         "labels": i.labels,
                         "stack": i.config.get("user.isb.stack"),
+                        "workspace": i.config.get(crate::workspace::KEY_WORKSPACE),
                         "owner": i.config.get("user.isb.owner"),
-                    })
+                        // Created by this caller (who may extend it).
+                        "mine": i.config.get("user.isb.owner").is_some_and(|o| *o == owner_label(c)),
+                        "created_at": created,
+                        "age_secs": created.map(|c| now.saturating_sub(c as u64)),
+                        "expires_at": num(crate::workspace::KEY_EXPIRES_AT),
+                        "idle_timeout": num(crate::workspace::KEY_IDLE_TIMEOUT),
+                        "last_active": d.workspaces.last_seen(&project, &i.name),
+                        "cpus": i.config.get("limits.cpu"),
+                        "memory": i.config.get("limits.memory"),
+                        "cpu_pct": s.and_then(|s| s.cpu_pct),
+                        "mem_bytes": s.and_then(|s| s.mem_bytes),
+                        "ip": s.and_then(|s| s.ip.clone()),
+                    }))
                 })
                 .collect();
             Ok(json!({"sandboxes": out}))
@@ -560,9 +599,36 @@ pub(super) fn sandbox_remove_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) 
                     a.name, info.config["user.isb.stack"]
                 )));
             }
+            if info.config.contains_key(crate::workspace::KEY_WORKSPACE) {
+                return Err(Error::invalid(format!(
+                    "{} is the org's workspace; workspace_delete removes it",
+                    a.name
+                )));
+            }
             Sandbox::remove(&oc, &a.name, true)?;
             Ok(json!({"ok": true}))
         }
+    );
+    Ok(())
+}
+
+pub(super) fn sandbox_extend_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> {
+    tool!(
+        r,
+        d,
+        "sandbox_extend",
+        "Extend a sandbox",
+        "Push a sandbox's expiry out by `by` (from the later of now and its current expiry; at most 30 days from now), or change its idle timeout. Its creator, or the org's admins and above.",
+        obj(
+            json!({
+                "name": {"type": "string"},
+                "by": {"type": "string", "description": "e.g. 24h (default 24h)."},
+                "idle_timeout": {"type": "string", "description": "A new idle timeout, e.g. 4h, or none."}
+            }),
+            &["name"]
+        ),
+        ann.write,
+        sandbox_extend
     );
     Ok(())
 }

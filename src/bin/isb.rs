@@ -43,6 +43,8 @@ mod secret;
 mod serve;
 #[path = "isb/servers.rs"]
 mod servers;
+#[path = "isb/ssh.rs"]
+mod ssh;
 #[path = "isb/stack.rs"]
 mod stack;
 #[path = "isb/templates.rs"]
@@ -59,6 +61,10 @@ use registry::*;
 use secret::*;
 use serve::*;
 use stack::*;
+#[path = "isb/volumes.rs"]
+mod volumes;
+#[path = "isb/workspaces.rs"]
+mod workspaces;
 
 /// Declarative incus sandboxes.
 ///
@@ -330,6 +336,11 @@ enum Cmd {
     /// show, remove, rotate its certificate (docs/servers.md).
     #[command(subcommand)]
     Server(servers::ServerCmd),
+    /// The org's workspace on the `isb serve` daemon: its long-lived
+    /// machine with a home and an org token, and the sandboxes beside it
+    /// (docs/workspaces.md).
+    #[command(subcommand)]
+    Workspace(workspaces::WorkspaceCmd),
     /// A live dashboard of stacks and sandboxes (`isb serve`'s view; with no
     /// daemon, sandboxes only).
     Tui,
@@ -350,6 +361,27 @@ enum Cmd {
     /// API tokens for `isb serve`.
     #[command(subcommand)]
     Token(TokenCmd),
+    /// SSH public keys on isb accounts: what `isb ssh-proxy` lets into an
+    /// org's instances (docs/ssh.md).
+    #[command(subcommand)]
+    Key(ssh::KeyCmd),
+    /// SSH's stdio over isb serve's websocket to an instance of an org, for
+    /// ssh's ProxyCommand (`isb ssh-config` writes it). Nothing listens in
+    /// the instance and no port opens anywhere.
+    SshProxy {
+        /// ORG/INSTANCE, or INSTANCE in --org.
+        target: String,
+        /// Whose isb SSH keys to let in, for the local socket (which has no
+        /// account of its own).
+        #[arg(long = "as")]
+        keys_of: Option<String>,
+        #[command(flatten)]
+        remote: ssh::RemoteArgs,
+    },
+    /// `Host` blocks for ~/.ssh/config (ProxyCommand isb ssh-proxy, the
+    /// instance's host key pinned in isb's known_hosts), so plain ssh, scp,
+    /// editors and `herdr machine add` reach an org's instances.
+    SshConfig(ssh::ConfigArgs),
     /// The audit log of `isb serve` (`<state>/audit.db`): who did what.
     #[command(subcommand)]
     Audit(AuditCmd),
@@ -528,6 +560,7 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         Cmd::Registry(r) => registry_cmd(ctx, r),
         Cmd::Notify(n) => notify::notify(&ctx.global.org, n),
         Cmd::Server(c) => servers::server(c),
+        Cmd::Workspace(w) => workspaces::workspace(&ctx.global.org, w),
         Cmd::Tui => {
             isb::tui::run(ctx.client(None), isb::server::default_socket_path())?;
             Ok(0)
@@ -540,6 +573,13 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
             db,
         } => invite_cmd(&org, &email, &role, &db),
         Cmd::Token(c) => token_cmd(c),
+        Cmd::Key(c) => ssh::key(c),
+        Cmd::SshProxy {
+            target,
+            keys_of,
+            remote,
+        } => ssh::proxy(&ctx.global.org, &target, keys_of, &remote),
+        Cmd::SshConfig(a) => ssh::config(&ctx.global.org, a),
         Cmd::Audit(c) => audit_cmd(c),
         Cmd::History(a) => history_cmd(a),
         Cmd::Create(a) => create(ctx, a),
@@ -705,9 +745,82 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
     }
 }
 
+fn volume_local(ctx: &Ctx, v: VolumeCmd) -> Result<u8> {
+    let c = ctx.client(None);
+    let pool =
+        |p: Option<String>| -> Result<String> { sandbox::host_facts(&c)?.pick_pool(p.as_deref()) };
+    match v {
+        VolumeCmd::Create {
+            name,
+            pool: p,
+            config,
+        } => {
+            let pool = pool(p)?;
+            let mut cfg = BTreeMap::new();
+            for kv in &config {
+                let (k, v) = shorthand::key_value(kv)?;
+                cfg.insert(k, v);
+            }
+            let created = isb::volume::ensure(&c, &pool, &name, &cfg)?;
+            if !ctx.global.quiet {
+                eprintln!(
+                    "{name} (pool {pool}): {}",
+                    if created { "created" } else { "already exists" }
+                );
+            }
+        }
+        VolumeCmd::Ls { pool: p, json } => {
+            let pools = match p {
+                Some(p) => vec![p],
+                None => sandbox::host_facts(&c)?.pools,
+            };
+            let mut all = Vec::new();
+            for p in pools {
+                all.extend(isb::volume::list(&c, &p)?);
+            }
+            if json {
+                print_json(&all);
+            } else {
+                let mut t = vec![vec!["NAME".into(), "POOL".into(), "USED BY".into()]];
+                for v in all {
+                    t.push(vec![v.name, v.pool, v.used_by.len().to_string()]);
+                }
+                table(t);
+            }
+        }
+        VolumeCmd::Inspect { name, pool: p } => {
+            let pool = pool(p)?;
+            let v = isb::volume::get(&c, &pool, &name)?
+                .ok_or_else(|| Error::NotFound(format!("volume {name} in pool {pool}")))?;
+            print_json(&v);
+        }
+        VolumeCmd::Rm { name, pool: p } => {
+            let pool = pool(p)?;
+            isb::volume::remove(&c, &pool, &name)?;
+        }
+        _ => unreachable!("isb serve's volume commands are handled in volume()"),
+    }
+    Ok(0)
+}
+
 /// Call a tool on the local daemon.
 fn call(tool: &str, args: serde_json::Value, timeout: Duration) -> Result<serde_json::Value> {
     let socket = isb::server::default_socket_path();
+    // Inside an org's workspace there is no daemon socket: isb serve's URL
+    // (the org bridge's, `$ISB_URL`) with the workspace's token
+    // (`$ISB_TOKEN`), as `isb ssh-config` and `isb key` use it.
+    if !socket.exists() {
+        let remote = ssh::RemoteArgs::default().or_env();
+        if remote.url.is_some() {
+            let org = args
+                .get("org")
+                .and_then(serde_json::Value::as_str)
+                .map(String::from)
+                .or_else(|| std::env::var("ISB_ORG").ok().filter(|o| !o.is_empty()))
+                .unwrap_or_else(|| "default".into());
+            return remote.remote()?.call_tool(&org, tool, args);
+        }
+    }
     isb::server::client::call_tool(&socket, tool, args, timeout).map_err(|e| match e {
         Error::Io(_) | Error::Connect { .. } if cfg!(target_os = "macos") => {
             Error::Invalid(format!(

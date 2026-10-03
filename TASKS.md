@@ -425,6 +425,11 @@ minime only runs binaries downloaded from our CI runs.
   **Verify:** end to end in the browser.
 - [x] (e7b84ec, d00c451) P3.4 Org admin: members, invitations, roles, API tokens, secrets editor,
   settings. **Verify:** invite a second user and sign in as them.
+- [x] P3.5 MCP page (`/orgs/ORG/agents`, `G A`): the org endpoint, a token
+  for the agent, install snippets (Claude Code, Codex, Cursor, curl), the
+  tool list, and for superadmins the `/mcp` endpoint and its sources.
+  **Verify:** the page's curl snippet lists the tools of a scratch daemon
+  with a token made the page's way; screenshots as owner and superadmin.
 
 ## Phase 4: day 2
 
@@ -443,6 +448,11 @@ minime only runs binaries downloaded from our CI runs.
 - [x] (1502ebd; Gitea live; GitLab and fork previews unit-tested only) P4.5 Preview deployments per pull request. **Verify:** a PR on the test
   repo gets a URL; closing it removes it.
 - [x] (6d71ea9, 83fa46e) P4.6 Metrics history (retained samples) and monitoring pages.
+- [x] (template-logos) P4.7 Template logos: the daemon fetches and caches
+  each template's logo and serves it from `/api/v1/templates/<ref>/logo`
+  (SSRF-checked https, 512 KiB, sniffed image types); built-ins link to
+  upstream logos. **Verify:** the Templates page shows built-in and Dokploy
+  logos in light and dark mode, with no request leaving isb's origin.
 
 ## Phase 5: scale-out
 
@@ -454,6 +464,89 @@ minime only runs binaries downloaded from our CI runs.
   **Verify:** deploy to an org placed on the hcloud box from titan's UI.
 - [x] (8423ecc, f48d234, 39d4158, cabc357, bf41199) P5.3 Audit log and finer roles. **Verify:** actions appear in the log
   with the acting user or agent.
+- [x] (2cdfda8, 7e6bff1; wizard verified on titan against a throwaway VM, 1.5 min) P5.4 Placement in the web UI: a Servers page (health, resources, orgs,
+  detail, remove) with an Add server wizard that follows the bootstrap
+  (`server_add` with `wait: false`, `server_provision_get`); placement and
+  isolation in the New org dialog, the org list and org Settings.
+  **Verify:** add a throwaway box through the wizard; create orgs on each
+  placement from the UI.
+- [x] (2cdfda8, 7e6bff1; verified on titan: whoami in vm-plvm, VM from the UI in ~4 min, deleted with its org) P5.5 Dedicated VMs: `org_create` with `placement: {vm: {...}}`
+  (`isb org create NAME --vm`) makes an incus VM in `isb-system`, installs
+  incus and the control plane's own isb through the incus API, registers it
+  as server `vm-NAME` and places the org there; `delete_vm` removes it with
+  the org. Refused, with the reason, where the host has no KVM.
+  **Verify:** an org in its own VM on titan runs an app, its server shows
+  healthy, and deleting the org deletes the VM.
+
+## Workspaces (docs/design/workspaces.md)
+
+- [x] (workspaces-ssh) W3 Doors, generic over an org's instances: SSH over
+  the daemon's websocket (`sshd -i` through incus exec, the caller's isb
+  SSH keys per connection, live sessions re-checked every 15 s), `isb key`,
+  the Account page's SSH keys, `isb ssh-proxy`, `isb ssh-config` (pinned
+  host keys, herdr line), `ssh_host_keys`, `?instance=` on the web
+  terminal, audit `ssh.open/close` and `auth.ssh_key_*` (docs/ssh.md).
+  **Verified** on titan: ssh, scp (20 MB both ways), a removed key refused
+  and its live session ended in 8 s, viewer and `read` tokens refused,
+  an instance's own authorized_keys ignored, `herdr machine add` saved and
+  reached the host (isolated HOME).
+- [x] (workspaces-home) W4 the home, generic over an org's named volumes:
+  snapshots now and on a schedule (`auto-*` pruned to keep, manual kept),
+  volume backups as `backup_*` with a `volume` (snapshot, temporary copy,
+  incus export compressed and streamed to S3, retention, run logs, beside
+  database backups), the `/etc/isb/pre-snapshot` hook (timeout, output in
+  the run log, `hook_required`), staged restores into a new volume mounted
+  at `/restore/<stamp>` (detached when the instance is stopped) and their
+  discard, `volume_*` tools, `isb volume snapshot|restore|restores|discard`,
+  the Volume panel and Volumes pages, admins-and-owners writes, org
+  projects allowing snapshots and exports (docs/volumes.md).
+  **Verified** on titan (scratch daemon, org `volh`, a dev-base instance
+  with a volume, RustFS as the S3 store): hook ran and its output logged; a
+  per-minute schedule pruned to keep 2 with the manual snapshot kept; a
+  5 s hook timeout reported and the snapshot taken, then refused with
+  `hook_required`; write, snapshot, change, staged restore, `diff -r`
+  showed the old file at `/restore/<stamp>` with ownership kept and the
+  live volume untouched; backup to RustFS, retention to 2, restore from the
+  bucket staged and diffed; restore while stopped left detached; discard
+  refused a volume that was not a staged restore; the UI restored a backup
+  file staged.
+- [ ] W4 follow-ups: volume
+  snapshots and backups for orgs placed on a server (tools forward, not
+  verified); a restore's byte count in its run record.
+- [x] (workspaces-core) W1 the workspace and its sandboxes, W2 the
+  workspace as an org actor, W7 the web UI (docs/workspaces.md): one
+  workspace per org (`max_workspaces`), a container with a home volume
+  that survives rebuild, `workspace_*` tools, the `workspace` REST resource
+  and `isb workspace`, confirmations that name live sessions; its `isb_ws_`
+  token (role admin by default) delivered as /run/isb/token and $ISB_TOKEN
+  with $ISB_URL and $ISB_ORG, rotated and revoked, actor `workspace`; the
+  org-bound MCP on each org's bridge (port 8481, the org's subnet and bearer
+  tokens only); sandbox expiry and idle timeout, `sandbox_extend`, the
+  reaper; `isb workspace ssh`/`ssh-config`; the Workspace page, org
+  overview card and create form. **Verified** on titan (scratch daemon,
+  bridge port 8480 since titan's ufw has no 8481 rule): workspace from
+  dev-base, token and env inside, tools/list and the isb CLI over the
+  bridge, another org's path 404, no token 401, another org's instance
+  cannot connect, a rotated token refused at once, rebuild keeps the home
+  and drops the root, a sibling sandbox through the MCP labelled
+  `isb.owner=workspace`, reaped on expiry (2m) and on idle (1m) with
+  `sandbox.reaped` in the history, the audit actor `workspace`, the web
+  terminal as `dev` counted as a live session, UI light/dark,
+  desktop/phone. Homes: a volume's pool per host (`--workspace-pool`) and
+  org (`home_pool`), hourly snapshots only on copy-on-write pools (titan's
+  `dir` gets none, with the Home tab's warning), the Volume panel on the
+  Home tab; host-folder homes (`--workspace-home-root`, `home_kind`,
+  `home_bind` for superadmins), the folder allowed in the org's project and
+  mapped 1:1. **Verified**: a host-folder home under the scratchpad (a file
+  made inside is uid 1000 on the host, the path added to
+  `restricted.devices.disk.paths`), and an org opting back to a volume on
+  `dir` with no schedule.
+- [ ] Workspace follow-ups: `isb host setup` on titan for port 8481 (not
+  run: the rule is in the code); titan's `--workspace-home-root
+  /srv/workspaces` and migrating clem with `home_bind`; a workspace on an org placed on a server
+  (the agent runs it and serves the bridge; untested); W3's terminal
+  reattach and ports; SSH to orgs placed on a server; Access credentials in
+  `isb ssh-proxy`.
 
 ## Log
 

@@ -750,13 +750,18 @@ pub fn from_event(e: &crate::stack::controller::Event) -> Option<NewRecord> {
         objects.push(e.service.clone());
     }
     objects.extend(e.instance.clone());
+    // Volume snapshots and staged restores are about a volume, not a stack.
+    let object_type = match e.kind.as_deref() {
+        Some(k) if k.starts_with("volume.") => "volume",
+        _ => "stack",
+    };
     Some(NewRecord {
         time: e.at as i64,
         source: "controller".into(),
         org: Some(org),
         project: None,
         kind: e.kind.clone().unwrap_or_else(|| "event".into()),
-        object_type: Some("stack".into()),
+        object_type: Some(object_type.into()),
         object: Some(stack),
         objects,
         actor: Some("isb".into()),

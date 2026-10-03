@@ -2,6 +2,7 @@ id: vaultwarden
 name: Vaultwarden
 description: A lightweight server compatible with the Bitwarden password manager clients.
 version: "1"
+logo: https://raw.githubusercontent.com/dani-garcia/vaultwarden/1c89e1772bfe51edf362fd033cf9c492ccd7ee55/resources/vaultwarden-icon.svg
 tags: [security, passwords]
 links:
   source: https://github.com/dani-garcia/vaultwarden

@@ -16,11 +16,13 @@ import { HostPage } from "@/pages/host";
 import { OrgHistoryPage } from "@/pages/history";
 import { OrgPage } from "@/pages/org";
 import { MembersPage } from "@/pages/org-members";
+import { McpHome, McpPage } from "@/pages/org-mcp";
 import { SecretsPage } from "@/pages/org-secrets";
 import { SettingsPage } from "@/pages/org-settings";
 import { ForgotPasswordPage, ResetPasswordPage } from "@/pages/password-reset";
 import { SetupPage } from "@/pages/setup";
 import { SignupPage } from "@/pages/signup";
+import { workspaceRoutes } from "@/workspace/routes";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -64,8 +66,11 @@ export function App() {
               <Route index element={<Home />} />
               <Route path="/orgs/:org" element={<OrgPage />} />
               {appRoutes()}
+              {workspaceRoutes()}
               {day2Routes()}
               <Route path="/orgs/:org/members" element={<MembersPage />} />
+              <Route path="/orgs/:org/agents" element={<McpPage />} />
+              <Route path="/agents" element={<McpHome />} />
               <Route path="/orgs/:org/secrets" element={<SecretsPage />} />
               <Route path="/orgs/:org/settings" element={<SettingsPage />} />
               <Route path="/orgs/:org/history" element={<OrgHistoryPage />} />

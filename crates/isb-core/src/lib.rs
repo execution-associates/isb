@@ -21,6 +21,7 @@ pub mod lock;
 pub mod machine;
 pub mod metrics;
 pub mod metrics_history;
+pub mod net;
 pub mod org;
 pub mod plan;
 pub mod registry;

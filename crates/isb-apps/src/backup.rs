@@ -295,8 +295,12 @@ fn yes() -> bool {
 #[serde(deny_unknown_fields)]
 pub struct BackupSpec {
     pub name: String,
-    /// The database app.
+    /// The database app, or empty for a volume backup.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub database: String,
+    /// Or a named volume in the org ([`crate::volume_backup`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume: Option<String>,
     pub destination: String,
     /// Cron (five fields or an alias).
     pub schedule: String,
@@ -329,7 +333,17 @@ impl BackupSpec {
 
     pub fn validate(&self) -> Result<()> {
         crate::jobs::validate_name("backup", &self.name)?;
-        crate::app::validate_app_name(&self.database)?;
+        match &self.volume {
+            None => crate::app::validate_app_name(&self.database)?,
+            Some(v) if self.database.is_empty() => {
+                crate::volume_backup::model::validate_volume_name(v)?
+            }
+            Some(_) => {
+                return Err(Error::invalid(
+                    "back up a `database` or a `volume`, not both",
+                ));
+            }
+        }
         crate::jobs::validate_name("destination", &self.destination)?;
         self.schedule()?;
         crate::jobs::parse_grace(&self.missed_grace)?;
@@ -406,7 +420,11 @@ pub struct BackupFile {
     pub key: String,
     pub size: u64,
     pub taken_at: String,
-    pub engine: Engine,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub engine: Option<Engine>,
+    /// A volume backup's volume.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub volume: Option<String>,
     pub compression: Compression,
 }
 
@@ -518,6 +536,14 @@ impl Backups {
 
     pub fn set_scheduler(&self, s: Scheduler) {
         *self.inner.scheduler.lock().unwrap() = s;
+    }
+
+    pub fn apps(&self) -> &Apps {
+        &self.inner.apps
+    }
+
+    pub fn state_dir(&self) -> &Path {
+        &self.inner.state
     }
 
     fn root(&self, org: &OrgId) -> PathBuf {
@@ -777,7 +803,10 @@ impl Backups {
 
     pub fn create(&self, org: &OrgId, spec: BackupSpec) -> Result<Backup> {
         spec.validate()?;
-        self.database(org, &spec.database)?;
+        match &spec.volume {
+            Some(v) => crate::volume_backup::export::check_source(self, org, v).map(|_| ())?,
+            None => self.database(org, &spec.database).map(|_| ())?,
+        }
         self.destination_get(org, &spec.destination)?;
         let _g = self.inner.edit.lock().unwrap();
         if self.backup_path(org, &spec.name).exists() {
@@ -803,8 +832,13 @@ impl Backups {
         crate::app::merge_patch(&mut v, patch);
         let spec: BackupSpec =
             serde_json::from_value(v).map_err(|e| Error::invalid(format!("backup {name}: {e}")))?;
-        if spec.name != b.spec.name || spec.database != b.spec.database {
-            return Err(Error::invalid("a backup's name and database are fixed"));
+        if spec.name != b.spec.name
+            || spec.database != b.spec.database
+            || spec.volume != b.spec.volume
+        {
+            return Err(Error::invalid(
+                "a backup's name and what it backs up are fixed",
+            ));
         }
         spec.validate()?;
         self.destination_get(org, &spec.destination)?;
@@ -846,6 +880,9 @@ impl Backups {
         let b = self.get(org, name)?;
         let d = self.destination_get(org, &b.spec.destination)?;
         let prefix = backup_prefix(&d, org, name);
+        if b.spec.volume.is_some() {
+            return crate::volume_backup::export::files(self, org, &d, &prefix);
+        }
         self.files_at(org, &d, &prefix)
     }
 
@@ -862,7 +899,8 @@ impl Backups {
                         key: o.key,
                         size: o.size,
                         taken_at: crate::cron::rfc3339(t),
-                        engine,
+                        engine: Some(engine),
+                        volume: None,
                         compression,
                     },
                 ))
@@ -912,21 +950,28 @@ impl Backups {
 
     fn execute(&self, org: &OrgId, b: &Backup, mut r: Run, mut log: RunLog) {
         let store = self.runs(org, &b.spec.name);
-        let res = self.backup_once(org, b, &mut log);
-        let stack = self
-            .inner
-            .apps
-            .get(org, &b.spec.database)
-            .ok()
-            .and_then(|a| a.spec.stack().ok())
-            .unwrap_or_default();
+        let res = match &b.spec.volume {
+            Some(v) => crate::volume_backup::export::backup_once(self, org, &b.spec, v, &mut log),
+            None => self.backup_once(org, b, &mut log),
+        };
+        let stack = match &b.spec.volume {
+            Some(v) => v.clone(),
+            None => self
+                .inner
+                .apps
+                .get(org, &b.spec.database)
+                .ok()
+                .and_then(|a| a.spec.stack().ok())
+                .unwrap_or_default(),
+        };
+        let what = b.spec.volume.as_deref().unwrap_or(&b.spec.database);
         let q = crate::stack::qualified(org, &stack);
         let (kind, level, msg) = match res {
             Ok(detail) => {
                 let msg = format!(
                     "backup {} of {}: {} ({} bytes)",
                     b.spec.name,
-                    b.spec.database,
+                    what,
                     detail["key"].as_str().unwrap_or(""),
                     detail["size"]
                 );
@@ -942,7 +987,7 @@ impl Backups {
                 (
                     "backup.failed",
                     "error",
-                    format!("backup {} of {} failed: {e}", b.spec.name, b.spec.database),
+                    format!("backup {} of {} failed: {e}", b.spec.name, what),
                 )
             }
         };
@@ -952,7 +997,7 @@ impl Backups {
         self.inner
             .apps
             .controller()
-            .event(kind, level, &q, &b.spec.database, msg);
+            .event(kind, level, &q, what, msg);
     }
 
     /// One backup: dump, compress, upload, verify, prune.
@@ -1034,6 +1079,11 @@ impl Backups {
         let (dest, prefix, source_db) = match (&req.backup, &req.destination) {
             (Some(bn), _) => {
                 let b = self.get(org, bn)?;
+                if b.spec.volume.is_some() {
+                    return Err(Error::invalid(format!(
+                        "{bn} backs up a volume: restore it with volume_restore (isb volume restore), into a new volume"
+                    )));
+                }
                 let d = self.destination_get(org, &b.spec.destination)?;
                 let p = backup_prefix(&d, org, bn);
                 (d, p, Some(b.spec.database.clone()))

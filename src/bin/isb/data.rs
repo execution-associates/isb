@@ -309,11 +309,14 @@ pub enum BackupCmd {
     /// Backup destinations (S3-compatible buckets).
     #[command(subcommand, alias = "destination")]
     Dest(DestCmd),
-    /// Back a database up on a schedule.
+    /// Back a database (or a named volume) up on a schedule.
     Create {
         name: String,
+        #[arg(long, required_unless_present = "volume", conflicts_with = "volume")]
+        database: Option<String>,
+        /// A named volume in the org instead (restore with `isb volume restore`).
         #[arg(long)]
-        database: String,
+        volume: Option<String>,
         #[arg(long)]
         destination: String,
         /// Cron (five fields) or @hourly, @daily, @weekly, ...
@@ -575,13 +578,19 @@ pub fn backup(org: &Option<String>, cmd: BackupCmd) -> Result<u8> {
         BackupCmd::Create {
             name,
             database,
+            volume,
             destination,
             schedule,
             timezone,
             keep,
             compression,
         } => {
-            let mut a = json!({"name": name, "database": database, "destination": destination, "schedule": schedule});
+            let mut a = json!({"name": name, "destination": destination, "schedule": schedule});
+            match (database, volume) {
+                (Some(d), _) => a["database"] = json!(d),
+                (None, Some(v)) => a["volume"] = json!(v),
+                (None, None) => {}
+            }
             if let Some(t) = timezone {
                 a["timezone"] = json!(t);
             }
@@ -629,7 +638,7 @@ pub fn backup(org: &Option<String>, cmd: BackupCmd) -> Result<u8> {
             }
             let mut rows = vec![vec![
                 "NAME".into(),
-                "DATABASE".into(),
+                "SOURCE".into(),
                 "DESTINATION".into(),
                 "SCHEDULE".into(),
                 "KEEP".into(),
@@ -644,7 +653,10 @@ pub fn backup(org: &Option<String>, cmd: BackupCmd) -> Result<u8> {
                 }
                 rows.push(vec![
                     s(&spec["name"]),
-                    s(&spec["database"]),
+                    match spec["volume"].as_str() {
+                        Some(v) => format!("volume {v}"),
+                        None => s(&spec["database"]),
+                    },
                     s(&spec["destination"]),
                     sched,
                     spec["keep"].to_string(),

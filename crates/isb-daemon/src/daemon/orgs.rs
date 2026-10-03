@@ -40,14 +40,39 @@ pub(super) struct Settings {
     /// control plane routes a server placement before the tool runs.
     #[serde(default)]
     pub server: Option<String>,
+    /// Where the org runs: `"local"`, `{"server": NAME}` or `{"vm": {cpus,
+    /// memory, disk}}` (a dedicated VM). A control plane routes anything
+    /// but local before the tool runs.
+    #[serde(default)]
+    pub placement: Option<Value>,
+    /// With a dedicated VM: wait for it (default), or answer at once with
+    /// the provisioning to follow. Read by the control plane's router.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub wait: Option<bool>,
 }
 
 impl Settings {
     fn org(&self) -> Result<OrgId> {
-        if let Some(s) = self.server.as_deref().filter(|s| *s != "local") {
-            return Err(Error::invalid(format!(
-                "server {s}: this daemon places no orgs on servers (only a control plane does: docs/servers.md)"
-            )));
+        let mut where_ = json!({});
+        if let Some(s) = &self.server {
+            where_["server"] = json!(s);
+        }
+        if let Some(p) = &self.placement {
+            where_["placement"] = p.clone();
+        }
+        match crate::servers::vm::placement(&where_)? {
+            crate::servers::vm::Placement::Local => {}
+            crate::servers::vm::Placement::Server(s) => {
+                return Err(Error::invalid(format!(
+                    "server {s}: this daemon places no orgs on servers (only a control plane does: docs/servers.md)"
+                )));
+            }
+            crate::servers::vm::Placement::Vm(_) => {
+                return Err(Error::invalid(
+                    "a dedicated VM is made by a control plane; this daemon is a server's agent (docs/servers.md)",
+                ));
+            }
         }
         let o = OrgId::new(
             self.org
@@ -143,6 +168,7 @@ fn view(d: &Daemon, o: &OrgInfo) -> Value {
     let mut v = serde_json::to_value(o).unwrap_or_default();
     v["domain"] = json!(format!("{}.isb", o.name));
     v["service_names"] = json!(o.dns_dir.is_some());
+    v["placement"] = super::servers::placement_view(d.servers.as_ref(), &o.name);
     v["members"] = json!(d.users.list_members(&o.name).map(|m| m.len()).unwrap_or(0));
     v["stacks"] = json!(
         d.ctl
@@ -169,7 +195,20 @@ fn settings_props() -> Value {
         "default_cpus": {"type": "integer", "minimum": 1, "description": "CPUs an instance gets when its spec sets none."},
         "default_memory": {"type": "string", "description": "Memory an instance gets when its spec sets none, e.g. 512MiB."},
         "egress": {"type": "array", "items": {"type": "string"}, "description": "Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/orgs.md). Replaces the list; [] clears it."},
-        "server": {"type": "string", "description": "Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers."}
+        "server": {"type": "string", "description": "Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. Same as placement {\"server\": NAME}."},
+        "placement": {
+            "description": "Where the org runs, set at creation: \"local\" (this host: an incus project sharing its kernel), {\"server\": NAME} (another host, server_list), or {\"vm\": {\"cpus\", \"memory\", \"disk\"}} (a dedicated VM this control plane makes on its own host: the org's own kernel; defaults 2 CPUs, 4GiB, 40GiB). An org is not moved afterwards.",
+            "oneOf": [
+                {"type": "string", "enum": ["local"]},
+                {"type": "object", "properties": {"server": {"type": "string"}}, "required": ["server"], "additionalProperties": false},
+                {"type": "object", "properties": {"vm": {"type": "object", "properties": {
+                    "cpus": {"type": "integer", "minimum": 1, "maximum": 256},
+                    "memory": {"type": "string", "description": "At least 2GiB (default 4GiB)."},
+                    "disk": {"type": "string", "description": "At least 10GiB (default 40GiB)."}
+                }, "additionalProperties": false}}, "required": ["vm"], "additionalProperties": false}
+            ]
+        },
+        "wait": {"type": "boolean", "description": "With a dedicated VM: wait until it is made and the org created (default true; minutes). false answers at once with `provision`; follow it with server_provision_get (name vm-<org>)."}
     })
 }
 
@@ -282,7 +321,10 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
         "Delete an org",
         "Platform admins: delete an org: its project with its volumes, its network, ACL and service names, and its members, invitations and tokens. Refused while stacks are deployed in it (remove them first); with force=true its remaining sandboxes are deleted too. Its secrets stay on disk under the state directory.",
         schema(
-            json!({"force": {"type": "boolean", "description": "Also delete the org's sandboxes."}}),
+            json!({
+                "force": {"type": "boolean", "description": "Also delete the org's sandboxes."},
+                "delete_vm": {"type": "boolean", "description": "For an org in a dedicated VM: delete the VM and its server registration too (default false: the VM keeps running as an empty server)."}
+            }),
             &["org"],
             "The org to delete."
         ),
@@ -294,6 +336,10 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
                 org: String,
                 #[serde(default)]
                 force: bool,
+                // An org on this host has no VM of its own.
+                #[serde(default)]
+                #[allow(dead_code)]
+                delete_vm: bool,
             }
             let a: A = args(a)?;
             let id = OrgId::new(a.org)?;
@@ -416,5 +462,28 @@ mod tests {
         };
         assert!(s.org().is_err());
         assert!(Settings::default().org().is_err());
+    }
+
+    #[test]
+    fn only_local_placements_reach_the_tool() {
+        let with = |p: Value| Settings {
+            org: Some("acme".into()),
+            placement: Some(p),
+            ..Default::default()
+        };
+        assert!(with(json!("local")).org().is_ok());
+        let e = with(json!({"vm": {}})).org().unwrap_err();
+        assert!(e.to_string().contains("control plane"), "{e}");
+        let e = with(json!({"server": "hel-1"})).org().unwrap_err();
+        assert!(e.to_string().contains("server hel-1"), "{e}");
+        let e = with(json!({"vm": {"memory": "1GiB"}})).org().unwrap_err();
+        assert!(e.to_string().contains("at least 2 GiB"), "{e}");
+        let both = Settings {
+            org: Some("acme".into()),
+            server: Some("x".into()),
+            placement: Some(json!("local")),
+            ..Default::default()
+        };
+        assert!(both.org().is_err());
     }
 }

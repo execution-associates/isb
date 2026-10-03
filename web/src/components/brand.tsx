@@ -1,17 +1,12 @@
 import { cn } from "@/lib/utils";
 
-/** isb's mark: four sandboxes, one of them live. */
+/** The Execution Associates (EXA) monogram, in the current text colour (see `.exa-mark`). */
 export function Logo({ className, light }: { className?: string; light?: boolean }) {
-  const outer = light ? "fill-neutral-50" : "fill-foreground";
-  const inner = light ? "fill-neutral-950" : "fill-background";
   return (
-    <svg viewBox="0 0 32 32" aria-hidden="true" className={cn("size-8", className)}>
-      <rect width="32" height="32" rx="7" className={outer} />
-      <rect x="7" y="7" width="8" height="8" rx="2" className={inner} />
-      <rect x="17" y="7" width="8" height="8" rx="2" className={inner} opacity=".55" />
-      <rect x="7" y="17" width="8" height="8" rx="2" className={inner} opacity=".55" />
-      <rect x="17" y="17" width="8" height="8" rx="2" fill="#34d399" />
-    </svg>
+    <span
+      aria-hidden="true"
+      className={cn("exa-mark inline-block size-8 shrink-0 align-middle", light ? "text-neutral-50" : "text-foreground", className)}
+    />
   );
 }
 

@@ -30,6 +30,11 @@ pub fn call_tool(socket: &Path, name: &str, args: Value, timeout: Duration) -> R
         json!({"name": name, "arguments": args}),
         timeout,
     )?;
+    unwrap_result(r)
+}
+
+/// A `tools/call` result as the tool's value, or its error.
+fn unwrap_result(r: Value) -> Result<Value> {
     let structured = r.get("structuredContent").cloned();
     if r.get("isError").and_then(Value::as_bool) == Some(true) {
         let s = structured.unwrap_or(Value::Null);
@@ -164,12 +169,25 @@ impl<T: Read + Write> ReadWrite for T {}
 /// One request on a fresh connection, bounded by `timeout` overall. The
 /// server closes after answering, so the response ends at EOF.
 fn exchange(
+    s: Stream,
+    method: &str,
+    path: &str,
+    body: &[u8],
+    timeout: Duration,
+    what: &str,
+) -> Result<(u16, Vec<u8>)> {
+    exchange_with(s, method, path, body, timeout, what, &[])
+}
+
+/// [`exchange`] with extra request headers.
+fn exchange_with(
     mut s: Stream,
     method: &str,
     path: &str,
     body: &[u8],
     timeout: Duration,
     what: &str,
+    extra: &[(&str, &str)],
 ) -> Result<(u16, Vec<u8>)> {
     let started = Instant::now();
     let timed_out = || {
@@ -186,10 +204,14 @@ fn exchange(
         }
     };
     s.set_timeouts(timeout)?;
+    let mut more = String::new();
+    for (k, v) in extra {
+        more.push_str(&format!("{k}: {v}\r\n"));
+    }
     let head = format!(
         "{method} {path} HTTP/1.1\r\nHost: localhost\r\nUser-Agent: isb/{}\r\n\
          Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\n\
-         MCP-Protocol-Version: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+         MCP-Protocol-Version: {}\r\nContent-Length: {}\r\n{more}Connection: close\r\n\r\n",
         env!("CARGO_PKG_VERSION"),
         PROTOCOL_VERSIONS[0],
         body.len()

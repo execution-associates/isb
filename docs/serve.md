@@ -18,7 +18,8 @@ tools. It listens in two places:
   | `/orgs/<org>/mcp` | MCP bound to one org: `org` is filled in, and any other value is refused |
   | `POST /api/v1/tools/<tool>`, `/orgs/<org>/api/v1/tools/<tool>` | REST: the arguments as a JSON body; `{"result": ...}`, or `{"error", "message", "data"}` with a matching status (400, 401, 403, 404, 409, 500, 504) |
   | `GET /api/v1/events` | server-sent events: deploys, rollouts, health and restarts in the caller's orgs; resumes from `Last-Event-ID` or `?since=` |
-  | `GET /orgs/<org>/api/v1/terminal?app=NAME` | a websocket to a shell in one of the app's replicas ([below](#the-web-terminal)) |
+  | `GET /orgs/<org>/api/v1/terminal?app=NAME` (or `?instance=NAME`) | a websocket to a shell in one of the app's replicas, or in an instance of the org ([below](#the-web-terminal)) |
+  | `GET /orgs/<org>/api/v1/ssh?instance=NAME` | a websocket carrying SSH to `sshd -i` in an instance of the org, for `isb ssh-proxy` ([ssh.md](ssh.md)) |
 
   `GET /api/v1/openapi.json` describes the REST surface, `GET /api/v1/tools`
   lists the tools, `/healthz` answers without auth, and the identity
@@ -29,6 +30,12 @@ tools. It listens in two places:
   **web UI**, embedded in the binary: sign-in, invitations, accounts and a
   live dashboard, built on the same API ([web.md](web.md)). It never answers
   an API path.
+
+`/orgs/<org>/api/v1/workspace` is the org's workspace as a REST resource
+over the `workspace_*` tools ([workspaces.md](workspaces.md#the-tools)).
+Each org with a workspace is also served on its own bridge address, to
+that org's subnet only, with bearer tokens only, for the agents inside it
+([workspaces.md](workspaces.md#reaching-isb-from-inside-the-bridge-listener)).
 
 `--listen` takes one or more addresses (comma-separated) and refuses
 anything but loopback, or a tailnet address (100.64.0.0/10,
@@ -58,6 +65,8 @@ org. API tokens can be narrowed with scopes (`read`, `deploy`, `admin`,
   or the web UI) are how agents sign in. A token made for an org reaches only
   that org, which is what an agent running inside the org should hold:
   `isb token create agent --org ocai`, then point it at `/orgs/ocai/mcp`.
+  The web UI's MCP page (`/orgs/ocai/agents`) makes the token and writes
+  the client configuration ([web.md](web.md)).
 - **Sessions** (the `isb_session` cookie from `POST /api/v1/auth/login`) are
   how the web UI signs in. Cookie-authenticated writes must carry
   `X-Isb-Csrf: 1`.
@@ -99,13 +108,16 @@ org. API tokens can be narrowed with scopes (`read`, `deploy`, `admin`,
 `GET /orgs/<org>/api/v1/terminal?app=NAME[&slot=N][&cols=C&rows=R]`
 upgrades to a websocket bridged to a login shell (bash, else sh) in one of
 the app's running replicas (`slot`, or one in rotation), with a
-pseudo-terminal. The web UI's Terminal tab uses it.
+pseudo-terminal. The web UI's Terminal tab uses it. With
+`?instance=NAME` instead of `app`, the shell is in that instance of the org
+(a workspace, a sandbox), as root.
 
 - **Who**: the caller signs in as for any tool (session, API token, Access)
   and is admitted as if calling `sandbox_exec` in the org: the org's
   members, admins and owners (not viewers, nor tokens whose scopes leave
   out `sandbox_exec`), platform admins, and nobody when `--deny-tools`
-  covers `sandbox_exec`. Only replicas of the org's own apps are reachable.
+  covers `sandbox_exec`. Only the org's own apps and instances are
+  reachable. SSH ([ssh.md](ssh.md)) is admitted the same way.
 - **Cross-site**: a session cookie rides along on a websocket from any
   site, so a cookie-authenticated upgrade must carry an `Origin` naming the
   request's `Host`. A bearer token needs no `Origin` (a browser never adds
@@ -291,8 +303,10 @@ its listener offers.
 | `stack_redeploy` | Replace a service's replicas though nothing changed. |
 | `stack_rollback` | Back to the previous deployment. |
 | `stack_remove` | Delete a stack's instances and ports (volumes with `volumes: true`), and the `<stack>_<key>` secrets it stored that no other stack uses. |
-| `sandbox_create` | Create or reconcile one sandbox from a service spec (object or YAML). |
-| `sandbox_list` | Instances, filtered by labels. |
+| `sandbox_create` | Create or reconcile one sandbox from a service spec (object or YAML), with an expiry and idle timeout (`expires`, `idle_timeout`; the org's defaults otherwise, 24h and 2h). |
+| `sandbox_list` | Instances, filtered by labels and kind: creator, age, expiry, idle timeout, last activity, limits and use. |
+| `sandbox_extend` | Push a sandbox's expiry out, or change its idle timeout; its creator or the org's admins. |
+| `workspace_get`, `workspace_list`, `workspace_create`, `workspace_update`, `workspace_start`, `workspace_stop`, `workspace_restart`, `workspace_rebuild`, `workspace_delete`, `workspace_token_rotate`, `workspace_settings` | The org's workspace: its machine, home volume and org token, and the sandbox defaults. Disruptive ones need `confirm: true`. See [workspaces.md](workspaces.md). |
 | `sandbox_exec` | Run argv in a sandbox: exit code, stdout, stderr (each capped at 256 KiB, keeping the end), optional stdin text and timeout (default 10m). |
 | `sandbox_remove` | Delete a sandbox (not a stack replica). |
 | `secret_create`, `secret_set`, `secret_get`, `secret_list`, `secret_inspect`, `secret_delete`, `secret_refresh`, `secret_reencrypt`, `secret_recipients`, `secret_resolve` | An org's secret store; values base64. `secret_list` says which stacks use each secret. `secret_set` and `secret_refresh` roll the stacks using the secret. `secret_resolve` (local callers only) is how `isb up` reads store-backed secrets. See [secrets.md](secrets.md). Remote callers reach every org's secrets, values included, unless `--deny-tools 'secret_*'`. |
@@ -307,7 +321,8 @@ its listener offers.
 | `template_catalog_list`, `template_catalog_add`, `template_catalog_remove` | The catalogs added to the built-in one: a host directory or an https URL, isb's format or Dokploy's. Adding and removing: platform admins. |
 | `database_create`, `database_list`, `database_get` | Databases (Postgres, MySQL, MariaDB, MongoDB, Redis) as apps with a `database` source: credentials generated as org secrets, connection details with the password as a secret reference (`database_get` with `reveal` shows it). Deploy, update and delete them with the `app_*` tools. See [databases.md](databases.md). |
 | `backup_destination_create`, `backup_destination_list`, `backup_destination_delete`, `backup_destination_test` | S3-compatible buckets for backups; key pairs kept as org secrets. Loopback endpoints: local callers and platform admins only. |
-| `backup_create`, `backup_update`, `backup_list`, `backup_delete`, `backup_run`, `backup_runs`, `backup_run_log`, `backup_restore` | Scheduled database backups (cron, keep N, gzip or zstd), their files in the bucket (`backup_list` with `name`), runs and logs; restore into an existing database (`confirm: true`) or a new one. |
+| `backup_create`, `backup_update`, `backup_list`, `backup_delete`, `backup_run`, `backup_runs`, `backup_run_log`, `backup_restore` | Scheduled database (or named volume) backups (cron, keep N, gzip or zstd), their files in the bucket (`backup_list` with `name`), runs and logs; restore a database's into an existing database (`confirm: true`) or a new one. |
+| `volume_list`, `volume_get`, `volume_snapshot_create`, `volume_snapshot_list`, `volume_snapshot_delete`, `volume_snapshot_schedule`, `volume_snapshot_runs`, `volume_snapshot_run_log`, `volume_restore`, `volume_restore_list`, `volume_restore_discard` | An org's named volumes: snapshots now and on a schedule (the `/etc/isb/pre-snapshot` hook first), staged restores into a new volume at `/restore/<stamp>`. Changes: org admins and owners. See [volumes.md](volumes.md). |
 | `job_create`, `job_list`, `job_get`, `job_update`, `job_delete`, `job_run`, `job_runs`, `job_run_log` | Scheduled jobs: a command on a cron schedule in an app's replica or a one-off instance from its image; runs with exit code, duration and output. See [jobs.md](jobs.md). |
 | `build_run` | Start a build of a host directory (`app`, `context`, `builder`, `dockerfile`, `target`, `args`, `tag`, `untrusted`, `timeout`) into the org's registry repository; returns an id. Remote callers: `context` under a `--bind-root`. See [builds.md](builds.md). |
 | `build_logs` | A build's state and log lines from `since`, waiting up to 30 s for more; `image` and `digest` when it succeeded. |
@@ -329,7 +344,7 @@ its listener offers.
 | `audit_list` | The audit log, filtered (actor, action and target globs, outcome, surface, time) and paged; an org's owners and admins see their org, platform admins everything ([audit.md](audit.md)). |
 | `audit_verify` | Walk the audit log's and the history's hash chains. Platform admins. |
 | `history_query` | The history ([history.md](history.md)): controller events, incus lifecycle events in every project with their requestor, audit rows and markers, merged; filter by org, object, kind, source, actor, time; `correlate` links incus changes to the audit row that likely caused them. Members see their orgs; host-level rows are for platform admins. |
-| `server_add`, `server_list`, `server_show`, `server_remove`, `server_rotate_cert` | The servers orgs can be placed on: bootstrap one over SSH, list them with their health and orgs, show one, forget one (refused while it holds orgs), issue its agent a new certificate. Platform admins. See [servers.md](servers.md). |
+| `server_add`, `server_list`, `server_show`, `server_remove`, `server_rotate_cert`, `server_provision_get` | The servers orgs can be placed on: bootstrap one over SSH (`wait: false` to answer at once), list them with their health and orgs (and servers being added, whether this host can run dedicated VMs, and suggested firewall sources), show one, forget one (refused while it holds orgs; a dedicated VM is deleted with it), issue its agent a new certificate, follow one being added (steps, log, error). Platform admins. See [servers.md](servers.md). |
 | `host_inventory` | Every incus project and instance on the host, isb's or not: project, org, type, status, addresses, isb's stack and owner labels. Superadmins. |
 | `host_policy` | How the daemon serves: listen addresses, Access, the remote tool policy, what remote specs may ask for, and each superadmin source with its allow list and token count. Superadmins. |
 | `superadmin_token_list`, `superadmin_token_revoke` | Superadmin tokens' metadata, and revoking one by id. Minting is `isb token create NAME --superadmin` on the host only. Superadmins. |
@@ -368,6 +383,9 @@ prior `initialize`, and there is no session id.
 | `--ingress-http`, `--ingress-https` | `ISB_INGRESS_HTTP`, `ISB_INGRESS_HTTPS` | off; `IP:PORT` (`:80` is every address). Either turns the ingress on ([ingress.md](ingress.md)) |
 | `--ingress-tunnels` | `ISB_INGRESS_TUNNELS` | off: turns the ingress on for Cloudflare-tunnel orgs without public listeners |
 | `--ingress-tunnel-port` | `ISB_INGRESS_TUNNEL_PORT` | `8480`: tunnel orgs' listener port on their bridge address |
+| `--workspace-mcp-port` | `ISB_WORKSPACE_MCP_PORT` | `8481`: where each org's workspace reaches the org-bound MCP, on its bridge address ([workspaces.md](workspaces.md#reaching-isb-from-inside-the-bridge-listener)) |
+| `--workspace-pool` | `ISB_WORKSPACE_POOL` | the org's default pool: where new workspace home volumes go (an org's `home_pool` wins) |
+| `--workspace-home-root` | `ISB_WORKSPACE_HOME_ROOT` | off: workspace homes are host folders `<DIR>/<org>/home` instead of volumes ([workspaces.md](workspaces.md#the-home-a-volume-or-a-host-folder)) |
 | `--ingress-public-ip` | `ISB_INGRESS_PUBLIC_IP` | the default route's source address, if public: what `host: auto` names resolve to |
 | `--acme-ca` | `ISB_ACME_CA` | `letsencrypt`; or `letsencrypt-staging`, `internal`, an ACME directory URL |
 | `--acme-email` | `ISB_ACME_EMAIL` | none: the ACME account's contact |

@@ -14,6 +14,8 @@ isb ls [--label k[=v]] [--json]            list, filtered by label
 isb inspect NAME [--json]
 isb exec NAME|SERVICE [-u USER] [-w DIR] [-e K=V] [-l] [-t|-T] [-n] [--timeout D] -- ARGV...
 isb volume create|ls|inspect|rm
+isb volume show NAME | snapshot create|ls|rm|schedule|runs|logs NAME   through isb serve, --org ORG (docs/volumes.md)
+isb volume restore NAME (--snapshot S | --backup B [--key K]) [--instance I] | restores [NAME] | discard NAME STAMP
 isb port add NAME SPEC [--name DEV] [--search N]   prints the listen address in use
 isb port get NAME DEV [KEY]                prints one property, default: listen
 isb port rm NAME DEV... | isb port ls NAME [--json]
@@ -94,7 +96,7 @@ isb backup dest create NAME --endpoint URL --bucket B [--region R] [--prefix P] 
               (--access-key ID | --access-key-secret S --secret-key-secret S) [--create-bucket] [--no-test]
                                            the secret key comes from $ISB_S3_SECRET_KEY or stdin
 isb backup dest ls [--json] | rm NAME | test NAME
-isb backup create NAME --database DB --destination D --schedule CRON [--keep N]
+isb backup create NAME (--database DB | --volume V) --destination D --schedule CRON [--keep N]
               [--compression gzip|zstd|none] [--timezone +HH:MM]
 isb backup update NAME [--schedule CRON] [--keep N] [--destination D] [--enable|--disable]
 isb backup ls [--json] | files NAME [--json] | rm NAME
@@ -134,6 +136,14 @@ isb invite ORG EMAIL [--role member]       viewer|member|admin|owner; prints the
 isb token create NAME [--org ORG] [--expires 90d] [--user EMAIL] [--scope read|deploy|admin|tool:GLOB]...
                                            prints the token, once; scopes only narrow the user's role
 isb token ls [--json] | revoke ID...
+
+# SSH into an org's instances through isb serve's websocket (docs/ssh.md)
+# --url URL (ISB_URL) with ISB_TOKEN or --token-file: a remote daemon, as the token's account;
+# without: the local socket, and `isb key` edits <state>/isb.db for --user EMAIL
+isb key add FILE|- [--name N] | ls [--json] | rm ID...
+isb ssh-config [ORG/INSTANCE...] [--user U] [--identity F] [--known-hosts F] [--as EMAIL] [-o FILE]
+                                           Host blocks (ProxyCommand isb ssh-proxy, pinned host keys); herdr lines on stderr
+isb ssh-proxy ORG/INSTANCE [--as EMAIL]    the ProxyCommand: SSH on stdin/stdout
 
 # the audit log of isb serve, on <state>/audit.db directly (docs/audit.md)
 isb audit ls [--org ORG | --platform] [--actor G] [--action G] [--target G] [--outcome ok|error|CODE]
