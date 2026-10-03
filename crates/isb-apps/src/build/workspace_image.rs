@@ -86,7 +86,7 @@ impl ImageBuild {
         match &self.description {
             Some(d) if !d.trim().is_empty() => d.trim().to_string(),
             _ if self.recipe == DEFAULT_RECIPE => format!(
-                "isb workspace: Ubuntu 24.04, dev (uid 1000), mise (node, bun, uv), Claude Code, Codex, herdr (built {})",
+                "isb workspace: Ubuntu 24.04, dev (uid 1000), mise (node, bun, uv), Claude Code, omp, herdr (built {})",
                 today()
             ),
             _ => format!(
@@ -360,7 +360,7 @@ pub fn list(base: &Client) -> Result<Vec<Value>> {
             (at, v)
         })
         .collect();
-    out.sort_by(|a, b| b.0.cmp(&a.0));
+    out.sort_by_key(|a| std::cmp::Reverse(a.0));
     Ok(out.into_iter().map(|(_, v)| v).collect())
 }
 
@@ -771,7 +771,7 @@ mod tests {
             "MISE_INSTALL_PATH=/usr/local/bin/mise",
             "mise install --system",
             "/usr/local/bin/claude",
-            "/usr/local/bin/codex",
+            "PI_INSTALL_DIR=/usr/local/bin",
             "HERDR_INSTALL_DIR=/usr/local/bin",
             "rm -f /etc/ssh/ssh_host_",
         ] {

@@ -1,6 +1,6 @@
 ---
 title: Workspace images and recipes
-description: Build the images workspaces start from with a recipe script, use isb's default image (Claude Code, Codex, herdr, mise), and tweak each workspace on its first boot.
+description: Build the images workspaces start from with a recipe script, use isb's default image (Claude Code, omp, herdr, mise), and tweak each workspace on its first boot.
 order: 16
 ---
 
@@ -37,7 +37,7 @@ a 632 MiB image.
 | `openssh-server`, git, build-essential, curl, jq, ripgrep, tmux and the usual tools | apt; sshd is installed but not running (isb's SSH starts `sshd -i` per connection), and its host keys are removed so each workspace makes its own |
 | mise, with node (LTS), bun and uv | mise's installer into `/usr/local/bin/mise`; tools with `mise install --system` under `/usr/local/share/mise`, listed in `/etc/mise/config.toml`, with shims on every login shell's path |
 | Claude Code | the native build from `downloads.claude.ai`, checked against its release manifest's SHA-256, as `/usr/local/bin/claude`; `DISABLE_AUTOUPDATER=1`, since a rebuilt image is how it updates |
-| Codex | the `codex-<arch>-unknown-linux-musl` asset of the latest `openai/codex` GitHub release, checked against the release's SHA-256 digest, as `/usr/local/bin/codex` |
+| omp | its official installer (`https://omp.sh/install`, `--binary`, `PI_INSTALL_DIR=/usr/local/bin`): the latest prebuilt binary from the `can1357/oh-my-pi` GitHub release, smoke-tested with `omp --version`, as `/usr/local/bin/omp`; the installer checks no checksum |
 | herdr | herdr's own installer (`https://herdr.dev/install.sh`, which checks its download) with `HERDR_INSTALL_DIR=/usr/local/bin` |
 
 Everything lives outside `/home`, because a workspace's home (a volume or a
@@ -49,7 +49,7 @@ agents sign in from inside the workspace, or read the org's secrets
 (`--secret NAME`).
 
 Claude Code is Anthropic's under its own terms and is downloaded when the
-image is built on your host, never redistributed by isb; Codex and herdr are
+image is built on your host, never redistributed by isb; omp is MIT and herdr is
 Apache-2.0. The recipe is
 [`crates/isb-apps/src/build/workspace-image.sh`](https://github.com/execution-associates/isb/blob/main/crates/isb-apps/src/build/workspace-image.sh).
 

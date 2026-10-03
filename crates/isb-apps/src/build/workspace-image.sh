@@ -8,7 +8,7 @@
 #     per connection, and each workspace makes its own host keys;
 #   - git, build-essential, curl and the usual command-line tools;
 #   - mise, with node (LTS), bun and uv installed system-wide;
-#   - Claude Code, Codex and herdr.
+#   - Claude Code, omp and herdr.
 #
 # Everything lives outside /home, so a workspace's home (a volume or a host
 # folder mounted over /home/dev) never shadows it. No credentials are baked
@@ -110,17 +110,9 @@ cat > /etc/profile.d/claude-code.sh <<'EOF'
 export DISABLE_AUTOUPDATER=1
 EOF
 
-say "Codex (the GitHub release, checksum from the release's digest)"
-asset="codex-$arch-unknown-linux-musl.tar.gz"
-fetch https://api.github.com/repos/openai/codex/releases/latest "$tmp/codex.json"
-url=$(jq -r --arg a "$asset" '.assets[] | select(.name == $a) | .browser_download_url' "$tmp/codex.json")
-sum=$(jq -r --arg a "$asset" '.assets[] | select(.name == $a) | .digest // empty' "$tmp/codex.json")
-sum=${sum#sha256:}
-[ -n "$url" ] && [ -n "$sum" ] || { echo "no $asset with a digest in Codex's latest release" >&2; exit 1; }
-fetch "$url" "$tmp/codex.tar.gz"
-verify "$tmp/codex.tar.gz" "$sum"
-tar -xzf "$tmp/codex.tar.gz" -C "$tmp"
-install -m 0755 "$tmp/codex-$arch-unknown-linux-musl" /usr/local/bin/codex
+say "omp (its official installer, prebuilt binary into /usr/local/bin)"
+# PI_INSTALL_DIR keeps it out of ~/.local/bin, which a host-folder home would hide.
+curl -fsSL https://omp.sh/install | PI_INSTALL_DIR=/usr/local/bin sh -s -- --binary
 
 say "herdr (its official installer, which verifies the download)"
 curl -fsSL https://herdr.dev/install.sh | HERDR_INSTALL_DIR=/usr/local/bin sh
@@ -129,7 +121,7 @@ say "versions"
 printf 'mise %s\n' "$(mise --version)"
 su - dev -c 'node --version; bun --version; uv --version' 2>&1
 printf 'claude %s\n' "$(/usr/local/bin/claude --version 2>&1 | head -1)"
-printf '%s\n' "$(/usr/local/bin/codex --version 2>&1 | head -1)"
+printf 'omp %s\n' "$(/usr/local/bin/omp --version 2>&1 | head -1)"
 printf '%s\n' "$(/usr/local/bin/herdr --version 2>&1 | head -1)"
 
 say "cleaning up"

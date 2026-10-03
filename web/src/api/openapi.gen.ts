@@ -3764,6 +3764,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/workspace_image_build": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Build a workspace image
+         * @description Build a workspace image from a recipe script (platform admins): launch a temporary container from `base` in isb's system project, run the recipe in it as root, stop it, publish it as the local image `name`, and delete the container. Without `recipe`, isb's default recipe (Ubuntu 24.04, dev at uid 1000, mise, Claude Code, omp, herdr) as isb-workspace. Returns an id at once: follow it with workspace_image_logs. A failure publishes nothing; the same recipe and base again is a no-op unless force. Only images isb built can be replaced.
+         */
+        post: operations["workspace_image_build"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/workspace_image_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List workspace images
+         * @description The workspace images isb built on this host (alias, description, size, base, recipe hash, who built it and when), the builds running or recently finished, and whether the default recipe's image (isb-workspace) exists and is current. Platform admins.
+         */
+        post: operations["workspace_image_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/workspace_image_logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Follow a workspace image build
+         * @description A workspace image build's state and its log lines from `since` (0 for all); `wait` (seconds, at most 30) holds the call until there are new lines or the build ends. Done when `state` is succeeded (`image`) or failed (`error`).
+         */
+        post: operations["workspace_image_logs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/workspace_image_remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove a workspace image
+         * @description Remove a workspace image isb built (platform admins), by its alias: the alias, and the image when nothing else names it. Images isb did not build (dev-base, any other) are refused. Workspaces already made from it keep running; rebuilding one needs another image.
+         */
+        post: operations["workspace_image_remove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/workspace_list": {
         parameters: {
             query?: never;
@@ -3844,6 +3924,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/workspace_setup_run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run the workspace's setup script
+         * @description Run the workspace's first-boot setup script again, as root: now when the workspace is running, else on its next start. Its outcome and the tail of its output go to the history (workspace.setup). Org admins and above.
+         */
+        post: operations["workspace_setup_run"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/workspace_start": {
         parameters: {
             query?: never;
@@ -3878,6 +3978,46 @@ export interface paths {
          * @description Stop the workspace. This ends every session on it (terminals, SSH, the agents running there): without confirm: true it only reports the live sessions. Org members and above.
          */
         post: operations["workspace_stop"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/workspace_terminal_update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rename or end a terminal session
+         * @description A herdr-backed web terminal session: `rename` it (the herdr tab's label), or `end: true` to close it and every shell in it. Org members and above.
+         */
+        post: operations["workspace_terminal_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/workspace_terminals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The workspace's terminal sessions
+         * @description How the workspace's web terminal works and its live sessions: mode `herdr` when herdr is installed in the workspace (each tab is a herdr tab in the `isb web` workspace of the user's herdr server, so a reload or a dropped connection reattaches to the same shell; `sessions` lists them), else `shell` (plain shells that end with their tab). Org members and above.
+         */
+        post: operations["workspace_terminals"];
         delete?: never;
         options?: never;
         head?: never;
@@ -12045,6 +12185,8 @@ export interface operations {
                     root_size?: string;
                     /** @description Org secrets delivered as /run/isb/secrets/NAME. */
                     secrets?: string[];
+                    /** @description A first-boot script, run once as root on the first start (and after each rebuild, or on request with workspace_setup_run), logged to the history. Not for secrets. */
+                    setup?: string;
                     /**
                      * @description The workspace token's role in the org (default admin).
                      * @enum {string}
@@ -12134,6 +12276,174 @@ export interface operations {
                 "application/json": {
                     /** @description The workspace (default: the org's only one). */
                     name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    workspace_image_build: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The image it starts from (default images:ubuntu/24.04). */
+                    base?: string;
+                    /** @description The image's description, shown in the workspace create form. */
+                    description?: string;
+                    /** @description Build even when the image is up to date. */
+                    force?: boolean;
+                    /** @description The local image alias (default isb-workspace). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description The recipe: a shell script run as root (a #! line picks its interpreter). Default: isb's own. */
+                    recipe?: string;
+                    /** @description Longest the recipe may run, e.g. 45m (default 30m, at most 2h). */
+                    timeout?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    workspace_image_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    workspace_image_logs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    id: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    since?: number;
+                    wait?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    workspace_image_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
                 };
@@ -12336,6 +12646,46 @@ export interface operations {
             };
         };
     };
+    workspace_setup_run: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
     workspace_start: {
         parameters: {
             query?: never;
@@ -12388,6 +12738,92 @@ export interface operations {
                 "application/json": {
                     /** @description Required: this ends live sessions on the workspace. Without it the call only says what would end. */
                     confirm?: boolean;
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    workspace_terminal_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Close the session and its shells. */
+                    end?: boolean;
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description Its new name. */
+                    rename?: string;
+                    /** @description The session (its tab's name). */
+                    session: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    workspace_terminals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
                     /** @description The workspace (default: the org's only one). */
                     name?: string;
                     /** @description The org to act in (default: default). */
@@ -12490,6 +12926,8 @@ export interface operations {
                     root_size?: string;
                     /** @description Replaces the delivered secrets. */
                     secrets?: string[];
+                    /** @description Replaces the first-boot script ("" removes it); it runs on the next rebuild or with workspace_setup_run. */
+                    setup?: string;
                     /** @enum {string} */
                     token_role?: "viewer" | "member" | "admin";
                 };
@@ -12743,6 +13181,8 @@ export interface operations {
                     root_size?: string;
                     /** @description Org secrets delivered as /run/isb/secrets/NAME. */
                     secrets?: string[];
+                    /** @description A first-boot script, run once as root on the first start (and after each rebuild, or on request with workspace_setup_run), logged to the history. Not for secrets. */
+                    setup?: string;
                     /**
                      * @description The workspace token's role in the org (default admin).
                      * @enum {string}
@@ -12856,6 +13296,8 @@ export interface operations {
                     root_size?: string;
                     /** @description Replaces the delivered secrets. */
                     secrets?: string[];
+                    /** @description Replaces the first-boot script ("" removes it); it runs on the next rebuild or with workspace_setup_run. */
+                    setup?: string;
                     /** @enum {string} */
                     token_role?: "viewer" | "member" | "admin";
                 };

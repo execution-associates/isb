@@ -19,7 +19,7 @@ endpoint has neither a tool nor a documented reason in the
 
 | Category | Count |
 |---|---|
-| Tools in the web UI and MCP | 120 |
+| Tools in the web UI and MCP | 127 |
 | Account tools, the web UI through the identity endpoints | 17 |
 | Tools for MCP and the CLI only | 18 |
 | Identity endpoints with a tool | 18 |
@@ -56,6 +56,13 @@ a person on the web does not need it.
 | Capability | Web UI | MCP |
 |---|---|---|
 | The workspace: status, resources, home, sessions, connect details | Workspace (every tab) | `workspace_get` |
+| Build a workspace image from a recipe (the default image or your own) | Workspace create form: Build the default image (platform admins) | `workspace_image_build` |
+| Follow an image build's log | Workspace create form, the build log | `workspace_image_logs` |
+| List the workspace images isb built | Workspace create form, the image picker | `workspace_image_list` |
+| Remove a workspace image isb built | Workspace create form (platform admins) | `workspace_image_remove` |
+| Run the workspace's first-boot setup script again | Workspace page | `workspace_setup_run` |
+| The workspace's terminal sessions (herdr or plain shells) | Workspace, Terminal | `workspace_terminals` |
+| Rename or end a terminal session | Workspace, Terminal: rename a tab, close it (Detach or End) | `workspace_terminal_update` |
 | Create, change, delete it | Workspace: Create; Resources, Home, Environment tabs; Delete | `workspace_create`, `workspace_update`, `workspace_delete` |
 | Start, stop, restart, rebuild | Workspace header actions | `workspace_start`, `workspace_stop`, `workspace_restart`, `workspace_rebuild` |
 | Rotate its token | Workspace, Connect: Rotate token | `workspace_token_rotate` |

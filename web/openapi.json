@@ -13199,6 +13199,10 @@
                     },
                     "type": "array"
                   },
+                  "setup": {
+                    "description": "A first-boot script, run once as root on the first start (and after each rebuild, or on request with workspace_setup_run), logged to the history. Not for secrets.",
+                    "type": "string"
+                  },
                   "token_role": {
                     "description": "The workspace token's role in the org (default admin).",
                     "enum": [
@@ -13383,6 +13387,277 @@
           "tools"
         ],
         "x-isb-tool": "workspace_get"
+      }
+    },
+    "/api/v1/tools/workspace_image_build": {
+      "post": {
+        "description": "Build a workspace image from a recipe script (platform admins): launch a temporary container from `base` in isb's system project, run the recipe in it as root, stop it, publish it as the local image `name`, and delete the container. Without `recipe`, isb's default recipe (Ubuntu 24.04, dev at uid 1000, mise, Claude Code, omp, herdr) as isb-workspace. Returns an id at once: follow it with workspace_image_logs. A failure publishes nothing; the same recipe and base again is a no-op unless force. Only images isb built can be replaced.",
+        "operationId": "workspace_image_build",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "base": {
+                    "description": "The image it starts from (default images:ubuntu/24.04).",
+                    "type": "string"
+                  },
+                  "description": {
+                    "description": "The image's description, shown in the workspace create form.",
+                    "type": "string"
+                  },
+                  "force": {
+                    "description": "Build even when the image is up to date.",
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "description": "The local image alias (default isb-workspace).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "recipe": {
+                    "description": "The recipe: a shell script run as root (a #! line picks its interpreter). Default: isb's own.",
+                    "type": "string"
+                  },
+                  "timeout": {
+                    "description": "Longest the recipe may run, e.g. 45m (default 30m, at most 2h).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Build a workspace image",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "workspace_image_build"
+      }
+    },
+    "/api/v1/tools/workspace_image_list": {
+      "post": {
+        "description": "The workspace images isb built on this host (alias, description, size, base, recipe hash, who built it and when), the builds running or recently finished, and whether the default recipe's image (isb-workspace) exists and is current. Platform admins.",
+        "operationId": "workspace_image_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List workspace images",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "workspace_image_list"
+      }
+    },
+    "/api/v1/tools/workspace_image_logs": {
+      "post": {
+        "description": "A workspace image build's state and its log lines from `since` (0 for all); `wait` (seconds, at most 30) holds the call until there are new lines or the build ends. Done when `state` is succeeded (`image`) or failed (`error`).",
+        "operationId": "workspace_image_logs",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "since": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "wait": {
+                    "maximum": 30,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Follow a workspace image build",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "workspace_image_logs"
+      }
+    },
+    "/api/v1/tools/workspace_image_remove": {
+      "post": {
+        "description": "Remove a workspace image isb built (platform admins), by its alias: the alias, and the image when nothing else names it. Images isb did not build (dev-base, any other) are refused. Workspaces already made from it keep running; rebuilding one needs another image.",
+        "operationId": "workspace_image_remove",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Remove a workspace image",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "workspace_image_remove"
       }
     },
     "/api/v1/tools/workspace_list": {
@@ -13659,6 +13934,67 @@
         "x-isb-tool": "workspace_settings"
       }
     },
+    "/api/v1/tools/workspace_setup_run": {
+      "post": {
+        "description": "Run the workspace's first-boot setup script again, as root: now when the workspace is running, else on its next start. Its outcome and the tail of its output go to the history (workspace.setup). Org admins and above.",
+        "operationId": "workspace_setup_run",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Run the workspace's setup script",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "workspace_setup_run"
+      }
+    },
     "/api/v1/tools/workspace_start": {
       "post": {
         "description": "Start the workspace and deliver its credentials. Org members and above.",
@@ -13785,6 +14121,142 @@
         "x-isb-tool": "workspace_stop"
       }
     },
+    "/api/v1/tools/workspace_terminal_update": {
+      "post": {
+        "description": "A herdr-backed web terminal session: `rename` it (the herdr tab's label), or `end: true` to close it and every shell in it. Org members and above.",
+        "operationId": "workspace_terminal_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "end": {
+                    "description": "Close the session and its shells.",
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "rename": {
+                    "description": "Its new name.",
+                    "type": "string"
+                  },
+                  "session": {
+                    "description": "The session (its tab's name).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "session"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Rename or end a terminal session",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "workspace_terminal_update"
+      }
+    },
+    "/api/v1/tools/workspace_terminals": {
+      "post": {
+        "description": "How the workspace's web terminal works and its live sessions: mode `herdr` when herdr is installed in the workspace (each tab is a herdr tab in the `isb web` workspace of the user's herdr server, so a reload or a dropped connection reattaches to the same shell; `sessions` lists them), else `shell` (plain shells that end with their tab). Org members and above.",
+        "operationId": "workspace_terminals",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "The workspace's terminal sessions",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "workspace_terminals"
+      }
+    },
     "/api/v1/tools/workspace_token_rotate": {
       "post": {
         "description": "Mint the workspace a new token and deliver it inside; the old one stops working at once. The token is never returned. Org admins and above.",
@@ -13905,6 +14377,10 @@
                       "type": "string"
                     },
                     "type": "array"
+                  },
+                  "setup": {
+                    "description": "Replaces the first-boot script (\"\" removes it); it runs on the next rebuild or with workspace_setup_run.",
+                    "type": "string"
                   },
                   "token_role": {
                     "enum": [
@@ -14431,6 +14907,10 @@
                     },
                     "type": "array"
                   },
+                  "setup": {
+                    "description": "Replaces the first-boot script (\"\" removes it); it runs on the next rebuild or with workspace_setup_run.",
+                    "type": "string"
+                  },
                   "token_role": {
                     "enum": [
                       "viewer",
@@ -14551,6 +15031,10 @@
                       "type": "string"
                     },
                     "type": "array"
+                  },
+                  "setup": {
+                    "description": "A first-boot script, run once as root on the first start (and after each rebuild, or on request with workspace_setup_run), logged to the history. Not for secrets.",
+                    "type": "string"
                   },
                   "token_role": {
                     "description": "The workspace token's role in the org (default admin).",

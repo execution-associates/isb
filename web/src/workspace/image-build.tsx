@@ -83,7 +83,7 @@ export function BuildDefaultImage({ image, canBuild, done }: { image: string; ca
           ) : (
             <>
               isb&apos;s default workspace image, <code className="font-mono text-xs">{image}</code> (Ubuntu 24.04, <code className="font-mono text-xs">dev</code> with sudo,
-              mise, Claude Code, Codex and herdr), is not on this host yet.{" "}
+              mise, Claude Code, omp and herdr), is not on this host yet.{" "}
               {canBuild ? "Building it takes a few minutes." : "A platform admin can build it (isb workspace image build)."}
             </>
           )}

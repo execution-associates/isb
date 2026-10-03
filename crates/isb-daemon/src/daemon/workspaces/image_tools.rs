@@ -269,7 +269,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
     r.register(
         Tool::new(
             "workspace_image_build",
-            "Build a workspace image from a recipe script (platform admins): launch a temporary container from `base` in isb's system project, run the recipe in it as root, stop it, publish it as the local image `name`, and delete the container. Without `recipe`, isb's default recipe (Ubuntu 24.04, dev at uid 1000, mise, Claude Code, Codex, herdr) as isb-workspace. Returns an id at once: follow it with workspace_image_logs. A failure publishes nothing; the same recipe and base again is a no-op unless force. Only images isb built can be replaced.",
+            "Build a workspace image from a recipe script (platform admins): launch a temporary container from `base` in isb's system project, run the recipe in it as root, stop it, publish it as the local image `name`, and delete the container. Without `recipe`, isb's default recipe (Ubuntu 24.04, dev at uid 1000, mise, Claude Code, omp, herdr) as isb-workspace. Returns an id at once: follow it with workspace_image_logs. A failure publishes nothing; the same recipe and base again is a no-op unless force. Only images isb built can be replaced.",
             obj(
                 json!({
                     "name": {"type": "string", "description": "The local image alias (default isb-workspace)."},

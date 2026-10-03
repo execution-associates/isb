@@ -60,7 +60,7 @@ terminal.
   (`workspace` unless `--name`), from any incus image (`isb-workspace`,
   `dev-base`, `images:ubuntu/24.04`) or the org's own `registry:APP:TAG`.
   Without `--image` it is `isb-workspace` (isb's default image, built from
-  its recipe: Claude Code, Codex, herdr, mise) when the host has it, then
+  its recipe: Claude Code, omp, herdr, mise) when the host has it, then
   `dev-base`, else `images:ubuntu/24.04`; a local image the host lacks is
   refused with the ones it has. It starts with the host (`boot.autostart`).
   [Workspace images](../guides/workspace-images.md) covers building images
