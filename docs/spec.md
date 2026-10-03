@@ -781,6 +781,29 @@ refuses `replicas` above 1, and applies only `resources`.
 | `resources.limits` | | `cpus` (whole CPUs) and `memory`: the same as `cpus` and `mem_limit`, which they may not repeat. |
 | `labels` | | Labels for the service's instances, merged over `labels`. |
 
+### `domains`
+
+Public hostnames `isb serve`'s ingress routes to the service's healthy
+replicas, with certificates (see [ingress.md](ingress.md)). Stacks only; `isb
+up` ignores them. Changing them never replaces an instance.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `host` | (required) | `app.example.com`; `*.example.com` where the org allows wildcards; `auto` for a generated `<service>-<stack>-<org>.<ip>.sslip.io` name. |
+| `path` | `/` | Path prefix: `/api` matches `/api` and `/api/...`. |
+| `port` | (required without `redirect`) | The port the service listens on in its replicas. |
+| `https` | `true` | Serve over HTTPS with a certificate the ingress obtains, redirecting HTTP to it. `false`: plain HTTP. |
+| `redirect` | | Answer with a 308 to this URL instead of proxying; a URL without a path keeps the request's path and query. |
+| `strip_prefix` | `false` | Remove `path` before passing the request on. |
+| `www_redirect` | `false` | Also serve `www.<host>`, redirecting to `host`. |
+
+```yaml
+domains:
+  - {host: shop.example.com, port: 8080}
+  - {host: shop.example.com, path: /api, port: 3000, strip_prefix: true}
+  - {host: auto, port: 8080}
+```
+
 ### `secrets`
 
 Secrets (top-level `secrets`) to write into the guest: names, or the long form

@@ -179,7 +179,7 @@ directly.
 |---|---|
 | `stack_deploy` | Deploy or update a stack from compose YAML (`name`, `compose`, `vars`, `secrets`, `base_dir`, `wait`, `timeout`). Returns the change per service; `wait` blocks until it settles. |
 | `stack_list` | Every stack with its services' state. |
-| `stack_status` | One stack in detail: replicas, health, rotation, restarts, probe output, ports and backends. |
+| `stack_status` | One stack in detail: replicas, health, rotation, restarts, probe output, ports and backends, and each domain with its URL and certificate state. |
 | `stack_config` | The deployed compose file, and its secrets as references (store name, driver, version), never values. |
 | `stack_logs` | Recent output of a service's replicas. |
 | `stack_scale` | Set a service's replicas. |
@@ -192,6 +192,7 @@ directly.
 | `sandbox_remove` | Delete a sandbox (not a stack replica). |
 | `secret_create`, `secret_set`, `secret_get`, `secret_list`, `secret_inspect`, `secret_delete`, `secret_refresh`, `secret_reencrypt`, `secret_recipients`, `secret_resolve` | An org's secret store; values base64. `secret_set` and `secret_refresh` roll the stacks using the secret. `secret_resolve` (local callers only) is how `isb up` reads store-backed secrets. See [secrets.md](secrets.md). Remote callers reach every org's secrets, values included, unless `--deny-tools 'secret_*'`. |
 | `server_status` | Versions, and the balancer's routes with live counters. |
+| `ingress_status` | The ingress: listeners, CA, the Caddy process, every routed domain (URL, certificate state, upstreams), conflicts and refusals, and each tunnel org's cloudflared ([ingress.md](ingress.md)). Shows the caller's orgs. |
 | `overview` | Everything a dashboard shows in one call: host CPU and memory with history, every stack in detail, sandboxes with their CPU and memory, the latest event number. |
 | `events` | The event feed (deploys, rollouts, health changes, restarts, failures) after a `since` cursor, optionally waiting up to 30 s for one. |
 
@@ -224,3 +225,10 @@ prior `initialize`, and there is no session id.
 | `--github-client-id`, `--google-client-id` | `ISB_GITHUB_CLIENT_ID`, `ISB_GOOGLE_CLIENT_ID` | off; secrets in `ISB_GITHUB_CLIENT_SECRET`, `ISB_GOOGLE_CLIENT_SECRET` or the default org's secrets ([auth.md](auth.md#signing-in-with-github-google-or-oidc)) |
 | `--oidc-issuer`, `--oidc-client-id`, `--oidc-name` | `ISB_OIDC_ISSUER`, `ISB_OIDC_CLIENT_ID`, `ISB_OIDC_NAME` | off; secret in `ISB_OIDC_CLIENT_SECRET` or the default org's secrets |
 | `--open-signup` | `ISB_OPEN_SIGNUP` | off: provider sign-up needs an invitation |
+| `--ingress-http`, `--ingress-https` | `ISB_INGRESS_HTTP`, `ISB_INGRESS_HTTPS` | off; `IP:PORT` (`:80` is every address). Either turns the ingress on ([ingress.md](ingress.md)) |
+| `--ingress-tunnels` | `ISB_INGRESS_TUNNELS` | off: turns the ingress on for Cloudflare-tunnel orgs without public listeners |
+| `--ingress-tunnel-port` | `ISB_INGRESS_TUNNEL_PORT` | `8480`: tunnel orgs' listener port on their bridge address |
+| `--ingress-public-ip` | `ISB_INGRESS_PUBLIC_IP` | the default route's source address, if public: what `host: auto` names resolve to |
+| `--acme-ca` | `ISB_ACME_CA` | `letsencrypt`; or `letsencrypt-staging`, `internal`, an ACME directory URL |
+| `--acme-email` | `ISB_ACME_EMAIL` | none: the ACME account's contact |
+| `--caddy-bin` | `ISB_CADDY_BIN` | the pinned Caddy release, downloaded and checked |

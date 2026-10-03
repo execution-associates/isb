@@ -624,7 +624,7 @@ pub fn release_asset(version: &str, arch: &str) -> String {
     format!("isb-v{version}-{arch}-unknown-linux-musl")
 }
 
-fn fetch(url: &str, limit: u64) -> Result<Vec<u8>> {
+pub(crate) fn fetch(url: &str, limit: u64) -> Result<Vec<u8>> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(300)))
         .user_agent(concat!("isb/", env!("CARGO_PKG_VERSION")))
@@ -691,7 +691,7 @@ fn download_release(version: &str, arch: &str, dir: &Path, dst: &Path) -> Result
     set_mode(dst, 0o755)
 }
 
-fn hex(b: &[u8]) -> String {
+pub(crate) fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 

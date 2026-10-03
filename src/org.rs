@@ -104,6 +104,30 @@ use std::collections::BTreeMap;
 const KEY_ORG: &str = "user.isb.org";
 const KEY_NETWORK: &str = "user.isb.network";
 const KEY_EGRESS: &str = "user.isb.egress";
+const KEY_DOMAINS: &str = "user.isb.domains";
+const KEY_INGRESS: &str = "user.isb.ingress";
+const KEY_CF_ACCOUNT: &str = "user.isb.ingress.cloudflare.account";
+const KEY_CF_ZONE: &str = "user.isb.ingress.cloudflare.zone";
+
+/// How an org's domains reach it: Caddy's public listeners (default) or the
+/// org's own Cloudflare Tunnel.
+pub const INGRESS_CADDY: &str = "caddy";
+pub const INGRESS_CLOUDFLARE_TUNNEL: &str = "cloudflare-tunnel";
+
+/// Check an allowlist entry: a domain suffix (`example.com`), or
+/// `*.example.com` to allow wildcard hosts under it too.
+pub fn check_domain_suffix(s: &str) -> Result<String> {
+    let s = s.trim().to_ascii_lowercase();
+    let base = s.strip_prefix("*.").unwrap_or(&s);
+    if base.starts_with("*.") {
+        return Err(Error::invalid(format!(
+            "--allow-domain {s:?}: one * at most"
+        )));
+    }
+    crate::ingress::domain::check_host(base)
+        .map_err(|e| Error::invalid(format!("--allow-domain {s:?}: {e}")))?;
+    Ok(s)
+}
 
 /// Limits for an org as a whole (the incus project's limits) and the
 /// defaults each instance gets when its spec sets none.
@@ -124,6 +148,15 @@ pub struct OrgOptions {
     /// Private destinations the org may reach despite the default deny.
     /// `None` keeps what the org has; `Some` replaces it.
     pub egress: Option<Vec<Egress>>,
+    /// Domain suffixes the org's services may serve; `Some(empty)` clears,
+    /// `None` keeps.
+    pub domains: Option<Vec<String>>,
+    /// `caddy` or `cloudflare-tunnel`; `None` keeps.
+    pub ingress: Option<String>,
+    /// Cloudflare account and zone ids for the tunnel provider's API calls
+    /// (`Some("")` clears).
+    pub cloudflare_account: Option<String>,
+    pub cloudflare_zone: Option<String>,
 }
 
 /// An org as it exists in incus.
@@ -142,6 +175,14 @@ pub struct OrgInfo {
     pub bind_roots: Vec<String>,
     /// Egress exceptions, as `isb org create --allow-egress` takes them.
     pub egress: Vec<String>,
+    /// Domain suffixes its services may serve (empty: any concrete name).
+    pub domains: Vec<String>,
+    /// `caddy` or `cloudflare-tunnel`.
+    pub ingress: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cloudflare_account: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cloudflare_zone: Option<String>,
     /// The hosts directory the org's dnsmasq reads service names from, when
     /// service discovery is on.
     pub dns_dir: Option<String>,
@@ -520,6 +561,45 @@ pub fn ensure(
             .unwrap_or_default(),
     };
     check_egress(&egress)?;
+    let keep = |key: &str| -> String {
+        existing
+            .as_ref()
+            .and_then(|p| p["config"][key].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let domains = match &opts.domains {
+        Some(d) => d
+            .iter()
+            .map(|s| check_domain_suffix(s))
+            .collect::<Result<Vec<_>>>()?
+            .join(" "),
+        None => keep(KEY_DOMAINS),
+    };
+    let ingress = match &opts.ingress {
+        Some(i) if i == INGRESS_CADDY || i == INGRESS_CLOUDFLARE_TUNNEL => i.clone(),
+        Some(i) => {
+            return Err(Error::invalid(format!(
+                "--ingress {i:?}: {INGRESS_CADDY} or {INGRESS_CLOUDFLARE_TUNNEL}"
+            )));
+        }
+        None => keep(KEY_INGRESS),
+    };
+    let cf_account = opts
+        .cloudflare_account
+        .clone()
+        .unwrap_or_else(|| keep(KEY_CF_ACCOUNT));
+    let cf_zone = opts
+        .cloudflare_zone
+        .clone()
+        .unwrap_or_else(|| keep(KEY_CF_ZONE));
+    for v in [&cf_account, &cf_zone] {
+        if !v.chars().all(|c| c.is_ascii_alphanumeric()) {
+            return Err(Error::invalid(format!(
+                "Cloudflare id {v:?}: letters and digits only"
+            )));
+        }
+    }
 
     // Service discovery: the org's dnsmasq reads its hosts directory. Set at
     // creation, since changing raw.dnsmasq later restarts dnsmasq.
@@ -645,6 +725,10 @@ pub fn ensure(
         KEY_ORG: org.as_str(),
         KEY_NETWORK: bridge,
         KEY_EGRESS: egress.iter().map(Egress::render).collect::<Vec<_>>().join(" "),
+        KEY_DOMAINS: domains,
+        KEY_INGRESS: ingress,
+        KEY_CF_ACCOUNT: cf_account,
+        KEY_CF_ZONE: cf_zone,
     });
     let roots: Vec<String> = opts
         .bind_roots
@@ -783,6 +867,17 @@ fn info(base: &Client, org: OrgId, p: &Value) -> Result<OrgInfo> {
             .get(KEY_EGRESS)
             .map(|s| s.split_whitespace().map(String::from).collect())
             .unwrap_or_default(),
+        domains: cfg
+            .get(KEY_DOMAINS)
+            .map(|s| s.split_whitespace().map(String::from).collect())
+            .unwrap_or_default(),
+        ingress: cfg
+            .get(KEY_INGRESS)
+            .filter(|s| !s.is_empty())
+            .cloned()
+            .unwrap_or_else(|| INGRESS_CADDY.to_string()),
+        cloudflare_account: cfg.get(KEY_CF_ACCOUNT).filter(|s| !s.is_empty()).cloned(),
+        cloudflare_zone: cfg.get(KEY_CF_ZONE).filter(|s| !s.is_empty()).cloned(),
         dns_dir,
         instances,
     })

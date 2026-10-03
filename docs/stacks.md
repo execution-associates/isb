@@ -124,6 +124,26 @@ Limits: TCP only (a UDP published port is an error in a stack), single ports
 (no ranges), and backends see the daemon's address, not the client's.
 Guest-bound ports (`bind: guest`) stay per-instance proxy devices.
 
+## Domains
+
+A service's `domains:` put it on a public hostname over HTTP(S), when the
+daemon runs its ingress (`isb serve --ingress-http/--ingress-https`):
+
+```yaml
+services:
+  web:
+    domains:
+      - {host: shop.example.com, port: 8080}     # https by default, with a certificate
+      - {host: auto, port: 8080}                 # web-shop-acme.203-0-113-7.sslip.io
+```
+
+The ingress (Caddy, run by the daemon) sends each request to a replica in
+rotation, the same set the load balancer and service names use, so rollouts
+are as gapless as for published ports: a replica leaves the routes, its
+requests in flight finish, and only then is it stopped. Certificates come
+from Let's Encrypt. A hostname another org serves is refused at deploy. See
+[ingress.md](ingress.md).
+
 ## Service discovery
 
 Replica names change with every rollout, so a stack in an org gets stable

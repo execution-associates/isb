@@ -65,6 +65,8 @@ pub struct ServeConfig {
     pub oauth: crate::auth::oauth::OAuthSettings,
     /// Accounts without an invitation, for verified provider emails.
     pub open_signup: bool,
+    /// The HTTP(S) edge for stack domains; `None` leaves domains unserved.
+    pub ingress: Option<crate::ingress::IngressConfig>,
 }
 
 /// The identity endpoints over `<state>/isb.db`. Provider client secrets
@@ -111,6 +113,7 @@ struct Daemon {
     policy: RemotePolicy,
     state_dir: PathBuf,
     secrets: Arc<crate::secrets::Secrets>,
+    ingress: Option<Arc<crate::ingress::Manager>>,
 }
 
 /// Run the daemon until SIGINT/SIGTERM. Apps keep running when it stops.
@@ -144,13 +147,37 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         Some(_) => Some(auth_routes(&cfg, users.clone(), &secrets)?),
         None => None,
     };
-    let ctl = Controller::start(client.clone(), store, cfg.interval, secrets.clone())?;
+    // The ingress follows rotation from the first replica the controller
+    // resumes, so it exists before the controller does.
+    let ingress = match &cfg.ingress {
+        Some(ic) => Some(crate::ingress::Manager::new(
+            ic.clone(),
+            client.clone(),
+            secrets.clone(),
+            &cfg.state_dir,
+        )?),
+        None => None,
+    };
+    let observer = ingress
+        .clone()
+        .map(|m| m as Arc<dyn crate::stack::controller::Observer>);
+    let ctl = Controller::start_with(
+        client.clone(),
+        store,
+        cfg.interval,
+        secrets.clone(),
+        observer,
+    )?;
+    if let Some(m) = &ingress {
+        m.start(ctl.clone())?;
+    }
     let d = Arc::new(Daemon {
         client,
         ctl: ctl.clone(),
         policy: cfg.policy.clone(),
         state_dir: cfg.state_dir.clone(),
         secrets,
+        ingress: ingress.clone(),
     });
     let registry = registry(d.clone())?;
     let hooks = hooks(d.clone(), users.clone(), cfg.allow_unauthenticated);
@@ -184,6 +211,9 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     });
     let r = crate::server::serve(listeners, registry, healthz);
     ctl.shutdown();
+    if let Some(m) = &ingress {
+        m.shutdown();
+    }
     r
 }
 
@@ -214,7 +244,7 @@ const PLATFORM_TOOLS: &[&str] = &["server_status"];
 
 /// Read-only tools that span orgs: any signed-in user, filtered to their
 /// orgs by the tool itself.
-const CROSS_ORG_READS: &[&str] = &["overview", "events", "stack_list"];
+const CROSS_ORG_READS: &[&str] = &["overview", "events", "stack_list", "ingress_status"];
 
 /// The org a tool call names (`org`, default `default`).
 fn arg_org(args: &Value) -> Result<crate::org::OrgId> {
@@ -495,6 +525,23 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
                 .filter(|e| event_visible(&orgs, &e.stack))
                 .collect();
             Ok(json!({"seq": seq, "events": events}))
+        }
+    );
+    tool!(
+        "ingress_status",
+        "Ingress status",
+        "The HTTP(S) edge: its listeners, CA and Caddy process; every routed domain with its URL, certificate state (issued, pending, failed, unsupported, cloudflare, none) and live upstreams; domain conflicts and refusals; and each Cloudflare-tunnel org's cloudflared and API sync. Shows the caller's orgs only.",
+        obj(json!({}), &[]),
+        ro,
+        |d: &Daemon, _a: Value, c: &Caller| -> Result<Value> {
+            let Some(m) = &d.ingress else {
+                return Ok(json!({
+                    "enabled": false,
+                    "message": "isb serve runs without an ingress (--ingress-http, --ingress-https or --ingress-tunnels)",
+                }));
+            };
+            let orgs = visible_orgs(c);
+            Ok(m.status(orgs.as_deref()))
         }
     );
     tool!(
@@ -968,6 +1015,12 @@ struct DeployArgs {
 fn stack_deploy(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     let a: DeployArgs = args(a)?;
     crate::stack::validate_stack_name(&a.name)?;
+    if a.name == crate::ingress::cloudflare::TUNNEL_STACK {
+        return Err(Error::invalid(format!(
+            "stack name {} is isb's (an org's cloudflared)",
+            a.name
+        )));
+    }
     let base = match &a.base_dir {
         Some(b) => {
             if !b.is_absolute() {
@@ -1039,6 +1092,9 @@ fn stack_deploy(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     // Checked before any value is stored, so a deploy that cannot happen
     // bumps no secret's version.
     d.ctl.validate(&def)?;
+    if let Some(m) = &d.ingress {
+        m.check(&def)?;
+    }
     def.secrets =
         crate::stack::secrets::bind(&d.secrets, &org, &a.name, &def.file, &given, a.dry_run)?;
     if a.dry_run {

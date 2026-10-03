@@ -1790,3 +1790,204 @@ fn stack_env_secret_delivery() {
     wait_file(&sys2, "/tmp/t");
     assert_eq!(read(&sys2, "/tmp/t"), "rotated");
 }
+
+/// One HTTP(S) request through curl (which checks the certificate against
+/// `cacert`): status code and body.
+fn curl(url: &str, resolve: &str, cacert: Option<&std::path::Path>) -> (u16, String) {
+    let mut c = Command::new("curl");
+    c.args([
+        "-sS",
+        "--max-time",
+        "5",
+        "--resolve",
+        resolve,
+        "-w",
+        "\n%{http_code}",
+    ]);
+    if let Some(ca) = cacert {
+        c.arg("--cacert").arg(ca);
+    }
+    let out = c.arg(url).stdin(Stdio::null()).output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    let (body, code) = text.rsplit_once('\n').unwrap_or(("", "0"));
+    (code.trim().parse().unwrap_or(0), body.trim().to_string())
+}
+
+/// The ingress: a 2-replica stack with an HTTPS and a plain-HTTP domain on
+/// Caddy (loopback listeners, Caddy's internal CA), requests spread over
+/// both replicas, HTTP redirects to HTTPS, a rolling redeploy loses no
+/// request, and removing the stack removes its routes. `ISB_CADDY_BIN`
+/// skips the download of the pinned Caddy.
+#[test]
+fn ingress_routes_rolls_and_removes() {
+    if !enabled() {
+        return;
+    }
+    let client = Client::new();
+    let state = tempfile::tempdir().unwrap();
+    let store = isb::stack::Store::open(state.path()).unwrap();
+    let secrets = test_secrets(state.path());
+    let (hp, sp) = (free_port(), free_port());
+    let cfg = isb::ingress::IngressConfig {
+        http: Some(format!("127.0.0.1:{hp}").parse().unwrap()),
+        https: Some(format!("127.0.0.1:{sp}").parse().unwrap()),
+        ca: isb::ingress::caddy::Ca::Internal,
+        caddy_bin: std::env::var_os("ISB_CADDY_BIN").map(PathBuf::from),
+        ..Default::default()
+    };
+    let m = isb::ingress::Manager::new(cfg, client.clone(), secrets.clone(), state.path()).unwrap();
+    let ctl = isb::stack::Controller::start_with(
+        client.clone(),
+        store,
+        Duration::from_secs(2),
+        secrets,
+        Some(m.clone()),
+    )
+    .unwrap();
+    m.start(ctl.clone()).unwrap();
+    let stack = format!("isb-test-{}", std::process::id() % 100000);
+    let host = format!("{stack}.ingress.test");
+    let plain = format!("plain-{stack}.ingress.test");
+    let yaml = format!(
+        "services:\n  web:\n    image: {}\n    labels: {{isb-test: '1'}}\n    user: dev\n\
+         \x20   command: [sh, -c, 'hostname > /tmp/index.html && exec python3 -m http.server 8000 -d /tmp']\n\
+         \x20   healthcheck: {{test: [CMD, python3, -c, \"import urllib.request as u; u.urlopen('http://127.0.0.1:8000')\"], interval: 2s, start_interval: 1s}}\n\
+         \x20   deploy: {{replicas: 2, update_config: {{order: start-first, monitor: 2s}}}}\n\
+         \x20   domains:\n\
+         \x20     - {{host: {host}, port: 8000}}\n\
+         \x20     - {{host: {plain}, port: 8000, https: false}}\n",
+        image()
+    );
+    let p = isb::compose::load_docs(
+        &[(state.path().join("isb.yaml"), yaml)],
+        state.path(),
+        Some(&stack),
+        &|_| None,
+    )
+    .unwrap();
+    let def = isb::stack::StackDef {
+        name: stack.clone(),
+        org: isb::org::OrgId::default_org(),
+        file: p.file,
+        base_dir: state.path().to_path_buf(),
+        secrets: Default::default(),
+        force: Default::default(),
+        deployed_at: 0,
+        deployed_by: "test".into(),
+        previous: None,
+    };
+    struct Rm(
+        isb::stack::Controller,
+        String,
+        std::sync::Arc<isb::ingress::Manager>,
+    );
+    impl Drop for Rm {
+        fn drop(&mut self) {
+            let _ = self.0.remove(&self.1, true, Duration::from_secs(120));
+            self.0.shutdown();
+            self.2.shutdown();
+        }
+    }
+    let _rm = Rm(ctl.clone(), stack.clone(), m.clone());
+    m.check(&def).unwrap();
+    ctl.deploy(def).unwrap();
+    let st = isb::daemon::wait_settled(&ctl, &stack, Duration::from_secs(300)).unwrap();
+    assert!(st.converged, "{st:?}");
+
+    let ca = state
+        .path()
+        .join("ingress/caddy/pki/authorities/local/root.crt");
+    let url = format!("https://{host}:{sp}/");
+    let resolve = format!("{host}:{sp}:127.0.0.1");
+    // The certificate and the route come within seconds.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let (code, _) = curl(&url, &resolve, Some(&ca));
+        if code == 200 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "no 200 from {url}: {code}");
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    let seen: std::collections::BTreeSet<String> =
+        (0..10).map(|_| curl(&url, &resolve, Some(&ca)).1).collect();
+    assert_eq!(seen.len(), 2, "{seen:?}");
+
+    let st = ctl.status(&stack).unwrap();
+    let doms = &st.services[0].domains;
+    let d = doms.iter().find(|d| d.host == host).unwrap();
+    assert_eq!(d.state, "serving", "{d:?}");
+    assert_eq!(d.cert, "issued", "{d:?}");
+    assert_eq!(d.upstreams.len(), 2, "{d:?}");
+    assert_eq!(d.url.as_deref(), Some(url.as_str()));
+    let dp = doms.iter().find(|d| d.host == plain).unwrap();
+    assert_eq!(dp.cert, "none");
+
+    // Plain HTTP: the HTTPS domain redirects, the http one serves.
+    let out = Command::new("curl")
+        .args([
+            "-sS",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code} %{redirect_url}",
+            "--resolve",
+        ])
+        .arg(format!("{host}:{hp}:127.0.0.1"))
+        .arg(format!("http://{host}:{hp}/x?y=1"))
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        format!("308 https://{host}:{sp}/x?y=1")
+    );
+    let purl = format!("http://{plain}:{hp}/");
+    let presolve = format!("{plain}:{hp}:127.0.0.1");
+    let (code, body) = curl(&purl, &presolve, None);
+    assert_eq!(code, 200);
+    assert!(seen.contains(&body), "{body}");
+
+    // A forced redeploy replaces both replicas while requests keep landing.
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let load = {
+        let (stop, url, resolve, ca) = (stop.clone(), url.clone(), resolve.clone(), ca.clone());
+        std::thread::spawn(move || {
+            let (mut ok, mut failed) = (0, Vec::new());
+            while !stop.load(Ordering::SeqCst) {
+                match curl(&url, &resolve, Some(&ca)) {
+                    (200, b) if !b.is_empty() => ok += 1,
+                    other => failed.push(other),
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            (ok, failed)
+        })
+    };
+    ctl.redeploy(&stack, "web").unwrap();
+    // wait_settled can return before the rollout starts: give it a beat.
+    std::thread::sleep(Duration::from_secs(3));
+    let st = isb::daemon::wait_settled(&ctl, &stack, Duration::from_secs(300)).unwrap();
+    std::thread::sleep(Duration::from_secs(2));
+    stop.store(true, Ordering::SeqCst);
+    let (ok, failed) = load.join().unwrap();
+    assert!(st.converged, "{st:?}");
+    eprintln!("during the roll: {ok} ok, {} failed", failed.len());
+    assert!(ok > 0 && failed.is_empty(), "ok {ok}, failed {failed:?}");
+    let after: std::collections::BTreeSet<String> =
+        (0..10).map(|_| curl(&url, &resolve, Some(&ca)).1).collect();
+    assert!(after.is_disjoint(&seen), "{after:?} vs {seen:?}");
+    assert_eq!(after.len(), 2, "{after:?}");
+
+    // Removal takes the routes away.
+    ctl.remove(&stack, true, Duration::from_secs(120)).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let routes = m.status(None)["routes"].as_array().unwrap().len();
+        let (code, body) = curl(&purl, &presolve, None);
+        if routes == 0 && !(code == 200 && !body.is_empty()) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "still routed: {code} {body}");
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}

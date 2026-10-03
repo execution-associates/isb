@@ -565,6 +565,12 @@ pub struct SandboxSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deploy: Option<Deploy>,
 
+    /// Public hostnames `isb serve`'s ingress routes to this service's
+    /// replicas (docs/ingress.md). Only stacks use them; `isb up` ignores
+    /// them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub domains: Vec<DomainSpec>,
+
     /// Secrets (top-level `secrets:`) to write under `/run/secrets` in the
     /// guest: names, or `{source, target, uid, gid, mode}`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -603,6 +609,59 @@ impl SandboxSpec {
 
 fn is_default<T: Default + PartialEq>(v: &T) -> bool {
     *v == T::default()
+}
+
+/// A hostname (and path) the ingress serves a service on.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DomainSpec {
+    /// The hostname, e.g. `app.example.com`; `*.example.com` where the org
+    /// allows wildcards; or `auto` for a generated
+    /// `<service>-<stack>-<org>.<ip>.sslip.io` name.
+    pub host: String,
+
+    /// Path prefix (default `/`): `/api` matches `/api` and `/api/...`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+
+    /// The port the service listens on inside its replicas. Not needed with
+    /// `redirect`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+
+    /// Serve over HTTPS with a certificate the ingress obtains (default
+    /// true), redirecting plain HTTP to it. `false` serves plain HTTP.
+    #[serde(
+        default,
+        deserialize_with = "flex::opt_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "Option<flex::BoolOrString>")]
+    pub https: Option<bool>,
+
+    /// Answer every request with a permanent redirect (308) to this URL
+    /// instead of proxying. A URL without a path keeps the request's path
+    /// and query (`https://example.com`); one with a path is used as is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redirect: Option<String>,
+
+    /// Remove `path` from the request before passing it on.
+    #[serde(
+        default,
+        deserialize_with = "flex::bool",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    #[schemars(with = "flex::BoolOrString")]
+    pub strip_prefix: bool,
+
+    /// Also serve `www.<host>`, redirecting it to `host`.
+    #[serde(
+        default,
+        deserialize_with = "flex::bool",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    #[schemars(with = "flex::BoolOrString")]
+    pub www_redirect: bool,
 }
 
 /// idmap handling.

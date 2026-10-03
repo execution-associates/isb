@@ -1,0 +1,378 @@
+{
+  "admin": {
+    "config": {
+      "persist": false
+    },
+    "listen": "unix//run/isb/ingress/admin.sock"
+  },
+  "apps": {
+    "http": {
+      "grace_period": "10s",
+      "http_port": 80,
+      "https_port": 443,
+      "servers": {
+        "public-http": {
+          "listen": [
+            "0.0.0.0:80"
+          ],
+          "routes": [
+            {
+              "handle": [
+                {
+                  "handler": "static_response",
+                  "headers": {
+                    "Location": [
+                      "https://{http.request.host}{http.request.uri}"
+                    ]
+                  },
+                  "status_code": 308
+                }
+              ],
+              "match": [
+                {
+                  "host": [
+                    "app.example.com"
+                  ]
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "handle": [
+                {
+                  "handler": "static_response",
+                  "headers": {
+                    "Location": [
+                      "https://{http.request.host}{http.request.uri}"
+                    ]
+                  },
+                  "status_code": 308
+                }
+              ],
+              "match": [
+                {
+                  "host": [
+                    "www.app.example.com"
+                  ]
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "handle": [
+                {
+                  "handler": "static_response",
+                  "headers": {
+                    "Location": [
+                      "https://{http.request.host}{http.request.uri}"
+                    ]
+                  },
+                  "status_code": 308
+                }
+              ],
+              "match": [
+                {
+                  "host": [
+                    "*.apps.example.com"
+                  ]
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "handle": [
+                {
+                  "body": "no replica of docs is serving\n",
+                  "handler": "static_response",
+                  "headers": {
+                    "Content-Type": [
+                      "text/plain; charset=utf-8"
+                    ],
+                    "Retry-After": [
+                      "5"
+                    ]
+                  },
+                  "status_code": 503
+                }
+              ],
+              "match": [
+                {
+                  "host": [
+                    "docs.example.com"
+                  ]
+                }
+              ],
+              "terminal": true
+            }
+          ]
+        },
+        "public-https": {
+          "automatic_https": {
+            "disable_redirects": true,
+            "skip": [
+              "*.apps.example.com"
+            ]
+          },
+          "listen": [
+            "0.0.0.0:443"
+          ],
+          "routes": [
+            {
+              "handle": [
+                {
+                  "handler": "rewrite",
+                  "strip_path_prefix": "/api"
+                },
+                {
+                  "handler": "reverse_proxy",
+                  "health_checks": {
+                    "passive": {
+                      "fail_duration": "10s",
+                      "max_fails": 1
+                    }
+                  },
+                  "load_balancing": {
+                    "retries": 2,
+                    "selection_policy": {
+                      "policy": "least_conn"
+                    },
+                    "try_duration": "5s",
+                    "try_interval": "250ms"
+                  },
+                  "upstreams": [
+                    {
+                      "dial": "10.64.3.20:3000"
+                    }
+                  ]
+                }
+              ],
+              "match": [
+                {
+                  "host": [
+                    "app.example.com"
+                  ],
+                  "path": [
+                    "/api",
+                    "/api/*"
+                  ]
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "handle": [
+                {
+                  "handler": "reverse_proxy",
+                  "health_checks": {
+                    "passive": {
+                      "fail_duration": "10s",
+                      "max_fails": 1
+                    }
+                  },
+                  "load_balancing": {
+                    "retries": 2,
+                    "selection_policy": {
+                      "policy": "least_conn"
+                    },
+                    "try_duration": "5s",
+                    "try_interval": "250ms"
+                  },
+                  "upstreams": [
+                    {
+                      "dial": "10.64.3.17:8080"
+                    },
+                    {
+                      "dial": "10.64.3.18:8080"
+                    }
+                  ]
+                }
+              ],
+              "match": [
+                {
+                  "host": [
+                    "app.example.com"
+                  ]
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "handle": [
+                {
+                  "handler": "static_response",
+                  "headers": {
+                    "Location": [
+                      "https://app.example.com{http.request.uri}"
+                    ]
+                  },
+                  "status_code": 308
+                }
+              ],
+              "match": [
+                {
+                  "host": [
+                    "www.app.example.com"
+                  ]
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "handle": [
+                {
+                  "handler": "reverse_proxy",
+                  "health_checks": {
+                    "passive": {
+                      "fail_duration": "10s",
+                      "max_fails": 1
+                    }
+                  },
+                  "load_balancing": {
+                    "retries": 2,
+                    "selection_policy": {
+                      "policy": "least_conn"
+                    },
+                    "try_duration": "5s",
+                    "try_interval": "250ms"
+                  },
+                  "upstreams": [
+                    {
+                      "dial": "10.64.3.30:80"
+                    }
+                  ]
+                }
+              ],
+              "match": [
+                {
+                  "host": [
+                    "*.apps.example.com"
+                  ]
+                }
+              ],
+              "terminal": true
+            }
+          ]
+        },
+        "tunnel-beta": {
+          "automatic_https": {
+            "disable": true
+          },
+          "listen": [
+            "10.70.1.1:8480"
+          ],
+          "routes": [
+            {
+              "handle": [
+                {
+                  "handler": "static_response",
+                  "headers": {
+                    "Location": [
+                      "https://{http.request.host}{http.request.uri}"
+                    ]
+                  },
+                  "status_code": 308
+                }
+              ],
+              "match": [
+                {
+                  "header": {
+                    "X-Forwarded-Proto": [
+                      "http"
+                    ]
+                  },
+                  "host": [
+                    "beta.example.org"
+                  ]
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "handle": [
+                {
+                  "handler": "reverse_proxy",
+                  "health_checks": {
+                    "passive": {
+                      "fail_duration": "10s",
+                      "max_fails": 1
+                    }
+                  },
+                  "load_balancing": {
+                    "retries": 2,
+                    "selection_policy": {
+                      "policy": "least_conn"
+                    },
+                    "try_duration": "5s",
+                    "try_interval": "250ms"
+                  },
+                  "upstreams": [
+                    {
+                      "dial": "10.70.1.5:80"
+                    }
+                  ]
+                }
+              ],
+              "match": [
+                {
+                  "host": [
+                    "beta.example.org"
+                  ]
+                }
+              ],
+              "terminal": true
+            }
+          ],
+          "trusted_proxies": {
+            "ranges": [
+              "10.70.1.0/24"
+            ],
+            "source": "static"
+          }
+        }
+      }
+    },
+    "pki": {
+      "certificate_authorities": {
+        "local": {
+          "install_trust": false
+        }
+      }
+    },
+    "tls": {
+      "automation": {
+        "policies": [
+          {
+            "issuers": [
+              {
+                "ca": "https://acme-staging-v02.api.letsencrypt.org/directory",
+                "email": "ops@example.com",
+                "module": "acme"
+              }
+            ],
+            "subjects": [
+              "app.example.com",
+              "www.app.example.com"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "logging": {
+    "logs": {
+      "default": {
+        "encoder": {
+          "format": "json"
+        },
+        "level": "INFO",
+        "writer": {
+          "output": "stderr"
+        }
+      }
+    }
+  },
+  "storage": {
+    "module": "file_system",
+    "root": "/var/lib/isb/ingress/caddy"
+  }
+}

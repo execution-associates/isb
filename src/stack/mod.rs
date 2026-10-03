@@ -114,6 +114,8 @@ impl StackDef {
         let mut s = spec.clone();
         s.name = None;
         s.depends_on.clear();
+        // Domains are the ingress's: changing them never replaces an instance.
+        s.domains.clear();
         // Published ports are the balancer's, not the instance's.
         s.ports.retain(|p| p.bind == crate::spec::PortBind::Guest);
         if let Some(d) = &mut s.deploy {
