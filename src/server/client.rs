@@ -201,7 +201,9 @@ fn exchange(
         if remaining.is_zero() {
             return Err(timed_out());
         }
-        s.set_timeouts(remaining)?;
+        // macOS refuses setsockopt (EINVAL) once the server has closed; the
+        // read cannot block then, so the previous timeout is as good.
+        let _ = s.set_timeouts(remaining);
         match s.io().read(&mut chunk) {
             Ok(0) => break,
             Ok(n) => buf.extend_from_slice(&chunk[..n]),
