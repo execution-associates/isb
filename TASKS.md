@@ -128,15 +128,16 @@ minime only runs binaries downloaded from our CI runs.
 ## Phase 1: foundation
 
 ### Orgs
-- [~] (orchestrator) P1.1 Org model: `isb org create|ls|rm|show`, an org = incus project
+- [x] (orgs commits on platform) P1.1 Org model: `isb org create|ls|rm|show`, an org = incus project
   `isb-<org>` created restricted (no privileged, managed disks only,
   limits from the org's quota), per-org network (bridge) and default ACLs.
   Every command, tool and the daemon take `--org` (default: a `default`
   org mapped to the incus `default` project for backwards compatibility).
   Stacks and sandboxes live inside their org. **Verify:** two orgs, a stack
   in each, neither can see or reach the other (exec, list, network).
-- [ ] P1.2 Per-org network policy: allow within the org, deny across orgs and
-  to private ranges by default, named exceptions in the org config.
+- [~] (orchestrator) P1.2 Per-org network policy: allow within the org, deny across orgs and
+  to private ranges by default (done with P1.1: the org ACL), named exceptions
+  in the org config (todo).
   **Verify:** curl across orgs fails, within succeeds, egress to internet ok.
 - [ ] P1.3 Service discovery: stable names per service inside an org
   (`<service>.<stack>.isb` or similar), resolving to the instance (1 replica)
@@ -144,7 +145,7 @@ minime only runs binaries downloaded from our CI runs.
   postgres by name through a rolling replacement of the postgres.
 
 ### Identity and API
-- [~] (subagent p1.4) P1.4 Users and sessions: built-in store (SQLite in the state dir),
+- [x] (0f5b645) P1.4 Users and sessions: built-in store (SQLite in the state dir),
   argon2id passwords, sessions with secure cookies, first-run admin setup,
   invitations, roles (platform admin; org admin/member), API tokens (hashed,
   org-scoped). **Verify:** unit tests + login over HTTP.
@@ -160,7 +161,7 @@ minime only runs binaries downloaded from our CI runs.
   MCP, REST and CLI; an org token cannot touch another org.
 
 ### Secrets
-- [~] (subagent p1.8) P1.8 age store + driver trait + `isb secret create|set|get|ls|inspect|rm|
+- [x] (a10c6fc, 1ee402b) P1.8 age store + driver trait + `isb secret create|set|get|ls|inspect|rm|
   encrypt|reencrypt|refresh`, per org; daemon key lookup and generation;
   break-glass recipients. **Verify:** unit tests; reencrypt round trip with a
   second recipient.
@@ -246,6 +247,11 @@ minime only runs binaries downloaded from our CI runs.
 
 ## Log
 
+- 2026-10-03: P1.1 done (orgs isolate, verified by integration test
+  orgs_isolate); P1.4 identity and P1.8 secrets store merged. Notes from
+  them: remote callers can use every secret tool across orgs until P1.7;
+  reset tokens go to the journal when no mailer is set; a setup token in
+  `<state>/setup-token` guards first-run setup.
 - 2026-10-03: P1.1 core landed (org create/ls/show/rm, --org, host setup);
   stacks and the daemon are not org-aware yet (next).
 
