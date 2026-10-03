@@ -181,7 +181,7 @@ rotation.
 `isb up` (no daemon) gets no service names. Its services reach each
 other by instance name, `<project>-<service>` (the default
 `container_name`), which incus' DNS serves as `<project>-<service>.<org>.isb`
-in an org (`.incus` in incus' default project) and through the search domain
+in an org (`.incus` for plain sandboxes in incus' `default` project) and through the search domain
 as the bare name.
 
 ## Health and restarts

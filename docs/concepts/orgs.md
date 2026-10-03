@@ -9,8 +9,10 @@ Everything in an org is administered by its members, and nothing crosses
 orgs. That makes the org the unit you hand to a team, a customer or an agent:
 give them an org, and they can do anything inside it and nothing outside it.
 
-Every command, daemon tool and stack takes `--org ORG` (or `$ISB_ORG`);
-without it you work in the `default` org.
+Every command, daemon tool and stack takes `--org ORG` (or `$ISB_ORG`).
+Platform commands (`stack`, `app`, `project`, `secret`, ...) without it work
+in the `default` org; plain sandbox commands (`isb create`, `isb up`) without
+it work outside every org ([below](#what-an-org-is-in-incus)).
 
 ```text
 isb org create NAME [--cpus N] [--memory 16GiB] [--disk 100GiB] [--instances N]
@@ -87,14 +89,23 @@ Org `acme` is the incus project `isb-acme` (config `user.isb.org=acme`), its
 bridge `isbbr<hash>` and its network ACL `isb-acme`.
 
 The `default` org is an org like any other: the incus project
-`isb-default`, with its own bridge, ACL and service names. `isb serve`
-creates it when it starts and it is missing, so `isb serve install` leaves a
-host with one. It cannot be removed.
+`isb-default`, with its own bridge, ACL and service names, settings, limits,
+egress rules, workspaces and, if you set one, a Cloudflare Tunnel
+([Domains](../guides/domains.md)). Multi-app templates and workspaces work in
+it as in any org. `isb serve` makes sure it exists on every start, so
+`isb serve install`, which starts the daemon, leaves a host with one, and it
+cannot be removed. `isb org ls` shows it as `default -> isb-default`.
 
 incus' own `default` project is never an org. Plain `isb create` and `isb up`
 without `--org` put sandboxes there, outside every org, and the TUI and the
-superadmin's Host page show them; `--org default` puts them in the default
-org.
+superadmin's Host page show them; `--org default` means the default org,
+`isb-default`.
+
+If a default-org stack still has instances in incus' `default` project,
+`isb serve` logs a warning when it starts: the controller recreates that
+stack in `isb-default` with new, empty volumes, and the old instances and
+volumes keep running in `default` until you delete them. isb has no tool to
+move data between the two projects.
 
 The project is **restricted**, so incus itself refuses what would reach the
 host:

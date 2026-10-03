@@ -25,7 +25,7 @@ These go before or after the subcommand.
 |---|---|---|---|
 | `--socket PATH` | `INCUS_SOCKET` | `$INCUS_DIR/unix.socket`, else `/var/lib/incus/unix.socket`; on macOS `~/.isb/machine/isb/incus.sock` | incusd's unix socket |
 | `--project NAME` | `INCUS_PROJECT` | `default`, or the compose file's `incus_project` | the incus project to work in |
-| `--org ORG` | `ISB_ORG` | `default` | the org to work in: its incus project, and the `org` of every daemon call |
+| `--org ORG` | `ISB_ORG` | the `default` org for platform commands; none for `create` and `up` | the org to work in: its incus project, `isb-<org>`, and the `org` of every daemon call. Without it, `isb create` and `isb up` make plain sandboxes in incus' `default` project, outside every org; `--org default` is the default org, `isb-default` |
 | `--env-file FILE` | | `.env` next to the first compose file | dotenv file(s) for `${VAR}` (repeatable; the environment wins) |
 | `-P`, `--project-name NAME` | | the file's `name`, else its directory | the compose project name |
 | `--create-timeout D` | | `10m` | deadline for creating an instance (`20m` for slow image downloads) |

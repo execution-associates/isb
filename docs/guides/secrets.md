@@ -21,7 +21,7 @@ isb secret rm db_password
 ```
 
 Every command talks to the daemon over its unix socket, as `isb stack` does,
-and takes `--org ORG` (default `default`).
+and takes `--org ORG` (default: the `default` org).
 
 ## The store
 
