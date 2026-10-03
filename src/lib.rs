@@ -70,6 +70,7 @@ pub mod supervise;
 pub mod template;
 pub mod tui;
 pub mod volume;
+pub mod volume_backup;
 pub mod web;
 
 pub use client::{Client, Timeouts};

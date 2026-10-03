@@ -16,6 +16,8 @@ use serde_json::Value;
 
 use crate::error::{Error, Result};
 
+mod stream;
+
 /// Deadlines used by the client. Every request has one; there is no unbounded wait
 /// anywhere except the output of `exec`, which by design has no default timeout.
 #[derive(Debug, Clone)]

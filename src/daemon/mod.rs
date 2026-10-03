@@ -24,6 +24,7 @@ mod ssh;
 pub mod superadmin;
 pub mod templates;
 mod terminal;
+pub mod volumes;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -182,6 +183,8 @@ struct Daemon {
     history: crate::metrics_history::History,
     /// Databases' backups and scheduled jobs.
     data: data::Ctx,
+    /// Named volumes' snapshots and staged restores.
+    volumes: crate::volume_backup::VolumeBackups,
     audit: Arc<crate::audit::AuditLog>,
     /// The servers orgs can be placed on (a control plane; `None` on an
     /// agent).
@@ -385,12 +388,16 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     // Jobs and backups share one scheduler thread.
     let jobs = crate::jobs::Jobs::new(&cfg.state_dir, apps.clone());
     let backups = crate::backup::Backups::new(&cfg.state_dir, apps.clone());
+    let volumes =
+        crate::volume_backup::VolumeBackups::new(&cfg.state_dir, apps.clone(), backups.clone());
     let scheduler = crate::jobs::Scheduler::start(vec![
         Arc::new(jobs.clone()) as Arc<dyn crate::jobs::Scheduled>,
         Arc::new(backups.clone()),
+        Arc::new(volumes.clone()),
     ]);
     jobs.set_scheduler(scheduler.clone());
     backups.set_scheduler(scheduler.clone());
+    volumes.set_scheduler(scheduler.clone());
     let d = Arc::new(Daemon {
         client,
         ctl: ctl.clone(),
@@ -407,6 +414,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
             jobs,
             backups,
         },
+        volumes,
         audit: audit_log.clone(),
         servers: servers.clone(),
         gate: gate.clone(),
@@ -1369,6 +1377,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
     t.catalogs = d.catalogs.clone();
     templates::register(&mut r, t)?;
     data::register(&mut r, d.data.clone())?;
+    volumes::register(&mut r, d.volumes.clone())?;
     tool!(
         "server_status",
         "Server status",

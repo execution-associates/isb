@@ -27,6 +27,8 @@ mod servers;
 mod ssh;
 #[path = "isb/templates.rs"]
 mod templates;
+#[path = "isb/volumes.rs"]
+mod volumes;
 
 /// Declarative incus sandboxes.
 ///
@@ -1185,6 +1187,18 @@ enum VolumeCmd {
         #[arg(long)]
         pool: Option<String>,
     },
+    /// Snapshots of a named volume in an org, now or on a schedule (isb serve).
+    #[command(subcommand)]
+    Snapshot(volumes::SnapshotCmd),
+    /// A volume's snapshots, schedule, backups and staged restores (isb serve).
+    Show { name: String },
+    /// Restore a snapshot or a backup into a NEW volume, mounted at
+    /// /restore/<stamp> in the instance using it; the live volume is untouched.
+    Restore(volumes::RestoreArgs),
+    /// Staged restores (of NAME, or every volume).
+    Restores { name: Option<String> },
+    /// Detach and delete a staged restore.
+    Discard { name: String, stamp: String },
 }
 
 #[derive(Subcommand)]
@@ -1765,6 +1779,18 @@ fn exec(ctx: &Ctx, a: ExecArgs) -> Result<u8> {
 }
 
 fn volume(ctx: &Ctx, v: VolumeCmd) -> Result<u8> {
+    let cmd = match v {
+        VolumeCmd::Snapshot(s) => volumes::Cmd::Snapshot(s),
+        VolumeCmd::Show { name } => volumes::Cmd::Show(name),
+        VolumeCmd::Restore(a) => volumes::Cmd::Restore(a),
+        VolumeCmd::Restores { name } => volumes::Cmd::Restores(name),
+        VolumeCmd::Discard { name, stamp } => volumes::Cmd::Discard(name, stamp),
+        other => return volume_local(ctx, other),
+    };
+    volumes::run(&ctx.global.org, cmd)
+}
+
+fn volume_local(ctx: &Ctx, v: VolumeCmd) -> Result<u8> {
     let c = ctx.client(None);
     let pool =
         |p: Option<String>| -> Result<String> { sandbox::host_facts(&c)?.pick_pool(p.as_deref()) };
@@ -1817,6 +1843,7 @@ fn volume(ctx: &Ctx, v: VolumeCmd) -> Result<u8> {
             let pool = pool(p)?;
             isb::volume::remove(&c, &pool, &name)?;
         }
+        _ => unreachable!("isb serve's volume commands are handled in volume()"),
     }
     Ok(0)
 }

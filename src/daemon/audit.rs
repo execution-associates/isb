@@ -71,6 +71,11 @@ const SAFE_KEYS: &[&str] = &[
     "scopes_count",
     "ssh_user",
     "fingerprint",
+    "volume",
+    "snapshot",
+    "backup",
+    "instance",
+    "stamp",
 ];
 
 /// The target, in order of preference.

@@ -812,6 +812,9 @@ pub fn ensure(
         "features.networks": "false",
         "restricted": "true",
         "restricted.containers.privilege": "unprivileged",
+        // Volume snapshots and exports (crate::volume_backup).
+        "restricted.snapshots": "allow",
+        "restricted.backups": "allow",
         "restricted.networks.access": bridge,
         // The daemon's own uid may be mapped 1:1, so `idmap: auto` keeps
         // bind-mounted files writable; root never.

@@ -442,7 +442,7 @@ type Obj = serde_json::Map<String, Value>;
 
 /// Read-modify-write of an instance under `If-Match`, so a concurrent change by
 /// another tool is never silently overwritten (a 412 re-reads and retries).
-fn update_instance(
+pub(crate) fn update_instance(
     client: &Client,
     name: &str,
     step: &str,
