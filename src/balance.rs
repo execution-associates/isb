@@ -754,10 +754,14 @@ mod tests {
         let lb = Balancer::new();
         // Its own loopback address: once the route closes, a parallel test
         // may take the same port number on 127.0.0.1, which would turn the
-        // refused connect below into someone else's listener.
-        let at = lb
-            .set_route("web", "127.0.0.2:0".parse().unwrap(), vec![a])
-            .unwrap();
+        // refused connect below into someone else's listener. macOS has
+        // only 127.0.0.1 configured, so there it takes that small chance.
+        let own = if cfg!(target_os = "macos") {
+            "127.0.0.1:0"
+        } else {
+            "127.0.0.2:0"
+        };
+        let at = lb.set_route("web", own.parse().unwrap(), vec![a]).unwrap();
         let (mut s, _) = open(at);
         lb.remove_route("web");
         let err = TcpStream::connect(at).unwrap_err();
