@@ -43,7 +43,7 @@ next request would sign it in again). See [superadmins](../concepts/access.md#su
 - **The sidebar**: an org switcher (the orgs you can open: your
   memberships, or every org for a platform admin; switching keeps the
   section you are in), a search button, the selected org's sections (**Org**:
-  Workspace, Overview, Projects, Templates, Backups, Notifications;
+  Overview, Projects, Workspace, Templates, Backups, Notifications;
   **Manage**: Members, MCP, Secrets, Settings, History), **Platform** for
   platform admins (and **Host** for superadmins), and your account menu
   (account, theme, sign out). The page sits in a panel with a top bar that

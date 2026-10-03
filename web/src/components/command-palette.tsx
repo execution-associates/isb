@@ -55,9 +55,9 @@ export const usePalette = () => useContext(Ctx);
 
 /** Org sections in nav order, with their `g` shortcut keys. */
 export const SECTIONS: { path: string; label: string; icon: LucideIcon; key: string; keywords?: string[] }[] = [
-  { path: "/workspace", label: "Workspace", icon: SquareTerminal, key: "w", keywords: ["machine", "box", "terminal", "sandboxes", "home"] },
   { path: "", label: "Overview", icon: LayoutDashboard, key: "o" },
   { path: "/projects", label: "Projects", icon: FolderKanban, key: "p" },
+  { path: "/workspace", label: "Workspace", icon: SquareTerminal, key: "w", keywords: ["machine", "box", "terminal", "sandboxes", "home"] },
   { path: "/templates", label: "Templates", icon: LayoutTemplate, key: "t" },
   { path: "/backups", label: "Backups", icon: DatabaseBackup, key: "b" },
   { path: "/notifications", label: "Notifications", icon: Bell, key: "n" },
