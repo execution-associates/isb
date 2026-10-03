@@ -1,6 +1,6 @@
 {
   "name": "@execution-associates/isb-linux-arm64",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "The static isb binary for Linux arm64 (aarch64-unknown-linux-musl), used by @execution-associates/isb",
   "license": "MIT",
   "repository": {
