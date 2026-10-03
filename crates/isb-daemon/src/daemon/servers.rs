@@ -1158,7 +1158,6 @@ mod tests {
             PtyOutput::Note(v) => assert_eq!(v["fingerprint"], "SHA256:k"),
             o => panic!("{o:?}"),
         }
-        drop(next);
         p.input(b"ping").unwrap();
         let mut got = Vec::new();
         for _ in 0..200 {

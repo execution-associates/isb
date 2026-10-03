@@ -370,10 +370,7 @@ pub fn parse(raw: &[u8], head_only: bool) -> Result<HttpAnswer, String> {
 /// A chunked body's data, as far as it goes.
 pub fn dechunk(mut b: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
-    loop {
-        let Some(i) = b.windows(2).position(|w| w == b"\r\n") else {
-            break;
-        };
+    while let Some(i) = b.windows(2).position(|w| w == b"\r\n") {
         let size = std::str::from_utf8(&b[..i])
             .ok()
             .and_then(|s| usize::from_str_radix(s.split(';').next()?.trim(), 16).ok());
