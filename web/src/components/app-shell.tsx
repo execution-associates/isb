@@ -327,7 +327,7 @@ function SidebarContent({ me, onNavigate }: { me: Me; onNavigate?: () => void })
   const org = useCurrentOrg(me);
   const o = org ? encodeURIComponent(org) : "";
   const known = !!org && me.orgs.includes(org);
-  const [main, manage] = [SECTIONS.slice(0, 5), SECTIONS.slice(5)];
+  const [main, manage] = [SECTIONS.slice(0, 6), SECTIONS.slice(6)];
   return (
     <div className="flex h-full flex-col gap-3 px-3 pt-3 pb-2">
       <Link to="/" onClick={onNavigate} className="flex h-8 items-center gap-2 px-1.5 font-semibold tracking-tight" aria-label="isb home">

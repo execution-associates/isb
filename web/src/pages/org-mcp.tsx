@@ -279,7 +279,7 @@ function TokenPanel({ me, org, created, onCreated }: { me: Me; org: string; crea
 
 // ---- snippets ----
 
-function CodeBlock({ title, code, className }: { title: ReactNode; code: string; className?: string }) {
+export function CodeBlock({ title, code, className }: { title: ReactNode; code: string; className?: string }) {
   return (
     <div className={cn("grid min-w-0 gap-1.5", className)}>
       <div className="text-xs font-medium text-muted-foreground">{title}</div>
@@ -292,7 +292,7 @@ function CodeBlock({ title, code, className }: { title: ReactNode; code: string;
 }
 
 /** The client tabs and their blocks, after the environment step. */
-function Install({ opts, token, placeholder = "isb_tok_...", where, envStep = true }: { opts: SnippetOptions; token?: string; placeholder?: string; where?: string; envStep?: boolean }) {
+export function Install({ opts, token, placeholder = "isb_tok_...", where, envStep = true }: { opts: SnippetOptions; token?: string; placeholder?: string; where?: string; envStep?: boolean }) {
   const [client, setClient] = useState<Client>("claude");
   const s = snippet(client, opts);
   const env = [

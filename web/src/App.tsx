@@ -22,6 +22,7 @@ import { SettingsPage } from "@/pages/org-settings";
 import { ForgotPasswordPage, ResetPasswordPage } from "@/pages/password-reset";
 import { SetupPage } from "@/pages/setup";
 import { SignupPage } from "@/pages/signup";
+import { workspaceRoutes } from "@/workspace/routes";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -65,6 +66,7 @@ export function App() {
               <Route index element={<Home />} />
               <Route path="/orgs/:org" element={<OrgPage />} />
               {appRoutes()}
+              {workspaceRoutes()}
               {day2Routes()}
               <Route path="/orgs/:org/members" element={<MembersPage />} />
               <Route path="/orgs/:org/agents" element={<McpPage />} />
