@@ -86,6 +86,12 @@ pub struct ServeConfig {
     /// The port each org's workspace reaches the org-bound MCP on, on the
     /// org bridge's address.
     pub workspace_mcp_port: u16,
+    /// `--workspace-pool`: the storage pool new workspace homes go in,
+    /// unless the org sets its own; none: the org's default pool.
+    pub workspace_pool: Option<String>,
+    /// `--workspace-home-root`: workspace homes are host folders
+    /// `<root>/<org>/home` instead of managed volumes.
+    pub workspace_home_root: Option<PathBuf>,
     /// How long audit rows are kept.
     pub audit_retention: Duration,
     /// Record read-only tool calls too (secret reads always are).
@@ -419,6 +425,8 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         secrets.clone(),
         recorder.clone(),
         cfg.workspace_mcp_port,
+        cfg.workspace_pool.clone(),
+        cfg.workspace_home_root.clone(),
     );
     let d = Arc::new(Daemon {
         client,

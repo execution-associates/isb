@@ -130,6 +130,13 @@ pub enum WorkspaceCmd {
         /// Idle timeout for sandboxes, e.g. 2h, or none.
         #[arg(long)]
         sandbox_idle: Option<String>,
+        /// Platform admins: new homes as a `volume` or a `host` folder
+        /// ("" for the daemon's default).
+        #[arg(long)]
+        home_kind: Option<String>,
+        /// Platform admins: the storage pool for new home volumes.
+        #[arg(long)]
+        home_pool: Option<String>,
     },
     /// SSH's stdio to the workspace over isb serve's websocket: the
     /// ProxyCommand `isb workspace ssh-config` writes (`isb ssh-proxy`
@@ -443,8 +450,12 @@ pub fn workspace(org: &Option<String>, cmd: WorkspaceCmd) -> Result<u8> {
             max_workspaces,
             sandbox_expiry,
             sandbox_idle,
+            home_kind,
+            home_pool,
         } => {
             let mut a = json!({});
+            opt(&mut a, "home_kind", home_kind);
+            opt(&mut a, "home_pool", home_pool);
             opt(&mut a, "max_workspaces", max_workspaces);
             opt(&mut a, "sandbox_expiry", sandbox_expiry);
             opt(&mut a, "sandbox_idle", sandbox_idle);

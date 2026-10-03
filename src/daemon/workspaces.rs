@@ -23,7 +23,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -139,6 +139,10 @@ pub struct Workspaces {
     secrets: Arc<crate::secrets::Secrets>,
     recorder: Arc<crate::history::Recorder>,
     port: u16,
+    /// `--workspace-pool`: where new homes go unless the org says.
+    home_pool: Option<String>,
+    /// `--workspace-home-root`: homes are host folders under it.
+    home_root: Option<PathBuf>,
     tokens: Mutex<HashMap<Vec<u8>, TokenRef>>,
     /// Token last use, by `<org>/<name>` (in memory).
     last_used: Mutex<HashMap<String, u64>>,
@@ -165,6 +169,8 @@ impl Workspaces {
         secrets: Arc<crate::secrets::Secrets>,
         recorder: Arc<crate::history::Recorder>,
         port: u16,
+        home_pool: Option<String>,
+        home_root: Option<PathBuf>,
     ) -> Arc<Workspaces> {
         let w = Arc::new(Workspaces {
             store: Store::new(state_dir),
@@ -173,6 +179,8 @@ impl Workspaces {
             secrets,
             recorder,
             port,
+            home_pool,
+            home_root,
             tokens: Mutex::new(HashMap::new()),
             last_used: Mutex::new(HashMap::new()),
             sessions: Arc::new(Mutex::new(HashMap::new())),
@@ -437,6 +445,28 @@ impl Workspaces {
         crate::sandbox::host_facts(oc)?.pick_pool(None)
     }
 
+    /// Where a new workspace's home goes: the org's `home_pool`, else
+    /// `--workspace-pool`, else the org's default pool.
+    fn new_home_pool(&self, org: &OrgId, oc: &Client) -> Result<String> {
+        let s = self.store.settings(org)?;
+        match s.home_pool.or_else(|| self.home_pool.clone()) {
+            Some(p) => {
+                pool_driver(&self.client, &p)
+                    .map_err(|e| Error::invalid(format!("workspace home pool {p}: {e}")))?;
+                Ok(p)
+            }
+            None => self.pool(oc),
+        }
+    }
+
+    /// The pool this workspace's home is in.
+    fn home_pool_of(&self, w: &Workspace, oc: &Client) -> Result<String> {
+        match &w.pool {
+            Some(p) => Ok(p.clone()),
+            None => self.pool(oc),
+        }
+    }
+
     /// The instance spec a workspace is created (and rebuilt) from.
     fn spec(org: &OrgId, w: &Workspace, pool: &str) -> Result<crate::spec::SandboxSpec> {
         let home = w.home_dir();
@@ -460,6 +490,11 @@ impl Workspaces {
         if let Some(r) = &w.root_size {
             v["raw_devices"] = json!({"root": {"size": r}});
         }
+        if w.home_bind.is_some() {
+            // The daemon's uid 1:1, so the workspace user (that uid) owns
+            // the host folder's files inside, as the host sees them.
+            v["idmap"] = json!("auto");
+        }
         v["volumes"] = match &w.home_bind {
             Some(dir) => json!([{"type": "bind", "source": dir, "target": home}]),
             None => {
@@ -473,7 +508,10 @@ impl Workspaces {
     /// deliver the credentials.
     fn build(&self, org: &OrgId, w: &Workspace, log: &mut Vec<String>) -> Result<()> {
         let oc = self.oc(org);
-        let pool = self.pool(&oc)?;
+        let pool = self.home_pool_of(w, &oc)?;
+        if let Some(dir) = &w.home_bind {
+            self.prepare_host_home(org, Path::new(dir), log)?;
+        }
         if w.home_bind.is_none() {
             let mut cfg = crate::plan::Props::new();
             cfg.insert("size".into(), w.home_size.clone());
@@ -507,16 +545,41 @@ impl Workspaces {
         Ok(())
     }
 
+    /// A host-folder home: made if missing (the daemon's user owns it, which
+    /// the instance maps 1:1), and allowed in the org's restricted project
+    /// as a disk path (its `<root>/<org>` under the home root, else the
+    /// folder itself). Done on every build, so it survives the org's bind
+    /// roots being rewritten.
+    fn prepare_host_home(&self, org: &OrgId, dir: &Path, log: &mut Vec<String>) -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        if !dir.is_absolute() {
+            return Err(Error::invalid(format!(
+                "home {}: an absolute host path",
+                dir.display()
+            )));
+        }
+        if !dir.exists() {
+            std::fs::create_dir_all(dir)?;
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o750))?;
+            log.push(format!("home folder {} created", dir.display()));
+        }
+        let allow = match &self.home_root {
+            Some(root) if dir.starts_with(root.join(org.as_str())) => root.join(org.as_str()),
+            _ => dir.to_path_buf(),
+        };
+        allow_disk_path(&self.client, org, &allow)
+    }
+
     /// The workspace user and its home: made when the image lacks them,
     /// seeded from `/etc/skel` when the home is empty, owned by the user.
     fn prepare(&self, oc: &Client, w: &Workspace) -> Result<()> {
         const SCRIPT: &str = r#"set -e
-u="$1"; h="$2"
+u="$1"; h="$2"; id="$3"
 if ! id -u "$u" >/dev/null 2>&1; then
   if command -v useradd >/dev/null 2>&1; then
-    useradd -M -d "$h" -s /bin/bash "$u" 2>/dev/null || useradd -M -d "$h" "$u"
+    useradd ${id:+-u "$id"} -M -d "$h" -s /bin/bash "$u" 2>/dev/null || useradd ${id:+-u "$id"} -M -d "$h" "$u"
   else
-    adduser -D -H -h "$h" "$u"
+    adduser ${id:+-u "$id"} -D -H -h "$h" "$u"
   fi
 fi
 mkdir -p "$h"
@@ -531,7 +594,21 @@ chown "$u": "$h"
         }
         let sb = Sandbox::get(oc, w.instance())?;
         let out = sb.exec_with(
-            ["sh", "-c", SCRIPT, "sh", w.user.as_str(), &w.home_dir()],
+            [
+                "sh",
+                "-c",
+                SCRIPT,
+                "sh",
+                w.user.as_str(),
+                &w.home_dir(),
+                // A host-folder home is mapped 1:1 for the daemon's uid: a
+                // user made here gets that uid, so it owns the files.
+                &if w.home_bind.is_some() {
+                    rustix::process::getuid().as_raw().to_string()
+                } else {
+                    String::new()
+                },
+            ],
             crate::exec::ExecOptions::default().timeout(Duration::from_secs(120)),
         )?;
         if !out.success() {
@@ -775,12 +852,72 @@ chown "$u": "$h"
 /// Is this org served here (not placed on another server)?
 pub type LocalOrg = Arc<dyn Fn(&OrgId) -> bool + Send + Sync>;
 
+/// A new workspace's home snapshot schedule, and how many are kept.
+const HOME_SNAPSHOTS: &str = "@hourly";
+const HOME_SNAPSHOTS_KEEP: u32 = 24;
+
 /// The root disk's size when none is given in an org with a disk quota.
 const DEFAULT_ROOT_SIZE: &str = "20GiB";
 
 /// A sandbox's root disk size when it gives none in an org with a disk
 /// quota.
 pub const SANDBOX_ROOT_SIZE: &str = "10GiB";
+
+/// Let the org's restricted project bind `path` (and what is under it):
+/// added to `restricted.devices.disk.paths` unless a listed path covers it.
+fn allow_disk_path(client: &Client, org: &OrgId, path: &Path) -> Result<()> {
+    let pp = format!("/1.0/projects/{}", encode_segment(&org.incus_project()));
+    let p = client.get(&pp)?;
+    let cfg = &p["config"];
+    if cfg["restricted"].as_str() != Some("true") {
+        return Ok(());
+    }
+    let mut paths: Vec<String> = cfg["restricted.devices.disk.paths"]
+        .as_str()
+        .unwrap_or("")
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect();
+    let covered = cfg["restricted.devices.disk"].as_str() == Some("allow")
+        && paths.iter().any(|x| path.starts_with(x));
+    if covered {
+        return Ok(());
+    }
+    paths.push(path.display().to_string());
+    let mut patch = serde_json::Map::new();
+    patch.insert("restricted.devices.disk".into(), json!("allow"));
+    patch.insert(
+        "restricted.devices.disk.paths".into(),
+        json!(paths.join(",")),
+    );
+    let mut merged = cfg.clone();
+    for (k, v) in patch {
+        merged[k] = v;
+    }
+    client.mutate(
+        "PUT",
+        &pp,
+        Some(&json!({"description": p["description"], "config": merged})),
+        &format!("let org {org} bind {}", path.display()),
+        client.timeouts.other,
+    )?;
+    Ok(())
+}
+
+/// A storage pool's driver (`zfs`, `btrfs`, `lvm`, `dir`, ...).
+pub fn pool_driver(client: &Client, pool: &str) -> Result<String> {
+    let p = client
+        .get_opt(&format!("/1.0/storage-pools/{}", encode_segment(pool)))?
+        .ok_or_else(|| Error::NotFound(format!("storage pool {pool}")))?;
+    Ok(p["driver"].as_str().unwrap_or("").to_string())
+}
+
+/// Whether snapshots on this driver share blocks with the volume (cheap),
+/// rather than copying it whole (`dir`).
+pub fn copy_on_write(driver: &str) -> bool {
+    matches!(driver, "zfs" | "btrfs" | "lvm" | "ceph")
+}
 
 /// Whether the org's project has a disk quota (`limits.disk`).
 pub fn project_has_disk_limit(client: &Client, org: &OrgId) -> bool {
@@ -963,9 +1100,12 @@ fn view(d: &Daemon, org: &OrgId, w: &Workspace, sessions: bool) -> Value {
         .get(&format!("{}/{}", org.incus_project(), w.instance()));
     let project = org.incus_project();
     let home = if w.home_bind.is_some() {
-        json!({"bind": w.home_bind, "path": w.home_dir()})
+        json!({"bind": w.home_bind, "path": w.home_dir(), "host_root": wsm.home_root})
     } else {
-        let pool = wsm.pool(&oc).ok();
+        let pool = wsm.home_pool_of(w, &oc).ok();
+        let driver = pool
+            .as_deref()
+            .and_then(|p| pool_driver(&wsm.client, p).ok());
         let vol = pool.as_deref().and_then(|p| {
             crate::volume::get(&oc, p, &w.home_volume(org))
                 .ok()
@@ -974,6 +1114,9 @@ fn view(d: &Daemon, org: &OrgId, w: &Workspace, sessions: bool) -> Value {
         json!({
             "volume": w.home_volume(org),
             "pool": pool,
+            "driver": driver,
+            // Copy-on-write: a snapshot costs what changed, not a full copy.
+            "cow": driver.as_deref().map(copy_on_write),
             "path": w.home_dir(),
             "size": vol.as_ref().and_then(|v| v.config.get("size").cloned()).unwrap_or_else(|| w.home_size.clone()),
             "exists": vol.is_some(),
@@ -1159,8 +1302,7 @@ fn workspace_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     check_fields(&a.env, &a.secrets, &a.labels)?;
     if a.home_bind.is_some() && !c.is_trusted() {
         return Err(Error::Forbidden(
-            "home_bind (a host directory as the home, for migrating a box) is for superadmins"
-                .into(),
+            "home_bind (a host directory as the home) is for superadmins".into(),
         ));
     }
     if let Some(b) = &a.home_bind {
@@ -1215,12 +1357,33 @@ fn workspace_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         labels: a.labels,
         token_role: role,
         home_bind: a.home_bind,
+        pool: None,
         created_at: t,
         created_by: creator(c),
         updated_at: t,
         rebuilt_at: None,
         token: None,
     };
+    // Where the home goes: the path a superadmin named, else a host folder
+    // under --workspace-home-root (unless the org says volume), else a
+    // managed volume.
+    if w.home_bind.is_none() {
+        let kind = settings.home_kind.as_deref();
+        match (&wsm.home_root, kind) {
+            (Some(root), None | Some("host")) => {
+                w.home_bind = Some(ws::host_home(root, &org, &name).display().to_string());
+            }
+            (None, Some("host")) => {
+                return Err(Error::invalid(
+                    "org setting home_kind is host, but isb serve has no --workspace-home-root",
+                ));
+            }
+            _ => {}
+        }
+    }
+    if w.home_bind.is_none() {
+        w.pool = Some(wsm.new_home_pool(&org, &oc)?);
+    }
     if w.root_size.is_none() && project_has_disk_limit(&d.client, &org) {
         // incus needs a root size in an org with a disk quota.
         w.root_size = Some(DEFAULT_ROOT_SIZE.into());
@@ -1241,6 +1404,30 @@ fn workspace_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
             },
         );
         return Err(e);
+    }
+    // On a copy-on-write pool the home gets snapshots from the start,
+    // hourly with the last day kept. On `dir` and the like every snapshot
+    // is a full copy of the home, so none are scheduled: backups to S3
+    // instead, or an admin opts in with a small keep.
+    if let (None, Some(pool)) = (&w.home_bind, &w.pool) {
+        match pool_driver(&d.client, pool) {
+            Ok(drv) if copy_on_write(&drv) => {
+                match d.volumes.update(
+                    &org,
+                    &w.home_volume(&org),
+                    &json!({"schedule": HOME_SNAPSHOTS, "keep": HOME_SNAPSHOTS_KEEP}),
+                ) {
+                    Ok(_) => log.push(format!(
+                        "home snapshots {HOME_SNAPSHOTS}, keeping {HOME_SNAPSHOTS_KEEP} (pool {pool}, {drv})"
+                    )),
+                    Err(e) => log.push(format!("home snapshot schedule not set: {e}")),
+                }
+            }
+            Ok(drv) => log.push(format!(
+                "no automatic home snapshots: pool {pool} is {drv}, where each snapshot is a full copy of the home"
+            )),
+            Err(e) => log.push(format!("pool {pool}: {e}")),
+        }
     }
     wsm.ensure_bridge(&org);
     // The bridge may have come up after the first delivery: write the
@@ -1397,7 +1584,7 @@ fn workspace_update(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     }
     if let Some(h) = &a.home_size {
         if w.home_bind.is_none() {
-            let pool = wsm.pool(&oc)?;
+            let pool = wsm.home_pool_of(&w, &oc)?;
             oc.mutate(
                 "PATCH",
                 &format!(
@@ -1595,7 +1782,7 @@ fn workspace_delete(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     );
     let mut home_deleted = false;
     if !a.keep_home && w.home_bind.is_none() {
-        let pool = wsm.pool(&oc)?;
+        let pool = wsm.home_pool_of(&w, &oc)?;
         match crate::volume::remove(&oc, &pool, &w.home_volume(&org)) {
             Ok(()) => home_deleted = true,
             Err(e) if e.is_not_found() => {}
@@ -1680,6 +1867,12 @@ struct SettingsArgs {
     sandbox_expiry: Option<String>,
     #[serde(default)]
     sandbox_idle: Option<String>,
+    /// `""` clears it.
+    #[serde(default)]
+    home_pool: Option<String>,
+    /// `volume`, `host`, or `""` (the daemon's default).
+    #[serde(default)]
+    home_kind: Option<String>,
 }
 
 fn workspace_settings(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
@@ -1687,10 +1880,21 @@ fn workspace_settings(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     let a: SettingsArgs = args(a)?;
     let wsm = &d.workspaces;
     let mut s = wsm.store.settings(&org)?;
-    let changes =
-        a.max_workspaces.is_some() || a.sandbox_expiry.is_some() || a.sandbox_idle.is_some();
+    let changes = a.max_workspaces.is_some()
+        || a.sandbox_expiry.is_some()
+        || a.sandbox_idle.is_some()
+        || a.home_pool.is_some()
+        || a.home_kind.is_some();
     if changes {
-        if a.max_workspaces.is_some_and(|m| m != s.max_workspaces) {
+        let pool_change = a
+            .home_pool
+            .as_ref()
+            .is_some_and(|p| Some(p.as_str()).filter(|p| !p.is_empty()) != s.home_pool.as_deref());
+        let kind_change = a
+            .home_kind
+            .as_ref()
+            .is_some_and(|k| Some(k.as_str()).filter(|k| !k.is_empty()) != s.home_kind.as_deref());
+        if a.max_workspaces.is_some_and(|m| m != s.max_workspaces) || pool_change || kind_change {
             let platform = match c {
                 Caller::Local { .. } | Caller::Superadmin(_) => true,
                 Caller::User { principal } => principal.platform_admin,
@@ -1698,7 +1902,7 @@ fn workspace_settings(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
             };
             if !platform {
                 return Err(Error::Forbidden(
-                    "max_workspaces is for platform admins".into(),
+                    "max_workspaces, home_pool and home_kind are for platform admins".into(),
                 ));
             }
         }
@@ -1711,6 +1915,27 @@ fn workspace_settings(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         }
         if let Some(i) = a.sandbox_idle {
             s.sandbox_idle = i.trim().to_string();
+        }
+        if let Some(k) = a.home_kind {
+            s.home_kind = match k.trim() {
+                "" => None,
+                "volume" | "host" => Some(k.trim().to_string()),
+                other => {
+                    return Err(Error::invalid(format!(
+                        "home_kind {other:?}: volume, host, or \"\" for the daemon's default"
+                    )));
+                }
+            };
+        }
+        if let Some(p) = a.home_pool {
+            let p = p.trim().to_string();
+            if p.is_empty() {
+                s.home_pool = None;
+            } else {
+                pool_driver(&d.client, &p)
+                    .map_err(|e| Error::invalid(format!("home_pool {p}: {e}")))?;
+                s.home_pool = Some(p);
+            }
         }
         wsm.store.put_settings(&org, &s)?;
     }
@@ -1802,7 +2027,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
                 "secrets": {"type": "array", "items": {"type": "string"}, "description": "Org secrets delivered as /run/isb/secrets/NAME."},
                 "labels": {"type": "object", "additionalProperties": {"type": "string"}},
                 "token_role": {"type": "string", "enum": ["viewer", "member", "admin"], "description": "The workspace token's role in the org (default admin)."},
-                "home_bind": {"type": "string", "description": "Superadmins only, for migrating a box: a host directory (under the org's bind roots) as the home instead of a volume."}
+                "home_bind": {"type": "string", "description": "Superadmins only: this host directory as the home (an existing box's, when migrating), instead of the default home."}
             }),
             &["image"]
         ),
@@ -1894,7 +2119,9 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
             json!({
                 "max_workspaces": {"type": "integer", "minimum": 1, "maximum": 100},
                 "sandbox_expiry": {"type": "string", "description": "e.g. 24h, 7d."},
-                "sandbox_idle": {"type": "string", "description": "e.g. 2h, or none."}
+                "sandbox_idle": {"type": "string", "description": "e.g. 2h, or none."},
+                "home_kind": {"type": "string", "enum": ["", "volume", "host"], "description": "Platform admins: where new workspace homes go: a managed volume, or a host folder under isb serve's --workspace-home-root (\"\": the daemon's default)."},
+                "home_pool": {"type": "string", "description": "Platform admins: the storage pool new workspace homes go in (\"\" clears it: the daemon's --workspace-pool, else the org's default pool)."}
             }),
             &[]
         ),
@@ -2034,6 +2261,8 @@ mod tests {
                     .unwrap(),
             )),
             port: DEFAULT_PORT,
+            home_pool: None,
+            home_root: None,
             tokens: Mutex::new(HashMap::new()),
             last_used: Mutex::new(HashMap::new()),
             sessions: Arc::new(Mutex::new(HashMap::new())),

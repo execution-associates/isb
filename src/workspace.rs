@@ -83,10 +83,14 @@ pub struct Workspace {
     pub labels: BTreeMap<String, String>,
     /// The role the workspace's token has in its org.
     pub token_role: Role,
-    /// A host directory bound as the home instead of a volume (migration;
-    /// superadmins only, under the org's bind roots).
+    /// A host directory bound as the home instead of a volume: under the
+    /// daemon's `--workspace-home-root`, or a path a superadmin named.
+    /// isb never deletes it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home_bind: Option<String>,
+    /// The storage pool the home volume is in, decided at create.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool: Option<String>,
     pub created_at: u64,
     pub created_by: String,
     #[serde(default)]
@@ -125,6 +129,16 @@ impl Workspace {
         } else {
             format!("/home/{}", self.user)
         }
+    }
+}
+
+/// A host-folder home under `root`: `<root>/<org>/home` for the org's
+/// `workspace`, `<root>/<org>/<name>/home` for another name.
+pub fn host_home(root: &Path, org: &OrgId, name: &str) -> PathBuf {
+    if name == DEFAULT_NAME {
+        root.join(org.as_str()).join("home")
+    } else {
+        root.join(org.as_str()).join(name).join("home")
     }
 }
 
@@ -201,6 +215,14 @@ pub struct Settings {
     /// `none`.
     #[serde(default = "default_idle")]
     pub sandbox_idle: String,
+    /// `volume` or `host`: where new homes go, overriding the daemon
+    /// (`host` needs `--workspace-home-root`). Platform admins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home_kind: Option<String>,
+    /// The storage pool new workspace homes go in (platform admins); unset:
+    /// the daemon's `--workspace-pool`, else the org's default pool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home_pool: Option<String>,
 }
 
 fn one() -> u32 {
@@ -221,6 +243,8 @@ impl Default for Settings {
             max_workspaces: one(),
             sandbox_expiry: default_expiry(),
             sandbox_idle: default_idle(),
+            home_kind: None,
+            home_pool: None,
         }
     }
 }
@@ -520,6 +544,20 @@ mod tests {
     }
 
     #[test]
+    fn host_folder_homes() {
+        let org = OrgId::new("ocai").unwrap();
+        let root = Path::new("/srv/workspaces");
+        assert_eq!(
+            host_home(root, &org, DEFAULT_NAME),
+            Path::new("/srv/workspaces/ocai/home")
+        );
+        assert_eq!(
+            host_home(root, &org, "lab"),
+            Path::new("/srv/workspaces/ocai/lab/home")
+        );
+    }
+
+    #[test]
     fn human_durations() {
         assert_eq!(human(0), "0s");
         assert_eq!(human(59), "59s");
@@ -634,6 +672,7 @@ mod tests {
             labels: BTreeMap::new(),
             token_role: Role::Admin,
             home_bind: None,
+            pool: None,
             created_at: 1,
             created_by: "a@x.io".into(),
             updated_at: 1,

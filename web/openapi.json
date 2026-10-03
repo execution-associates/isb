@@ -4570,7 +4570,7 @@
     },
     "/api/v1/tools/sandbox_create": {
       "post": {
-        "description": "Create (or reconcile) one sandbox: an incus container or VM to run code in isolation. `spec` is one compose service (docs/spec.md) with container_name set, as an object or YAML text. Remote callers' sandboxes are labelled with their identity, and only managed sandboxes are reachable remotely.",
+        "description": "Create (or reconcile) one sandbox: an incus container or VM to run code in isolation. `spec` is one compose service (docs/spec.md) with container_name set, as an object or YAML text. Remote callers' sandboxes are labelled with their identity, and only managed sandboxes are reachable remotely. Sandboxes are short-lived: each expires (the org's default, 24h, unless `expires` says otherwise; sandbox_extend pushes it out) and is deleted after sitting idle (`idle_timeout`, default 2h; `none` turns it off).",
         "operationId": "sandbox_create",
         "requestBody": {
           "content": {
@@ -4578,6 +4578,14 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "expires": {
+                    "description": "Lifetime from now, e.g. 4h or 7d (at most 30d; default: the org's, 24h).",
+                    "type": "string"
+                  },
+                  "idle_timeout": {
+                    "description": "Delete after this long without use (exec, a terminal, CPU), e.g. 2h; `none` for never (default: the org's, 2h).",
+                    "type": "string"
+                  },
                   "org": {
                     "description": "The org to act in (default: default).",
                     "type": "string"
@@ -4696,9 +4704,65 @@
         "summary": "Run a command in a sandbox"
       }
     },
+    "/api/v1/tools/sandbox_extend": {
+      "post": {
+        "description": "Push a sandbox's expiry out by `by` (from the later of now and its current expiry; at most 30 days from now), or change its idle timeout. Its creator, or the org's admins and above.",
+        "operationId": "sandbox_extend",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "by": {
+                    "description": "e.g. 24h (default 24h).",
+                    "type": "string"
+                  },
+                  "idle_timeout": {
+                    "description": "A new idle timeout, e.g. 4h, or none.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Extend a sandbox"
+      }
+    },
     "/api/v1/tools/sandbox_list": {
       "post": {
-        "description": "List instances (for remote callers: only the ones isb serve manages), optionally filtered by labels (`key` or `key=value`).",
+        "description": "List instances (for remote callers: only the ones isb serve manages), optionally filtered by labels (`key` or `key=value`) and kind (`sandbox`, `workspace`, `replica`, `build`). Each with who created it (owner), when, its expiry and idle timeout, its last activity, and its CPU and memory.",
         "operationId": "sandbox_list",
         "requestBody": {
           "content": {
@@ -4706,6 +4770,16 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "kind": {
+                    "description": "Only this kind of instance.",
+                    "enum": [
+                      "sandbox",
+                      "workspace",
+                      "replica",
+                      "build"
+                    ],
+                    "type": "string"
+                  },
                   "labels": {
                     "items": {
                       "type": "string"
@@ -7306,6 +7380,674 @@
           }
         },
         "summary": "Schedule snapshots"
+      }
+    },
+    "/api/v1/tools/workspace_create": {
+      "post": {
+        "description": "Create the org's workspace: an unprivileged container from `image` with a managed home volume (`home_size`, counted against the org's disk quota) at the workspace user's home, and an org token (role `token_role`, default admin) delivered inside as /run/isb/token and $ISB_TOKEN, with $ISB_URL and $ISB_ORG, so the isb CLI and MCP clients inside work with no setup. One per org. Org admins and above.",
+        "operationId": "workspace_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "cpus": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "env": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Plain variables for login shells.",
+                    "type": "object"
+                  },
+                  "home_bind": {
+                    "description": "Superadmins only: this host directory as the home (an existing box's, when migrating), instead of the default home.",
+                    "type": "string"
+                  },
+                  "home_size": {
+                    "description": "The home volume (default 20GiB).",
+                    "type": "string"
+                  },
+                  "image": {
+                    "description": "An incus image (dev-base, images:ubuntu/24.04) or registry:APP:TAG.",
+                    "type": "string"
+                  },
+                  "labels": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "memory": {
+                    "description": "e.g. 8GiB.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "Default: workspace.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "root_size": {
+                    "description": "The root disk, e.g. 30GiB (default: the pool's).",
+                    "type": "string"
+                  },
+                  "secrets": {
+                    "description": "Org secrets delivered as /run/isb/secrets/NAME.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "token_role": {
+                    "description": "The workspace token's role in the org (default admin).",
+                    "enum": [
+                      "viewer",
+                      "member",
+                      "admin"
+                    ],
+                    "type": "string"
+                  },
+                  "user": {
+                    "description": "The workspace user (default dev); created when the image lacks it.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "image"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Create the workspace"
+      }
+    },
+    "/api/v1/tools/workspace_delete": {
+      "post": {
+        "description": "Delete the workspace: its machine, its token (revoked at once) and, unless keep_home, its home volume. Needs confirm: true. Org admins and above.",
+        "operationId": "workspace_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "confirm": {
+                    "description": "Required: this ends live sessions on the workspace. Without it the call only says what would end.",
+                    "type": "boolean"
+                  },
+                  "keep_home": {
+                    "description": "Keep the home volume (it can be attached to a new workspace of the same name).",
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Delete the workspace"
+      }
+    },
+    "/api/v1/tools/workspace_get": {
+      "post": {
+        "description": "The org's workspace (its long-lived machine, docs/workspaces.md): image, size, home volume, status, CPU and memory, live sessions (web terminals, SSH), last activity, its token's metadata (never the token) and how to connect; `workspace` is null when the org has none yet. Also the org's workspace settings.",
+        "operationId": "workspace_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Get the workspace"
+      }
+    },
+    "/api/v1/tools/workspace_list": {
+      "post": {
+        "description": "The org's workspaces (one per org unless a platform admin raised max_workspaces), as workspace_get shows each, without the session count.",
+        "operationId": "workspace_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List workspaces"
+      }
+    },
+    "/api/v1/tools/workspace_rebuild": {
+      "post": {
+        "description": "Replace the workspace's machine with a fresh one from its image (or `image`), keeping its home volume and token: what to do when the root is damaged. Ends every session; needs confirm: true. Software installed outside the home is gone. Org admins and above.",
+        "operationId": "workspace_rebuild",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "confirm": {
+                    "description": "Required: this ends live sessions on the workspace. Without it the call only says what would end.",
+                    "type": "boolean"
+                  },
+                  "image": {
+                    "description": "Rebuild from this image instead (it becomes the workspace's).",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Rebuild the workspace"
+      }
+    },
+    "/api/v1/tools/workspace_restart": {
+      "post": {
+        "description": "Restart the workspace. This ends every session on it: without confirm: true it only reports the live sessions. Org members and above.",
+        "operationId": "workspace_restart",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "confirm": {
+                    "description": "Required: this ends live sessions on the workspace. Without it the call only says what would end.",
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Restart the workspace"
+      }
+    },
+    "/api/v1/tools/workspace_settings": {
+      "post": {
+        "description": "The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none). Without changes it reads them; org admins change the sandbox defaults.",
+        "operationId": "workspace_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "home_kind": {
+                    "description": "Platform admins: where new workspace homes go: a managed volume, or a host folder under isb serve's --workspace-home-root (\"\": the daemon's default).",
+                    "enum": [
+                      "",
+                      "volume",
+                      "host"
+                    ],
+                    "type": "string"
+                  },
+                  "home_pool": {
+                    "description": "Platform admins: the storage pool new workspace homes go in (\"\" clears it: the daemon's --workspace-pool, else the org's default pool).",
+                    "type": "string"
+                  },
+                  "max_workspaces": {
+                    "maximum": 100,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "sandbox_expiry": {
+                    "description": "e.g. 24h, 7d.",
+                    "type": "string"
+                  },
+                  "sandbox_idle": {
+                    "description": "e.g. 2h, or none.",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Workspace settings"
+      }
+    },
+    "/api/v1/tools/workspace_start": {
+      "post": {
+        "description": "Start the workspace and deliver its credentials. Org members and above.",
+        "operationId": "workspace_start",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Start the workspace"
+      }
+    },
+    "/api/v1/tools/workspace_stop": {
+      "post": {
+        "description": "Stop the workspace. This ends every session on it (terminals, SSH, the agents running there): without confirm: true it only reports the live sessions. Org members and above.",
+        "operationId": "workspace_stop",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "confirm": {
+                    "description": "Required: this ends live sessions on the workspace. Without it the call only says what would end.",
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Stop the workspace"
+      }
+    },
+    "/api/v1/tools/workspace_token_rotate": {
+      "post": {
+        "description": "Mint the workspace a new token and deliver it inside; the old one stops working at once. The token is never returned. Org admins and above.",
+        "operationId": "workspace_token_rotate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Rotate the workspace's token"
+      }
+    },
+    "/api/v1/tools/workspace_update": {
+      "post": {
+        "description": "Change the workspace: cpus, memory, root_size and home_size apply at once (resizing needs confirm: true, since it can end sessions); env and secrets are delivered again (new login shells see them); image applies on the next rebuild; labels; token_role. Fields left out are kept. Org admins and above.",
+        "operationId": "workspace_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "confirm": {
+                    "description": "Required: this ends live sessions on the workspace. Without it the call only says what would end.",
+                    "type": "boolean"
+                  },
+                  "cpus": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "env": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Replaces the variables.",
+                    "type": "object"
+                  },
+                  "home_size": {
+                    "description": "Grow the home volume.",
+                    "type": "string"
+                  },
+                  "image": {
+                    "type": "string"
+                  },
+                  "labels": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Replaces the labels.",
+                    "type": "object"
+                  },
+                  "memory": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "The workspace (default: the org's only one).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "root_size": {
+                    "type": "string"
+                  },
+                  "secrets": {
+                    "description": "Replaces the delivered secrets.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "token_role": {
+                    "enum": [
+                      "viewer",
+                      "member",
+                      "admin"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Change the workspace"
       }
     }
   },

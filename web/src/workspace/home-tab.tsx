@@ -23,7 +23,7 @@ export function HomeTab({ org, ws, admin }: { org: string; ws: Workspace; admin:
         title="Home"
         description={
           h.bind
-            ? "A host directory bound as the home (a migration): isb neither sizes nor deletes it."
+            ? "A host folder bound as the home: the host backs it up; isb neither sizes nor deletes it, and rebuilding or deleting the workspace keeps it."
             : `A managed volume mounted at ${h.path}. Rebuilding the workspace keeps it; deleting the workspace deletes it unless you keep it. It counts against the org's disk quota.`
         }
       >
@@ -38,7 +38,7 @@ export function HomeTab({ org, ws, admin }: { org: string; ws: Workspace; admin:
               : [
                   ["Volume", <code key="v" className="font-mono text-xs">{h.volume}</code>],
                   ["Size", h.size],
-                  ["Pool", h.pool],
+                  ["Pool", h.driver ? `${h.pool} (${h.driver})` : h.pool],
                   ["Mounted at", <code key="p" className="font-mono text-xs">{h.path}</code>],
                   ["Owner", ws.user],
                   ["State", h.exists ? "present" : "missing"],

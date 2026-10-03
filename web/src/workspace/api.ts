@@ -22,8 +22,8 @@ export interface WorkspaceSessions {
 }
 
 export type WorkspaceHome =
-  | { volume: string; pool: string | null; path: string; size: string; exists: boolean; bind?: undefined }
-  | { bind: string; path: string; volume?: undefined; pool?: undefined; size?: undefined; exists?: undefined };
+  | { volume: string; pool: string | null; driver: string | null; cow: boolean | null; path: string; size: string; exists: boolean; bind?: undefined }
+  | { bind: string; path: string; volume?: undefined; pool?: undefined; driver?: undefined; cow?: undefined; size?: undefined; exists?: undefined };
 
 export interface Workspace {
   name: string;
