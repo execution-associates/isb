@@ -112,8 +112,9 @@
   --app-font-sans: "Geist Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --app-font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --app-font-display: "Archivo Variable", "Geist Variable", "Helvetica Neue", Arial, sans-serif;
-  /* The site's corners are square; 4px keeps controls from looking unfinished. */
-  --radius: 0.25rem;
+  /* The site's corners are square, but square corners make neighbouring gradients
+     meet in hard seams; 8px (small controls 4px) keeps the edges soft. */
+  --radius: 0.5rem;
   --background: oklch(0.193 0.066 303.8); /* ink */
   --foreground: oklch(0.95 0.012 335);
   --card: oklch(0.215 0.072 305);

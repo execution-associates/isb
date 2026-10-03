@@ -130,7 +130,7 @@ route; isb's own sign-in applies after it.
   Associates theme takes executionassociates.com's palette and type: ink
   surfaces, white text, peach focus rings, glow pink as the brand colour,
   Geist and Geist Mono, Archivo (widened) for page titles and sidebar labels,
-  square-ish 4 px corners, and the site's coast at night on the sign-in panel.
+  softly rounded 8 px corners (4 px on small controls), and the site's coast at night on the sign-in panel.
   The site is dark only, so the theme is dark only: `<html>` carries `dark`
   and `ea`, and `:root.ea` replaces the dark palette.
 - **Texture** (Execution Associates theme only; `web/src/ea-texture.css`,
