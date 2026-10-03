@@ -587,7 +587,7 @@ fn mark_down(key: &str, b: &Backend, err: &io::Error) {
     b.failures.fetch_add(1, Ordering::SeqCst);
     let mut h = lock(&b.health);
     let now = Instant::now();
-    let was_up = !h.down_until.is_some_and(|t| t > now);
+    let was_up = h.down_until.is_none_or(|t| t <= now);
     h.backoff = if h.backoff.is_zero() {
         BACKOFF_MIN
     } else {

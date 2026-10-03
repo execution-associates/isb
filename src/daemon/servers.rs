@@ -61,7 +61,7 @@ impl Daemon {
 
 fn platform_only(c: &Caller) -> Result<()> {
     match c {
-        Caller::Local { .. } => Ok(()),
+        Caller::Local { .. } | Caller::Superadmin(_) => Ok(()),
         Caller::User { principal } if principal.platform_admin => Ok(()),
         _ => Err(Error::Forbidden("servers are for platform admins".into())),
     }

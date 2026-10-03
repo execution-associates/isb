@@ -25,6 +25,7 @@ pub mod client;
 pub mod http;
 pub mod mcp;
 pub mod service;
+pub mod tailnet;
 pub mod terminal;
 
 use std::path::PathBuf;
@@ -78,6 +79,8 @@ pub struct Listener {
     pub policy: ToolPolicy,
     /// Serve TCP with no Access validation, trusting whatever reaches the port.
     pub allow_unauthenticated: bool,
+    /// A TCP listener on a tailnet address rather than loopback.
+    pub tailnet: bool,
     /// Paths other than `/healthz` and `/mcp`.
     pub routes: Option<Routes>,
     /// Routes that authenticate every request themselves and are served
@@ -120,6 +123,7 @@ impl Listener {
             access: None,
             policy: ToolPolicy::default(),
             allow_unauthenticated: false,
+            tailnet: false,
             routes: None,
             public_routes: None,
             hooks: mcp::Hooks::default(),
@@ -149,6 +153,19 @@ impl Listener {
         self
     }
 
+    /// [`Self::access`], sharing a validator (and its key cache).
+    pub fn access_shared(mut self, v: Arc<AccessValidator>) -> Self {
+        self.access = Some(v);
+        self
+    }
+
+    /// Bind a tailnet address instead of loopback (no Access: only tailnet
+    /// peers reach it).
+    pub fn tailnet(mut self, yes: bool) -> Self {
+        self.tailnet = yes;
+        self
+    }
+
     pub fn policy(mut self, p: ToolPolicy) -> Self {
         self.policy = p;
         self
@@ -159,7 +176,8 @@ impl Listener {
         self
     }
 
-    /// The unix socket is trusted; TCP never is.
+    /// The unix socket is trusted as itself; a TCP caller is trusted only
+    /// as a superadmin, per request.
     pub fn is_trusted(&self) -> bool {
         matches!(self.kind, ListenerKind::Unix(_))
     }
@@ -172,6 +190,9 @@ impl Listener {
             ))),
             (ListenerKind::Mtls(a, _), Some(_)) => Err(Error::invalid(format!(
                 "{a}: Cloudflare Access does not apply to an mTLS listener"
+            ))),
+            (ListenerKind::Tcp(a), Some(_)) if self.tailnet => Err(Error::invalid(format!(
+                "{a}: Cloudflare Access applies to loopback listeners (behind the tunnel), not a tailnet one"
             ))),
             (ListenerKind::Tcp(a), None) if !self.allow_unauthenticated => {
                 Err(Error::invalid(format!(
@@ -194,6 +215,10 @@ impl Listener {
             (ListenerKind::Tcp(a), Some(v)) => format!(
                 "http://{a}/mcp (Cloudflare Access: {}, {tools} tools)",
                 v.issuer()
+            ),
+            (ListenerKind::Tcp(a), None) if self.tailnet => format!(
+                "http://{a}/mcp on the tailnet ({tools} tools): callers sign in with isb API tokens \
+                 or sessions, or are superadmins by tailnet identity"
             ),
             (ListenerKind::Tcp(a), None) if self.hooks.authorize.is_some() => format!(
                 "http://{a}/mcp ({tools} tools) without Cloudflare Access: callers sign in \
@@ -248,6 +273,7 @@ pub fn serve_until(
     for l in &listeners {
         l.check()?;
         let sock = match &l.kind {
+            ListenerKind::Tcp(a) if l.tailnet => HttpListener::bind_tcp_tailnet(a)?,
             ListenerKind::Tcp(a) => HttpListener::bind_tcp(a)?,
             ListenerKind::Unix(p) => HttpListener::bind_unix(p)?,
             ListenerKind::Mtls(a, t) => HttpListener::bind_tls(a, t.clone())?,

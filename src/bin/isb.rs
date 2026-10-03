@@ -498,6 +498,11 @@ enum TokenCmd {
         /// Default: the user's whole role.
         #[arg(long = "scope")]
         scopes: Vec<String>,
+        /// A superadmin token: the unix socket's reach over HTTP (every
+        /// tool, no remote-spec policy, any instance). Nobody's; minted
+        /// only here, on the host.
+        #[arg(long, conflicts_with_all = ["org", "user", "scopes"])]
+        superadmin: bool,
         #[command(flatten)]
         db: AuthDb,
     },
@@ -508,10 +513,10 @@ enum TokenCmd {
         #[command(flatten)]
         db: AuthDb,
     },
-    /// Revoke API tokens by id.
+    /// Revoke tokens by id (a superadmin token's as `sa-ID`, as `ls` shows).
     Revoke {
         #[arg(required = true)]
-        ids: Vec<i64>,
+        ids: Vec<String>,
         #[command(flatten)]
         db: AuthDb,
     },
@@ -521,9 +526,11 @@ enum TokenCmd {
 struct ServeArgs {
     #[command(subcommand)]
     action: Option<ServeAction>,
-    /// Loopback address for remote MCP (`/mcp`) and `/healthz`.
-    #[arg(long, env = "ISB_SERVE_LISTEN")]
-    listen: Option<String>,
+    /// Addresses for remote MCP (`/mcp`), the web UI and `/healthz`
+    /// (comma-separated): loopback, or a tailnet address with
+    /// --superadmin-tailnet.
+    #[arg(long, env = "ISB_SERVE_LISTEN", value_delimiter = ',')]
+    listen: Vec<String>,
     /// Unix socket for the local CLI.
     #[arg(long = "serve-socket", env = "ISB_SERVE_SOCKET")]
     serve_socket: Option<PathBuf>,
@@ -564,6 +571,15 @@ struct ServeArgs {
     /// Let remote callers reach every instance, not only managed ones.
     #[arg(long, env = "ISB_SERVE_ANY_INSTANCE")]
     any_instance: bool,
+    /// Superadmins by tailnet identity: login names (someone@example.com)
+    /// and node tags (tag:agents), comma-separated. They get the unix
+    /// socket's reach from a tailnet --listen address.
+    #[arg(long, env = "ISB_SUPERADMIN_TAILNET", value_name = "LIST")]
+    superadmin_tailnet: Option<String>,
+    /// Superadmins by Cloudflare Access identity: emails and service token
+    /// client ids, comma-separated, exact. Needs Access and --public-url.
+    #[arg(long, env = "ISB_SUPERADMIN_ACCESS", value_name = "LIST")]
+    superadmin_access: Option<String>,
     /// Where users reach isb (https://isb.example.com), for invitation and
     /// password-reset links.
     #[arg(long, env = "ISB_PUBLIC_URL")]
@@ -2188,7 +2204,12 @@ fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
         _ => None,
     };
     let cfg = ServeConfig {
-        listen: a.listen.filter(|l| !l.is_empty()),
+        listen: a
+            .listen
+            .into_iter()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect(),
         socket: a
             .serve_socket
             .unwrap_or_else(isb::server::default_socket_path),
@@ -2245,6 +2266,18 @@ fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
             }
             _ => None,
         },
+        // Given but empty is refused: it would read as "superadmins on"
+        // while granting nobody.
+        superadmin_tailnet: a
+            .superadmin_tailnet
+            .as_deref()
+            .map(isb::server::tailnet::AllowList::parse)
+            .transpose()?,
+        superadmin_access: a
+            .superadmin_access
+            .as_deref()
+            .map(isb::daemon::superadmin::AccessAllowList::parse)
+            .transpose()?,
     };
     isb::daemon::serve(ctx.client(None), cfg)?;
     Ok(0)
@@ -3937,11 +3970,40 @@ fn token_cmd(c: TokenCmd) -> Result<u8> {
     match c {
         TokenCmd::Create {
             name,
+            superadmin: true,
+            expires,
+            db,
+            ..
+        } => {
+            let store = open_auth(&db)?;
+            let t = store.create_superadmin_token(&name, expires)?;
+            cli_audit(
+                &db,
+                "auth.superadmin_token_create",
+                None,
+                &t.info.name,
+                serde_json::json!({"id": t.info.id}),
+            );
+            eprintln!(
+                "SUPERADMIN token sa-{} ({}): the unix socket's reach over HTTP{}; shown once:",
+                t.info.id,
+                t.info.name,
+                match t.info.expires_at {
+                    Some(e) => format!(", expires in {} days", (e - t.info.created_at) / 86400),
+                    None => ", never expires".into(),
+                }
+            );
+            println!("{}", t.token);
+            Ok(0)
+        }
+        TokenCmd::Create {
+            name,
             org,
             expires,
             user,
             scopes,
             db,
+            ..
         } => {
             let store = open_auth(&db)?;
             let u = match user {
@@ -3995,8 +4057,9 @@ fn token_cmd(c: TokenCmd) -> Result<u8> {
         TokenCmd::Ls { json, db } => {
             let store = open_auth(&db)?;
             let tokens = store.list_all_api_tokens()?;
+            let supers = store.list_superadmin_tokens()?;
             if json {
-                print_json(&tokens);
+                print_json(&serde_json::json!({"tokens": tokens, "superadmin": supers}));
                 return Ok(0);
             }
             let emails: BTreeMap<i64, String> = store
@@ -4034,6 +4097,18 @@ fn token_cmd(c: TokenCmd) -> Result<u8> {
                     },
                 ]);
             }
+            for t in supers {
+                rows.push(vec![
+                    format!("sa-{}", t.id),
+                    t.name,
+                    "SUPERADMIN".into(),
+                    "*".into(),
+                    fmt_time((t.created_at).max(0) as u64),
+                    when(t.last_used),
+                    when(t.expires_at),
+                    "everything".into(),
+                ]);
+            }
             table(rows);
             Ok(0)
         }
@@ -4041,6 +4116,28 @@ fn token_cmd(c: TokenCmd) -> Result<u8> {
             let store = open_auth(&db)?;
             let mut code = 0;
             for id in ids {
+                if let Some(sa) = id.strip_prefix("sa-") {
+                    let sid: i64 = sa
+                        .parse()
+                        .map_err(|_| Error::Invalid(format!("token id {id:?}")))?;
+                    if store.revoke_superadmin_token(sid)? {
+                        cli_audit(
+                            &db,
+                            "auth.superadmin_token_revoke",
+                            None,
+                            &id,
+                            serde_json::json!({}),
+                        );
+                        println!("revoked superadmin token {id}");
+                    } else {
+                        eprintln!("isb: superadmin token {id} not found");
+                        code = 1;
+                    }
+                    continue;
+                }
+                let id: i64 = id
+                    .parse()
+                    .map_err(|_| Error::Invalid(format!("token id {id:?}: a number, or sa-N")))?;
                 let org = store.api_token(id).ok().and_then(|t| t.org);
                 if store.revoke_api_token(id)? {
                     cli_audit(
@@ -4085,6 +4182,20 @@ mod tests {
                 assert_eq!(expires, Some(Duration::from_secs(90 * 86400)));
             }
             _ => panic!("wrong command"),
+        }
+        // A superadmin token is nobody's and unscoped.
+        let c = Cli::try_parse_from(["isb", "token", "create", "agent", "--superadmin"]).unwrap();
+        assert!(matches!(
+            c.cmd,
+            Cmd::Token(TokenCmd::Create {
+                superadmin: true,
+                ..
+            })
+        ));
+        for extra in [["--org", "ocai"], ["--user", "a@x.io"], ["--scope", "read"]] {
+            let mut argv = vec!["isb", "token", "create", "agent", "--superadmin"];
+            argv.extend(extra);
+            assert!(Cli::try_parse_from(argv).is_err(), "{extra:?}");
         }
         let c = Cli::try_parse_from(["isb", "invite", "ocai", "a@x.io"]).unwrap();
         assert!(matches!(c.cmd, Cmd::Invite { ref role, .. } if role == "member"));

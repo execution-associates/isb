@@ -20,6 +20,7 @@ pub mod policy;
 pub mod previews;
 pub mod secrets;
 mod servers;
+pub mod superadmin;
 pub mod templates;
 mod terminal;
 
@@ -50,8 +51,10 @@ pub const LABEL_OWNER: &str = "isb.owner";
 /// How `isb serve` runs.
 #[derive(Debug, Clone)]
 pub struct ServeConfig {
-    /// Loopback `host:port` for remote MCP; `None` serves the socket only.
-    pub listen: Option<String>,
+    /// `host:port` addresses for remote MCP and the web UI: loopback, or a
+    /// tailnet address with `superadmin_tailnet`. Empty serves the socket
+    /// only.
+    pub listen: Vec<String>,
     pub socket: PathBuf,
     /// Cloudflare Access team domain and application audience.
     pub access: Option<(String, String)>,
@@ -87,6 +90,12 @@ pub struct ServeConfig {
     /// Run as a server's agent for a control plane (docs/servers.md): an
     /// mTLS listener instead of the identity store, web UI and `--listen`.
     pub agent: Option<AgentConfig>,
+    /// `--superadmin-tailnet`: tailnet logins and tags with the unix
+    /// socket's reach.
+    pub superadmin_tailnet: Option<crate::server::tailnet::AllowList>,
+    /// `--superadmin-access`: Access emails and service token client ids
+    /// with the unix socket's reach.
+    pub superadmin_access: Option<superadmin::AccessAllowList>,
 }
 
 /// `isb serve --agent`.
@@ -107,6 +116,7 @@ fn auth_routes(
     store: Arc<AuthStore>,
     secrets: &Arc<crate::secrets::Secrets>,
     log: &Arc<crate::audit::AuditLog>,
+    gate: Arc<superadmin::Gate>,
 ) -> Result<crate::server::Routes> {
     use crate::auth::oauth::SecretFn;
     let default_org = crate::org::OrgId::default_org();
@@ -134,6 +144,12 @@ fn auth_routes(
             providers,
             open_signup: cfg.open_signup,
             audit: Some(log.clone()),
+            superadmin: Some(Arc::new(move |r: &crate::server::http::Request| match gate
+                .resolve(r, None)
+            {
+                superadmin::Resolved::Superadmin(s) => Some(s),
+                _ => None,
+            })),
         },
     )?;
     eprintln!("isb serve: identity store {}", path.display());
@@ -169,6 +185,9 @@ struct Daemon {
     /// The servers orgs can be placed on (a control plane; `None` on an
     /// agent).
     servers: Option<Arc<crate::servers::Servers>>,
+    /// Who is a superadmin, and what `host_policy` reports.
+    gate: Arc<superadmin::Gate>,
+    host: Value,
 }
 
 /// dnsmasq (as `incus`) reads service names from the DNS root. When that
@@ -280,14 +299,26 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
             ""
         }
     );
-    if cfg.agent.is_some() && cfg.listen.is_some() {
+    if cfg.agent.is_some() && !cfg.listen.is_empty() {
         return Err(Error::invalid(
             "--agent serves its control plane only: drop --listen (users reach the control plane)",
         ));
     }
-    let auth = match &cfg.listen {
-        Some(_) => Some(auth_routes(&cfg, users.clone(), &secrets, &audit_log)?),
+    let access = match &cfg.access {
+        Some((team, aud)) => Some(Arc::new(AccessValidator::new(team, aud)?)),
         None => None,
+    };
+    let gate = Arc::new(superadmin::gate(&cfg, users.clone(), access.clone())?);
+    let auth = if cfg.listen.is_empty() {
+        None
+    } else {
+        Some(auth_routes(
+            &cfg,
+            users.clone(),
+            &secrets,
+            &audit_log,
+            gate.clone(),
+        )?)
     };
     let servers = match &cfg.agent {
         None => Some(crate::servers::Servers::open(&cfg.state_dir)?),
@@ -375,12 +406,15 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         },
         audit: audit_log.clone(),
         servers: servers.clone(),
+        gate: gate.clone(),
+        host: superadmin::host_summary(&cfg, &gate),
     });
     if let Some(s) = &servers {
         s.start(ctl.clone());
     }
     let registry = registry(d.clone())?;
     let mut hooks = hooks(d.clone(), users.clone(), cfg.allow_unauthenticated);
+    superadmin::announce(&cfg, &gate, &users);
     hooks.audit = Some(audit::hook(audit_log.clone(), cfg.audit_all));
     if servers.is_some() {
         hooks.route = Some(servers::route(d.clone()));
@@ -422,19 +456,23 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
             webhooks.clone(),
         ));
     }
-    if let Some(addr) = &cfg.listen {
+    for addr in &cfg.listen {
+        let tailnet = superadmin::is_tailnet_listen(addr);
         let mut l = Listener::tcp(addr.clone())
             .policy(cfg.remote_tools.clone())
-            .hooks(hooks)
-            .public_routes(webhooks);
-        if let Some(r) = auth {
-            l = l.routes(r);
+            .hooks(hooks.clone())
+            .public_routes(webhooks.clone())
+            .tailnet(tailnet);
+        if let Some(r) = &auth {
+            l = l.routes(r.clone());
         }
-        listeners.push(match &cfg.access {
-            Some((team, aud)) => l.access(AccessValidator::new(team, aud)?),
-            // Callers sign in with an API token or a session; the authorizer
-            // refuses anonymous ones unless --allow-unauthenticated.
-            None => l.allow_unauthenticated(true),
+        listeners.push(match &access {
+            // Access guards the loopback listeners (the tunnel's end).
+            Some(v) if !tailnet => l.access_shared(v.clone()),
+            // Callers sign in with an API token or a session (or are tailnet
+            // superadmins); the authorizer refuses anonymous ones unless
+            // --allow-unauthenticated.
+            _ => l.allow_unauthenticated(true),
         });
     }
     let hd = d.clone();
@@ -584,7 +622,13 @@ fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate:
     use crate::server::Authenticated;
     let term = terminal::terminal(d.clone());
     let u = users.clone();
+    let gate = d.gate.clone();
     let authn: crate::server::mcp::Authn = Arc::new(move |req, id| {
+        match gate.resolve(req, id) {
+            superadmin::Resolved::Superadmin(s) => return Authenticated::Superadmin(s),
+            superadmin::Resolved::Refused => return Authenticated::Refused,
+            superadmin::Resolved::None => {}
+        }
         if req.header("authorization").is_some()
             || req
                 .header("cookie")
@@ -679,7 +723,10 @@ fn authorize_class(
         }
     }
     match c {
-        Caller::Local { .. } => Ok(args),
+        Caller::Local { .. } | Caller::Superadmin(_) => Ok(args),
+        _ if superadmin::TOOLS.contains(&tool) => Err(Error::Forbidden(format!(
+            "{tool} is for superadmins (the unix socket, a superadmin token, or a listed tailnet or Access identity)"
+        ))),
         Caller::Unauthenticated { .. } if allow_anonymous => Ok(args),
         Caller::Unauthenticated { .. } => Err(Error::Forbidden(
             "sign in: send an API token as Authorization: Bearer (isb token create)".into(),
@@ -766,6 +813,7 @@ fn caller_name(c: &Caller) -> String {
 /// Build the tool registry.
 fn registry(d: Arc<Daemon>) -> Result<Registry> {
     let mut r = Registry::new().instructions(INSTRUCTIONS);
+    superadmin::register(&mut r, d.clone())?;
     let ro = json!({"readOnlyHint": true, "openWorldHint": false});
     let destructive = json!({"destructiveHint": true, "openWorldHint": false});
     let write = json!({"destructiveHint": false, "openWorldHint": false});
@@ -1599,11 +1647,15 @@ fn sandbox_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         .name
         .clone()
         .ok_or_else(|| Error::invalid("spec needs container_name"))?;
-    let base = if c.is_trusted() {
+    let base = if c.is_local() {
         std::env::current_dir()?
     } else {
         d.files_dir("_sandboxes")?
     };
+    if let Caller::Superadmin(s) = c {
+        // The socket's reach, under the superadmin's own name.
+        spec.labels.insert(LABEL_OWNER.into(), s.label());
+    }
     if !c.is_trusted() {
         d.policy.check_spec(&spec, &base)?;
         if let Ok(sb) = Sandbox::get(&d.oc(&a.org)?, &name) {
@@ -1809,6 +1861,46 @@ mod tests {
 
     fn ok(c: &Caller, tool: &str, args: Value) -> bool {
         authorize(c, tool, args, None, false).is_ok()
+    }
+
+    #[test]
+    fn host_tools_are_superadmin_only_and_superadmins_reach_everything() {
+        let platform = user(&[], true);
+        let owner = user(&[("acme", Role::Owner)], false);
+        let anon = Caller::Unauthenticated {
+            addr: "127.0.0.1:1".parse().unwrap(),
+        };
+        let sa = Caller::Superadmin(Arc::new(crate::auth::Superadmin::synthetic(
+            crate::auth::SuperadminSource::Token {
+                id: 1,
+                name: "ci".into(),
+            },
+        )));
+        for t in superadmin::TOOLS {
+            assert!(!ok(&platform, t, json!({})), "{t}");
+            assert!(!ok(&owner, t, json!({})), "{t}");
+            // Not even --allow-unauthenticated reaches the host tools.
+            assert!(authorize(&anon, t, json!({}), None, true).is_err(), "{t}");
+            assert!(ok(&sa, t, json!({})), "{t}");
+            assert!(ok(&Caller::Local { uid: None }, t, json!({})), "{t}");
+        }
+        // Every org, every platform tool, as the socket does.
+        for t in ["org_delete", "server_add", "secret_get", "audit_verify"] {
+            assert!(ok(&sa, t, json!({"org": "anything"})), "{t}");
+        }
+        assert!(sa.is_trusted() && !sa.is_local());
+        assert_eq!(sa.superadmin_source().as_deref(), Some("token:ci"));
+        assert_eq!(
+            Caller::Local { uid: None }.superadmin_source().as_deref(),
+            Some("socket")
+        );
+        assert_eq!(platform.superadmin_source(), None);
+        // Audit rows name the source.
+        let a = audit::actor(&sa);
+        assert_eq!(a.name, "token:ci");
+        assert_eq!(a.kind, Some(crate::audit::ActorKind::Superadmin));
+        assert_eq!(a.token_name.as_deref(), Some("ci"));
+        assert_eq!(a.user_id, None);
     }
 
     #[test]

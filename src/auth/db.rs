@@ -121,6 +121,19 @@ const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE api_tokens ADD COLUMN scopes TEXT;
     ",
+    // 4: superadmin tokens: the unix socket's reach over HTTP. Nobody's:
+    // minted on the host (`isb token create NAME --superadmin`), named
+    // uniquely so the audit log's `token:<name>` is unambiguous.
+    "
+    CREATE TABLE superadmin_tokens (
+        id         INTEGER PRIMARY KEY,
+        token_hash BLOB NOT NULL UNIQUE,
+        name       TEXT NOT NULL UNIQUE,
+        created_at INTEGER NOT NULL,
+        last_used  INTEGER,
+        expires_at INTEGER
+    );
+    ",
 ];
 
 /// The schema version this build writes.

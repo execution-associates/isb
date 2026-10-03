@@ -286,7 +286,7 @@ impl Templates {
             undo(&made_apps, &made_secrets);
             return Err(e);
         }
-        let trigger = if c.is_trusted() {
+        let trigger = if c.is_local() {
             Trigger::Manual
         } else {
             Trigger::Api

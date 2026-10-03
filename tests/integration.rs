@@ -2323,7 +2323,7 @@ fn ingress_routes_rolls_and_removes() {
     loop {
         let routes = m.status(None)["routes"].as_array().unwrap().len();
         let (code, body) = curl(&purl, &presolve, None);
-        if routes == 0 && !(code == 200 && !body.is_empty()) {
+        if routes == 0 && (code != 200 || body.is_empty()) {
             break;
         }
         assert!(Instant::now() < deadline, "still routed: {code} {body}");

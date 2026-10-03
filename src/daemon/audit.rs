@@ -150,6 +150,7 @@ pub fn actor(c: &Caller) -> Actor {
             a
         }
         Caller::Unauthenticated { .. } => Actor::anonymous("anonymous"),
+        Caller::Superadmin(s) => Actor::from_principal(&s.principal),
         Caller::User { principal } => {
             let mut a = Actor::from_principal(principal);
             if principal.kind == PrincipalKind::Access {
@@ -203,7 +204,11 @@ pub fn outcome(r: std::result::Result<(), &Error>) -> String {
 /// calls (org-spanning tools without an org).
 fn row_org(action: &str, args: &Value) -> Option<String> {
     let named = args.get("org").and_then(Value::as_str);
-    if super::PLATFORM_TOOLS.contains(&action) || super::CROSS_ORG_READS.contains(&action) {
+    if super::PLATFORM_TOOLS.contains(&action)
+        || super::CROSS_ORG_READS.contains(&action)
+        || super::superadmin::TOOLS.contains(&action)
+        || action.starts_with("superadmin.")
+    {
         return named.and_then(|o| crate::org::OrgId::new(o).ok().map(|o| o.to_string()));
     }
     super::arg_org(args).ok().map(|o| o.to_string())
@@ -215,7 +220,9 @@ pub fn entry(a: &Audited, record_all: bool) -> Option<NewEntry> {
     let terminal = a.action.starts_with("terminal.");
     let cls = a.tool.map(|t| class_for(t, a.args)).unwrap_or_default();
     let refused = matches!(a.outcome, Err(Error::Forbidden(_)));
-    if !(terminal || !cls.read_only || record_all || refused) {
+    // A superadmin over HTTP is recorded whatever it does, reads included.
+    let superadmin = matches!(a.caller, Caller::Superadmin(_));
+    if !(terminal || !cls.read_only || record_all || refused || superadmin) {
         return None;
     }
     let details = safe_details(a.args);
@@ -252,7 +259,7 @@ pub fn hook(log: Arc<AuditLog>, record_all: bool) -> crate::server::mcp::Audit {
 /// that org; nobody else anything.
 pub fn visibility(c: &Caller, org: Option<&str>) -> Result<Visibility> {
     match c {
-        Caller::Local { .. } => Ok(Visibility::All),
+        Caller::Local { .. } | Caller::Superadmin(_) => Ok(Visibility::All),
         Caller::User { principal: p } if p.platform_admin => Ok(Visibility::All),
         Caller::User { principal: p } => {
             let Some(o) = org else {
@@ -352,7 +359,7 @@ pub fn register(r: &mut Registry, log: Arc<AuditLog>) -> Result<()> {
 /// never host-level rows.
 pub fn history_visibility(c: &Caller, org: Option<&str>) -> Result<Visibility> {
     match c {
-        Caller::Local { .. } => Ok(Visibility::All),
+        Caller::Local { .. } | Caller::Superadmin(_) => Ok(Visibility::All),
         Caller::User { principal: p } if p.platform_admin => Ok(Visibility::All),
         Caller::User { principal: p } => match org {
             Some(o) => {

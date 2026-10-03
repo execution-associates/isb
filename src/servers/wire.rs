@@ -76,11 +76,20 @@ impl Assertion {
                 via: "local".into(),
                 ..Self::control_plane()
             }),
+            // A superadmin of the control plane is the control plane's
+            // own user over HTTP: it administers every org, and the agent
+            // judges it as it judges the control plane (its policy holds).
+            Caller::Superadmin(s) => Some(Assertion {
+                email: format!("{} via control plane", s.label()),
+                via: "superadmin".into(),
+                ..Self::control_plane()
+            }),
             Caller::Access(_) => None,
             Caller::User { principal: p } => {
                 let (via, token_name, token_org, scopes) = match &p.kind {
                     PrincipalKind::Session { .. } => ("session", None, None, Vec::new()),
                     PrincipalKind::Access => ("access", None, None, Vec::new()),
+                    PrincipalKind::Superadmin { .. } => ("superadmin", None, None, Vec::new()),
                     PrincipalKind::ApiToken {
                         org, name, scopes, ..
                     } => ("token", Some(name.clone()), org.clone(), scopes.clone()),

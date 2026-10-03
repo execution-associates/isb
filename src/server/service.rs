@@ -170,7 +170,7 @@ fn setup_key(config: &Path) -> Result<KeySetup> {
     let cred = config.join(CREDENTIAL_FILE);
     let key_file = sources.default_file.clone();
     let version = systemd_version();
-    if !version.is_some_and(|v| v >= 256) {
+    if version.is_none_or(|v| v < 256) {
         // Make sure there is a key, so the daemon does not generate one at
         // first start unnoticed.
         let k = keys::load_identity(&sources)?;

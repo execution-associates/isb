@@ -60,6 +60,10 @@ pub enum Notice {
 /// requester, who gets the same answer either way.
 pub type Notifier = Arc<dyn Fn(&Notice) -> Result<(), String> + Send + Sync>;
 
+/// The superadmin behind a request, if any: a superadmin token, or a
+/// listed tailnet or Access identity (the daemon's gate).
+pub type SuperadminFn = Arc<dyn Fn(&Request) -> Option<Arc<super::Superadmin>> + Send + Sync>;
+
 #[derive(Clone, Default)]
 pub struct ApiConfig {
     /// Where users reach isb (`https://isb.example.com`), for the links in
@@ -79,6 +83,9 @@ pub struct ApiConfig {
     /// Where sign-ins, token, invitation, member and user changes are
     /// recorded.
     pub audit: Option<Arc<crate::audit::AuditLog>>,
+    /// Who is a superadmin. A superadmin is signed in as its principal
+    /// (ahead of any session cookie) and is a platform admin here.
+    pub superadmin: Option<SuperadminFn>,
 }
 
 impl std::fmt::Debug for ApiConfig {
@@ -90,6 +97,7 @@ impl std::fmt::Debug for ApiConfig {
             .field("providers", &self.providers)
             .field("open_signup", &self.open_signup)
             .field("audit", &self.audit.is_some())
+            .field("superadmin", &self.superadmin.is_some())
             .finish()
     }
 }
@@ -209,8 +217,12 @@ impl AuthApi {
         Arc::new(move |r: &Request| self.handle(r))
     }
 
-    /// The caller behind `req`, if any (see [`AuthStore::principal_from_request`]).
+    /// The caller behind `req`, if any: a superadmin (whose principal is
+    /// its isb user's, or synthetic), else [`AuthStore::principal_from_request`].
     pub fn principal(&self, req: &Request) -> Option<Principal> {
+        if let Some(s) = self.cfg.superadmin.as_ref().and_then(|f| f(req)) {
+            return Some(s.principal.clone());
+        }
         self.store.principal_from_request(req)
     }
 
@@ -652,6 +664,16 @@ impl AuthApi {
         } else {
             p.orgs.iter().map(|(o, _)| o.clone()).collect()
         };
+        // A superadmin: where its power comes from, and whether it has an
+        // isb account (sessions, passkeys and tokens of its own).
+        let superadmin = match &p.kind {
+            PrincipalKind::Superadmin { source } => json!({
+                "source": source.label(),
+                "via": source,
+                "account": p.user.id > 0,
+            }),
+            _ => Value::Null,
+        };
         Ok(Response::json(
             200,
             &json!({
@@ -660,6 +682,7 @@ impl AuthApi {
                 "memberships": memberships,
                 "orgs": orgs,
                 "auth": p.kind,
+                "superadmin": superadmin,
             }),
         ))
     }
@@ -714,9 +737,12 @@ impl AuthApi {
                 )));
             }
         }
-        let n = self
-            .store
-            .create_invitation(Some(p.user.id), &b.org, &b.email, role)?;
+        let n = self.store.create_invitation(
+            (p.user.id > 0).then_some(p.user.id),
+            &b.org,
+            &b.email,
+            role,
+        )?;
         Ok(Response::json(
             201,
             &json!({
@@ -811,8 +837,25 @@ impl AuthApi {
             /// `read`, `deploy`, `admin`, `tool:GLOB`; empty: the role's reach.
             #[serde(default)]
             scopes: Vec<String>,
+            /// Never honoured here: refused, so nobody mistakes the token
+            /// they get for one.
+            #[serde(default)]
+            superadmin: bool,
         }
         let b: B = body(req)?;
+        // Minted on the host only, so a stolen HTTP credential (a
+        // superadmin's included) cannot mint a durable one.
+        if b.superadmin {
+            return Err(AuthError::Forbidden(
+                "superadmin tokens are minted on the host only: isb token create NAME --superadmin"
+                    .into(),
+            ));
+        }
+        if p.user.id <= 0 {
+            return Err(AuthError::Forbidden(
+                "a superadmin without an isb account has no tokens of its own".into(),
+            ));
+        }
         // Judged by what the caller can reach, not what the user can: an org
         // token cannot mint a token for another org or a platform token.
         match &b.org {

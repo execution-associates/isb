@@ -841,3 +841,111 @@ fn org_members_and_tokens_carry_who_and_when() {
     // A member may not list the org's tokens.
     assert_eq!(t.get("orgs/ocai/tokens", &[("Cookie", &member)]).0, 403);
 }
+
+#[test]
+fn superadmins_sign_in_by_their_source_and_never_mint_superadmin_tokens() {
+    let (s, _) = crate::auth::tests::store_with(fast_config());
+    let s = Arc::new(s);
+    let sa = s.create_superadmin_token("agent", None).unwrap();
+    let st = s.clone();
+    // As the daemon's gate: the superadmin token, or a "tailnet" peer.
+    let gate: SuperadminFn = Arc::new(move |r: &Request| {
+        let bearer = r
+            .header("authorization")
+            .and_then(|a| a.strip_prefix("Bearer "));
+        if let Some(t) = bearer {
+            return st.authenticate_superadmin_token(t).ok().flatten().map(|i| {
+                Arc::new(crate::auth::Superadmin::synthetic(
+                    crate::auth::SuperadminSource::Token {
+                        id: i.id,
+                        name: i.name,
+                    },
+                ))
+            });
+        }
+        matches!(&r.peer, Peer::Tcp(a) if a.ip().to_string() == "100.64.0.1").then(|| {
+            Arc::new(crate::auth::Superadmin::synthetic(
+                crate::auth::SuperadminSource::Tailnet {
+                    login: "tagged-devices".into(),
+                    node: "agent.t.ts.net".into(),
+                    tags: vec!["tag:agents".into()],
+                },
+            ))
+        })
+    });
+    let api = Arc::new(
+        AuthApi::new(
+            s.clone(),
+            ApiConfig {
+                superadmin: Some(gate),
+                ..Default::default()
+            },
+        )
+        .unwrap(),
+    );
+    let t = T {
+        router: api.clone().router(),
+        api,
+    };
+    // A tailnet superadmin is signed in without a session.
+    let (st, v, _) = t.call(req_from(
+        "100.64.0.1:1",
+        "GET",
+        "/api/v1/auth/me",
+        &[],
+        None,
+    ));
+    assert_eq!(st, 200, "{v}");
+    assert_eq!(v["superadmin"]["source"], "tailnet:agent.t.ts.net");
+    assert_eq!(v["superadmin"]["account"], false);
+    assert_eq!(v["platform_admin"], true);
+    // Not from elsewhere.
+    assert_eq!(t.get("me", &[]).0, 401);
+    // Neither it nor a superadmin token mints a superadmin token, or any
+    // token without an account.
+    let bearer = format!("Bearer {}", sa.token);
+    for (peer, h) in [
+        ("100.64.0.1:1", vec![CSRF]),
+        ("127.0.0.1:1", vec![("Authorization", bearer.as_str())]),
+    ] {
+        let (st, v, _) = t.call(req_from(
+            peer,
+            "POST",
+            "/api/v1/auth/tokens",
+            &h,
+            Some(json!({"name": "durable", "superadmin": true})),
+        ));
+        assert_eq!(st, 403, "{v}");
+        assert!(
+            v["message"].as_str().unwrap().contains("on the host"),
+            "{v}"
+        );
+        let (st, _, _) = t.call(req_from(
+            peer,
+            "POST",
+            "/api/v1/auth/tokens",
+            &h,
+            Some(json!({"name": "plain"})),
+        ));
+        assert_eq!(st, 403);
+    }
+    // Writes still need the CSRF header from the ambient source.
+    let (st, _, _) = t.call(req_from(
+        "100.64.0.1:1",
+        "POST",
+        "/api/v1/auth/tokens",
+        &[],
+        Some(json!({"name": "x"})),
+    ));
+    assert_eq!(st, 403);
+    // Even a session user asking for one is refused.
+    s.create_user("u@x.io", "U", Some(PW), true).unwrap();
+    let c = t.login("u@x.io");
+    let (st, _, _) = t.post(
+        "tokens",
+        &[("Cookie", &c)],
+        json!({"name": "d", "superadmin": true}),
+    );
+    assert_eq!(st, 403);
+    assert_eq!(s.list_superadmin_tokens().unwrap().len(), 1);
+}

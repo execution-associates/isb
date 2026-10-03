@@ -41,8 +41,8 @@ fn take(a: &mut Value, keys: &[&str]) -> serde_json::Map<String, Value> {
     out
 }
 
-/// The caller may point a destination at this host: the local CLI or a
-/// platform admin.
+/// The caller may point a destination at this host: a superadmin (the
+/// local CLI included) or a platform admin.
 fn trusted(c: &Caller) -> bool {
     c.is_trusted() || c.principal().is_some_and(|p| p.platform_admin)
 }
@@ -169,7 +169,7 @@ pub fn register(r: &mut Registry, ctx: Ctx) -> Result<()> {
             let (app, _) = x.apps.create(&org, spec)?;
             let mut out = json!({"database": database_json(&org, &app, None)});
             if t.get("deploy").and_then(Value::as_bool).unwrap_or(true) {
-                let trigger = if c.is_trusted() {
+                let trigger = if c.is_local() {
                     crate::app::deploy::Trigger::Manual
                 } else {
                     crate::app::deploy::Trigger::Api

@@ -40,12 +40,38 @@ pub enum Caller {
     User {
         principal: Arc<crate::auth::Principal>,
     },
+    /// The unix socket's reach over HTTP: a superadmin token, or a tailnet
+    /// identity on the superadmin allow list ([`crate::auth::superadmin`]).
+    Superadmin(Arc<crate::auth::Superadmin>),
 }
 
 impl Caller {
-    /// True only for the local unix socket.
+    /// A superadmin: the unix socket, or an HTTP caller with the socket's
+    /// reach. Every tool, no remote-spec policy, any instance.
     pub fn is_trusted(&self) -> bool {
+        matches!(self, Caller::Local { .. } | Caller::Superadmin(_))
+    }
+
+    /// Literally the unix socket: the daemon's own user on this host.
+    pub fn is_local(&self) -> bool {
         matches!(self, Caller::Local { .. })
+    }
+
+    pub fn superadmin(&self) -> Option<&crate::auth::Superadmin> {
+        match self {
+            Caller::Superadmin(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Where a superadmin's power comes from: `socket`, `token:<name>`,
+    /// `tailnet:<login>`; `None` for everyone else.
+    pub fn superadmin_source(&self) -> Option<String> {
+        match self {
+            Caller::Local { .. } => Some("socket".into()),
+            Caller::Superadmin(s) => Some(s.label()),
+            _ => None,
+        }
     }
 
     pub fn identity(&self) -> Option<&Identity> {
@@ -55,6 +81,9 @@ impl Caller {
         }
     }
 
+    /// A signed-in user's principal. `None` for superadmins too, which
+    /// reach every org: code that filters by a principal's orgs treats them
+    /// as it treats the socket.
     pub fn principal(&self) -> Option<&crate::auth::Principal> {
         match self {
             Caller::User { principal } => Some(principal),
@@ -73,6 +102,7 @@ impl std::fmt::Display for Caller {
             }
             Caller::Access(id) => f.write_str(id.name()),
             Caller::Unauthenticated { addr } => write!(f, "unauthenticated {addr}"),
+            Caller::Superadmin(s) => write!(f, "superadmin {}", s.label()),
             Caller::User { principal } => match &principal.kind {
                 crate::auth::PrincipalKind::ApiToken { .. } => {
                     write!(f, "{} (token)", principal.user.email)
@@ -356,6 +386,63 @@ pub enum Authenticated {
     User(Arc<crate::auth::Principal>),
     /// A credential was presented and is not valid.
     Refused,
+    /// The unix socket's reach: a superadmin token or a tailnet identity on
+    /// the allow list.
+    Superadmin(Arc<crate::auth::Superadmin>),
+}
+
+/// Is `path` an MCP endpoint (`/mcp`, `/orgs/<org>/mcp`)?
+fn is_mcp_path(path: &str) -> bool {
+    path == "/mcp"
+        || path
+            .strip_prefix("/orgs/")
+            .and_then(|r| r.strip_suffix("/mcp"))
+            .is_some_and(|o| !o.is_empty() && !o.contains('/'))
+}
+
+/// The authority (`host[:port]`) of an `Origin`, lowercased.
+fn origin_authority(origin: &str) -> Option<String> {
+    let (scheme, rest) = origin.trim().split_once("://")?;
+    if !(scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https"))
+        || rest.is_empty()
+        || rest.contains(['/', '?', '#', '@'])
+    {
+        return None;
+    }
+    Some(rest.to_ascii_lowercase())
+}
+
+/// Defences for a caller whose credential the browser sends by itself (a
+/// tailnet identity, like a cookie), so a page open on a tailnet machine
+/// cannot drive the API:
+/// - an `Origin`, when sent, must be this server's own (it names the
+///   request's `Host`; the `Host` itself was checked against this server's
+///   names before the identity was granted, which blocks DNS rebinding);
+/// - `/mcp` must be `Content-Type: application/json` (a cross-site page can
+///   send that only after a CORS preflight, which isb never grants);
+/// - other writes must carry `X-Isb-Csrf: 1`, as sessions do.
+pub fn ambient_ok(req: &Request) -> std::result::Result<(), &'static str> {
+    if let Some(o) = req.header("origin") {
+        let host = req.header("host").map(|h| h.trim().to_ascii_lowercase());
+        if origin_authority(o).is_none() || origin_authority(o) != host {
+            return Err("origin not allowed");
+        }
+    }
+    let write = !matches!(req.method.as_str(), "GET" | "HEAD");
+    if is_mcp_path(&req.path) {
+        if write
+            && !req.header("content-type").is_some_and(|ct| {
+                ct.trim()
+                    .to_ascii_lowercase()
+                    .starts_with("application/json")
+            })
+        {
+            return Err("/mcp needs Content-Type: application/json");
+        }
+    } else if write && req.header("x-isb-csrf").map(str::trim) != Some("1") {
+        return Err("missing X-Isb-Csrf header");
+    }
+    Ok(())
 }
 
 /// May `caller` run `tool` with these arguments? Returns the arguments to
@@ -830,6 +917,32 @@ impl Endpoint {
             Some(a) => a(req, id),
             None => Authenticated::None,
         };
+        let superadmin = |s: Arc<crate::auth::Superadmin>| {
+            if s.source.is_ambient() {
+                if let Err(why) = ambient_ok(req) {
+                    eprintln!(
+                        "isb serve: refused superadmin {} on {} {}: {why}",
+                        s.label(),
+                        req.method,
+                        req.path
+                    );
+                    if let Some(a) = &self.hooks.audit {
+                        let caller = Caller::Superadmin(s.clone());
+                        let e = Error::Forbidden(why.to_string());
+                        a(&Audited {
+                            caller: &caller,
+                            action: "superadmin.refused",
+                            tool: None,
+                            args: &json!({}),
+                            outcome: Err(&e),
+                            origin: &origin(req, &caller, is_mcp_path(&req.path)),
+                        });
+                    }
+                    return Err(rest_error(403, "forbidden", why));
+                }
+            }
+            Ok(Caller::Superadmin(s))
+        };
         if let Some(v) = &self.access {
             let token = req.header(ASSERTION_HEADER).unwrap_or("").trim();
             if token.is_empty() {
@@ -855,24 +968,26 @@ impl Endpoint {
                     csrf()?;
                     Ok(Caller::User { principal: p })
                 }
+                Authenticated::Superadmin(s) => superadmin(s),
                 Authenticated::Refused => {
                     Err(rest_error(401, "unauthorized", "invalid credentials"))
                 }
                 Authenticated::None => Ok(Caller::Access(id)),
             };
         }
-        if bearer || cookie {
-            match user(None) {
-                Authenticated::User(p) => {
-                    csrf()?;
-                    return Ok(Caller::User { principal: p });
-                }
-                Authenticated::Refused => {
-                    return Err(rest_error(401, "unauthorized", "invalid credentials"));
-                }
-                // No authenticator: credentials mean nothing here.
-                Authenticated::None => {}
+        // Asked even without a credential: a tailnet identity is judged
+        // from the connection itself.
+        match user(None) {
+            Authenticated::User(p) => {
+                csrf()?;
+                return Ok(Caller::User { principal: p });
             }
+            Authenticated::Superadmin(s) => return superadmin(s),
+            Authenticated::Refused => {
+                return Err(rest_error(401, "unauthorized", "invalid credentials"));
+            }
+            // No authenticator, or no credential: fall through.
+            Authenticated::None => {}
         }
         if let Some(o) = req.header("origin").filter(|o| !origin_is_local(o)) {
             eprintln!("isb serve: refused origin {o:?}");
@@ -1599,6 +1714,195 @@ mod tests {
             route: None,
         };
         ep
+    }
+
+    /// An endpoint whose authn grants superadmin to `source` for any request
+    /// from a tailnet peer (as the daemon's gate would after its own Host
+    /// and whois checks), and to a bearer `isb_sa_ok`.
+    fn superadmin_endpoint(
+        source: crate::auth::SuperadminSource,
+        access: Option<AccessValidator>,
+    ) -> Endpoint {
+        let mut ep = hooked();
+        let mut r = registry();
+        r.register(Tool::new("sandbox_exec", "Exec", json!({}), |_, _| {
+            Ok(Value::Null)
+        }))
+        .unwrap();
+        ep.registry = Arc::new(r);
+        ep.access = access.map(Arc::new);
+        let ambient = Arc::new(crate::auth::Superadmin::synthetic(source));
+        let token = Arc::new(crate::auth::Superadmin::synthetic(
+            crate::auth::SuperadminSource::Token {
+                id: 1,
+                name: "ci".into(),
+            },
+        ));
+        ep.hooks.authn = Some(Arc::new(move |req: &Request, id: Option<&Identity>| {
+            if req.header("authorization") == Some("Bearer isb_sa_ok") {
+                return Authenticated::Superadmin(token.clone());
+            }
+            let tailnet =
+                matches!(&req.peer, Peer::Tcp(a) if crate::server::tailnet::is_tailnet_ip(a.ip()));
+            if tailnet || id.is_some() {
+                return Authenticated::Superadmin(ambient.clone());
+            }
+            Authenticated::None
+        }));
+        ep
+    }
+
+    fn tailnet_peer() -> Peer {
+        Peer::Tcp("100.64.0.7:5000".parse().unwrap())
+    }
+
+    fn ambient_cases(ep: &Endpoint, peer: Peer, extra: &[(&str, &str)]) {
+        let body = serde_json::to_vec(&rpc("tools/call", json!({"name": "echo"}))).unwrap();
+        let call = |path: &str, h: &[(&str, &str)], body: &[u8]| {
+            let mut all: Vec<(&str, &str)> = extra.to_vec();
+            all.extend_from_slice(h);
+            ep.handle(&req("POST", path, &all, body, peer.clone()))
+        };
+        let host = ("Host", "100.86.22.100:18995");
+        let json_ct = ("Content-Type", "application/json");
+        // /mcp: JSON and no foreign Origin is a superadmin call.
+        let r = call("/mcp", &[host, json_ct], &body);
+        assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(&r.body));
+        let v: Value = serde_json::from_slice(&r.body).unwrap();
+        assert_eq!(v["result"]["structuredContent"]["trusted"], true);
+        // A form post (no JSON content type) from a page is refused.
+        for ct in [
+            None,
+            Some("text/plain"),
+            Some("application/x-www-form-urlencoded"),
+        ] {
+            let mut h = vec![host];
+            if let Some(c) = ct {
+                h.push(("Content-Type", c));
+            }
+            assert_eq!(call("/mcp", &h, &body).status, 403, "{ct:?}");
+            assert_eq!(call("/orgs/alpha/mcp", &h, &body).status, 403, "{ct:?}");
+        }
+        // A foreign Origin is refused; the server's own passes.
+        assert_eq!(
+            call(
+                "/mcp",
+                &[host, json_ct, ("Origin", "https://evil.example")],
+                &body
+            )
+            .status,
+            403
+        );
+        assert_eq!(
+            call(
+                "/mcp",
+                &[host, json_ct, ("Origin", "http://100.86.22.100:9999")],
+                &body
+            )
+            .status,
+            403
+        );
+        assert_eq!(
+            call("/mcp", &[host, json_ct, ("Origin", "null")], &body).status,
+            403
+        );
+        assert_eq!(
+            call(
+                "/mcp",
+                &[host, json_ct, ("Origin", "http://100.86.22.100:18995")],
+                &body
+            )
+            .status,
+            200
+        );
+        // REST writes need X-Isb-Csrf, as sessions do.
+        assert_eq!(
+            call("/api/v1/tools/echo", &[host, json_ct], b"{}").status,
+            403
+        );
+        let r = call(
+            "/api/v1/tools/echo",
+            &[host, json_ct, ("X-Isb-Csrf", "1")],
+            b"{}",
+        );
+        assert_eq!(r.status, 200);
+        let v: Value = serde_json::from_slice(&r.body).unwrap();
+        assert_eq!(v["result"]["trusted"], true);
+        assert_eq!(
+            call(
+                "/api/v1/tools/echo",
+                &[
+                    host,
+                    ("X-Isb-Csrf", "1"),
+                    ("Origin", "https://evil.example")
+                ],
+                b"{}"
+            )
+            .status,
+            403
+        );
+        // The terminal: an upgrade needs an Origin naming the Host.
+        let ws = |origin: Option<&str>| {
+            let mut h: Vec<(&str, &str)> = extra.to_vec();
+            h.extend([
+                host,
+                ("Upgrade", "websocket"),
+                ("Connection", "Upgrade"),
+                ("Sec-WebSocket-Version", "13"),
+                ("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ=="),
+            ]);
+            if let Some(o) = origin {
+                h.push(("Origin", o));
+            }
+            let mut q = req("GET", "/orgs/alpha/api/v1/terminal", &h, b"", peer.clone());
+            q.query = Some("app=web".into());
+            ep.handle(&q).status
+        };
+        assert_eq!(ws(Some("http://100.86.22.100:18995")), 101);
+        assert_eq!(ws(Some("https://evil.example")), 403);
+        assert_eq!(ws(None), 403);
+    }
+
+    #[test]
+    fn tailnet_superadmins_get_csrf_origin_and_content_type_checks() {
+        let ep = superadmin_endpoint(
+            crate::auth::SuperadminSource::Tailnet {
+                login: "me@example.com".into(),
+                node: "laptop.t.ts.net".into(),
+                tags: vec![],
+            },
+            None,
+        );
+        ambient_cases(&ep, tailnet_peer(), &[]);
+        // A superadmin token is not ambient: no CSRF header or JSON needed.
+        let r = ep.handle(&req(
+            "POST",
+            "/api/v1/tools/echo",
+            &[("Authorization", "Bearer isb_sa_ok")],
+            b"{}",
+            Peer::Tcp("127.0.0.1:1".parse().unwrap()),
+        ));
+        assert_eq!(r.status, 200);
+        let v: Value = serde_json::from_slice(&r.body).unwrap();
+        assert_eq!(v["result"]["caller"], "superadmin token:ci");
+    }
+
+    #[test]
+    fn access_superadmins_get_the_same_checks() {
+        let (v, _) = at::validator();
+        let ep = superadmin_endpoint(
+            crate::auth::SuperadminSource::Access {
+                name: "alice@example.com".into(),
+                service_token: false,
+            },
+            Some(v),
+        );
+        let token = at::sign(&at::header(), &at::claims());
+        ambient_cases(
+            &ep,
+            Peer::Tcp("127.0.0.1:4000".parse().unwrap()),
+            &[("Cf-Access-Jwt-Assertion", token.as_str())],
+        );
     }
 
     #[test]

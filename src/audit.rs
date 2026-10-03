@@ -112,6 +112,10 @@ pub enum ActorKind {
     /// A Cloudflare Access identity with no isb account, or an
     /// unauthenticated loopback caller.
     Anonymous,
+    /// A superadmin over HTTP (a superadmin token, a tailnet or Access
+    /// identity on the allow list): `name` is its source, `token:<name>`,
+    /// `tailnet:<login>` or `access:<name>`.
+    Superadmin,
 }
 
 impl ActorKind {
@@ -122,6 +126,7 @@ impl ActorKind {
             ActorKind::Local => "local",
             ActorKind::Webhook => "webhook",
             ActorKind::Anonymous => "anonymous",
+            ActorKind::Superadmin => "superadmin",
         }
     }
 }
@@ -147,10 +152,25 @@ impl Actor {
             email: Some(p.user.email.clone()),
             ..Default::default()
         };
-        if let crate::auth::PrincipalKind::ApiToken { id, name, .. } = &p.kind {
-            a.kind = Some(ActorKind::Agent);
-            a.token_id = Some(*id);
-            a.token_name = Some(name.clone());
+        match &p.kind {
+            crate::auth::PrincipalKind::ApiToken { id, name, .. } => {
+                a.kind = Some(ActorKind::Agent);
+                a.token_id = Some(*id);
+                a.token_name = Some(name.clone());
+            }
+            crate::auth::PrincipalKind::Superadmin { source } => {
+                a.name = source.label();
+                a.kind = Some(ActorKind::Superadmin);
+                if p.user.id <= 0 {
+                    a.user_id = None;
+                    a.email = None;
+                }
+                if let crate::auth::SuperadminSource::Token { id, name } = source {
+                    a.token_id = Some(*id);
+                    a.token_name = Some(name.clone());
+                }
+            }
+            _ => {}
         }
         a
     }

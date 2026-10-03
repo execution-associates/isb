@@ -23,7 +23,8 @@ fn org_of(a: &Value) -> Result<OrgId> {
 }
 
 fn trigger(c: &Caller) -> Trigger {
-    if c.is_trusted() {
+    // The CLI on the host; a superadmin over HTTP is an API call.
+    if c.is_local() {
         Trigger::Manual
     } else {
         Trigger::Api

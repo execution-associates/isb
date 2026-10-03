@@ -964,8 +964,9 @@ fn traefik_domains(
             continue;
         };
         let entry = field("entrypoints").unwrap_or_default();
-        let https = !(entry.split(',').all(|e| e.trim() == "web") && !entry.is_empty())
-            || field("tls").is_some_and(|t| t == "true");
+        // HTTPS unless every entrypoint is plain `web`.
+        let web_only = !entry.is_empty() && entry.split(',').all(|e| e.trim() == "web");
+        let https = !web_only || field("tls").is_some_and(|t| t == "true");
         let mut strip = false;
         for m in field("middlewares")
             .unwrap_or_default()

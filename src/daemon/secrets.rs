@@ -356,11 +356,12 @@ pub fn register(r: &mut Registry, secrets: Arc<Secrets>, hooks: Hooks) -> Result
                 org: Option<String>,
                 secrets: BTreeMap<String, crate::spec::SecretDef>,
             }
-            // A decryption oracle for the daemon's key: never for remote
-            // callers, whatever --deny-tools says.
+            // A decryption oracle for the daemon's key: superadmins only
+            // (the socket's `isb up`, or an HTTP caller with its reach),
+            // whatever --deny-tools says.
             if !c.is_trusted() {
                 return Err(Error::invalid(
-                    "secret_resolve is for local callers (isb up) only",
+                    "secret_resolve is for superadmins (the local socket: isb up) only",
                 ));
             }
             let a: A = args(a)?;
@@ -527,7 +528,7 @@ mod tests {
             &remote,
         )
         .unwrap_err();
-        assert!(e.to_string().contains("local callers"), "{e}");
+        assert!(e.to_string().contains("superadmins"), "{e}");
     }
 
     #[test]

@@ -261,6 +261,24 @@ impl HttpListener {
         Ok(HttpListener::Tcp(l))
     }
 
+    /// Bind a tailnet address (100.64.0.0/10, fd7a:115c:a1e0::/48): only
+    /// tailnet peers reach it, so it is served without a tunnel in front
+    /// (`isb serve --superadmin-tailnet`).
+    pub fn bind_tcp_tailnet(addr: &str) -> Result<Self> {
+        let addrs: Vec<SocketAddr> = addr
+            .to_socket_addrs()
+            .map_err(|e| Error::invalid(format!("listen address {addr:?}: {e}")))?
+            .collect();
+        if addrs.is_empty() || addrs.iter().any(|a| !super::tailnet::is_tailnet_ip(a.ip())) {
+            return Err(Error::invalid(format!(
+                "listen address {addr:?} is not a tailnet address (100.64.0.0/10, fd7a:115c:a1e0::/48)"
+            )));
+        }
+        let l = TcpListener::bind(addrs[0])?;
+        l.set_nonblocking(true)?;
+        Ok(HttpListener::Tcp(l))
+    }
+
     /// Bind a unix socket, mode 0600. A parent directory isb creates is 0700. A
     /// stale socket is replaced; a live one (something answers) is an error,
     /// and so is a path that is not a socket.

@@ -25,6 +25,7 @@ pub mod limit;
 pub mod oauth;
 pub mod oidc;
 pub mod secret;
+pub mod superadmin;
 pub mod webauthn;
 
 use std::path::{Path, PathBuf};
@@ -37,6 +38,7 @@ use serde::{Deserialize, Serialize};
 use crate::org::OrgId;
 use limit::{Rate, RateLimiter};
 use secret::{PasswordCost, TokenKind};
+pub use superadmin::{Superadmin, SuperadminSource, SuperadminToken};
 
 /// What the identity store can fail with. [`AuthError::InvalidCredentials`]
 /// is deliberately vague: it is the answer to every failed login.
@@ -268,6 +270,11 @@ pub enum PrincipalKind {
     },
     /// A Cloudflare Access identity whose email is this user's.
     Access,
+    /// A superadmin ([`superadmin`]): a superadmin token or a tailnet
+    /// identity, acting as this (possibly synthetic) user.
+    Superadmin {
+        source: SuperadminSource,
+    },
 }
 
 /// An authenticated caller: who, how, and what they may reach. For an
@@ -339,7 +346,9 @@ impl Principal {
     pub fn session_id(&self) -> Option<i64> {
         match self.kind {
             PrincipalKind::Session { id } => Some(id),
-            PrincipalKind::ApiToken { .. } | PrincipalKind::Access => None,
+            PrincipalKind::ApiToken { .. }
+            | PrincipalKind::Access
+            | PrincipalKind::Superadmin { .. } => None,
         }
     }
 }
