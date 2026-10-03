@@ -130,6 +130,10 @@ queued → building → deploying → done
 - The last 30 records per app are kept, with their logs. A deployment the
   daemon was running when it stopped is marked failed when it starts again.
 
+A deployment's log holds its git, build and image lines and, while it rolls
+out, the controller's events about the service (slots created, probed,
+serving, old ones drained), so it tells the whole deploy in one place.
+
 The log is streamed two ways: `app_deployment_log` returns it from a byte
 offset (poll with the returned `offset` until `finished`; `isb app logs NAME
 [ID] -f` does) together with the deployment's record (`deployment`: status,

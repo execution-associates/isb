@@ -1107,6 +1107,7 @@ impl super::Apps {
         dep.rendered = Some(rendered.clone());
         self.pstatus(org, n, dep, Status::Deploying)?;
         let q = crate::stack::qualified(org, &p.stack);
+        let mark = self.event_mark();
         {
             let _s = self.inner.stacks.lock().unwrap();
             if self.preview_get(org, name, n)?.removing {
@@ -1133,7 +1134,7 @@ impl super::Apps {
                 None => {}
             }
         }
-        let (ok, msg) = self.wait_service(&q, name)?;
+        let (ok, msg) = self.wait_service_with(&q, name, Some(mark), |m| log.line(m))?;
         if !ok {
             return Err(Error::invalid(format!("service {name}: {msg}")));
         }

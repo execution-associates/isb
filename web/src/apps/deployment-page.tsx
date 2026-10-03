@@ -64,7 +64,10 @@ function useFollow(org: string, app: string, id: number) {
         const at = follow.log.offset;
         const r = await callTool<LogReply>("app_deployment_log", { name: app, deployment: id, offset: at }, org);
         const hadLines = follow.firstLineAt !== null;
+        const wasDone = follow.finished;
         follow.apply(at, r);
+        // Finished: the app's state, current deployment and replicas moved.
+        if (!wasDone && follow.finished) void qc.invalidateQueries({ queryKey: keys.org(org) });
         if (!hadLines && follow.firstLineAt !== null) performance.mark("isb:first-log-line");
         if (follow.record) qc.setQueryData(keys.deployment(org, app, id), follow.record);
         setError(null);

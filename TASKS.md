@@ -112,6 +112,13 @@ minime only runs binaries downloaded from our CI runs.
   - The app layer renders apps to ordinary stacks: an org's project +
     environment is one stack (`<project>-<env>`), each app one service in
     it, so service names (`<app>.<project>-<env>`) work between apps.
+- **Web UI design system** (docs/web.md#design-system): status colours only
+  through `lib/status.ts`; Inter and JetBrains Mono (OFL 1.1, Latin subsets)
+  self-hosted, since the CSP allows no font CDN. A deploy opens its
+  deployment in the same frame (record seeded in the query cache) and
+  follows it with `app_deployment_log`, which returns the record with the
+  text; the deployment log also carries the controller's rollout events.
+  Measured on titan (debug build): click to first log line 76-260 ms.
 - **Web UI is embedded by `build.rs` as an `include_bytes!` table** (no
   crate). Without `web/dist` the binary serves a placeholder;
   `ISB_WEB_REQUIRED=1` (set by releases) makes that a build error, so plain

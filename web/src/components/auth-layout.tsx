@@ -5,7 +5,7 @@ import { Logo, Wordmark } from "@/components/brand";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 const POINTS = [
-  { icon: Boxes, title: "Apps, databases and stacks", body: "Deploy from git or a compose file, with live logs and one-click rollbacks." },
+  { icon: Boxes, title: "Apps, databases and stacks", body: "Deploy from git or an image, with live logs and one-click rollbacks." },
   { icon: ShieldCheck, title: "Isolated by default", body: "Each org gets its own incus project, network, quota and encrypted secrets." },
   { icon: Bot, title: "Built for agents too", body: "Scoped API tokens and an MCP endpoint per org, beside the people who sign in here." },
 ];

@@ -135,7 +135,7 @@ const AUTH: Record<string, [ActivityKind, string] | null> = {
 function auditEntry(i: HistoryItem): ActivityEntry | null {
   const action = i.kind;
   // Deploys are told by the controller's own events, with their outcome.
-  if (action === "app_deploy" || action === "app_redeploy") return null;
+  if (action === "app_deploy" || action === "app_redeploy" || action.endsWith(".deploy")) return null;
   const failed = i.level !== null && i.level !== "ok";
   const subject = i.object ?? undefined;
   const base = { key: `a:${i.id}`, actor: actorLabel(i.actor), time: i.time, count: 1, after: failed ? ` (${i.level})` : undefined };

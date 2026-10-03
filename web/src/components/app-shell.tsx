@@ -187,7 +187,7 @@ function NavItem({ to, icon: Icon, children, onNavigate, end, shortcut }: { to: 
           <Icon className={cn("size-4 shrink-0", isActive ? "text-brand" : "text-muted-foreground group-hover/nav:text-foreground")} />
           <span className="flex-1 truncate">{children}</span>
           {shortcut && (
-            <kbd className="hidden font-sans text-[10px] text-muted-foreground/70 opacity-0 transition-opacity group-hover/nav:opacity-100 md:inline">
+            <kbd aria-hidden className="hidden font-sans text-[10px] text-muted-foreground/70 opacity-0 transition-opacity group-hover/nav:opacity-100 md:inline">
               G {shortcut.toUpperCase()}
             </kbd>
           )}
@@ -361,15 +361,17 @@ function TopCrumbs() {
  */
 function DeployWatcher({ org }: { org: string | null }) {
   const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   // The feed replays recent events on connect; only news counts.
   const since = useMemo(() => Date.now(), []);
   useLiveEvents((e) => {
     if (!org || e.level === "log" || e.at < since || splitStack(e.stack).org !== org) return;
     const q = queuedEvent(e.message);
     if (!q || isMine(org, q.app, q.id)) return;
-    // Already watching that app's deployments: its page follows by itself.
+    // Already watching that app's deployments, or a template's chain that
+    // moves on to it: the page follows by itself.
     if (pathname.startsWith(`/orgs/${encodeURIComponent(org)}/apps/${q.app}/deployments`)) return;
+    if ((new URLSearchParams(search).get("then") ?? "").split(",").includes(q.app)) return;
     toast(`${q.app}: deployment #${q.id} started`, {
       description: q.by.startsWith("webhook") ? `From a ${q.by.replace("webhook:", "")} push` : `By ${q.by}`,
       action: { label: "Watch", onClick: () => navigate(deploymentPath(org, q.app, q.id)) },

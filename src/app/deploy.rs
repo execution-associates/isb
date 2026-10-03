@@ -1038,6 +1038,7 @@ impl Apps {
         self.set_status(org, dep, Status::Deploying)?;
         let stack = app.spec.stack()?;
         let q = crate::stack::qualified(org, &stack);
+        let mark = self.event_mark();
         {
             let _s = self.inner.stacks.lock().unwrap();
             let cur = self.inner.ctl.definition(&q).ok();
@@ -1059,7 +1060,7 @@ impl Apps {
                 None => {}
             }
         }
-        let (ok, msg) = self.wait_service(&q, name)?;
+        let (ok, msg) = self.wait_service_with(&q, name, Some(mark), |m| log.line(m))?;
         if !ok {
             return Err(Error::invalid(format!("service {name}: {msg}")));
         }
@@ -1122,8 +1123,41 @@ impl Apps {
     /// Wait for one service of a stack to settle at its current revision:
     /// `(converged, why not)`.
     pub(super) fn wait_service(&self, q: &str, svc: &str) -> Result<(bool, String)> {
+        self.wait_service_with(q, svc, None, |_| {})
+    }
+
+    /// The controller's latest event number: rollout events after it
+    /// belong to a deploy that starts now.
+    pub(super) fn event_mark(&self) -> u64 {
+        self.inner.ctl.events(u64::MAX, 0).0
+    }
+
+    /// [`Apps::wait_service`], handing each controller event about the
+    /// service after `since` (the rollout: slots created, probed, serving,
+    /// old ones drained) to `seen` as it happens, so a deployment's log
+    /// tells the whole story. App events (`app NAME: ...`) are skipped:
+    /// they are the log's own lines.
+    pub(super) fn wait_service_with(
+        &self,
+        q: &str,
+        svc: &str,
+        mut since: Option<u64>,
+        mut seen: impl FnMut(&str),
+    ) -> Result<(bool, String)> {
         let started = Instant::now();
+        let own = format!("app {svc}");
+        let mut relay = |since: &mut Option<u64>| {
+            let Some(after) = *since else { return };
+            let (last, evs) = self.inner.ctl.events(after, 500);
+            for e in evs.iter().filter(|e| e.stack == q && e.service == svc) {
+                if !e.message.starts_with(&own) {
+                    seen(&e.message);
+                }
+            }
+            *since = Some(last.max(after));
+        };
         loop {
+            relay(&mut since);
             let def = self.inner.ctl.definition(q)?;
             let rev = def.revision(svc)?;
             let replicas = def.service(svc)?.replicas();
@@ -1131,8 +1165,12 @@ impl Apps {
             if let Some(s) = st.services.iter().find(|s| s.service == svc) {
                 if s.rev == rev && s.replicas == replicas {
                     match s.state.as_str() {
-                        "converged" => return Ok((true, String::new())),
+                        "converged" => {
+                            relay(&mut since);
+                            return Ok((true, String::new()));
+                        }
                         "paused" | "failing" => {
+                            relay(&mut since);
                             return Ok((
                                 false,
                                 format!("{}: {}", s.state, s.message.clone().unwrap_or_default()),
@@ -1148,7 +1186,7 @@ impl Apps {
                     format!("not converged after {:?}", self.inner.timeout),
                 ));
             }
-            std::thread::sleep(Duration::from_secs(1));
+            std::thread::sleep(Duration::from_millis(500));
         }
     }
 
@@ -1521,6 +1559,53 @@ mod tests {
                 .find(|(n, _)| *n == k.to_ascii_lowercase())
                 .map(|(_, v)| v.clone())
         })
+    }
+
+    #[test]
+    fn rollout_events_reach_the_deployment_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let gate = Arc::new((Mutex::new(true), std::sync::Condvar::new()));
+        let ap = apps(dir.path(), gate);
+        let ctl = ap.controller();
+        ctl.note_service(
+            "info",
+            "acme/shop-production",
+            "web",
+            "before the deploy".into(),
+        );
+        let mark = ap.event_mark();
+        ctl.note_service(
+            "info",
+            "acme/shop-production",
+            "web",
+            "app web: #1: own line".into(),
+        );
+        ctl.note_service(
+            "info",
+            "acme/shop-production",
+            "web",
+            "rolling out rev 1 to 1 slot(s)".into(),
+        );
+        ctl.note_service(
+            "info",
+            "acme/shop-production",
+            "api",
+            "another service".into(),
+        );
+        ctl.note_service("info", "acme/other", "web", "another stack".into());
+        let mut seen = Vec::new();
+        // No definition here, so the wait itself fails, after relaying.
+        let r = ap.wait_service_with("acme/shop-production", "web", Some(mark), |m| {
+            seen.push(m.to_string())
+        });
+        assert!(r.is_err());
+        assert_eq!(seen, ["rolling out rev 1 to 1 slot(s)"]);
+        // Without a mark, nothing is relayed.
+        let mut none = Vec::new();
+        let _ = ap.wait_service_with("acme/shop-production", "web", None, |m| {
+            none.push(m.to_string())
+        });
+        assert!(none.is_empty());
     }
 
     #[test]
