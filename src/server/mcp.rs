@@ -334,6 +334,7 @@ pub(crate) struct Endpoint {
     pub policy: ToolPolicy,
     pub access: Option<Arc<AccessValidator>>,
     pub healthz: Healthz,
+    pub routes: Option<super::Routes>,
 }
 
 fn rpc_error(id: Value, code: i64, message: impl Into<String>) -> Value {
@@ -362,8 +363,27 @@ impl Endpoint {
                     _ => Response::text(405, "method not allowed").header("Allow", "POST"),
                 }
             }
-            _ => Response::text(404, "not found"),
+            _ => self.extra(req),
         }
+    }
+
+    /// The embedder's routes. They authenticate their own callers, but sit
+    /// behind Access when it is configured: Access is the front door.
+    fn extra(&self, req: &Request) -> Response {
+        let Some(routes) = &self.routes else {
+            return Response::text(404, "not found");
+        };
+        if let Some(v) = &self.access {
+            let token = req.header(ASSERTION_HEADER).unwrap_or("").trim();
+            if token.is_empty() {
+                return Response::text(401, "missing Cloudflare Access assertion");
+            }
+            if let Err(d) = v.validate(token) {
+                eprintln!("isb serve: refused {:?} {}: {d}", req.peer, req.path);
+                return Response::text(401, "invalid Cloudflare Access assertion");
+            }
+        }
+        routes(req).unwrap_or_else(|| Response::text(404, "not found"))
     }
 
     fn authenticate(&self, req: &Request) -> std::result::Result<Caller, Response> {
@@ -599,6 +619,7 @@ mod tests {
             policy,
             access: access.map(Arc::new),
             healthz: Arc::new(|| (true, json!({"ok": true}))),
+            routes: None,
         }
     }
 
@@ -926,6 +947,35 @@ mod tests {
         let r = sick.handle(&req("GET", "/healthz", &[], b"", local()));
         assert_eq!(r.status, 503);
         assert_eq!(r.get_header("content-type"), Some("application/json"));
+    }
+
+    #[test]
+    fn extra_routes_sit_behind_access() {
+        let routes: super::super::Routes =
+            Arc::new(|r: &Request| (r.path == "/api/x").then(|| Response::text(200, "extra")));
+        let tcp = Peer::Tcp("127.0.0.1:1234".parse().unwrap());
+        // No Access: the routes answer their own paths; the rest is a 404.
+        let open = Endpoint {
+            routes: Some(routes.clone()),
+            ..endpoint(ToolPolicy::default(), None)
+        };
+        let get = |ep: &Endpoint, path: &str, h: &[(&str, &str)]| {
+            ep.handle(&req("GET", path, h, b"", tcp.clone())).status
+        };
+        assert_eq!(get(&open, "/api/x", &[]), 200);
+        assert_eq!(get(&open, "/api/y", &[]), 404);
+        assert_eq!(get(&open, "/healthz", &[]), 200);
+        // With Access, a route needs the assertion like /mcp does.
+        let (v, _) = at::validator();
+        let gated = Endpoint {
+            routes: Some(routes),
+            ..endpoint(ToolPolicy::default(), Some(v))
+        };
+        assert_eq!(get(&gated, "/api/x", &[]), 401);
+        assert_eq!(get(&gated, "/api/x", &[(ASSERTION_HEADER, "a.b.c")]), 401);
+        let token = at::sign(&at::header(), &at::claims());
+        assert_eq!(get(&gated, "/api/x", &[(ASSERTION_HEADER, &token)]), 200);
+        assert_eq!(get(&gated, "/healthz", &[]), 200);
     }
 
     #[test]

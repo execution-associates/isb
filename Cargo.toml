@@ -38,9 +38,21 @@ base64 = { version = "0.23", default-features = false, features = ["alloc"] }
 ring = { version = "0.17", default-features = false, features = ["alloc"] }
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 ratatui = "0.29.0"
+# isb serve's identity store (src/auth): SQLite compiled from source, so the
+# static musl build needs no system library; argon2id for passwords, salted
+# from ring's OS randomness, so no getrandom/password-hash features.
+rusqlite = { version = "0.40", features = ["bundled"] }
+argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 tempfile = "3"
+
+# argon2 is unusably slow unoptimised, and debug builds hash passwords too.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
 
 [profile.release]
 lto = "thin"

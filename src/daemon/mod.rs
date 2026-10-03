@@ -20,6 +20,9 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
+use crate::auth::AuthConfig;
+use crate::auth::AuthStore;
+use crate::auth::http::{ApiConfig, AuthApi};
 use crate::client::Client;
 use crate::error::{Error, Result};
 use crate::exec::{ExecOptions, Stdin};
@@ -47,6 +50,27 @@ pub struct ServeConfig {
     pub policy: RemotePolicy,
     pub state_dir: PathBuf,
     pub interval: Duration,
+    /// Session lifetimes and the rest of the identity store's settings.
+    pub auth: AuthConfig,
+    /// Where users reach isb, for invitation and reset links.
+    pub public_url: Option<String>,
+}
+
+/// The identity endpoints over `<state>/isb.db`.
+fn auth_routes(cfg: &ServeConfig) -> Result<crate::server::Routes> {
+    let path = crate::auth::db_path(&cfg.state_dir);
+    let store = AuthStore::open_with(&path, cfg.auth.clone())
+        .map_err(|e| Error::invalid(format!("open {}: {e}", path.display())))?;
+    let api = AuthApi::new(
+        Arc::new(store),
+        ApiConfig {
+            public_url: cfg.public_url.clone(),
+            notifier: None,
+            setup_token_file: Some(cfg.state_dir.join("setup-token")),
+        },
+    )?;
+    eprintln!("isb serve: identity store {}", path.display());
+    Ok(Arc::new(api).router())
 }
 
 struct Daemon {
@@ -62,6 +86,12 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         .server_info()
         .map_err(|e| Error::invalid(format!("isb serve needs incusd: {e}")))?;
     let store = Store::open(&cfg.state_dir)?;
+    // The identity endpoints ride on the TCP listener; open the database
+    // before anything starts, so a bad one fails startup cleanly.
+    let auth = match &cfg.listen {
+        Some(_) => Some(auth_routes(&cfg)?),
+        None => None,
+    };
     let ctl = Controller::start(client.clone(), store, cfg.interval)?;
     let d = Arc::new(Daemon {
         client,
@@ -72,7 +102,10 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     let registry = registry(d.clone())?;
     let mut listeners = vec![Listener::unix(&cfg.socket)];
     if let Some(addr) = &cfg.listen {
-        let l = Listener::tcp(addr.clone());
+        let mut l = Listener::tcp(addr.clone());
+        if let Some(r) = auth {
+            l = l.routes(r);
+        }
         listeners.push(match (&cfg.access, cfg.allow_unauthenticated) {
             (Some((team, aud)), _) => l
                 .access(AccessValidator::new(team, aud)?)
@@ -83,7 +116,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
             (None, false) => {
                 // Health answers so the unit can be checked; no tool does.
                 eprintln!(
-                    "isb serve: remote MCP is off until CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD are set; {addr} serves /healthz only"
+                    "isb serve: remote MCP is off until CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD are set; {addr} serves /healthz and /api/v1/auth only"
                 );
                 l.allow_unauthenticated(true)
                     .policy(ToolPolicy::from_lists("", "*"))

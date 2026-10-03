@@ -9,7 +9,9 @@ tools. It listens in two places:
   daemon's own user and are trusted.
 - **loopback HTTP** (`--listen`, e.g. `127.0.0.1:8092`) at `/mcp` for remote
   agents such as Claude or ChatGPT, reached through a Cloudflare Tunnel and
-  protected by Cloudflare Access. `/healthz` answers there without auth.
+  protected by Cloudflare Access. `/healthz` answers there without auth, and
+  the identity endpoints (users, sessions, invitations, API tokens) answer at
+  `/api/v1/auth/*`; see [auth.md](auth.md).
 
 `--listen` refuses anything but a loopback address: remote access belongs
 behind the tunnel and an Access policy, never on an open port.
@@ -165,3 +167,6 @@ prior `initialize`, and there is no session id.
 | `--bind-root` | `ISB_SERVE_BIND_ROOTS` (comma-separated) | none |
 | `--publish-address` | `ISB_SERVE_PUBLISH_ADDRESSES` (comma-separated) | none: loopback only |
 | `--allow-privileged`, `--allow-raw`, `--any-instance` | `ISB_SERVE_ALLOW_PRIVILEGED`, `ISB_SERVE_ALLOW_RAW`, `ISB_SERVE_ANY_INSTANCE` | off |
+| `--public-url` | `ISB_PUBLIC_URL` | none: invitation and reset links are bare tokens |
+| `--session-max-age` | `ISB_SESSION_MAX_AGE` | `30d` |
+| `--session-idle` | `ISB_SESSION_IDLE` | `7d` |

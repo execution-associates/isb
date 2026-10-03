@@ -29,6 +29,7 @@
 //! YAML, and [`plan`] turns a spec plus the instance's actual state into the
 //! minimal set of changes. A device that is already correct is never touched.
 
+pub mod auth;
 pub mod balance;
 pub mod client;
 pub mod compose;

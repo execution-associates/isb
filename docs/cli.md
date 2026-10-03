@@ -38,6 +38,13 @@ isb stack ls | ps NAME | logs NAME SERVICE | config NAME
 isb stack scale NAME SERVICE=N... | redeploy NAME SERVICE | rollback NAME
 isb stack rm NAME [--volumes]
 isb tui                                    live dashboard (docs/tui.md)
+
+# identity for isb serve, on <state>/isb.db directly (docs/auth.md)
+isb user create EMAIL [--admin] [--name N]  password from the terminal, or stdin's first line
+isb user ls [--json] | passwd EMAIL
+isb invite ORG EMAIL [--role member]       prints the invitation token (or link), once
+isb token create NAME [--org ORG] [--expires 90d] [--user EMAIL]   prints the token, once
+isb token ls [--json] | revoke ID...
 ```
 
 **`up` runs in the foreground**, like `docker compose up`: it runs each
