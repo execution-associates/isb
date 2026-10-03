@@ -20,6 +20,7 @@
 pub mod catalog;
 pub mod dokploy;
 pub mod generate;
+mod planning;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
@@ -880,50 +881,13 @@ fn secret_env_name(var: &str) -> String {
 
 /// Render a template into what a deploy creates. Pure apart from the
 /// generators and `ctx`.
-#[expect(
-    clippy::too_many_lines,
-    clippy::cognitive_complexity,
-    clippy::excessive_nesting,
-    reason = "predates the lint ratchet; split it when next changed"
-)]
 pub fn plan(t: &Template, p: &Params, ctx: &Context) -> Result<Plan> {
     t.validate()?;
     crate::app::validate_app_name(&p.instance)
         .map_err(|_| Error::invalid(format!("name {:?}: [a-z0-9-], starting with a letter, at most 30 characters (it names the apps)", p.instance)))?;
     let stack = crate::app::stack_name(&p.project, &p.environment)?;
-    for k in p.values.keys() {
-        match t.var(k) {
-            None => {
-                return Err(Error::invalid(format!(
-                    "{k}: template {} has no such variable",
-                    t.id
-                )));
-            }
-            Some(v) if !v.is_input() => {
-                return Err(Error::invalid(format!("{k} is computed; it cannot be set")));
-            }
-            _ => {}
-        }
-    }
-    let main = t.main_key();
-    let names: BTreeMap<String, String> = t
-        .apps
-        .iter()
-        .map(|a| {
-            (
-                a.name.clone(),
-                app_name(&p.instance, &a.name, main == Some(a.name.as_str())),
-            )
-        })
-        .collect();
-    let uniq: BTreeSet<&String> = names.values().collect();
-    if uniq.len() != names.len() {
-        return Err(Error::invalid(format!(
-            "template {}: two apps would both be named {}; pick another name",
-            t.id, p.instance
-        )));
-    }
-    let mut notes = Vec::new();
+    planning::check_values(t, p)?;
+    let names = planning::app_names(t, p)?;
     let uses = domain_uses(t);
     let mut r = Renderer {
         p,
@@ -931,406 +895,21 @@ pub fn plan(t: &Template, p: &Params, ctx: &Context) -> Result<Plan> {
         names,
         vars: BTreeMap::new(),
     };
-    let mut planned_vars = Vec::new();
-    let mut secrets: Vec<PlannedSecret> = Vec::new();
-    for v in t.var_order()? {
-        let at = format!("variable {}", v.name);
-        let given = p.values.get(&v.name).filter(|s| !s.is_empty());
-        if let Some(g) = given {
-            validate_input(v, g).map_err(|e| Error::invalid(format!("{}: {e}", v.name)))?;
-        }
-        let mut secret = v.declared_secret();
-        let mut auto = false;
-        let (value, source): (Option<String>, &str) = if let Some(expr) = &v.value {
-            let segs = r.render(expr, &at)?;
-            secret |= has_secret(&segs);
-            (Some(concat(&segs)), "computed")
-        } else if v.kind == VarKind::Domain {
-            match given.map(String::as_str) {
-                Some(h) if h != "auto" => (Some(h.to_string()), "given"),
-                _ => {
-                    let d = match &v.default {
-                        Some(d) => r.plain(d, &at)?,
-                        None => String::new(),
-                    };
-                    if !d.is_empty() && d != "auto" {
-                        (Some(d), "default")
-                    } else {
-                        auto = true;
-                        let users = uses.get(&v.name);
-                        let anchor = users
-                            .and_then(|u| u.first())
-                            .map(String::as_str)
-                            .or(main)
-                            .unwrap_or(t.apps[0].name.as_str());
-                        let svc = &r.names[anchor];
-                        let host = match ctx.public_ip {
-                            Some(ip) => {
-                                Some(crate::ingress::domain::auto_host(&p.org, &stack, svc, ip)?)
-                            }
-                            None => None,
-                        };
-                        if host.is_none() {
-                            notes.push(format!(
-                                "{}: a generated hostname needs a public address (isb serve --ingress-public-ip); until then the domain is not served",
-                                v.name
-                            ));
-                        }
-                        (host, "generated")
-                    }
-                }
-            }
-        } else if let Some(g) = given {
-            (Some(g.clone()), "given")
-        } else if v.kind.generated() {
-            (Some(generate_value(v, &r, ctx, &at)?), "generated")
-        } else if let Some(d) = &v.default {
-            let segs = r.render(d, &at)?;
-            secret |= has_secret(&segs);
-            (Some(concat(&segs)), "default")
-        } else if v.required() {
-            return Err(Error::invalid(format!(
-                "{} is required{}",
-                v.name,
-                if v.description.is_empty() {
-                    String::new()
-                } else {
-                    format!(" ({})", v.description)
-                }
-            )));
-        } else {
-            (Some(String::new()), "default")
-        };
-        if v.default.is_some() && source == "default" {
-            if let Some(val) = &value {
-                validate_input(v, val)
-                    .map_err(|e| Error::invalid(format!("{} default: {e}", v.name)))?;
-            }
-        }
-        if secret {
-            let name = var_secret(&p.instance, &v.name);
-            crate::secrets::validate_name(&name)?;
-            secrets.push(PlannedSecret {
-                name,
-                holds: format!("variable {}", v.name),
-                value: value.clone().unwrap_or_default(),
-            });
-        }
-        planned_vars.push(PlannedVar {
-            name: v.name.clone(),
-            value: if secret { None } else { value.clone() },
-            secret,
-            source: source.into(),
-        });
-        r.vars.insert(
-            v.name.clone(),
-            Resolved {
-                value,
-                secret,
-                auto,
-            },
-        );
-    }
-
-    let mut apps = Vec::new();
-    let mut urls = Vec::new();
-    for a in &t.apps {
-        let name = r.names[&a.name].clone();
-        let at = |w: &str| format!("app {} {w}", a.name);
-        let mut env = serde_json::Map::new();
-        let mut tpl_env: BTreeSet<String> = BTreeSet::new();
-        let secret_ref = |var: &str| json!({"secret": var_secret(&p.instance, var)});
-        for (k, s) in &a.env {
-            let segs = r.render(s, &at(&format!("env {k}")))?;
-            let v = match segs.as_slice() {
-                [Seg::Secret { var, .. }] => secret_ref(var),
-                _ if has_secret(&segs) => {
-                    let sname = format!("tpl.{}.{}.env.{k}", p.instance, a.name);
-                    crate::secrets::validate_name(&sname).map_err(|_| {
-                        Error::invalid(format!(
-                            "{}: env {k}: the name cannot make a secret name",
-                            a.name
-                        ))
-                    })?;
-                    secrets.push(PlannedSecret {
-                        name: sname.clone(),
-                        holds: format!("app {name} env {k}"),
-                        value: concat(&segs),
-                    });
-                    json!({"secret": sname})
-                }
-                _ => json!(concat(&segs)),
-            };
-            env.insert(k.clone(), v);
-        }
-        let command: Option<Vec<String>> = match (&a.command, &a.args) {
-            (Some(c), _) | (None, Some(c)) => {
-                let mut words = argv(c, &at("command"))?;
-                if a.args.is_some() {
-                    let image = r.plain(&a.image, &at("image"))?;
-                    let ep = (ctx.entrypoint)(&image).map_err(|e| {
-                        Error::invalid(format!(
-                            "app {}: args need the image's entrypoint, and reading {image} failed: {e}",
-                            a.name
-                        ))
-                    })?;
-                    let mut full = ep.unwrap_or_default();
-                    full.extend(words);
-                    words = full;
-                }
-                let segs: Vec<Vec<Seg>> = words
-                    .iter()
-                    .map(|w| r.render(w, &at("command")))
-                    .collect::<Result<_>>()?;
-                if segs.iter().any(|s| has_secret(s)) {
-                    Some(vec![
-                        "/bin/sh".into(),
-                        "-c".into(),
-                        shell_line(segs, &mut tpl_env),
-                    ])
-                } else {
-                    Some(segs.iter().map(|s| concat(s)).collect())
-                }
-            }
-            (None, None) => None,
-        };
-        let healthcheck = match &a.healthcheck {
-            None => None,
-            Some(h) => {
-                let mut h = h.clone();
-                let test = h.get("test").cloned();
-                if let Some(test) = test {
-                    let (shell, words): (bool, Vec<String>) = match &test {
-                        Value::String(s) => (true, vec![s.clone()]),
-                        Value::Array(a) => {
-                            let w = argv(&test, "healthcheck test")?;
-                            match a.first().and_then(Value::as_str) {
-                                Some("CMD-SHELL") => (true, w[1..].to_vec()),
-                                Some("CMD") => (false, w[1..].to_vec()),
-                                _ => (false, w),
-                            }
-                        }
-                        _ => (false, vec![]),
-                    };
-                    let segs: Vec<Vec<Seg>> = words
-                        .iter()
-                        .map(|w| r.render(w, &at("healthcheck")))
-                        .collect::<Result<_>>()?;
-                    let new = if !segs.iter().any(|s| has_secret(s)) {
-                        match &test {
-                            Value::String(_) => json!(concat(&segs[0])),
-                            _ => {
-                                let mut v: Vec<String> = Vec::new();
-                                if let Some(first) = test
-                                    .as_array()
-                                    .and_then(|a| a.first())
-                                    .and_then(Value::as_str)
-                                    .filter(|f| matches!(*f, "CMD" | "CMD-SHELL" | "NONE"))
-                                {
-                                    v.push(first.into());
-                                }
-                                v.extend(segs.iter().map(|s| concat(s)));
-                                json!(v)
-                            }
-                        }
-                    } else if shell {
-                        // Inside a shell line: the secret becomes a variable.
-                        let mut line = String::new();
-                        for (i, s) in segs.iter().enumerate() {
-                            if i > 0 {
-                                line.push(' ');
-                            }
-                            for seg in s {
-                                match seg {
-                                    Seg::Lit(l) => line.push_str(l),
-                                    Seg::Secret { var, .. } => {
-                                        line.push_str(&format!("${{{}}}", secret_env_name(var)));
-                                        tpl_env.insert(var.clone());
-                                    }
-                                }
-                            }
-                        }
-                        json!(["CMD-SHELL", line])
-                    } else {
-                        let l = shell_line(segs, &mut tpl_env);
-                        json!(["CMD-SHELL", l])
-                    };
-                    h["test"] = new;
-                }
-                if let Some(o) = h.as_object_mut() {
-                    for (k, v) in o.iter_mut() {
-                        if k != "test" {
-                            if let Some(s) = v.as_str() {
-                                *v = json!(r.plain(s, &at("healthcheck"))?);
-                            }
-                        }
-                    }
-                }
-                Some(h)
-            }
-        };
-        for var in &tpl_env {
-            env.insert(secret_env_name(var), secret_ref(var));
-        }
-        if !tpl_env.is_empty() {
-            notes.push(format!(
-                "app {name}: a secret in its command or healthcheck reaches it as a variable through /bin/sh"
-            ));
-        }
-        let mut domains = Vec::new();
-        for d in &a.domains {
-            let mut out = serde_json::Map::new();
-            for (k, v) in d {
-                let nv = match (k.as_str(), v.as_str()) {
-                    ("host", Some(h)) => {
-                        let parts = parse_expr(h).unwrap_or_default();
-                        match parts.as_slice() {
-                            [Part::Var(var)]
-                                if r.vars.get(var).is_some_and(|x| x.auto)
-                                    && uses.get(var).is_some_and(|u| u.len() == 1) =>
-                            {
-                                json!("auto")
-                            }
-                            [Part::Var(var)] if r.vars.get(var).is_some_and(|x| x.auto) => {
-                                // Shared by several apps: one generated name
-                                // for all (the first app's).
-                                match &r.vars[var].value {
-                                    Some(v) => {
-                                        notes.push(format!(
-                                            "{var}: the generated name {v} is shared by several apps, so it is written out; an org with a domain allowlist needs it listed"
-                                        ));
-                                        json!(v)
-                                    }
-                                    None => json!("auto"),
-                                }
-                            }
-                            _ => json!(r.plain(h, &at("domain host"))?),
-                        }
-                    }
-                    (_, Some(s)) => json!(r.plain(s, &at(&format!("domain {k}")))?),
-                    _ => v.clone(),
-                };
-                out.insert(k.clone(), nv);
-            }
-            let host = out.get("host").and_then(Value::as_str).unwrap_or("");
-            let shown = if host == "auto" {
-                d.get("host").and_then(Value::as_str).and_then(|h| {
-                    match parse_expr(h).ok()?.as_slice() {
-                        [Part::Var(v)] => r.vars.get(v)?.value.clone(),
-                        _ => None,
-                    }
-                })
-            } else {
-                Some(host.to_string())
-            };
-            if let Some(h) = shown {
-                let https = out.get("https").and_then(Value::as_bool).unwrap_or(true);
-                let path = out.get("path").and_then(Value::as_str).unwrap_or("/");
-                let url = format!("{}://{h}{path}", if https { "https" } else { "http" });
-                if !urls.contains(&url) {
-                    urls.push(url);
-                }
-            }
-            domains.push(Value::Object(out));
-        }
-        let mut files = Vec::new();
-        for (i, f) in a.files.iter().enumerate() {
-            let path = r.plain(&f.path, &at("file path"))?;
-            let sname = format!("tpl.{}.{}.file{}", p.instance, a.name, i + 1);
-            crate::secrets::validate_name(&sname)?;
-            let content = concat(&r.render(&f.content, &at(&format!("file {path}")))?);
-            secrets.push(PlannedSecret {
-                name: sname.clone(),
-                holds: format!("app {name} file {path}"),
-                value: content,
-            });
-            files.push(json!({"path": path, "secret": sname, "mode": f.mode.clone().unwrap_or_else(|| "0444".into())}));
-        }
-        let mut spec = json!({
-            "name": name,
-            "project": p.project,
-            "environment": p.environment,
-            "source": {"image": r.plain(&a.image, &at("image"))?},
-        });
-        if !env.is_empty() {
-            spec["env"] = Value::Object(env);
-        }
-        if let Some(port) = a.port {
-            spec["port"] = json!(port);
-        }
-        if !domains.is_empty() {
-            spec["domains"] = json!(domains);
-        }
-        let vols: Vec<String> = a
-            .volumes
-            .iter()
-            .map(|v| r.plain(v, &at("volumes")))
-            .collect::<Result<_>>()?;
-        if !vols.is_empty() {
-            spec["volumes"] = json!(vols);
-        }
-        let ports: Vec<String> = a
-            .ports
-            .iter()
-            .map(|v| r.plain(v, &at("ports")))
-            .collect::<Result<_>>()?;
-        if !ports.is_empty() {
-            spec["ports"] = json!(ports);
-        }
-        if let Some(n) = a.replicas {
-            spec["replicas"] = json!(n);
-        }
-        if let Some(c) = command {
-            spec["command"] = json!(c);
-        }
-        if let Some(h) = healthcheck {
-            spec["healthcheck"] = h;
-        }
-        if let Some(res) = &a.resources {
-            let mut out = serde_json::Map::new();
-            if let Some(c) = &res.cpus {
-                let c = r.plain(c, &at("resources"))?;
-                // isb pins whole CPUs.
-                let c = match c.parse::<f64>() {
-                    Ok(f) if f > 0.0 && f.fract() != 0.0 => {
-                        notes.push(format!(
-                            "app {name}: cpus {c} is rounded up to {}",
-                            f.ceil()
-                        ));
-                        (f.ceil() as u64).to_string()
-                    }
-                    _ => c,
-                };
-                out.insert("cpus".into(), json!(c));
-            }
-            if let Some(m) = &res.memory {
-                out.insert("memory".into(), json!(r.plain(m, &at("resources"))?));
-            }
-            spec["resources"] = Value::Object(out);
-        }
-        if !files.is_empty() {
-            spec["files"] = json!(files);
-        }
-        if let Some(u) = &a.user {
-            spec["user"] = json!(r.plain(u, &at("user"))?);
-        }
-        if let Some(w) = &a.working_dir {
-            spec["working_dir"] = json!(r.plain(w, &at("working_dir"))?);
-        }
-        let spec: AppSpec = serde_json::from_value(spec)
-            .map_err(|e| Error::invalid(format!("app {}: {e}", a.name)))?;
-        spec.validate()
-            .map_err(|e| Error::invalid(format!("app {}: {e}", a.name)))?;
-        apps.push(spec);
-    }
+    let mut out = planning::Out::default();
+    let variables = planning::resolve_vars(t, &mut r, ctx, &uses, &mut out)?;
+    let apps = t
+        .apps
+        .iter()
+        .map(|a| planning::plan_app(a, &r, ctx, &uses, &mut out))
+        .collect::<Result<Vec<_>>>()?;
     let order = t
         .order()?
         .into_iter()
         .map(|k| r.names[&k].clone())
         .collect();
     let mut seen = BTreeSet::new();
-    secrets.retain(|s| seen.insert(s.name.clone()));
-    notes.extend(t.notes.iter().cloned());
+    out.secrets.retain(|s| seen.insert(s.name.clone()));
+    out.notes.extend(t.notes.iter().cloned());
     Ok(Plan {
         template: t.id.clone(),
         version: t.version.clone(),
@@ -1340,10 +919,10 @@ pub fn plan(t: &Template, p: &Params, ctx: &Context) -> Result<Plan> {
         stack,
         apps,
         order,
-        secrets,
-        variables: planned_vars,
-        urls,
-        notes,
+        secrets: out.secrets,
+        variables,
+        urls: out.urls,
+        notes: out.notes,
     })
 }
 
