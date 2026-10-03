@@ -47,8 +47,10 @@ secrets, and nothing in any other org. Platform admins reach every org.
 - **Anonymous** calls are refused, unless `--allow-unauthenticated` (local
   testing only).
 - `overview`, `events` and `stack_list` show only the caller's orgs.
-  `server_status` and re-encrypting every org's secrets are for platform
-  admins.
+  `server_status`, `org_list`, `org_create`, `org_update`, `org_delete` and
+  re-encrypting every org's secrets are for platform admins, whatever their
+  role in an org (an org owner's token is refused). `org_get` is for the
+  org's members.
 - The unix socket is the daemon's own user and reaches everything.
 
 ## Install
@@ -192,8 +194,13 @@ directly.
 | `sandbox_list` | Instances, filtered by labels. |
 | `sandbox_exec` | Run argv in a sandbox: exit code, stdout, stderr (each capped at 256 KiB, keeping the end), optional stdin text and timeout (default 10m). |
 | `sandbox_remove` | Delete a sandbox (not a stack replica). |
-| `secret_create`, `secret_set`, `secret_get`, `secret_list`, `secret_inspect`, `secret_delete`, `secret_refresh`, `secret_reencrypt`, `secret_recipients`, `secret_resolve` | An org's secret store; values base64. `secret_set` and `secret_refresh` roll the stacks using the secret. `secret_resolve` (local callers only) is how `isb up` reads store-backed secrets. See [secrets.md](secrets.md). Remote callers reach every org's secrets, values included, unless `--deny-tools 'secret_*'`. |
+| `secret_create`, `secret_set`, `secret_get`, `secret_list`, `secret_inspect`, `secret_delete`, `secret_refresh`, `secret_reencrypt`, `secret_recipients`, `secret_resolve` | An org's secret store; values base64. `secret_list` says which stacks use each secret. `secret_set` and `secret_refresh` roll the stacks using the secret. `secret_resolve` (local callers only) is how `isb up` reads store-backed secrets. See [secrets.md](secrets.md). Remote callers reach every org's secrets, values included, unless `--deny-tools 'secret_*'`. |
 | `server_status` | Versions, and the balancer's routes with live counters. |
+| `org_get` | One org: limits and per-instance defaults, bridge and subnet, egress exceptions, bind roots, service-name domain, and instance, stack and member counts. Members of the org. |
+| `org_list` | Every org, as `org_get` shows one. Platform admins. |
+| `org_create` | Create an org (`org`, optional `cpus`, `memory`, `disk`, `instances`, `default_cpus`, `default_memory`, `egress`); fails if it exists. Platform admins. |
+| `org_update` | Change an org's limits, defaults or `egress` (which replaces the list; `[]` clears it). Fields left out are kept. Platform admins. |
+| `org_delete` | Delete an org and its members, invitations and tokens; refused while stacks are deployed in it, and while it has sandboxes unless `force`. Platform admins. See [orgs.md](orgs.md). |
 | `overview` | Everything a dashboard shows in one call: host CPU and memory with history, every stack in detail, sandboxes with their CPU and memory, the latest event number. |
 | `events` | The event feed (deploys, rollouts, health changes, restarts, failures) after a `since` cursor, optionally waiting up to 30 s for one. |
 

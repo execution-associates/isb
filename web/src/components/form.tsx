@@ -137,8 +137,8 @@ export function SubmitButton({
   );
 }
 
-/** A read-only value with a copy button, for secrets shown once. */
-export function CopyField({ value, label = "Copy", mono = true }: { value: string; label?: string; mono?: boolean }) {
+/** Copies `value` to the clipboard, saying so for a moment. */
+export function CopyButton({ value, label = "Copy" }: { value: string; label?: string }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -150,6 +150,16 @@ export function CopyField({ value, label = "Copy", mono = true }: { value: strin
     }
   };
   return (
+    <Button type="button" variant="outline" onClick={copy} className="shrink-0">
+      {copied ? <Check /> : <Copy />}
+      <span className="sr-only sm:not-sr-only">{copied ? "Copied" : label}</span>
+    </Button>
+  );
+}
+
+/** A read-only value with a copy button, for secrets shown once. */
+export function CopyField({ value, label = "Copy", mono = true }: { value: string; label?: string; mono?: boolean }) {
+  return (
     <div className="flex items-stretch gap-2">
       <Input
         readOnly
@@ -158,10 +168,7 @@ export function CopyField({ value, label = "Copy", mono = true }: { value: strin
         className={cn("min-w-0 flex-1", mono && "font-mono text-xs")}
         aria-label="Value to copy"
       />
-      <Button type="button" variant="outline" onClick={copy} className="shrink-0">
-        {copied ? <Check /> : <Copy />}
-        <span className="sr-only sm:not-sr-only">{copied ? "Copied" : label}</span>
-      </Button>
+      <CopyButton value={value} label={label} />
     </div>
   );
 }

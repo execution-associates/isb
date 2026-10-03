@@ -74,3 +74,69 @@ export interface StackEvent {
   instance?: string;
   message: string;
 }
+
+// Secrets (src/daemon/secrets.rs). Values travel base64, and only
+// secret_get returns one.
+
+export interface SecretMeta {
+  org: string;
+  name: string;
+  driver: string;
+  version: number;
+  created_at: number;
+  updated_at: number;
+  labels?: Record<string, string>;
+  /** Deployed stacks whose services use it. */
+  used_by: string[];
+}
+
+/** A driver reference a stack uses (such as 1Password's vault/item/field). */
+export interface SecretReference {
+  name: string;
+  driver: string;
+  version: number;
+  used_by: string[];
+}
+
+export interface SecretList {
+  secrets: SecretMeta[];
+  references: SecretReference[];
+}
+
+// Orgs (src/daemon/orgs.rs, src/org.rs).
+
+export interface OrgView {
+  name: string;
+  project: string;
+  network: string | null;
+  subnet: string | null;
+  cpus: string | null;
+  memory: string | null;
+  disk: string | null;
+  instances_limit: string | null;
+  default_cpus: string | null;
+  default_memory: string | null;
+  bind_roots: string[];
+  egress: string[];
+  dns_dir: string | null;
+  instances: number;
+  domain: string;
+  service_names: boolean;
+  members: number;
+  stacks: number;
+  notes?: string[];
+}
+
+export interface ServerStatus {
+  isb: string;
+  incus: string;
+  state_dir: string;
+  routes: {
+    route: string;
+    listen: string;
+    backends: { addr: string; active: number; down: boolean }[];
+    accepted: number;
+    failures: number;
+    rejected: number;
+  }[];
+}

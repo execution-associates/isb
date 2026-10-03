@@ -2,18 +2,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, Boxes, CircleAlert, CircleCheck, Layers, Loader2, Radio, UserPlus } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useParams } from "react-router";
-import { toast } from "sonner";
-import { auth, type Role } from "@/api/auth";
 import { useEvents } from "@/api/events";
 import { callTool, type StackEvent, type StackList, type StackStatus } from "@/api/tools";
 import { PageHeader } from "@/components/app-shell";
-import { CopyField, Field, FormError, SubmitButton } from "@/components/form";
+import { FormError } from "@/components/form";
+import { InviteDialog } from "@/components/invite-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { relativeTime } from "@/lib/format";
@@ -230,7 +226,7 @@ export function OrgPage() {
           </CardContent>
         </Card>
       </div>
-      <InviteDialog org={org} open={inviteOpen} onOpenChange={setInviteOpen} canOwner={me.platform_admin || roleIn(me, org) === "owner"} />
+      <InviteDialog org={org} open={inviteOpen} onOpenChange={setInviteOpen} />
     </>
   );
 }
@@ -268,116 +264,5 @@ function EmptyStacks({ org }: { org: string }) {
         isb stack deploy --org {org} NAME
       </code>
     </div>
-  );
-}
-
-function InviteDialog({
-  org,
-  open,
-  onOpenChange,
-  canOwner,
-}: {
-  org: string;
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-  canOwner: boolean;
-}) {
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState<Role>("member");
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ link: string | null; token: string; email: string } | null>(null);
-
-  const reset = (o: boolean) => {
-    onOpenChange(o);
-    if (!o) {
-      setEmail("");
-      setRole("member");
-      setError(null);
-      setResult(null);
-    }
-  };
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPending(true);
-    setError(null);
-    try {
-      const r = await auth.invite({ org, email: email.trim(), role });
-      setResult({ link: r.link, token: r.token, email: r.invitation.email });
-      toast.success(`Invitation for ${r.invitation.email} created`);
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setPending(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={reset}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{result ? "Share the invitation" : `Invite someone to ${org}`}</DialogTitle>
-          <DialogDescription>
-            {result
-              ? `Send this link to ${result.email}. It works once and expires in 7 days.`
-              : "They get a link to create an account (or sign in) and join this org."}
-          </DialogDescription>
-        </DialogHeader>
-        {result ? (
-          <>
-            <CopyField value={result.link ?? result.token} label="Copy link" />
-            {!result.link && (
-              <p className="text-sm text-muted-foreground">
-                This server has no public URL set, so this is the bare token: they open{" "}
-                <code className="font-mono text-xs">/invite#TOKEN</code> on this site.
-              </p>
-            )}
-            <DialogFooter>
-              <Button onClick={() => reset(false)}>Done</Button>
-            </DialogFooter>
-          </>
-        ) : (
-          <form onSubmit={submit} className="grid gap-4">
-            <FormError>{error}</FormError>
-            <Field label="Email">
-              {(id) => (
-                <Input
-                  id={id}
-                  type="email"
-                  required
-                  autoFocus
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="teammate@example.com"
-                />
-              )}
-            </Field>
-            <Field label="Role" hint={role === "member" ? "Members run and manage the org's apps and secrets." : "Admins also manage members, invitations and tokens."}>
-              {(id) => (
-                <Select value={role} onValueChange={(v) => setRole(v as Role)}>
-                  <SelectTrigger id={id} className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="member">Member</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
-                    {canOwner && <SelectItem value="owner">Owner</SelectItem>}
-                  </SelectContent>
-                </Select>
-              )}
-            </Field>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => reset(false)}>
-                Cancel
-              </Button>
-              <SubmitButton pending={pending} disabled={!email.trim()}>
-                Create invitation
-              </SubmitButton>
-            </DialogFooter>
-          </form>
-        )}
-      </DialogContent>
-    </Dialog>
   );
 }
