@@ -242,7 +242,7 @@ minime only runs binaries downloaded from our CI runs.
 - [ ] P3.3 Deploy flows: new app from git/image/template, deploy with live
   build logs, rollback, scale, web terminal (xterm.js over websocket exec).
   **Verify:** end to end in the browser.
-- [ ] P3.4 Org admin: members, invitations, roles, API tokens, secrets editor,
+- [~] (subagent p3.4) P3.4 Org admin: members, invitations, roles, API tokens, secrets editor,
   settings. **Verify:** invite a second user and sign in as them.
 
 ## Phase 4: day 2
