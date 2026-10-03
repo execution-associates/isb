@@ -172,10 +172,10 @@ minime only runs binaries downloaded from our CI runs.
   argon2id passwords, sessions with secure cookies, first-run admin setup,
   invitations, roles (platform admin; org admin/member), API tokens (hashed,
   org-scoped). **Verify:** unit tests + login over HTTP.
-- [~] (97da457, merged; browser verify pending) P1.5 OAuth/OIDC: GitHub, Google, generic OIDC (discovery, PKCE),
+- [~] (97da457; browser verify with the P3.1 sign-in pages) P1.5 OAuth/OIDC: GitHub, Google, generic OIDC (discovery, PKCE),
   account linking by verified email. **Verify:** GitHub login end to end in a
   browser against the hcloud box.
-- [~] (97da457, merged; browser verify pending) P1.6 Passkeys (WebAuthn): register and sign in. **Verify:** browser on
+- [~] (97da457; browser verify with the P3.1 sign-in pages) P1.6 Passkeys (WebAuthn): register and sign in. **Verify:** browser on
   minime (Touch ID or a virtual authenticator via CDP).
 - [x] (platform) P1.7 REST + SSE API generated from the tool registry: `/api/v1/<tool>`,
   OpenAPI document, `/api/v1/events` SSE, auth by session or token; MCP keeps
@@ -204,21 +204,21 @@ minime only runs binaries downloaded from our CI runs.
 
 ## Phase 2: the deploy loop
 
-- [ ] P2.1 Git sources: GitHub App (install, repo list, webhooks), generic git
+- [~] (subagent p2.5) P2.1 Git sources: GitHub App (install, repo list, webhooks), generic git
   over HTTPS/SSH with deploy keys, GitLab/Gitea webhooks. **Verify:** push to
   a test repo deploys on the hcloud box.
-- [ ] P2.2 Builds in sandboxes: Railpack (and Nixpacks), Dockerfile,
+- [~] (subagent p2.2) P2.2 Builds in sandboxes: Railpack (and Nixpacks), Dockerfile,
   buildpacks; each build in a fresh isb sandbox (VM for untrusted), logs
   streamed, build cache volume per app. **Verify:** a Node, a Python and a
   Dockerfile app build and run.
-- [ ] P2.3 Local OCI registry as an isb service; builds push, incus pulls;
+- [~] (subagent p2.2) P2.3 Local OCI registry as an isb service; builds push, incus pulls;
   image retention. **Verify:** deploy pulls from the local registry; rollback
   to a previous image.
-- [ ] P2.4 Ingress: embedded edge proxy (Caddy) with ACME, `domains:` per
+- [~] (subagent p2.4) P2.4 Ingress: embedded edge proxy (Caddy) with ACME, `domains:` per
   service (host, path, port, https, redirects), generated hostnames
   (sslip.io-style) for quick starts; Cloudflare Tunnel as an alternative
   provider per org. **Verify:** HTTPS on the hcloud box with a real cert.
-- [ ] P2.5 App model + env editor: "application" (git/image source, build
+- [~] (subagent p2.5) P2.5 App model + env editor: "application" (git/image source, build
   settings, env, domains, volumes, replicas) as a first-class object over
   stacks; project → environment → service hierarchy. **Verify:** create, edit,
   deploy and redeploy an app through the API.
