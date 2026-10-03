@@ -51,7 +51,7 @@ export function MonitoringTab({ org, app }: { org: string; app: App }) {
         <Stat icon={Cpu} label="CPU, all replicas" value={percent(cpuNow)} hint="100% is one core" />
         <Stat icon={MemoryStick} label="Memory, all replicas" value={bytes(memNow)} hint={memLimit ? `limit ${bytes(memLimit)} each` : "no limit set"} />
         <Stat icon={HeartPulse} label="Healthy" value={svc ? `${svc.healthy}/${svc.replicas}` : "–"} hint={svc?.state} />
-        <Stat icon={RotateCw} label="Restarts" value={String(restarts)} hint="since each replica started" />
+        <Stat icon={RotateCw} label="Restarts" value={String(restarts)} hint="since each started" />
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         {instances.map((i) => {
@@ -70,15 +70,15 @@ export function MonitoringTab({ org, app }: { org: string; app: App }) {
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <div className="mb-1 flex items-baseline justify-between text-xs text-muted-foreground">
-                    <span>CPU · last {Math.round((i.cpu_history.length * 2) / 60) || 1} min</span>
-                    <span className="text-base font-semibold text-foreground tabular-nums">{percent(i.cpu_pct)}</span>
+                    <span className="truncate">CPU · last {Math.round((i.cpu_history.length * 2) / 60) || 1} min</span>
+                    <span className="shrink-0 pl-2 text-base font-semibold whitespace-nowrap text-foreground tabular-nums">{percent(i.cpu_pct)}</span>
                   </div>
                   <AreaChart values={i.cpu_history} max={Math.max(5, ...i.cpu_history) * 1.25} label={`CPU of replica ${i.slot}`} tone="sky" />
                 </div>
                 <div>
                   <div className="mb-1 flex items-baseline justify-between text-xs text-muted-foreground">
-                    <span>Memory · since opened</span>
-                    <span className="text-base font-semibold text-foreground tabular-nums">{bytes(i.mem_bytes)}</span>
+                    <span className="truncate">Memory · this visit</span>
+                    <span className="shrink-0 pl-2 text-base font-semibold whitespace-nowrap text-foreground tabular-nums">{bytes(i.mem_bytes)}</span>
                   </div>
                   <AreaChart values={m} max={memLimit ?? Math.max(...m, 1) * 1.5} label={`Memory of replica ${i.slot}`} tone="violet" />
                 </div>

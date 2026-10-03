@@ -1,6 +1,6 @@
 // Building blocks shared by the app pages.
 import { ChevronRight, CircleAlert, Loader2, Radio } from "lucide-react";
-import { Fragment, type ReactNode, useId, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 import type { StreamState } from "@/api/events";
 import { FormError } from "@/components/form";
@@ -261,7 +261,7 @@ export function ConfirmDialog({
 /** A small key/value grid for metadata. */
 export function Meta({ items }: { items: [ReactNode, ReactNode][] }) {
   return (
-    <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+    <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm lg:grid-cols-3">
       {items.map(([k, v], i) => (
         <div key={i} className="min-w-0">
           <dt className="text-xs text-muted-foreground">{k}</dt>
@@ -281,7 +281,7 @@ export function QueryError({ error }: { error: unknown }) {
  * `max` (or the data's own maximum).
  */
 export function AreaChart({
-  values,
+  values: raw,
   max,
   className,
   label,
@@ -295,6 +295,8 @@ export function AreaChart({
 }) {
   const w = 240;
   const h = 64;
+  // One sample is a flat line, not a dot.
+  const values = raw.length === 1 ? [raw[0], raw[0]] : raw;
   const n = values.length;
   const top = Math.max(max ?? 0, ...values, 1e-9);
   const pts = values.map((v, i) => [n <= 1 ? w : (i / (n - 1)) * w, h - 2 - (Math.max(0, v) / top) * (h - 4)] as const);
@@ -322,8 +324,17 @@ export function AreaChart({
 
 /** Horizontal scrolling tab links (the app page's tabs); never wraps on phones. */
 export function TabLinks({ tabs, active }: { tabs: { id: string; label: string; to: string; icon?: typeof CircleAlert }[]; active: string }) {
+  const bar = useRef<HTMLDivElement>(null);
+  // On a phone the active tab may sit past the edge: bring it into view.
+  useEffect(() => {
+    const el = bar.current?.querySelector<HTMLElement>('[aria-current="page"]');
+    const box = bar.current;
+    if (!el || !box) return;
+    const l = el.offsetLeft; // the bar is the links' offset parent
+    if (l < box.scrollLeft || l + el.offsetWidth > box.scrollLeft + box.clientWidth) box.scrollLeft = l - 16;
+  }, [active]);
   return (
-    <div className="-mx-4 mb-6 overflow-x-auto border-b px-4 sm:mx-0 sm:px-0 [scrollbar-width:none]">
+    <div ref={bar} className="relative -mx-4 mb-6 overflow-x-auto border-b px-4 sm:mx-0 sm:px-0 [scrollbar-width:none]">
       <nav className="flex min-w-max gap-1" aria-label="Sections">
         {tabs.map((t) => (
           <Link

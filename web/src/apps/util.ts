@@ -141,3 +141,10 @@ export function portProblem(p: string): string | null {
   if (!ok(m[2]) || !ok(m[3])) return "Ports are 1-65535.";
   return null;
 }
+
+/** The terminal websocket for an app (docs/serve.md, "The web terminal"); `slot` "auto" picks a replica. */
+export function terminalUrl(loc: { protocol: string; host: string }, org: string, app: string, slot: string, cols: number, rows: number): string {
+  const q = new URLSearchParams({ app, cols: String(cols), rows: String(rows) });
+  if (slot !== "auto") q.set("slot", slot);
+  return `${loc.protocol === "https:" ? "wss" : "ws"}://${loc.host}/orgs/${encodeURIComponent(org)}/api/v1/terminal?${q}`;
+}

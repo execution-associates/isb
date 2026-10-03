@@ -63,59 +63,63 @@ impl Pty for ExecPty {
 }
 
 pub(super) fn terminal(d: Arc<Daemon>) -> Terminal {
-    Arc::new(move |c: &Caller, org: &OrgId, t: &TermRequest| -> Result<Box<dyn Pty>> {
-        let app = d.apps.get(org, &t.app)?;
-        let stack = crate::stack::qualified(org, &app.spec.stack()?);
-        let st = d
-            .ctl
-            .status(&stack)
-            .map_err(|_| Error::NotFound(format!("{} is not deployed", t.app)))?;
-        let svc = st
-            .services
-            .iter()
-            .find(|s| s.service == t.app)
-            .ok_or_else(|| Error::NotFound(format!("{} is not deployed", t.app)))?;
-        let inst = match t.slot {
-            Some(n) => svc
-                .instances
+    Arc::new(
+        move |c: &Caller, org: &OrgId, t: &TermRequest| -> Result<Box<dyn Pty>> {
+            let app = d.apps.get(org, &t.app)?;
+            let stack = crate::stack::qualified(org, &app.spec.stack()?);
+            let st = d
+                .ctl
+                .status(&stack)
+                .map_err(|_| Error::NotFound(format!("{} is not deployed", t.app)))?;
+            let svc = st
+                .services
                 .iter()
-                .find(|i| i.slot == n)
-                .ok_or_else(|| Error::NotFound(format!("{} has no replica {n}", t.app)))?,
-            None => svc
-                .instances
-                .iter()
-                .filter(|i| i.status == "Running")
-                .min_by_key(|i| (!i.in_rotation, i.slot))
-                .ok_or_else(|| Error::NotFound(format!("{} has no running replica", t.app)))?,
-        };
-        if inst.status != "Running" {
-            return Err(Error::invalid(format!(
-                "replica {} is {}, not running",
-                inst.slot,
-                inst.status.to_lowercase()
-            )));
-        }
-        let oc = crate::org::client(&d.client, org);
-        let sb = Sandbox::get(&oc, &inst.name)?;
-        let mut opts = ExecOptions::default()
-            .tty(true)
-            .stdin(Stdin::Piped)
-            .env("TERM", "xterm-256color");
-        opts.width = Some(t.cols);
-        opts.height = Some(t.rows);
-        let stream = sb
-            .exec_stream(["/bin/sh", "-c", SHELL], opts)
-            .map_err(|e| Error::invalid(format!("cannot start a shell in {}: {e}", inst.name)))?;
-        d.ctl.service_event(
-            "info",
-            &stack,
-            &t.app,
-            format!("terminal opened on replica {} by {c}", inst.slot),
-        );
-        Ok(Box::new(ExecPty {
-            ctl: stream.controller(),
-            stream,
-            done: false,
-        }))
-    })
+                .find(|s| s.service == t.app)
+                .ok_or_else(|| Error::NotFound(format!("{} is not deployed", t.app)))?;
+            let inst = match t.slot {
+                Some(n) => svc
+                    .instances
+                    .iter()
+                    .find(|i| i.slot == n)
+                    .ok_or_else(|| Error::NotFound(format!("{} has no replica {n}", t.app)))?,
+                None => svc
+                    .instances
+                    .iter()
+                    .filter(|i| i.status == "Running")
+                    .min_by_key(|i| (!i.in_rotation, i.slot))
+                    .ok_or_else(|| Error::NotFound(format!("{} has no running replica", t.app)))?,
+            };
+            if inst.status != "Running" {
+                return Err(Error::invalid(format!(
+                    "replica {} is {}, not running",
+                    inst.slot,
+                    inst.status.to_lowercase()
+                )));
+            }
+            let oc = crate::org::client(&d.client, org);
+            let sb = Sandbox::get(&oc, &inst.name)?;
+            let mut opts = ExecOptions::default()
+                .tty(true)
+                .stdin(Stdin::Piped)
+                .env("TERM", "xterm-256color");
+            opts.width = Some(t.cols);
+            opts.height = Some(t.rows);
+            let stream = sb
+                .exec_stream(["/bin/sh", "-c", SHELL], opts)
+                .map_err(|e| {
+                    Error::invalid(format!("cannot start a shell in {}: {e}", inst.name))
+                })?;
+            d.ctl.service_event(
+                "info",
+                &stack,
+                &t.app,
+                format!("terminal opened on replica {} by {c}", inst.slot),
+            );
+            Ok(Box::new(ExecPty {
+                ctl: stream.controller(),
+                stream,
+                done: false,
+            }))
+        },
+    )
 }

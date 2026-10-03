@@ -487,12 +487,7 @@ fn peer_uid(_: &UnixStream) -> Option<u32> {
 }
 
 /// Serve one request on `stream`. Generic so tests can drive it in memory.
-pub(crate) fn handle<S: Duplex>(
-    stream: &mut S,
-    peer: Peer,
-    limits: &Limits,
-    handler: &Handler,
-) {
+pub(crate) fn handle<S: Duplex>(stream: &mut S, peer: Peer, limits: &Limits, handler: &Handler) {
     match read_request(stream, peer, limits) {
         Ok(req) => {
             let resp = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(&req)))
@@ -949,7 +944,10 @@ pub(crate) mod tests {
         let mut m = Mock::new(&b"GET /ws HTTP/1.1\r\nUpgrade: websocket\r\n\r\n"[..]);
         handle(&mut m, Peer::Unix { uid: None }, &Limits::default(), &h);
         let out = String::from_utf8(m.output).unwrap();
-        assert!(out.starts_with("HTTP/1.1 101 Switching Protocols\r\n"), "{out}");
+        assert!(
+            out.starts_with("HTTP/1.1 101 Switching Protocols\r\n"),
+            "{out}"
+        );
         assert!(out.contains("Connection: Upgrade\r\n") && out.contains("Upgrade: websocket\r\n"));
         assert!(out.contains("Sec-WebSocket-Accept: k\r\n"));
         assert!(!out.contains("Content-Length") && !out.contains("close"));

@@ -367,7 +367,10 @@ impl ExecStream {
 
     /// Next chunk of output within `wait`: `Ok(None)` if none came, `Err`
     /// with the exit code once the command ended and its output was read.
-    pub fn poll_event(&mut self, wait: Duration) -> std::result::Result<Option<ExecEvent>, Result<i32>> {
+    pub fn poll_event(
+        &mut self,
+        wait: Duration,
+    ) -> std::result::Result<Option<ExecEvent>, Result<i32>> {
         use std::sync::mpsc::RecvTimeoutError;
         let r = if wait.is_zero() {
             self.events.try_recv().map_err(|e| match e {

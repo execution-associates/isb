@@ -535,7 +535,10 @@ impl Endpoint {
             Err(r) => return r,
         };
         if !origin_allowed(req) {
-            eprintln!("isb serve: refused a terminal from origin {:?}", req.header("origin"));
+            eprintln!(
+                "isb serve: refused a terminal from origin {:?}",
+                req.header("origin")
+            );
             return rest_error(403, "forbidden", "origin not allowed");
         }
         let Some(key) = websocket_key(req) else {
@@ -548,7 +551,11 @@ impl Endpoint {
         match self.admit("sandbox_exec", json!({}), &caller, Some(org)) {
             Ok(_) => {}
             Err(Admit::Unknown) => {
-                return rest_error(404, "not_found", "terminals are not offered on this listener");
+                return rest_error(
+                    404,
+                    "not_found",
+                    "terminals are not offered on this listener",
+                );
             }
             Err(Admit::Refused(e)) => return error_response(&e),
         }
@@ -1384,8 +1391,10 @@ mod tests {
     fn terminal_upgrades_only_when_admitted() {
         let mut ep = hooked();
         let mut r = registry();
-        r.register(Tool::new("sandbox_exec", "Exec", json!({}), |_, _| Ok(Value::Null)))
-            .unwrap();
+        r.register(Tool::new("sandbox_exec", "Exec", json!({}), |_, _| {
+            Ok(Value::Null)
+        }))
+        .unwrap();
         ep.registry = Arc::new(r);
         let ws = [
             // Unauthenticated test callers pass only from a local page.
@@ -1403,22 +1412,43 @@ mod tests {
         };
         let ok = get(&ep, "/orgs/alpha/api/v1/terminal", "app=web", &ws);
         assert_eq!(ok.status, 101);
-        assert_eq!(ok.get_header("sec-websocket-accept"), Some("s3pPLMBiTxaQ9kYGzzhZRbK+xOo="));
+        assert_eq!(
+            ok.get_header("sec-websocket-accept"),
+            Some("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")
+        );
         assert!(ok.upgrade.is_some());
         // Another org is refused before any upgrade.
-        assert_eq!(get(&ep, "/orgs/beta/api/v1/terminal", "app=web", &ws).status, 403);
+        assert_eq!(
+            get(&ep, "/orgs/beta/api/v1/terminal", "app=web", &ws).status,
+            403
+        );
         // A cross-site page riding the session cookie is refused.
         let mut evil = ws.to_vec();
         evil[1] = ("Origin", "http://localhost:9999");
-        assert_eq!(get(&ep, "/orgs/alpha/api/v1/terminal", "app=web", &evil).status, 403);
+        assert_eq!(
+            get(&ep, "/orgs/alpha/api/v1/terminal", "app=web", &evil).status,
+            403
+        );
         // Not a websocket, or no app: 400; not GET: 405.
-        assert_eq!(get(&ep, "/orgs/alpha/api/v1/terminal", "app=web", &ws[..2]).status, 400);
+        assert_eq!(
+            get(&ep, "/orgs/alpha/api/v1/terminal", "app=web", &ws[..2]).status,
+            400
+        );
         assert_eq!(get(&ep, "/orgs/alpha/api/v1/terminal", "", &ws).status, 400);
-        let r = ep.handle(&req("POST", "/orgs/alpha/api/v1/terminal", &ws, b"", local()));
+        let r = ep.handle(&req(
+            "POST",
+            "/orgs/alpha/api/v1/terminal",
+            &ws,
+            b"",
+            local(),
+        ));
         assert_eq!(r.status, 405);
         // --deny-tools sandbox_exec turns terminals off.
         ep.policy = ToolPolicy::from_lists("", "sandbox_exec");
-        assert_eq!(get(&ep, "/orgs/alpha/api/v1/terminal", "app=web", &ws).status, 404);
+        assert_eq!(
+            get(&ep, "/orgs/alpha/api/v1/terminal", "app=web", &ws).status,
+            404
+        );
     }
 
     #[test]

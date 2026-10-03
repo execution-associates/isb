@@ -19,13 +19,68 @@ of it) in a browser:
   mailer is configured) and `/reset-password#TOKEN` sets the new password.
 - **Signed in**: a sidebar with an org switcher (the orgs you can open: your
   memberships, or every org for a platform admin) and your account menu
-  (account, theme, sign out). Each org's overview lists its stacks and a live
+  (account, theme, sign out). Each org's overview shows its projects with
+  their health, the latest deployments of every app, its stacks and a live
   activity feed. **Account** changes your password, links and unlinks
   providers, adds and deletes passkeys, makes and revokes API tokens (shown
   once), and lists your sessions. Org owners and admins invite people from
   the org overview.
 
 Light, dark and system themes; it works down to phone width.
+
+## Projects and apps
+
+The pages over [apps](apps.md), Dokploy's layout:
+
+| Page | Shows |
+|---|---|
+| `/orgs/<org>/projects` | The org's projects as cards: environments with their app counts, and health (the worst of the environments' stacks). New project (name, description, environments). |
+| `/orgs/<org>/projects/<project>/<env>` | The project's environments as tabs; the environment's apps with state, source (image and digest, or repository, branch and commit), replicas, domains and last deploy. New app, add an environment, delete an empty environment or project (typed confirm). |
+| `/orgs/<org>/apps/<app>/<tab>` | One app: state, Deploy (or Redeploy), Stop and Start, and the tabs below. |
+
+An app's tabs:
+
+- **General**: the source (image; or repository URL, branch, subdirectory,
+  token or SSH key secret, submodules, and a deploy key to generate and
+  copy), the build (builder, Dockerfile path and target, build arguments,
+  VM or container), scale (applies at once: saved with `app_update`, then
+  `stack_scale`), runtime (port, CPUs, memory, command), the health check,
+  and the webhook URL with its secret (reveal, rotate). Each card saves on
+  its own; settings take effect at the next deploy.
+- **Environment**: the `.env` editor, with line numbers and highlighting,
+  checked as the daemon parses it (errors block the save, warnings explain:
+  a quoted `${{secret...}}` is literal text, a key set twice). Secret
+  references show in violet, and in red when the org has no such secret.
+  Save, or save and deploy.
+- **Domains**: each domain with its URL, route state and certificate state
+  from the ingress; add, edit and remove (host or `auto`, path, port,
+  HTTPS, redirect, strip prefix, `www.` redirect), checked as the ingress
+  checks them. Domains are routed at the next deploy; the tab says when
+  some are not routed yet and offers the deploy.
+- **Deployments**: the last 30 with status, trigger and caller, commit or
+  image and digest, and duration; Roll back on earlier successful ones.
+  A deployment's page follows its log live: each log line on the event
+  feed pulls the new text by offset, so nothing shows twice; it follows
+  the end while you are at the bottom and pauses when you scroll up. A
+  failure is shown above the log with what to do next.
+- **Logs**: the replicas' recent output (`stack_logs`), per replica or all,
+  refreshed every 5 seconds.
+- **Monitoring**: CPU and memory per replica (the daemon's last 40 CPU
+  samples, 2 seconds apart; memory as seen while the tab is open), health,
+  rotation, restarts.
+- **Terminal**: a login shell in a replica, in xterm.js (loaded only on this
+  tab), over the daemon's terminal websocket (below).
+- **Advanced**: named volumes, published ports, and deleting the app (typed
+  confirm).
+
+"New app" (from an environment) takes an image, or a repository with its
+access (public, an HTTPS token secret, an existing SSH key secret, or a new
+deploy key, which it generates and shows before the first deploy) and a
+builder; templates come later. With "deploy right away" it opens the
+deployment's live log.
+
+Every page follows the event feed over one shared connection and refetches
+what an event in its org touches.
 
 ## How it talks to the daemon
 
@@ -41,6 +96,8 @@ Only through the public HTTP API, like any other client:
   untyped, so new tools need no change to the UI server.
 - `GET /api/v1/events` (server-sent events) for live updates, reconnecting
   with backoff (1 s doubling to 30 s) and resuming after the last event seen.
+- `GET /orgs/<org>/api/v1/terminal` (a websocket) for the Terminal tab
+  ([serve.md](serve.md#the-web-terminal)).
 
 ## Built, embedded, served
 
@@ -112,8 +169,9 @@ route; isb's own sign-in applies after it.
 
 ## Developing
 
-Run a daemon with a listener, then the Vite dev server, which proxies `/api`
-and `/healthz` to it and reloads on every edit. Build and run both inside a
+Run a daemon with a listener, then the Vite dev server, which proxies `/api`,
+`/orgs/<org>/api` (websockets included) and `/healthz` to it and reloads on
+every edit. Build and run both inside a
 sandbox per the repository's rules; the daemon needs the incus socket, so run
 the binary you built there on the host:
 

@@ -12,14 +12,9 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { type App, serviceOf, useStack } from "./api";
 import { EmptyState } from "./components";
+import { terminalUrl } from "./util";
 
 type State = { kind: "idle" } | { kind: "connecting" } | { kind: "open" } | { kind: "closed"; message: string };
-
-export function terminalUrl(loc: { protocol: string; host: string }, org: string, app: string, slot: string, cols: number, rows: number): string {
-  const q = new URLSearchParams({ app, cols: String(cols), rows: String(rows) });
-  if (slot !== "auto") q.set("slot", slot);
-  return `${loc.protocol === "https:" ? "wss" : "ws"}://${loc.host}/orgs/${encodeURIComponent(org)}/api/v1/terminal?${q}`;
-}
 
 export default function TerminalTab({ org, app }: { org: string; app: App }) {
   const stack = useStack(org, app.stack);
@@ -158,7 +153,7 @@ export default function TerminalTab({ org, app }: { org: string; app: App }) {
             {state.kind === "idle" ? "Connect" : "Reconnect"}
           </Button>
         )}
-        <p className="min-w-0 flex-1 text-sm text-muted-foreground sm:text-right">
+        <p className="w-full text-sm text-muted-foreground sm:w-auto sm:min-w-0 sm:flex-1 sm:text-right">
           {state.kind === "connecting" && (
             <span className="inline-flex items-center gap-1.5">
               <Loader2 className="size-3.5 animate-spin" />

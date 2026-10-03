@@ -17,8 +17,8 @@
 //! Bounded: at most [`MAX_SESSIONS`] at once, [`IDLE`] without a byte either
 //! way, [`MAX_AGE`] in all, messages up to [`MAX_MESSAGE`].
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use serde_json::json;
@@ -92,7 +92,12 @@ fn param(req: &Request, key: &str) -> Option<String> {
 /// The request's terminal parameters, or what is wrong with them.
 pub fn term_request(req: &Request) -> std::result::Result<TermRequest, String> {
     let app = param(req, "app").ok_or("app= is required")?;
-    if app.is_empty() || app.len() > 64 || !app.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') {
+    if app.is_empty()
+        || app.len() > 64
+        || !app
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    {
         return Err("app= is not an app name".into());
     }
     let num = |k: &str, lo: u32, hi: u32, def: u32| -> std::result::Result<u32, String> {
@@ -141,10 +146,8 @@ pub fn origin_allowed(req: &Request) -> bool {
 /// The client's websocket key, if this is a websocket upgrade request.
 pub fn websocket_key(req: &Request) -> Option<String> {
     let has = |name: &str, token: &str| {
-        req.header(name).is_some_and(|v| {
-            v.split(',')
-                .any(|t| t.trim().eq_ignore_ascii_case(token))
-        })
+        req.header(name)
+            .is_some_and(|v| v.split(',').any(|t| t.trim().eq_ignore_ascii_case(token)))
     };
     if req.method != "GET" || !has("upgrade", "websocket") || !has("connection", "upgrade") {
         return None;
@@ -178,7 +181,10 @@ where
             );
             if ACTIVE.fetch_add(1, Ordering::SeqCst) >= MAX_SESSIONS {
                 ACTIVE.fetch_sub(1, Ordering::SeqCst);
-                refuse(&mut ws, "too many terminals are open on this server; close one and try again");
+                refuse(
+                    &mut ws,
+                    "too many terminals are open on this server; close one and try again",
+                );
                 return;
             }
             let _slot = Slot;
@@ -210,7 +216,12 @@ fn would_block(e: &tungstenite::Error) -> bool {
 
 /// Shuttle bytes between the websocket and the terminal until either ends,
 /// the session idles for `idle`, or it reaches `max_age`.
-pub fn bridge(ws: &mut WebSocket<&mut dyn Duplex>, mut pty: Box<dyn Pty>, idle: Duration, max_age: Duration) {
+pub fn bridge(
+    ws: &mut WebSocket<&mut dyn Duplex>,
+    mut pty: Box<dyn Pty>,
+    idle: Duration,
+    max_age: Duration,
+) {
     let _ = ws.get_mut().set_read_timeout(Some(POLL));
     let started = Instant::now();
     let mut last = Instant::now();
@@ -329,7 +340,10 @@ mod tests {
             method: "GET".into(),
             path: "/orgs/acme/api/v1/terminal".into(),
             query: Some(query.into()),
-            headers: headers.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            headers: headers
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
             body: vec![],
             peer: Peer::Unix { uid: None },
         }
@@ -349,7 +363,15 @@ mod tests {
         );
         let t = term_request(&req("app=web", &[])).unwrap();
         assert_eq!((t.slot, t.cols, t.rows), (None, 80, 24));
-        for bad in ["", "app=", "app=../x", "app=Web", "app=web&slot=0", "app=web&cols=1", "app=web&rows=x"] {
+        for bad in [
+            "",
+            "app=",
+            "app=../x",
+            "app=Web",
+            "app=web&slot=0",
+            "app=web&cols=1",
+            "app=web&rows=x",
+        ] {
             assert!(term_request(&req(bad, &[])).is_err(), "{bad}");
         }
     }
@@ -357,14 +379,35 @@ mod tests {
     #[test]
     fn origin_must_be_this_site_for_cookies() {
         let host = ("Host", "isb.example.com");
-        assert!(origin_allowed(&req("", &[host, ("Origin", "https://isb.example.com")])));
-        assert!(origin_allowed(&req("", &[("Host", "localhost:8092"), ("Origin", "http://localhost:8092")])));
-        assert!(!origin_allowed(&req("", &[host, ("Origin", "https://evil.example")])));
-        assert!(!origin_allowed(&req("", &[host, ("Origin", "https://isb.example.com.evil.example")])));
+        assert!(origin_allowed(&req(
+            "",
+            &[host, ("Origin", "https://isb.example.com")]
+        )));
+        assert!(origin_allowed(&req(
+            "",
+            &[
+                ("Host", "localhost:8092"),
+                ("Origin", "http://localhost:8092")
+            ]
+        )));
+        assert!(!origin_allowed(&req(
+            "",
+            &[host, ("Origin", "https://evil.example")]
+        )));
+        assert!(!origin_allowed(&req(
+            "",
+            &[host, ("Origin", "https://isb.example.com.evil.example")]
+        )));
         assert!(!origin_allowed(&req("", &[host, ("Origin", "null")])));
         // No Origin: only a bearer token, which a browser never adds by itself.
-        assert!(!origin_allowed(&req("", &[host, ("Cookie", "isb_session=x")])));
-        assert!(origin_allowed(&req("", &[host, ("Authorization", "Bearer isb_tok_x")])));
+        assert!(!origin_allowed(&req(
+            "",
+            &[host, ("Cookie", "isb_session=x")]
+        )));
+        assert!(origin_allowed(&req(
+            "",
+            &[host, ("Authorization", "Bearer isb_tok_x")]
+        )));
     }
 
     #[test]
@@ -375,7 +418,10 @@ mod tests {
             ("Sec-WebSocket-Version", "13"),
             ("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ=="),
         ];
-        assert_eq!(websocket_key(&req("", &ok)).as_deref(), Some("dGhlIHNhbXBsZSBub25jZQ=="));
+        assert_eq!(
+            websocket_key(&req("", &ok)).as_deref(),
+            Some("dGhlIHNhbXBsZSBub25jZQ==")
+        );
         assert_eq!(
             tungstenite::handshake::derive_accept_key(b"dGhlIHNhbXBsZSBub25jZQ=="),
             "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
@@ -384,7 +430,12 @@ mod tests {
             let h: Vec<_> = ok.iter().copied().filter(|(k, _)| *k != skip).collect();
             websocket_key(&req("", &h))
         };
-        for h in ["Upgrade", "Connection", "Sec-WebSocket-Version", "Sec-WebSocket-Key"] {
+        for h in [
+            "Upgrade",
+            "Connection",
+            "Sec-WebSocket-Version",
+            "Sec-WebSocket-Key",
+        ] {
             assert!(without(h).is_none(), "{h}");
         }
     }
@@ -402,7 +453,9 @@ mod tests {
             if d == b"exit" {
                 self.tx.send(PtyOutput::Exit(Some(3))).unwrap();
             } else {
-                self.tx.send(PtyOutput::Data(d.to_ascii_uppercase())).unwrap();
+                self.tx
+                    .send(PtyOutput::Data(d.to_ascii_uppercase()))
+                    .unwrap();
             }
             Ok(())
         }
@@ -417,7 +470,9 @@ mod tests {
         }
     }
 
-    fn echo() -> (Box<dyn Pty>, Arc<Mutex<Option<(u16, u16)>>>, Arc<Mutex<bool>>) {
+    type Resized = Arc<Mutex<Option<(u16, u16)>>>;
+
+    fn echo() -> (Box<dyn Pty>, Resized, Arc<Mutex<bool>>) {
         let (tx, rx) = channel();
         let resized = Arc::new(Mutex::new(None));
         let closed = Arc::new(Mutex::new(false));
@@ -449,7 +504,9 @@ mod tests {
             let mut ws = WebSocket::from_raw_socket(d, Role::Server, None);
             bridge(&mut ws, pty, IDLE, MAX_AGE);
         });
-        client.send(Message::text(r#"{"type":"resize","cols":100,"rows":30}"#)).unwrap();
+        client
+            .send(Message::text(r#"{"type":"resize","cols":100,"rows":30}"#))
+            .unwrap();
         client.send(Message::binary(b"ls".to_vec())).unwrap();
         assert_eq!(client.read().unwrap(), Message::binary(b"LS".to_vec()));
         client.send(Message::binary(b"exit".to_vec())).unwrap();

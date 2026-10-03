@@ -187,7 +187,7 @@ function AppList({
   const o = encodeURIComponent(org);
   return (
     <Card className="gap-0 overflow-hidden py-0">
-      <div className="hidden grid-cols-[minmax(0,1.3fr)_minmax(0,1.6fr)_6rem_minmax(0,1.2fr)_minmax(0,1fr)_1.5rem] gap-4 border-b bg-muted/30 px-5 py-2.5 text-xs font-medium text-muted-foreground lg:grid">
+      <div className="hidden grid-cols-[minmax(0,1.1fr)_minmax(0,1.6fr)_7.5rem_minmax(0,1.1fr)_minmax(0,1.1fr)_1.5rem] gap-4 border-b bg-muted/30 px-5 py-2.5 text-xs font-medium text-muted-foreground lg:grid">
         <span>App</span>
         <span>Source</span>
         <span>Replicas</span>
@@ -203,12 +203,12 @@ function AppList({
           const state = appState(svc, last);
           const src = sourceLabel(a, ds.find((d) => d.id === a.current_deployment) ?? last);
           const urls = (svc?.domains ?? []).map((d) => d.url).filter(Boolean) as string[];
-          const hosts = urls.length ? urls : (a.domains ?? []).map((d) => String(d.host));
+          const hosts = urls.length ? urls : (a.domains ?? []).map((d) => (d.host === "auto" ? "generated name" : String(d.host)));
           return (
             <li key={a.name}>
               <Link
                 to={`/orgs/${o}/apps/${a.name}`}
-                className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1.5 px-5 py-4 transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1.6fr)_6rem_minmax(0,1.2fr)_minmax(0,1fr)_1.5rem] lg:items-center"
+                className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1.5 px-5 py-4 transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1.6fr)_7.5rem_minmax(0,1.1fr)_minmax(0,1.1fr)_1.5rem] lg:items-center"
               >
                 <div className="flex min-w-0 items-center gap-2.5">
                   <span className="truncate font-medium">{a.name}</span>
@@ -231,8 +231,8 @@ function AppList({
                   {last ? (
                     <>
                       <DeploymentBadge status={last.status} />
-                      <span className="truncate">
-                        #{last.id} {relativeTime(last.created_at / 1000)}
+                      <span className="min-w-0 truncate lg:grid lg:leading-tight">
+                        <span>#{last.id}</span> <span>{relativeTime(last.created_at / 1000)}</span>
                       </span>
                     </>
                   ) : (

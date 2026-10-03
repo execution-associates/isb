@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { domainFromSpec, domainToSpec, emptyDomain, hostProblem, matchStatuses, normalizePath, validateDomain, type DomainForm } from "./domains";
 import { analyzeEnv, missingSecrets } from "./envtext";
 import { concernsDeployment, deploymentLine, LogBuffer, LogFollower, parseAnsi, stripAnsi } from "./logstream";
-import { applyPatch, duration, mergePatch, nameProblem, parseKv, portProblem, shortDigest, volumeProblem } from "./util";
+import { applyPatch, duration, mergePatch, nameProblem, parseKv, portProblem, shortDigest, terminalUrl, volumeProblem } from "./util";
 import { gitUrlProblem } from "./new-app-dialog";
 import { parseMemory } from "./app-monitoring";
 import { appState } from "./api";
@@ -252,6 +252,15 @@ describe("small helpers", () => {
     expect(parseKv("bad").errors).toHaveLength(1);
     expect(parseMemory("512m")).toBe(512 * 1024 ** 2);
     expect(parseMemory("2GiB")).toBe(2 * 1024 ** 3);
+  });
+
+  it("builds the terminal websocket URL on this origin", () => {
+    expect(terminalUrl({ protocol: "https:", host: "isb.example.com" }, "acme", "web", "auto", 120, 40)).toBe(
+      "wss://isb.example.com/orgs/acme/api/v1/terminal?app=web&cols=120&rows=40",
+    );
+    expect(terminalUrl({ protocol: "http:", host: "localhost:8092" }, "a b", "web", "2", 80, 24)).toBe(
+      "ws://localhost:8092/orgs/a%20b/api/v1/terminal?app=web&cols=80&rows=24&slot=2",
+    );
   });
 
   it("derives an app's state from its service and latest deployment", () => {

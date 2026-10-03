@@ -63,6 +63,8 @@ export function DomainsTab({ org, app }: { org: string; app: App }) {
   const [editing, setEditing] = useState<{ index: number | null; form: DomainForm } | null>(null);
   const [removing, setRemoving] = useState<number | null>(null);
   const [dirty, setDirty] = useState(false);
+  // Saved but not in the running deployment (added since, or dropped by a rollback).
+  const unrouted = !!app.current_deployment && !!ingress.data?.enabled && !stack.isLoading && matched.some((m) => !m);
 
   const store = async (next: DomainForm[], deploy: boolean) => {
     const r = await save({ domains: next.map(domainToSpec) }, { deploy, quiet: !deploy });
@@ -83,12 +85,12 @@ export function DomainsTab({ org, app }: { org: string; app: App }) {
           </AlertDescription>
         </Alert>
       )}
-      {dirty && (
+      {(dirty || unrouted) && (
         <Alert className="border-sky-500/30 bg-sky-500/5">
           <Rocket />
-          <AlertTitle>Deploy to apply domain changes</AlertTitle>
+          <AlertTitle>{dirty ? "Deploy to apply domain changes" : "Some domains are not routed yet"}</AlertTitle>
           <AlertDescription className="flex flex-wrap items-center gap-3">
-            Domains are routed at the next deploy; changing them never replaces the running replicas' revision.
+            Domains are saved with the app and routed when it is next deployed.
             <Button size="sm" onClick={() => store(forms, true)} disabled={pending}>
               {pending && <Loader2 className="animate-spin" />}
               Deploy now

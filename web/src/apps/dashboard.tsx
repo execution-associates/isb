@@ -30,7 +30,7 @@ export function OrgAppsOverview({ org }: { org: string }) {
   const appInfo = new Map((apps.data ?? []).map((a) => [a.name, a]));
 
   return (
-    <div className="mt-6 grid gap-6 xl:grid-cols-2">
+    <div className="mt-6 grid items-start gap-6 xl:grid-cols-2">
       <Card className="gap-0 overflow-hidden py-0">
         <CardHeader className="flex flex-row items-center justify-between border-b px-5 py-3 [.border-b]:pb-3">
           <CardTitle className="text-base">Projects</CardTitle>
