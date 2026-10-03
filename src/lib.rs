@@ -30,6 +30,7 @@
 //! minimal set of changes. A device that is already correct is never touched.
 
 pub mod app;
+pub mod audit;
 pub mod auth;
 pub mod balance;
 pub mod build;

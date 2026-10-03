@@ -116,6 +116,11 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX passkeys_user ON passkeys(user_id);
     ",
+    // 3: API token scopes, a JSON array of strings; NULL is the role's
+    // whole reach.
+    "
+    ALTER TABLE api_tokens ADD COLUMN scopes TEXT;
+    ",
 ];
 
 /// The schema version this build writes.

@@ -76,6 +76,9 @@ pub struct ApiConfig {
     /// Let anyone with a verified email from a provider make an account.
     /// Off: after the first admin, accounts come by invitation.
     pub open_signup: bool,
+    /// Where sign-ins, token, invitation, member and user changes are
+    /// recorded.
+    pub audit: Option<Arc<crate::audit::AuditLog>>,
 }
 
 impl std::fmt::Debug for ApiConfig {
@@ -86,6 +89,7 @@ impl std::fmt::Debug for ApiConfig {
             .field("setup_token_file", &self.setup_token_file)
             .field("providers", &self.providers)
             .field("open_signup", &self.open_signup)
+            .field("audit", &self.audit.is_some())
             .finish()
     }
 }
@@ -230,7 +234,44 @@ impl AuthApi {
             );
         }
         let seg: Vec<&str> = rest.split('/').collect();
-        let r = match (m, seg.as_slice()) {
+        let writes = !matches!(m, "GET" | "HEAD");
+        let audited = writes || matches!(seg.as_slice(), ["oauth", _, "callback"]);
+        // Who was there before the request (a sign-out ends the session),
+        // and what a revocation is about to remove.
+        let before = audited.then(|| self.principal(req)).flatten();
+        let restricted = writes && before.as_ref().is_some_and(|p| p.restricted());
+        let token_org = match (m, seg.as_slice()) {
+            ("DELETE", ["tokens", id]) => id
+                .parse()
+                .ok()
+                .and_then(|id| self.store.api_token(id).ok())
+                .and_then(|t| t.org),
+            _ => None,
+        };
+        NOTED.with(|n| n.set(None));
+        let resp = if restricted {
+            error_response(
+                403,
+                "forbidden",
+                "this token's scopes do not cover changing accounts, tokens or members (it needs admin)",
+            )
+        } else {
+            self.dispatch(req, m, &seg)
+        };
+        if audited {
+            if let Some(log) = &self.cfg.audit {
+                for e in self.audit_entries(req, &seg, &resp, before.as_ref(), token_org) {
+                    if let Err(err) = log.append(e) {
+                        eprintln!("isb serve: {err}");
+                    }
+                }
+            }
+        }
+        resp
+    }
+
+    fn dispatch(&self, req: &Request, m: &str, seg: &[&str]) -> Response {
+        let r = match (m, seg) {
             ("GET", ["setup"]) => self.get_setup(),
             ("POST", ["setup"]) => self.post_setup(req),
             ("POST", ["login"]) => self.login(req),
@@ -280,11 +321,206 @@ impl AuthApi {
                 };
                 self.with_principal(req, |p| self.org_route(req, p, &org, rest))
             }
-            _ => return not_found_or_405(&seg),
+            _ => return not_found_or_405(seg),
         };
         match r {
             Ok(resp) => resp,
             Err(e) => auth_error(e),
+        }
+    }
+
+    /// What a state-changing request did, as audit rows (usually one).
+    fn audit_entries(
+        &self,
+        req: &Request,
+        seg: &[&str],
+        resp: &Response,
+        before: Option<&Principal>,
+        token_org: Option<OrgId>,
+    ) -> Vec<crate::audit::NewEntry> {
+        use crate::audit::{Actor, NewEntry, Origin};
+        let m = req.method.as_str();
+        let body: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
+        let answer: Value = serde_json::from_slice(&resp.body).unwrap_or(Value::Null);
+        let field = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(String::from);
+        let mut outcome = if resp.status < 400 {
+            "ok".to_string()
+        } else {
+            field(&answer, "error").unwrap_or_else(|| format!("http_{}", resp.status))
+        };
+        let mut details = serde_json::Map::new();
+        let (action, org, target): (&str, Option<String>, Option<String>) = match (m, seg) {
+            ("POST", ["setup"]) => ("auth.setup", None, field(&body, "email")),
+            ("POST", ["login"]) => {
+                details.insert("method".into(), json!("password"));
+                ("auth.login", None, None)
+            }
+            ("POST", ["logout"]) => ("auth.logout", None, None),
+            ("DELETE", ["sessions", id]) => ("auth.session_revoke", None, Some(id.to_string())),
+            ("POST", ["invitations"]) => {
+                if let Some(r) = field(&body, "role") {
+                    details.insert("role".into(), json!(r));
+                }
+                (
+                    "auth.invitation_create",
+                    field(&body, "org"),
+                    field(&body, "email"),
+                )
+            }
+            ("POST", ["invitations", "accept"]) => (
+                "auth.invitation_accept",
+                answer["membership"]["org"].as_str().map(String::from),
+                None,
+            ),
+            ("POST", ["tokens"]) => {
+                if let Some(id) = answer["info"]["id"].as_i64() {
+                    details.insert("id".into(), json!(id));
+                }
+                if let Some(s) = body.get("scopes").and_then(Value::as_array) {
+                    details.insert("scopes_count".into(), json!(s.len()));
+                }
+                (
+                    "auth.token_create",
+                    field(&body, "org"),
+                    field(&body, "name"),
+                )
+            }
+            ("DELETE", ["tokens", id]) => (
+                "auth.token_revoke",
+                token_org.map(|o| o.to_string()),
+                Some(id.to_string()),
+            ),
+            ("POST", ["password"]) => ("auth.password_change", None, None),
+            ("POST", ["password-reset", "request"]) => {
+                ("auth.password_reset_request", None, field(&body, "email"))
+            }
+            ("POST", ["password-reset", "confirm"]) => ("auth.password_reset", None, None),
+            ("GET", ["oauth", p, "callback"]) => {
+                details.insert("provider".into(), json!(p));
+                let loc = resp.get_header("location").unwrap_or("");
+                if let Some(code) = loc
+                    .split(['?', '&'])
+                    .find_map(|kv| kv.strip_prefix("error="))
+                {
+                    outcome = code.to_string();
+                }
+                let session_set = resp.headers.iter().any(|(k, v)| {
+                    k.eq_ignore_ascii_case("set-cookie") && v.starts_with("isb_session=")
+                });
+                let link = !session_set && before.is_some();
+                (
+                    if link {
+                        "auth.identity_link"
+                    } else {
+                        "auth.login"
+                    },
+                    None,
+                    None,
+                )
+            }
+            ("DELETE", ["identities", id]) => ("auth.identity_unlink", None, Some(id.to_string())),
+            ("POST", ["passkeys", "register", "verify"]) => (
+                "auth.passkey_add",
+                None,
+                answer["passkey"]["id"].as_i64().map(|i| i.to_string()),
+            ),
+            ("DELETE", ["passkeys", id]) => ("auth.passkey_remove", None, Some(id.to_string())),
+            ("POST", ["passkeys", "login", "verify"]) => {
+                details.insert("method".into(), json!("passkey"));
+                ("auth.login", None, None)
+            }
+            ("PATCH", ["admin", "users", id]) => {
+                // One row per change asked for.
+                let base = |action: &str| NewEntry {
+                    org: None,
+                    actor: before.map(Actor::from_principal).unwrap_or_default(),
+                    origin: Origin::default(),
+                    action: action.into(),
+                    target: Some(id.to_string()),
+                    details: json!({"email": answer["user"]["email"]}),
+                    outcome: outcome.clone(),
+                };
+                let mut out = Vec::new();
+                match body.get("disabled").and_then(Value::as_bool) {
+                    Some(true) => out.push(base("auth.user_disable")),
+                    Some(false) => out.push(base("auth.user_enable")),
+                    None => {}
+                }
+                match body.get("platform_admin").and_then(Value::as_bool) {
+                    Some(true) => out.push(base("auth.platform_admin_grant")),
+                    Some(false) => out.push(base("auth.platform_admin_revoke")),
+                    None => {}
+                }
+                let origin = self.origin(req);
+                return out
+                    .into_iter()
+                    .map(|mut e| {
+                        e.origin = origin.clone();
+                        e
+                    })
+                    .collect();
+            }
+            ("PUT", ["orgs", org, "members", uid]) => {
+                if let Some(r) = field(&body, "role") {
+                    details.insert("role".into(), json!(r));
+                }
+                (
+                    "auth.role_change",
+                    Some(org.to_string()),
+                    Some(uid.to_string()),
+                )
+            }
+            ("DELETE", ["orgs", org, "members", uid]) => (
+                "auth.member_remove",
+                Some(org.to_string()),
+                Some(uid.to_string()),
+            ),
+            ("DELETE", ["orgs", org, "invitations", id]) => (
+                "auth.invitation_revoke",
+                Some(org.to_string()),
+                Some(id.to_string()),
+            ),
+            _ => return Vec::new(),
+        };
+        // Who: the user a sign-in signed in, else who was signed in, else
+        // the address someone claimed.
+        let noted = NOTED.with(|n| n.take());
+        let actor = match (noted.and_then(|id| self.store.user(id).ok()), before) {
+            (Some(u), _) => Actor {
+                name: u.email.clone(),
+                kind: Some(crate::audit::ActorKind::Person),
+                user_id: Some(u.id),
+                email: Some(u.email),
+                ..Default::default()
+            },
+            (None, Some(p)) => Actor::from_principal(p),
+            (None, None) => match field(&body, "email") {
+                Some(e) => Actor::claimed(&e),
+                None => Actor::anonymous("anonymous"),
+            },
+        };
+        vec![NewEntry {
+            org,
+            actor,
+            origin: self.origin(req),
+            action: action.into(),
+            target,
+            details: Value::Object(details),
+            outcome,
+        }]
+    }
+
+    fn origin(&self, req: &Request) -> crate::audit::Origin {
+        let bearer = req.header("authorization").is_some();
+        crate::audit::Origin {
+            surface: if bearer { "rest" } else { "web" }.into(),
+            ip: client_ip(req),
+            user_agent: req.header("user-agent").map(String::from),
+            request_id: req
+                .header("x-request-id")
+                .or_else(|| req.header("cf-ray"))
+                .filter(|s| s.len() <= 64)
+                .map(String::from),
         }
     }
 
@@ -376,6 +612,7 @@ impl AuthApi {
         s: &NewSession,
     ) -> Result<Response, AuthError> {
         let user = self.store.user(s.session.user_id)?;
+        note_user(user.id);
         let memberships = self.store.memberships(user.id)?;
         let max_age = (s.session.expires_at - self.store.now()).max(0);
         Ok(Response::json(
@@ -527,6 +764,7 @@ impl AuthApi {
         let b: B = body(req)?;
         if let Some(p) = self.principal(req) {
             let a = self.store.accept_invitation_as(&b.token, p.user.id)?;
+            note_user(a.user.id);
             return Ok(Response::json(
                 200,
                 &json!({"user": a.user, "membership": a.membership, "created": false}),
@@ -536,6 +774,7 @@ impl AuthApi {
             .password
             .ok_or_else(|| AuthError::Invalid("password is required".into()))?;
         let a = self.store.accept_invitation(&b.token, &b.name, &pw)?;
+        note_user(a.user.id);
         let s = self.store.start_session(a.user.id, meta(req))?;
         let max_age = (s.session.expires_at - self.store.now()).max(0);
         Ok(Response::json(
@@ -569,6 +808,9 @@ impl AuthApi {
             /// `90d`, `12h`; absent or null never expires.
             #[serde(default)]
             expires: Option<String>,
+            /// `read`, `deploy`, `admin`, `tool:GLOB`; empty: the role's reach.
+            #[serde(default)]
+            scopes: Vec<String>,
         }
         let b: B = body(req)?;
         // Judged by what the caller can reach, not what the user can: an org
@@ -591,9 +833,13 @@ impl AuthApi {
             .filter(|s| !s.trim().is_empty())
             .map(|s| crate::parse_duration(&s).map_err(AuthError::Invalid))
             .transpose()?;
-        let t = self
-            .store
-            .create_api_token(p.user.id, b.org.as_ref(), &b.name, expires)?;
+        let t = self.store.create_api_token_scoped(
+            p.user.id,
+            b.org.as_ref(),
+            &b.name,
+            expires,
+            &b.scopes,
+        )?;
         Ok(Response::json(
             201,
             &json!({"token": t.token, "info": t.info}),
@@ -676,7 +922,8 @@ impl AuthApi {
         }
         self.store.limit_ip(client_ip(req).as_deref())?;
         let b: B = body(req)?;
-        self.store.reset_password(&b.token, &b.password)?;
+        let u = self.store.reset_password(&b.token, &b.password)?;
+        note_user(u.id);
         Ok(Response::new(204))
     }
 
@@ -904,6 +1151,16 @@ impl AuthStore {
     }
 }
 
+thread_local! {
+    /// The user a request signed in (or reset, or accepted as), for its
+    /// audit row: handlers run on the request's thread.
+    static NOTED: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
+}
+
+pub(crate) fn note_user(id: i64) {
+    NOTED.with(|n| n.set(Some(id)));
+}
+
 fn csrf_ok(req: &Request) -> bool {
     let bearer = req
         .header("authorization")
@@ -1069,3 +1326,6 @@ pub use external::{LOGIN_PAGE, OAUTH_COOKIE, safe_next};
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod audit_tests;

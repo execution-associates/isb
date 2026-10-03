@@ -92,6 +92,9 @@ pub type AuthResult<T> = std::result::Result<T, AuthError>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
+    /// Reads the org: lists and inspects, no secret values, no deploys, no
+    /// exec or terminal.
+    Viewer,
     Member,
     Admin,
     Owner,
@@ -100,7 +103,10 @@ pub enum Role {
 /// Something a role allows within its org.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Permission {
-    /// Apps, stacks, sandboxes, secrets (read included), deploys.
+    /// List and inspect what is in the org (read-only tools), never secret
+    /// values.
+    ReadOrg,
+    /// Apps, stacks, sandboxes, secrets (read included), deploys, exec.
     AdminOrg,
     /// Add, change and remove members; invitations; every token in the org.
     ManageMembers,
@@ -109,16 +115,17 @@ pub enum Permission {
 }
 
 impl Role {
-    pub const ALL: [Role; 3] = [Role::Member, Role::Admin, Role::Owner];
+    pub const ALL: [Role; 4] = [Role::Viewer, Role::Member, Role::Admin, Role::Owner];
 
-    /// What each role may do. The org is the boundary, so for now every
-    /// member administers what is in it.
+    /// What each role may do. The org is the boundary, so every member
+    /// administers what is in it; a viewer only reads.
     pub fn permissions(self) -> &'static [Permission] {
         use Permission::*;
         match self {
-            Role::Member => &[AdminOrg],
-            Role::Admin => &[AdminOrg, ManageMembers],
-            Role::Owner => &[AdminOrg, ManageMembers, DeleteOrg],
+            Role::Viewer => &[ReadOrg],
+            Role::Member => &[ReadOrg, AdminOrg],
+            Role::Admin => &[ReadOrg, AdminOrg, ManageMembers],
+            Role::Owner => &[ReadOrg, AdminOrg, ManageMembers, DeleteOrg],
         }
     }
 
@@ -128,6 +135,7 @@ impl Role {
 
     pub fn as_str(self) -> &'static str {
         match self {
+            Role::Viewer => "viewer",
             Role::Member => "member",
             Role::Admin => "admin",
             Role::Owner => "owner",
@@ -138,7 +146,9 @@ impl Role {
         Role::ALL
             .into_iter()
             .find(|r| r.as_str() == s)
-            .ok_or_else(|| AuthError::Invalid(format!("role {s:?}: owner, admin or member")))
+            .ok_or_else(|| {
+                AuthError::Invalid(format!("role {s:?}: owner, admin, member or viewer"))
+            })
     }
 }
 
@@ -228,6 +238,9 @@ pub struct ApiToken {
     pub created_at: i64,
     pub last_used: Option<i64>,
     pub expires_at: Option<i64>,
+    /// Restrictions on top of the role ([`Scope`]); empty: the role's
+    /// whole reach.
+    pub scopes: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -246,6 +259,12 @@ pub enum PrincipalKind {
     ApiToken {
         id: i64,
         org: Option<OrgId>,
+        /// The token's name, for audit rows.
+        #[serde(default)]
+        name: String,
+        /// Empty: the role's whole reach.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        scopes: Vec<String>,
     },
     /// A Cloudflare Access identity whose email is this user's.
     Access,
@@ -278,6 +297,25 @@ impl Principal {
     /// Apps, stacks, sandboxes and secrets in `org`.
     pub fn can_admin_org(&self, org: &OrgId) -> bool {
         self.can(org, Permission::AdminOrg)
+    }
+
+    /// Read-only tools in `org`.
+    pub fn can_read_org(&self, org: &OrgId) -> bool {
+        self.can(org, Permission::ReadOrg)
+    }
+
+    /// The token's scopes; empty for sessions and unscoped tokens.
+    pub fn scopes(&self) -> &[String] {
+        match &self.kind {
+            PrincipalKind::ApiToken { scopes, .. } => scopes,
+            _ => &[],
+        }
+    }
+
+    /// A token scoped short of `admin`: it may not change who has access.
+    pub fn restricted(&self) -> bool {
+        let s = self.scopes();
+        !s.is_empty() && !s.iter().any(|x| x == "admin")
     }
 
     /// Members, invitations and every token in `org`.
@@ -471,7 +509,7 @@ fn invitation_row(r: &Row) -> rusqlite::Result<Invitation> {
     })
 }
 
-const TOKEN_COLS: &str = "id, name, user_id, org, created_at, last_used, expires_at";
+const TOKEN_COLS: &str = "id, name, user_id, org, created_at, last_used, expires_at, scopes";
 
 fn token_row(r: &Row) -> rusqlite::Result<ApiToken> {
     Ok(ApiToken {
@@ -482,7 +520,76 @@ fn token_row(r: &Row) -> rusqlite::Result<ApiToken> {
         created_at: r.get(4)?,
         last_used: r.get(5)?,
         expires_at: r.get(6)?,
+        scopes: scopes_col(r.get(7)?),
     })
+}
+
+fn scopes_col(v: Option<String>) -> Vec<String> {
+    v.and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+/// What an API token may do on top of its role. A token with no scopes has
+/// the role's whole reach (agents administer their org by default); scopes
+/// only ever narrow it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Scope {
+    /// Read-only tools, never secret values.
+    Read,
+    /// `read`, plus deploys, redeploys, rollbacks, scaling and builds.
+    Deploy,
+    /// Everything the role allows, including tokens and members.
+    Admin,
+    /// Tools whose name matches a glob: `tool:app_*`.
+    Tools(String),
+}
+
+impl Scope {
+    pub fn parse(s: &str) -> AuthResult<Scope> {
+        let s = s.trim();
+        match s {
+            "read" => Ok(Scope::Read),
+            "deploy" => Ok(Scope::Deploy),
+            "admin" => Ok(Scope::Admin),
+            _ => match s.strip_prefix("tool:") {
+                Some(g)
+                    if !g.is_empty()
+                        && g.len() <= 128
+                        && g.bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b"_.-*?[]!^".contains(&b)) =>
+                {
+                    Ok(Scope::Tools(g.to_string()))
+                }
+                _ => Err(AuthError::Invalid(format!(
+                    "scope {s:?}: read, deploy, admin or tool:GLOB"
+                ))),
+            },
+        }
+    }
+
+    pub fn as_string(&self) -> String {
+        match self {
+            Scope::Read => "read".into(),
+            Scope::Deploy => "deploy".into(),
+            Scope::Admin => "admin".into(),
+            Scope::Tools(g) => format!("tool:{g}"),
+        }
+    }
+
+    /// Check a list, normalized and without duplicates.
+    pub fn normalize(v: &[String]) -> AuthResult<Vec<String>> {
+        if v.len() > 32 {
+            return Err(AuthError::Invalid("at most 32 scopes".into()));
+        }
+        let mut out: Vec<String> = Vec::new();
+        for s in v {
+            let s = Scope::parse(s)?.as_string();
+            if !out.contains(&s) {
+                out.push(s);
+            }
+        }
+        Ok(out)
+    }
 }
 
 impl AuthStore {
@@ -1322,6 +1429,19 @@ impl AuthStore {
         name: &str,
         expires: Option<Duration>,
     ) -> AuthResult<NewApiToken> {
+        self.create_api_token_scoped(user_id, org, name, expires, &[])
+    }
+
+    /// [`Self::create_api_token`], narrowed to `scopes` ([`Scope`]).
+    pub fn create_api_token_scoped(
+        &self,
+        user_id: i64,
+        org: Option<&OrgId>,
+        name: &str,
+        expires: Option<Duration>,
+        scopes: &[String],
+    ) -> AuthResult<NewApiToken> {
+        let scopes = Scope::normalize(scopes)?;
         let name = name.trim();
         if name.is_empty() || name.chars().count() > 100 || name.chars().any(char::is_control) {
             return Err(AuthError::Invalid(
@@ -1357,9 +1477,17 @@ impl AuthStore {
             ensure_org_tx(&db, o, now)?;
         }
         db.execute(
-            "INSERT INTO api_tokens (token_hash, name, user_id, org, created_at, expires_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![hash, name, user_id, org.map(OrgId::as_str), now, expires_at],
+            "INSERT INTO api_tokens (token_hash, name, user_id, org, created_at, expires_at, scopes)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                hash,
+                name,
+                user_id,
+                org.map(OrgId::as_str),
+                now,
+                expires_at,
+                (!scopes.is_empty()).then(|| serde_json::to_string(&scopes).unwrap_or_default())
+            ],
         )?;
         Ok(NewApiToken {
             token,
@@ -1371,6 +1499,7 @@ impl AuthStore {
                 created_at: now,
                 last_used: None,
                 expires_at,
+                scopes,
             },
         })
     }
@@ -1398,8 +1527,9 @@ impl AuthStore {
             .db()
             .query_row(
                 &format!(
-                    "SELECT t.token_hash, t.id, t.org, t.expires_at, t.last_used, {USER_COLS}
-                     FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.token_hash = ?1"
+                    "SELECT t.token_hash, t.id, t.org, t.expires_at, t.last_used, t.name, t.scopes,
+                     {USER_COLS} FROM api_tokens t JOIN users u ON u.id = t.user_id
+                     WHERE t.token_hash = ?1"
                 ),
                 [&hash],
                 |r| {
@@ -1409,12 +1539,14 @@ impl AuthStore {
                         opt_org_col(r, 2)?,
                         r.get::<_, Option<i64>>(3)?,
                         r.get::<_, Option<i64>>(4)?,
-                        user_row(r, 5)?,
+                        r.get::<_, String>(5)?,
+                        scopes_col(r.get(6)?),
+                        user_row(r, 7)?,
                     ))
                 },
             )
             .optional()?;
-        let Some((stored, id, org, expires, last_used, user)) = found else {
+        let Some((stored, id, org, expires, last_used, name, scopes, user)) = found else {
             return Ok(None);
         };
         if !secret::ct_eq(&stored, &hash) || expires.is_some_and(|e| now >= e) || user.disabled {
@@ -1448,7 +1580,12 @@ impl AuthStore {
         }
         Ok(Some(Principal {
             user,
-            kind: PrincipalKind::ApiToken { id, org },
+            kind: PrincipalKind::ApiToken {
+                id,
+                org,
+                name,
+                scopes,
+            },
             orgs,
             platform_admin,
         }))

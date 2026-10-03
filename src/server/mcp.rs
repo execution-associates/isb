@@ -369,6 +369,25 @@ pub type Authorize = Arc<
 /// this caller, starting after `since` (from `?since=` or `Last-Event-ID`).
 pub type Events = Arc<dyn Fn(&Caller, u64) -> crate::Result<super::http::StreamFn> + Send + Sync>;
 
+/// What the audit hook hears: a tool call, admitted or refused, or a
+/// terminal opening (`terminal.open`) and closing (`terminal.close`).
+pub struct Audited<'a> {
+    pub caller: &'a Caller,
+    /// The tool's name, or `terminal.open` / `terminal.close`.
+    pub action: &'a str,
+    /// The tool, when the action is one (its annotations say whether it
+    /// only reads).
+    pub tool: Option<&'a Tool>,
+    /// The arguments as authorized (for a refusal, as sent). The hook keeps
+    /// only what it knows is safe to keep.
+    pub args: &'a Value,
+    pub outcome: std::result::Result<(), &'a Error>,
+    pub origin: &'a crate::audit::Origin,
+}
+
+/// Records what happened; it must not fail the call.
+pub type Audit = Arc<dyn Fn(&Audited) + Send + Sync>;
+
 /// What the embedder plugs into every listener.
 #[derive(Clone, Default)]
 pub struct Hooks {
@@ -377,6 +396,50 @@ pub struct Hooks {
     pub events: Option<Events>,
     /// Opens a terminal for `GET /orgs/<org>/api/v1/terminal` (a websocket).
     pub terminal: Option<super::terminal::Terminal>,
+    /// Hears every tool call on every surface, and terminal sessions.
+    pub audit: Option<Audit>,
+}
+
+/// Where a request came from, for the audit log: the surface (`cli` over
+/// the unix socket, `mcp`, `web` for a browser session, else `rest`), the
+/// client's address and agent, and a request id (`X-Request-Id` when it is
+/// sane, else `Cf-Ray`, else a fresh one).
+pub fn origin(req: &Request, caller: &Caller, mcp: bool) -> crate::audit::Origin {
+    let surface = match (&req.peer, mcp, caller) {
+        (Peer::Unix { .. }, _, _) => "cli",
+        (_, true, _) => "mcp",
+        (_, false, Caller::User { principal })
+            if matches!(principal.kind, crate::auth::PrincipalKind::Session { .. }) =>
+        {
+            "web"
+        }
+        _ => "rest",
+    };
+    let sane = |s: &&str| {
+        !s.is_empty()
+            && s.len() <= 64
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':'))
+    };
+    let request_id = req
+        .header("x-request-id")
+        .filter(sane)
+        .or_else(|| req.header("cf-ray").filter(sane))
+        .map(String::from)
+        .unwrap_or_else(new_request_id);
+    crate::audit::Origin {
+        surface: surface.into(),
+        ip: crate::auth::http::client_ip(req),
+        user_agent: req.header("user-agent").map(String::from),
+        request_id: Some(request_id),
+    }
+}
+
+fn new_request_id() -> String {
+    use ring::rand::SecureRandom;
+    let mut b = [0u8; 8];
+    let _ = ring::rand::SystemRandom::new().fill(&mut b);
+    b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
 /// One listener's view of the server: its tools, its gate, its health.
@@ -445,7 +508,7 @@ impl Endpoint {
             Err(r) => return r,
         };
         match req.method.as_str() {
-            "POST" => self.post(req, &caller, scope),
+            "POST" => self.post(req, &caller, scope, &origin(req, &caller, true)),
             _ => Response::text(405, "method not allowed").header("Allow", "POST"),
         }
     }
@@ -507,17 +570,56 @@ impl Endpoint {
                 Err(e) => return rest_error(400, "invalid", &format!("bad JSON: {e}")),
             }
         };
-        let (tool, args) = match self.admit(name, args, &caller, scope) {
-            Ok(x) => x,
-            Err(Admit::Unknown) => {
-                return rest_error(404, "not_found", &format!("unknown tool: {name}"));
-            }
-            Err(Admit::Refused(e)) => return error_response(&e),
-        };
-        match run(tool, args, &caller) {
-            Ok(v) => Response::json(200, &json!({"result": v})),
-            Err(e) => error_response(&e),
+        let origin = origin(req, &caller, false);
+        match self.call_audited(name, args, &caller, scope, &origin) {
+            Some(Ok(v)) => Response::json(200, &json!({"result": v})),
+            Some(Err(e)) => error_response(&e),
+            None => rest_error(404, "not_found", &format!("unknown tool: {name}")),
         }
+    }
+
+    /// Admit and run a tool, telling the audit hook how it went. `None`
+    /// when this listener does not offer the tool.
+    fn call_audited(
+        &self,
+        name: &str,
+        args: Value,
+        caller: &Caller,
+        scope: Option<&crate::org::OrgId>,
+        origin: &crate::audit::Origin,
+    ) -> Option<crate::Result<Value>> {
+        let sent = self.hooks.audit.as_ref().map(|_| args.clone());
+        let (tool, args) = match self.admit(name, args, caller, scope) {
+            Ok(x) => x,
+            Err(Admit::Unknown) => return None,
+            Err(Admit::Refused(e)) => {
+                eprintln!("isb serve: {caller} called {name}: refused: {e}");
+                if let (Some(a), Some(sent)) = (&self.hooks.audit, &sent) {
+                    a(&Audited {
+                        caller,
+                        action: name,
+                        tool: self.registry.get(name),
+                        args: sent,
+                        outcome: Err(&e),
+                        origin,
+                    });
+                }
+                return Some(Err(e));
+            }
+        };
+        let kept = self.hooks.audit.as_ref().map(|_| args.clone());
+        let r = run(tool, args, caller);
+        if let (Some(a), Some(kept)) = (&self.hooks.audit, &kept) {
+            a(&Audited {
+                caller,
+                action: name,
+                tool: Some(tool),
+                args: kept,
+                outcome: r.as_ref().map(|_| ()),
+                origin,
+            });
+        }
+        Some(r)
     }
 
     /// `GET /orgs/<org>/api/v1/terminal?app=NAME`: a websocket to a shell,
@@ -548,6 +650,9 @@ impl Endpoint {
             Ok(t) => t,
             Err(m) => return rest_error(400, "invalid", &m),
         };
+        let origin = origin(req, &caller, false);
+        let audit = self.hooks.audit.clone();
+        let args = json!({"org": org.as_str(), "app": t.app});
         match self.admit("sandbox_exec", json!({}), &caller, Some(org)) {
             Ok(_) => {}
             Err(Admit::Unknown) => {
@@ -557,11 +662,48 @@ impl Endpoint {
                     "terminals are not offered on this listener",
                 );
             }
-            Err(Admit::Refused(e)) => return error_response(&e),
+            Err(Admit::Refused(e)) => {
+                if let Some(a) = &audit {
+                    a(&Audited {
+                        caller: &caller,
+                        action: "terminal.open",
+                        tool: None,
+                        args: &args,
+                        outcome: Err(&e),
+                        origin: &origin,
+                    });
+                }
+                return error_response(&e);
+            }
         }
         let (open, org) = (open.clone(), org.clone());
         eprintln!("isb serve: {caller} opened a terminal to {org}/{}", t.app);
-        upgrade(&key, move || open(&caller, &org, &t))
+        upgrade(&key, move || {
+            let r = open(&caller, &org, &t);
+            let Some(a) = audit else { return r };
+            let mut args = args;
+            if let Ok(p) = &r {
+                args["replica"] = json!(p.target());
+            }
+            a(&Audited {
+                caller: &caller,
+                action: "terminal.open",
+                tool: None,
+                args: &args,
+                outcome: r.as_ref().map(|_| ()),
+                origin: &origin,
+            });
+            r.map(|inner| {
+                Box::new(AuditedPty {
+                    inner,
+                    started: Instant::now(),
+                    audit: a,
+                    caller,
+                    args,
+                    origin,
+                }) as Box<dyn super::terminal::Pty>
+            })
+        })
     }
 
     fn events(&self, req: &Request) -> Response {
@@ -715,7 +857,13 @@ impl Endpoint {
         })
     }
 
-    fn post(&self, req: &Request, caller: &Caller, scope: Option<&crate::org::OrgId>) -> Response {
+    fn post(
+        &self,
+        req: &Request,
+        caller: &Caller,
+        scope: Option<&crate::org::OrgId>,
+        origin: &crate::audit::Origin,
+    ) -> Response {
         // Clients vary in what they send here; note oddities, never refuse.
         if let Some(ct) = req
             .header("content-type")
@@ -739,11 +887,11 @@ impl Endpoint {
             Value::Array(items) => {
                 let out: Vec<Value> = items
                     .into_iter()
-                    .filter_map(|m| self.message(m, caller, scope))
+                    .filter_map(|m| self.message(m, caller, scope, origin))
                     .collect();
                 (!out.is_empty()).then_some(Value::Array(out))
             }
-            m => self.message(m, caller, scope),
+            m => self.message(m, caller, scope, origin),
         };
         match answer {
             Some(a) => Response::json(200, &a),
@@ -757,6 +905,7 @@ impl Endpoint {
         m: Value,
         caller: &Caller,
         scope: Option<&crate::org::OrgId>,
+        origin: &crate::audit::Origin,
     ) -> Option<Value> {
         let Value::Object(mut o) = m else {
             return Some(rpc_error(Value::Null, INVALID_REQUEST, "invalid request"));
@@ -791,10 +940,12 @@ impl Endpoint {
             ));
         }
         let params = o.remove("params").unwrap_or(Value::Null);
-        Some(match self.dispatch(&method, params, caller, scope) {
-            Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
-            Err((code, msg)) => rpc_error(id, code, msg),
-        })
+        Some(
+            match self.dispatch(&method, params, caller, scope, origin) {
+                Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
+                Err((code, msg)) => rpc_error(id, code, msg),
+            },
+        )
     }
 
     fn dispatch(
@@ -803,6 +954,7 @@ impl Endpoint {
         params: Value,
         caller: &Caller,
         scope: Option<&crate::org::OrgId>,
+        origin: &crate::audit::Origin,
     ) -> RpcResult {
         let bad = |m: &str| Err((INVALID_PARAMS, m.to_string()));
         if !(params.is_null() || params.is_object()) {
@@ -849,10 +1001,9 @@ impl Endpoint {
                     Some(_) => return bad("arguments must be an object"),
                 };
                 // A tool hidden by policy does not exist for this listener.
-                match self.admit(name, args, caller, scope) {
-                    Ok((tool, args)) => Ok(call(tool, args, caller)),
-                    Err(Admit::Unknown) => Err((INVALID_PARAMS, format!("unknown tool: {name}"))),
-                    Err(Admit::Refused(e)) => Ok(tool_error(name, caller, &e)),
+                match self.call_audited(name, args, caller, scope, origin) {
+                    Some(r) => Ok(tool_result(r)),
+                    None => Err((INVALID_PARAMS, format!("unknown tool: {name}"))),
                 }
             }
             _ => Err((METHOD_NOT_FOUND, format!("method not found: {method}"))),
@@ -865,13 +1016,48 @@ enum Admit {
     Refused(Error),
 }
 
-fn tool_error(name: &str, caller: &Caller, e: &Error) -> Value {
-    eprintln!("isb serve: {caller} called {name}: refused: {e}");
-    json!({
-        "content": [{"type": "text", "text": e.to_string()}],
-        "structuredContent": crate::rpc::error_json(e),
-        "isError": true,
-    })
+/// A terminal that tells the audit hook when it ends, and how long it ran.
+/// Never what was typed.
+struct AuditedPty {
+    inner: Box<dyn super::terminal::Pty>,
+    started: Instant,
+    audit: Audit,
+    caller: Caller,
+    args: Value,
+    origin: crate::audit::Origin,
+}
+
+impl super::terminal::Pty for AuditedPty {
+    fn input(&mut self, data: &[u8]) -> crate::Result<()> {
+        self.inner.input(data)
+    }
+    fn resize(&mut self, cols: u16, rows: u16) {
+        self.inner.resize(cols, rows)
+    }
+    fn output(&mut self, wait: std::time::Duration) -> super::terminal::PtyOutput {
+        self.inner.output(wait)
+    }
+    fn close(&mut self) {
+        self.inner.close()
+    }
+    fn target(&self) -> Option<String> {
+        self.inner.target()
+    }
+}
+
+impl Drop for AuditedPty {
+    fn drop(&mut self) {
+        let mut args = self.args.clone();
+        args["duration_s"] = json!(self.started.elapsed().as_secs());
+        (self.audit)(&Audited {
+            caller: &self.caller,
+            action: "terminal.close",
+            tool: None,
+            args: &args,
+            outcome: Ok(()),
+            origin: &self.origin,
+        });
+    }
 }
 
 fn rest_error(status: u16, code: &str, message: &str) -> Response {
@@ -924,9 +1110,8 @@ fn run(tool: &Tool, args: Value, caller: &Caller) -> crate::Result<Value> {
     r
 }
 
-/// Run a tool and shape its outcome as an MCP tool result.
-fn call(tool: &Tool, args: Value, caller: &Caller) -> Value {
-    let r = run(tool, args, caller);
+/// A tool's outcome as an MCP tool result.
+fn tool_result(r: crate::Result<Value>) -> Value {
     match r {
         Ok(v) => {
             let text = serde_json::to_string_pretty(&v).unwrap_or_default();
@@ -1383,6 +1568,7 @@ mod tests {
             terminal: Some(Arc::new(|_c, _org, _t| {
                 Err(Error::NotFound("no such app".into()))
             })),
+            audit: None,
         };
         ep
     }

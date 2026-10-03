@@ -11,6 +11,7 @@
 //! machine for an agent), and each org's secrets ([`crate::secrets`]).
 
 pub mod apps;
+pub mod audit;
 pub mod builds;
 mod orgs;
 pub mod policy;
@@ -71,6 +72,10 @@ pub struct ServeConfig {
     pub open_signup: bool,
     /// The HTTP(S) edge for stack domains; `None` leaves domains unserved.
     pub ingress: Option<crate::ingress::IngressConfig>,
+    /// How long audit rows are kept.
+    pub audit_retention: Duration,
+    /// Record read-only tool calls too (secret reads always are).
+    pub audit_all: bool,
 }
 
 /// The identity endpoints over `<state>/isb.db`, and the web UI. Provider
@@ -80,6 +85,7 @@ fn auth_routes(
     cfg: &ServeConfig,
     store: Arc<AuthStore>,
     secrets: &Arc<crate::secrets::Secrets>,
+    log: &Arc<crate::audit::AuditLog>,
 ) -> Result<crate::server::Routes> {
     use crate::auth::oauth::SecretFn;
     let default_org = crate::org::OrgId::default_org();
@@ -99,13 +105,14 @@ fn auth_routes(
     }
     let path = crate::auth::db_path(&cfg.state_dir);
     let api = AuthApi::new(
-        store,
+        store.clone(),
         ApiConfig {
             public_url: cfg.public_url.clone(),
             notifier: None,
             setup_token_file: Some(cfg.state_dir.join("setup-token")),
             providers,
             open_signup: cfg.open_signup,
+            audit: Some(log.clone()),
         },
     )?;
     eprintln!("isb serve: identity store {}", path.display());
@@ -114,10 +121,13 @@ fn auth_routes(
             "isb serve: this binary was built without the web UI (a placeholder page is served)"
         );
     }
-    // The identity endpoints first, then the web UI, which answers every
-    // other non-API GET.
+    // The identity endpoints first, the audit tail, then the web UI, which
+    // answers every other non-API GET.
     let (auth, web) = (Arc::new(api).router(), crate::web::routes());
-    Ok(Arc::new(move |r| auth(r).or_else(|| web(r))))
+    let tail = audit::stream_route(log.clone(), store);
+    Ok(Arc::new(move |r| {
+        auth(r).or_else(|| tail(r)).or_else(|| web(r))
+    }))
 }
 
 struct Daemon {
@@ -130,6 +140,7 @@ struct Daemon {
     ingress: Option<Arc<crate::ingress::Manager>>,
     /// The identity store: the org list memberships hang off.
     users: Arc<AuthStore>,
+    audit: Arc<crate::audit::AuditLog>,
 }
 
 /// Run the daemon until SIGINT/SIGTERM. Apps keep running when it stops.
@@ -159,8 +170,23 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         AuthStore::open_with(&db, cfg.auth.clone())
             .map_err(|e| Error::invalid(format!("open {}: {e}", db.display())))?,
     );
+    let audit_db = crate::audit::db_path(&cfg.state_dir);
+    let audit_log = Arc::new(crate::audit::AuditLog::open(
+        &audit_db,
+        cfg.audit_retention,
+    )?);
+    eprintln!(
+        "isb serve: audit log {} (kept {} days{})",
+        audit_db.display(),
+        cfg.audit_retention.as_secs() / 86400,
+        if cfg.audit_all {
+            ", reads included"
+        } else {
+            ""
+        }
+    );
     let auth = match &cfg.listen {
-        Some(_) => Some(auth_routes(&cfg, users.clone(), &secrets)?),
+        Some(_) => Some(auth_routes(&cfg, users.clone(), &secrets, &audit_log)?),
         None => None,
     };
     // The local registry, when set up: this daemon pushes to it and keeps
@@ -207,9 +233,11 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         apps: apps.clone(),
         ingress: ingress.clone(),
         users: users.clone(),
+        audit: audit_log.clone(),
     });
     let registry = registry(d.clone())?;
-    let hooks = hooks(d.clone(), users.clone(), cfg.allow_unauthenticated);
+    let mut hooks = hooks(d.clone(), users.clone(), cfg.allow_unauthenticated);
+    hooks.audit = Some(audit::hook(audit_log.clone(), cfg.audit_all));
     let mut listeners = vec![Listener::unix(&cfg.socket).hooks(hooks.clone())];
     if let Some(addr) = &cfg.listen {
         let mut l = Listener::tcp(addr.clone())
@@ -217,7 +245,10 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
             .hooks(hooks)
             // Webhooks carry their own credential (a signature), and come
             // from senders that hold no session.
-            .public_routes(apps::webhook_routes(apps.clone()));
+            .public_routes(audit::audited_webhooks(
+                apps::webhook_routes(apps.clone()),
+                audit_log.clone(),
+            ));
         if let Some(r) = auth {
             l = l.routes(r);
         }
@@ -279,6 +310,7 @@ const PLATFORM_TOOLS: &[&str] = &[
     "org_update",
     "org_delete",
     "registry_gc",
+    "audit_verify",
 ];
 
 /// Read-only tools that span orgs: any signed-in user, filtered to their
@@ -326,7 +358,14 @@ fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate:
         Authenticated::None
     });
     let authorize: crate::server::mcp::Authorize = Arc::new(move |c, tool, args, scope| {
-        authorize(c, &tool.name, args, scope, allow_anonymous)
+        authorize_class(
+            c,
+            &tool.name,
+            audit::class(tool),
+            args,
+            scope,
+            allow_anonymous,
+        )
     });
     let events: crate::server::mcp::Events = Arc::new(move |c, since| {
         if let (Caller::Unauthenticated { .. }, false) = (c, allow_anonymous) {
@@ -367,14 +406,17 @@ fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate:
         authorize: Some(authorize),
         events: Some(events),
         terminal: Some(term),
+        audit: None,
     }
 }
 
-/// May `c` call `tool` with `args`? The arguments to use (an org-bound
-/// endpoint pins `org`), or the refusal.
-fn authorize(
+/// May `c` call `tool` (of class `cls`) with `args`? The arguments to use
+/// (an org-bound endpoint pins `org`), or the refusal. A token's scopes
+/// narrow what its role allows; a viewer runs read-only tools only.
+fn authorize_class(
     c: &Caller,
     tool: &str,
+    cls: audit::Class,
     mut args: Value,
     scope: Option<&crate::org::OrgId>,
     allow_anonymous: bool,
@@ -400,6 +442,12 @@ fn authorize(
             id.name()
         ))),
         Caller::User { principal: p } => {
+            if !audit::scope_allows(p.scopes(), tool, cls) {
+                return Err(Error::Forbidden(format!(
+                    "this token's scopes ({}) do not cover {tool}",
+                    p.scopes().join(", ")
+                )));
+            }
             if PLATFORM_TOOLS.contains(&tool) && !p.platform_admin {
                 return Err(Error::Forbidden(format!("{} is for platform admins", tool)));
             }
@@ -411,14 +459,21 @@ fn authorize(
                     "re-encrypting every org is for platform admins".into(),
                 ));
             }
-            if CROSS_ORG_READS.contains(&tool) && scope.is_none() {
+            if (CROSS_ORG_READS.contains(&tool) && scope.is_none()) || tool == "audit_list" {
+                // They filter to what the caller may see themselves.
                 return Ok(args);
             }
             let org = arg_org(&args)?;
-            if p.platform_admin || p.role_in(&org).is_some() {
-                Ok(args)
-            } else {
-                Err(Error::Forbidden(format!("no access to org {org}")))
+            if p.platform_admin {
+                return Ok(args);
+            }
+            match p.role_in(&org) {
+                None => Err(Error::Forbidden(format!("no access to org {org}"))),
+                Some(_) if cls.read_only => Ok(args),
+                Some(_) if p.can_admin_org(&org) => Ok(args),
+                Some(r) => Err(Error::Forbidden(format!(
+                    "{tool} changes things or reads secrets; a {r} in org {org} only reads"
+                ))),
             }
         }
     }
@@ -1012,6 +1067,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
         }
     );
     orgs::register(&mut r, d.clone())?;
+    audit::register(&mut r, d.audit.clone())?;
     Ok(r)
 }
 
@@ -1399,7 +1455,24 @@ mod tests {
     use crate::auth::{Principal, PrincipalKind, Role, User};
     use crate::org::OrgId;
 
-    fn user(orgs: &[(&str, Role)], platform_admin: bool) -> Caller {
+    /// A token holder with these roles and scopes.
+    pub(super) fn token(orgs: &[(&str, Role)], scopes: &[&str]) -> Caller {
+        let Caller::User { principal } = user(orgs, false) else {
+            unreachable!()
+        };
+        let mut p = (*principal).clone();
+        p.kind = PrincipalKind::ApiToken {
+            id: 3,
+            org: p.orgs.first().map(|(o, _)| o.clone()),
+            name: "ci".into(),
+            scopes: scopes.iter().map(|s| s.to_string()).collect(),
+        };
+        Caller::User {
+            principal: Arc::new(p),
+        }
+    }
+
+    pub(super) fn user(orgs: &[(&str, Role)], platform_admin: bool) -> Caller {
         Caller::User {
             principal: Arc::new(Principal {
                 user: User {
@@ -1419,6 +1492,42 @@ mod tests {
                 platform_admin,
             }),
         }
+    }
+
+    /// The class the real registry gives these tools.
+    fn class_of(tool: &str) -> audit::Class {
+        let secret_read = audit::SECRET_READS.contains(&tool);
+        let ro = [
+            "org_get",
+            "org_list",
+            "secret_list",
+            "secret_inspect",
+            "stack_list",
+            "stack_status",
+            "stack_logs",
+            "overview",
+            "events",
+            "server_status",
+            "app_get",
+            "app_list",
+            "audit_list",
+            "audit_verify",
+        ]
+        .contains(&tool);
+        audit::Class {
+            read_only: ro && !secret_read,
+            secret_read,
+        }
+    }
+
+    fn authorize(
+        c: &Caller,
+        tool: &str,
+        args: Value,
+        scope: Option<&OrgId>,
+        anon: bool,
+    ) -> Result<Value> {
+        authorize_class(c, tool, class_of(tool), args, scope, anon)
     }
 
     fn ok(c: &Caller, tool: &str, args: Value) -> bool {
@@ -1491,5 +1600,98 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn viewers_only_read() {
+        let viewer = user(&[("acme", Role::Viewer)], false);
+        let acme = |extra: Value| {
+            let mut v = json!({"org": "acme", "name": "web"});
+            for (k, x) in extra.as_object().unwrap() {
+                v[k] = x.clone();
+            }
+            v
+        };
+        for t in [
+            "stack_status",
+            "stack_list",
+            "secret_list",
+            "app_get",
+            "stack_logs",
+        ] {
+            assert!(ok(&viewer, t, acme(json!({}))), "{t}");
+        }
+        // No writes, no deploys, no exec (the terminal is admitted as
+        // sandbox_exec), no secret values.
+        for t in [
+            "stack_deploy",
+            "app_deploy",
+            "sandbox_exec",
+            "secret_set",
+            "secret_get",
+            "app_webhook",
+            "secret_resolve",
+        ] {
+            let e = authorize(&viewer, t, acme(json!({})), None, false).unwrap_err();
+            assert!(e.to_string().contains("only reads"), "{t}: {e}");
+        }
+        // Still confined to the org.
+        assert!(!ok(&viewer, "stack_status", json!({"org": "beta"})));
+        // A viewer's audit_list is refused by the tool itself (owners and
+        // admins only); the authorizer lets it through to filter.
+        assert!(ok(&viewer, "audit_list", json!({"org": "acme"})));
+        assert!(
+            audit::visibility(&viewer, Some("acme"))
+                .unwrap_err()
+                .to_string()
+                .contains("owners and admins")
+        );
+    }
+
+    #[test]
+    fn token_scopes_narrow_the_role() {
+        let a = json!({"org": "acme", "name": "web"});
+        let member = [("acme", Role::Member)];
+        // No scopes: the whole role (agents administer their org).
+        let full = token(&member, &[]);
+        for t in ["stack_deploy", "secret_get", "sandbox_exec", "app_delete"] {
+            assert!(ok(&full, t, a.clone()), "{t}");
+        }
+        let read = token(&member, &["read"]);
+        assert!(ok(&read, "stack_status", a.clone()));
+        for t in ["stack_deploy", "secret_get", "sandbox_exec", "secret_set"] {
+            let e = authorize(&read, t, a.clone(), None, false).unwrap_err();
+            assert!(e.to_string().contains("scopes (read)"), "{t}: {e}");
+        }
+        let deploy = token(&member, &["deploy"]);
+        for t in [
+            "stack_status",
+            "stack_deploy",
+            "app_deploy",
+            "app_rollback",
+            "stack_scale",
+        ] {
+            assert!(ok(&deploy, t, a.clone()), "{t}");
+        }
+        for t in [
+            "secret_get",
+            "secret_set",
+            "sandbox_exec",
+            "app_delete",
+            "app_env_set",
+        ] {
+            assert!(!ok(&deploy, t, a.clone()), "{t}");
+        }
+        let apps = token(&member, &["tool:app_*", "read"]);
+        assert!(ok(&apps, "app_env_set", a.clone()));
+        assert!(ok(&apps, "app_webhook", a.clone()));
+        assert!(!ok(&apps, "stack_deploy", a.clone()));
+        assert!(!ok(&apps, "secret_get", a.clone()));
+        let admin = token(&member, &["admin"]);
+        assert!(ok(&admin, "secret_get", a.clone()));
+        // Scopes never widen a role: a viewer's admin token still only reads.
+        let v = token(&[("acme", Role::Viewer)], &["admin"]);
+        assert!(!ok(&v, "stack_deploy", a.clone()));
+        assert!(ok(&v, "stack_status", a));
     }
 }

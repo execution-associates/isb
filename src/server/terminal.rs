@@ -65,6 +65,10 @@ pub trait Pty: Send {
     fn output(&mut self, wait: Duration) -> PtyOutput;
     /// End the program; the session is over.
     fn close(&mut self);
+    /// What it runs in (an instance name), for the audit log.
+    fn target(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Opens a terminal for `caller` in `org`; refusals become an error frame.

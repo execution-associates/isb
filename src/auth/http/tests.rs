@@ -370,7 +370,7 @@ fn tokens_over_http() {
     assert_eq!(st, 200);
     assert_eq!(
         v["auth"],
-        json!({"kind": "api_token", "id": 1, "org": "default"})
+        json!({"kind": "api_token", "id": 1, "org": "default", "name": "ci"})
     );
     assert_eq!(v["platform_admin"], false);
     // An org token sees only its org.
