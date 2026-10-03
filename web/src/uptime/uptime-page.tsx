@@ -7,7 +7,7 @@ import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
-import { EmptyState, QueryError, Section } from "@/apps/components";
+import { Crumbs, EmptyState, QueryError, Section } from "@/apps/components";
 import { PageHeader } from "@/components/app-shell";
 import { StatusDot } from "@/components/status";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,7 @@ export function UptimePage() {
 
   return (
     <>
+      <Crumbs items={[{ label: "Uptime" }]} />
       <PageHeader
         title="Uptime"
         description="What users see: each app's public URL (DNS, TLS, ingress and the app's answer), checked from this server. Channels that hear monitor events are told when one goes down and comes back."
@@ -129,7 +130,7 @@ function MonitorRow({ org, m }: { org: string; m: Monitor }) {
                 auto
               </span>
             )}
-            {m.status !== "up" && <MonitorBadge m={m} />}
+            {(m.status !== "up" || m.flapping) && <MonitorBadge m={m} />}
           </div>
           <p className="truncate font-mono text-xs text-muted-foreground" title={m.last?.url ?? m.target}>
             {m.last?.url ?? m.target}
