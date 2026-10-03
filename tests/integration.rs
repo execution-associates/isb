@@ -1307,3 +1307,231 @@ fn orgs_isolate() {
     let bind = SandboxSpec::new("bind", image()).volume("/hostetc", Volume::bind("/etc"));
     assert!(Sandbox::create(&ca, &bind).is_err());
 }
+
+/// Removes test orgs (and everything in them) when dropped.
+struct OrgsRm(Client, Vec<isb::org::OrgId>);
+
+impl Drop for OrgsRm {
+    fn drop(&mut self) {
+        for o in &self.1 {
+            assert!(o.as_str().starts_with("isbtest-"));
+            if let Err(e) = isb::org::remove(&self.0, o, true, &mut |_| {}) {
+                if !e.is_not_found() {
+                    eprintln!("cleanup: org {o}: {e}");
+                }
+            }
+        }
+    }
+}
+
+/// What a name resolves to inside an instance (IPv4, deduplicated).
+fn resolve(sb: &Sandbox, name: &str) -> std::collections::BTreeSet<String> {
+    let o = sb.exec(["getent", "ahostsv4", name]).unwrap();
+    o.stdout_text()
+        .lines()
+        .filter_map(|l| l.split_whitespace().next().map(String::from))
+        .collect()
+}
+
+/// Wait until `name` resolves to exactly `want` inside `sb`.
+fn wait_resolves(sb: &Sandbox, name: &str, want: &std::collections::BTreeSet<String>) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let got = resolve(sb, name);
+        if got == *want {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{name} resolves to {got:?}, want {want:?}"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+/// Service discovery: `<service>.<stack>.<org>.isb` (and `<service>.<stack>`)
+/// resolves to every in-rotation replica, follows a rolling replacement, and
+/// goes away with the stack. Needs `isb host setup` (the hosts directory).
+#[test]
+fn service_names() {
+    if !enabled() {
+        return;
+    }
+    let base = Client::new();
+    let org = isb::org::OrgId::new(format!("isbtest-d{}", std::process::id() % 100000)).unwrap();
+    let _rm = OrgsRm(base.clone(), vec![org.clone()]);
+    let info = isb::org::ensure(
+        &base,
+        &org,
+        &isb::org::OrgOptions {
+            cpus: Some(8),
+            memory: Some("8GiB".into()),
+            ..Default::default()
+        },
+        &mut |l| eprintln!("{l}"),
+    )
+    .unwrap();
+    assert!(
+        info.dns_dir.is_some(),
+        "no service names: run `sudo isb host setup` first"
+    );
+    let oc = isb::org::client(&base, &org);
+    let client = Sandbox::create(
+        &oc,
+        &SandboxSpec::new("client", image())
+            .ready(vec![ReadyCheck::Running, ReadyCheck::DefaultRoute]),
+    )
+    .unwrap();
+
+    let state = tempfile::tempdir().unwrap();
+    let store = isb::stack::Store::open(state.path()).unwrap();
+    let ctl = isb::stack::Controller::start(base.clone(), store, Duration::from_secs(2)).unwrap();
+    let stack = format!("isb-test-{}", std::process::id() % 100000);
+    let yaml = format!(
+        "services:\n  web:\n    image: {}\n    user: dev\n\
+         \x20   command: [sh, -c, 'exec python3 -m http.server 8000 -d /tmp']\n\
+         \x20   healthcheck: {{test: [CMD, python3, -c, \"import urllib.request as u; u.urlopen('http://127.0.0.1:8000')\"], interval: 2s, start_interval: 1s}}\n\
+         \x20   deploy: {{replicas: 2, update_config: {{order: start-first, monitor: 2s}}}}\n",
+        image()
+    );
+    let p = isb::compose::load_docs(
+        &[(state.path().join("isb.yaml"), yaml)],
+        state.path(),
+        Some(&stack),
+        &|_| None,
+    )
+    .unwrap();
+    let def = isb::stack::StackDef {
+        name: stack.clone(),
+        org: org.clone(),
+        file: p.file,
+        base_dir: state.path().to_path_buf(),
+        secrets: Default::default(),
+        force: Default::default(),
+        deployed_at: 0,
+        deployed_by: "test".into(),
+        previous: None,
+    };
+    let q = def.qualified();
+    struct Rm(isb::stack::Controller, String);
+    impl Drop for Rm {
+        fn drop(&mut self) {
+            let _ = self.0.remove(&self.1, true, Duration::from_secs(120));
+            self.0.shutdown();
+        }
+    }
+    let _rmstack = Rm(ctl.clone(), q.clone());
+    ctl.deploy(def).unwrap();
+    let in_rotation = |ctl: &isb::stack::Controller| -> std::collections::BTreeSet<String> {
+        ctl.status(&q).unwrap().services[0]
+            .instances
+            .iter()
+            .filter(|i| i.in_rotation)
+            .filter_map(|i| i.ip.clone())
+            .collect()
+    };
+    let st = isb::daemon::wait_settled(&ctl, &q, Duration::from_secs(300)).unwrap();
+    assert!(st.converged, "{st:?}");
+    let first = in_rotation(&ctl);
+    assert_eq!(first.len(), 2, "{st:?}");
+    let full = format!("web.{stack}.{org}.isb");
+    let short = format!("web.{stack}");
+    wait_resolves(&client, &full, &first);
+    wait_resolves(&client, &short, &first);
+
+    // A rolling replacement: the name follows the new replicas.
+    ctl.redeploy(&q, "web").unwrap();
+    let st = isb::daemon::wait_settled(&ctl, &q, Duration::from_secs(300)).unwrap();
+    assert!(st.converged, "{st:?}");
+    let second = in_rotation(&ctl);
+    assert_eq!(second.len(), 2, "{st:?}");
+    assert!(second.is_disjoint(&first), "{second:?} vs {first:?}");
+    wait_resolves(&client, &full, &second);
+
+    // Gone with the stack.
+    ctl.remove(&q, true, Duration::from_secs(120)).unwrap();
+    wait_resolves(&client, &full, &Default::default());
+}
+
+/// An egress exception lets one org reach a private address the default
+/// deny blocks, on the given port only, while another org stays blocked.
+/// The target is a host address in a private range where sshd listens
+/// (`ISB_TEST_EGRESS_IP`, default incusbr0's), reached from the org bridge
+/// through the host's INPUT chain.
+#[test]
+fn egress_exceptions() {
+    if !enabled() {
+        return;
+    }
+    let target = std::env::var("ISB_TEST_EGRESS_IP").unwrap_or_else(|_| {
+        let o = Command::new("ip")
+            .args(["-4", "-o", "addr", "show", "incusbr0"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&o.stdout)
+            .split_whitespace()
+            .nth(3)
+            .and_then(|a| a.split('/').next())
+            .expect("no incusbr0 address; set ISB_TEST_EGRESS_IP")
+            .to_string()
+    });
+    let base = Client::new();
+    let n = std::process::id() % 100000;
+    let a = isb::org::OrgId::new(format!("isbtest-e{n}")).unwrap();
+    let b = isb::org::OrgId::new(format!("isbtest-f{n}")).unwrap();
+    let _rm = OrgsRm(base.clone(), vec![a.clone(), b.clone()]);
+    let opts = |egress: Option<Vec<&str>>| isb::org::OrgOptions {
+        cpus: Some(2),
+        memory: Some("2GiB".into()),
+        egress: egress.map(|v| {
+            v.into_iter()
+                .map(|e| isb::org::Egress::parse(e).unwrap())
+                .collect()
+        }),
+        ..Default::default()
+    };
+    let port_only = format!("{target}:22/tcp");
+    let info = isb::org::ensure(&base, &a, &opts(Some(vec![&port_only])), &mut |l| {
+        eprintln!("{l}")
+    })
+    .unwrap();
+    assert_eq!(info.egress, vec![format!("{target}/32:22/tcp")]);
+    isb::org::ensure(&base, &b, &opts(None), &mut |l| eprintln!("{l}")).unwrap();
+    let mk = |o: &isb::org::OrgId, n: &str| {
+        let spec =
+            SandboxSpec::new(n, image()).ready(vec![ReadyCheck::Running, ReadyCheck::DefaultRoute]);
+        Sandbox::create(&isb::org::client(&base, o), &spec).unwrap()
+    };
+    let in_a = mk(&a, "probe");
+    let in_b = mk(&b, "probe");
+    let ssh = |sb: &Sandbox| {
+        let o = sb
+            .exec([
+                "timeout",
+                "5",
+                "bash",
+                "-c",
+                &format!("exec 3<>/dev/tcp/{target}/22 && head -c 4 <&3"),
+            ])
+            .unwrap();
+        o.stdout_text()
+    };
+    let ping = |sb: &Sandbox| sb.exec(["ping", "-c1", "-W2", &target]).unwrap().success();
+    assert_eq!(
+        ssh(&in_a),
+        "SSH-",
+        "the exception lets org a reach {target}:22"
+    );
+    assert_eq!(ssh(&in_b), "", "org b reached {target}:22");
+    assert!(!ping(&in_a), "a port-limited exception let ICMP through");
+    assert!(!ping(&in_b));
+
+    // Replaced by a whole-address exception: everything to it passes.
+    let info = isb::org::ensure(&base, &a, &opts(Some(vec![&target])), &mut |_| {}).unwrap();
+    assert_eq!(info.egress, vec![format!("{target}/32")]);
+    assert!(ping(&in_a), "a whole-address exception blocked ICMP");
+    // Kept by an ensure that does not mention it.
+    let info = isb::org::ensure(&base, &a, &opts(None), &mut |_| {}).unwrap();
+    assert_eq!(info.egress, vec![format!("{target}/32")]);
+    assert_eq!(ssh(&in_b), "");
+}

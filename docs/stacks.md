@@ -122,6 +122,41 @@ Limits: TCP only (a UDP published port is an error in a stack), single ports
 (no ranges), and backends see the daemon's address, not the client's.
 Guest-bound ports (`bind: guest`) stay per-instance proxy devices.
 
+## Service discovery
+
+Replica names change with every rollout, so a stack in an org gets stable
+names for its services, resolvable from anything in the same org:
+
+- `<service>.<stack>.<org>.isb`, e.g. `db.shop.acme.isb`;
+- `<service>.<stack>`, e.g. `db.shop`, the same records.
+
+A name resolves to the IPv4 address of every replica that is in rotation
+(healthy, or running when there is no healthcheck): DNS round-robin, like
+swarm's `dnsrr` endpoint mode, with a TTL of 0. A one-replica service resolves
+to its one instance. The records follow the load balancer's view: a replica
+leaves the name when it leaves rotation (unhealthy, or drained during a
+rollout) and joins when it enters, so a `start-first` rollout always has an
+address to give out. A service with no replica in rotation has no record
+(NXDOMAIN), and removing the stack removes its names. A service name with
+characters a DNS label cannot hold is spelled as in instance names (`my_db`
+is `my-db`).
+
+The daemon writes each service's records into the org's hosts directory, which
+the org's dnsmasq watches; a change is served within milliseconds (about 25 ms
+measured on titan, the time of a `dig`). See [orgs.md](orgs.md#service-names)
+for the mechanism and its one-time host setup. While the daemon is down the
+last records stay as they were, and a restarted daemon keeps them until a
+replica of the service is back in rotation.
+
+Not in the `default` org: it is incus' `default` project on `incusbr0`, which
+isb does not manage, so its stacks get no service names; reach a replica
+there by instance name, or the service through its published port.
+
+`isb up` (no daemon) gets no service names either. Its services reach each
+other by instance name, `<project>-<service>` (the default `container_name`),
+which incus' DNS serves as `<project>-<service>.<org>.isb` in an org (`.incus`
+in the default org) and through the search domain as the bare name.
+
 ## Health and restarts
 
 A replica's probe runs every `start_interval` until its first result, then

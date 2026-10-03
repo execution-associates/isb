@@ -427,6 +427,11 @@ enum OrgCmd {
         /// Host directory the org may bind-mount from (repeatable).
         #[arg(long)]
         bind_root: Vec<PathBuf>,
+        /// A private destination the org may reach despite the default deny:
+        /// CIDR[:PORTS[/tcp|udp]], e.g. 100.79.171.47/32:1080/tcp
+        /// (repeatable). Replaces the org's exceptions; `none` clears them.
+        #[arg(long, value_name = "DEST")]
+        allow_egress: Vec<String>,
     },
     /// List orgs.
     #[command(alias = "list")]
@@ -452,11 +457,16 @@ enum OrgCmd {
 #[derive(Subcommand)]
 enum HostCmd {
     /// Let org bridges through a default-deny host firewall (ufw): DHCP and
-    /// DNS to the host, and egress through the uplink. Run once, as root.
+    /// DNS to the host, and egress through the uplink. Also makes the
+    /// directory service names are published in. Run once, as root.
     Setup {
         /// The uplink interface (default: the default route's).
         #[arg(long)]
         uplink: Option<String>,
+        /// The user `isb serve` and `isb org` run as, who writes service
+        /// names (default: the user who ran sudo).
+        #[arg(long)]
+        user: Option<String>,
         /// Print the firewall commands instead of running them.
         #[arg(long)]
         dry_run: bool,
@@ -884,7 +894,11 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         Cmd::Serve(a) => serve(ctx, a),
         Cmd::Stack(s) => stack(ctx, s),
         Cmd::Org(o) => org(ctx, o),
-        Cmd::Host(HostCmd::Setup { uplink, dry_run }) => host_setup(uplink, dry_run),
+        Cmd::Host(HostCmd::Setup {
+            uplink,
+            user,
+            dry_run,
+        }) => host_setup(uplink, user, dry_run),
         Cmd::Secret(s) => secret(ctx, s),
         Cmd::Tui => {
             isb::tui::run(ctx.client(None), isb::server::default_socket_path())?;
@@ -2019,8 +2033,21 @@ fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
             default_cpus,
             default_memory,
             bind_root,
+            allow_egress,
         } => {
             let id = OrgId::new(name)?;
+            let egress = if allow_egress.is_empty() {
+                None
+            } else if allow_egress == ["none"] {
+                Some(Vec::new())
+            } else {
+                Some(
+                    allow_egress
+                        .iter()
+                        .map(|e| org::Egress::parse(e))
+                        .collect::<Result<Vec<_>>>()?,
+                )
+            };
             let roots = bind_root
                 .into_iter()
                 .map(|p| {
@@ -2039,6 +2066,7 @@ fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
                     default_cpus,
                     default_memory,
                     bind_roots: roots,
+                    egress,
                 },
                 &mut rep,
             )?;
@@ -2111,6 +2139,22 @@ fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
                         o.bind_roots.join(", ")
                     }
                 );
+                println!(
+                    "egress     {}",
+                    if o.egress.is_empty() {
+                        "internet only".to_string()
+                    } else {
+                        format!("internet, {}", o.egress.join(", "))
+                    }
+                );
+                println!(
+                    "names      {}",
+                    match &o.dns_dir {
+                        Some(d) => format!("<service>.<stack>.{}.isb (from {d})", o.name),
+                        None if o.name.is_default() => "instances only".to_string(),
+                        None => "instances only (service names are off: run `sudo isb host setup`, then `isb org create` again)".to_string(),
+                    }
+                );
             }
             Ok(0)
         }
@@ -2168,12 +2212,40 @@ fn with_before_rules(text: &str) -> Option<String> {
     done.then_some(out)
 }
 
-fn host_setup(uplink: Option<String>, dry_run: bool) -> Result<u8> {
+/// The command that makes the service-name directory: owned by `user`,
+/// group `incus` (dnsmasq's) with setgid so what the daemon writes there is
+/// readable by dnsmasq and nobody else. Without an `incus` group (dnsmasq as
+/// `nobody`), world-readable instead.
+fn dns_dir_command(user: &str, incus_group: bool) -> Vec<String> {
+    let root = isb::discovery::root().display().to_string();
+    let (mode, group) = if incus_group {
+        ("2750", isb::discovery::DNSMASQ_GROUP.to_string())
+    } else {
+        ("0755", user.to_string())
+    };
+    ["install", "-d", "-m", mode, "-o", user, "-g", &group, &root]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+fn group_exists(name: &str) -> bool {
+    std::fs::read_to_string("/etc/group")
+        .map(|t| t.lines().any(|l| l.split(':').next() == Some(name)))
+        .unwrap_or(false)
+}
+
+fn host_setup(uplink: Option<String>, user: Option<String>, dry_run: bool) -> Result<u8> {
     let uplink = match uplink {
         Some(u) => u,
         None => default_route_iface()
             .ok_or_else(|| Error::Invalid("no default route; pass --uplink".into()))?,
     };
+    let user = user
+        .or_else(|| std::env::var("SUDO_USER").ok().filter(|u| !u.is_empty()))
+        .or_else(|| std::env::var("USER").ok().filter(|u| !u.is_empty()))
+        .ok_or_else(|| Error::Invalid("cannot tell who runs isb; pass --user".into()))?;
+    let dns_cmd = dns_dir_command(&user, group_exists(isb::discovery::DNSMASQ_GROUP));
     let ufw_active = std::process::Command::new("ufw")
         .arg("status")
         .output()
@@ -2186,6 +2258,8 @@ fn host_setup(uplink: Option<String>, dry_run: bool) -> Result<u8> {
                 "isb host setup needs root to change the firewall; run it with sudo, or do this:"
             );
         }
+        println!("# the directory service names are published in:");
+        println!("{}", dns_cmd.join(" "));
         println!("# in {BEFORE_RULES_PATH}, before the first -A ufw-before-input line:");
         print!("{BEFORE_RULES}");
         for r in &rules {
@@ -2204,6 +2278,17 @@ fn host_setup(uplink: Option<String>, dry_run: bool) -> Result<u8> {
         println!("ufw reload");
         return Ok(if dry_run { 0 } else { 1 });
     }
+    if !std::process::Command::new(&dns_cmd[0])
+        .args(&dns_cmd[1..])
+        .status()?
+        .success()
+    {
+        return Err(Error::Invalid(format!("{} failed", dns_cmd.join(" "))));
+    }
+    println!(
+        "{}: service names for org stacks, written by {user}",
+        isb::discovery::root().display()
+    );
     if !ufw_active {
         println!("no active ufw: incus' own firewall rules already let org bridges through");
         return Ok(0);
