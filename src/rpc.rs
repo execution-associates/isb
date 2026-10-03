@@ -595,6 +595,7 @@ pub fn error_json(e: &Error) -> Value {
         Error::Protocol(_) => ("protocol", Value::Null),
         Error::Io(_) => ("io", Value::Null),
         Error::Json(_) => ("json", Value::Null),
+        Error::Remote { code, data, .. } => (code.as_str(), data.clone()),
     };
     let mut o = json!({"code": code, "message": e.to_string()});
     if !data.is_null() {
