@@ -1,7 +1,7 @@
 // An app's Jobs tab: commands on a cron schedule (docs/jobs.md), in a
 // running replica (exec) or a fresh one-off instance (run), with their runs.
 import { useQueryClient } from "@tanstack/react-query";
-import { CalendarClock, Loader2, MoreHorizontal, Pause, Pencil, Play, Plus, Trash2 } from "lucide-react";
+import { CalendarClock, Loader2, MoreHorizontal, Pause, Pencil, Play, Plus, SquareTerminal, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
@@ -10,6 +10,7 @@ import { ConfirmDialog, EmptyState, QueryError } from "@/apps/components";
 import { formatKv, parseKv } from "@/apps/util";
 import { CronField, ScheduleText } from "@/components/cron-field";
 import { Field, FormError } from "@/components/form";
+import { StatusBadge } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -19,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { cronPreview, parseOffset } from "@/lib/cron";
+import { cronPreview, formatRun, parseOffset } from "@/lib/cron";
 import { relativeTime } from "@/lib/format";
 import { errorMessage } from "@/lib/messages";
 import { useCanWrite } from "@/lib/use-role";
@@ -34,7 +35,23 @@ export function JobsTab({ org, app }: { org: string; app: { name: string } }) {
   const [edit, setEdit] = useState<{ job?: JobSpec } | null>(null);
   const [log, setLog] = useState<{ job: string; run: Run } | null>(null);
 
-  if (jobs.isLoading) return <Skeleton className="h-48" />;
+  if (jobs.isLoading) {
+    return (
+      <div className="grid gap-6">
+        <Skeleton className="h-4 w-2/3" />
+        <Card className="gap-3 px-5 py-5">
+          <div className="flex gap-3">
+            <Skeleton className="size-9 rounded-lg" />
+            <div className="grid flex-1 gap-2">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-3 w-56" />
+              <Skeleton className="h-7 w-full rounded-md" />
+            </div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
   if (jobs.error) return <QueryError error={jobs.error} />;
   const mine = (jobs.data ?? []).filter((j) => "app" in j.job.target && j.job.target.app === app.name);
 
@@ -118,25 +135,36 @@ function JobCard({ org, entry, canWrite, onEdit, onLog }: { org: string; entry: 
   return (
     <Card className="gap-0 overflow-hidden py-0">
       <div className="flex flex-wrap items-start gap-4 px-5 pt-5 pb-4">
-        <div className="min-w-0 flex-1 basis-72 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium">{j.name}</span>
-            {entry.last_run && <RunBadge status={entry.last_run.status} />}
-            {!j.enabled && <span className="rounded border px-1.5 text-xs text-muted-foreground">paused</span>}
+        <div className="flex min-w-0 flex-1 basis-72 gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/50">
+            <SquareTerminal className="size-4 text-muted-foreground" />
+          </span>
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[15px] font-semibold tracking-tight">{j.name}</span>
+                {entry.last_run && <RunBadge status={entry.last_run.status} />}
+                {!j.enabled && <StatusBadge tone="muted">Disabled</StatusBadge>}
+              </div>
+              <div className="text-sm">
+                <ScheduleText schedule={j.schedule} timezone={j.timezone} next={entry.next_run} enabled={j.enabled} />
+              </div>
+            </div>
+            <code className="flex min-w-0 items-center gap-2 rounded-md bg-terminal px-3 py-1.5 font-mono text-xs text-zinc-100" title={joinWords(j.command)}>
+              <span className="text-zinc-500 select-none">$</span>
+              <span className="truncate">{joinWords(j.command)}</span>
+            </code>
+            <p className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span>{j.mode === "run" ? "One-off instance" : "In a running replica"}</span>
+              <span>timeout {j.timeout}</span>
+              <span>{j.concurrency === "skip" ? "skips overlaps" : "overlaps allowed"}</span>
+              {entry.last_run && <span>last {relativeTime(entry.last_run.started_at / 1000)}</span>}
+            </p>
+            {j.enabled && <NextRuns schedule={j.schedule} timezone={j.timezone} />}
           </div>
-          <div className="text-sm">
-            <ScheduleText schedule={j.schedule} timezone={j.timezone} next={entry.next_run} enabled={j.enabled} />
-          </div>
-          <code className="block truncate rounded bg-muted/50 px-2 py-1 font-mono text-xs" title={joinWords(j.command)}>
-            $ {joinWords(j.command)}
-          </code>
-          <p className="text-xs text-muted-foreground">
-            {j.mode === "run" ? "in a one-off instance" : "in a running replica"} · timeout {j.timeout} · {j.concurrency === "skip" ? "skips overlaps" : "overlaps allowed"}
-            {entry.last_run ? ` · last ${relativeTime(entry.last_run.started_at / 1000)}` : ""}
-          </p>
         </div>
         {canWrite && (
-          <div className="flex shrink-0 gap-2">
+          <div className="flex shrink-0 gap-2 pl-12 sm:pl-0">
             <Button variant="outline" onClick={runNow} disabled={busy || (running && j.concurrency === "skip")}>
               {busy || running ? <Loader2 className="animate-spin" /> : <Play />}
               {running ? "Running" : "Run now"}
@@ -199,6 +227,28 @@ function JobCard({ org, entry, canWrite, onEdit, onLog }: { org: string; entry: 
         }}
       />
     </Card>
+  );
+}
+
+/** The next three slots, as chips (the schedule's own time zone). */
+function NextRuns({ schedule, timezone }: { schedule: string; timezone?: string }) {
+  const p = cronPreview(schedule, timezone || null, Date.now() / 1000, 3);
+  if (!p.ok || !p.runs.length) return null;
+  let offset = 0;
+  try {
+    offset = parseOffset(timezone ?? "");
+  } catch {
+    return null;
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+      <span className="text-muted-foreground">Next</span>
+      {p.runs.map((t) => (
+        <span key={t} className="rounded-md border bg-muted/40 px-1.5 py-0.5 tabular-nums" title={`${formatRun(t, offset)}, ${relativeTime(t)}`}>
+          {formatRun(t, offset).slice(5, 16)}
+        </span>
+      ))}
+    </div>
   );
 }
 

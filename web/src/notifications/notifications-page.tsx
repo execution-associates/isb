@@ -3,7 +3,7 @@
 // delivery log. Platform admins also see the server-wide private-target
 // switch.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, BellOff, FlaskConical, Hash, Loader2, Mail, MessageCircle, MoreHorizontal, Pencil, Plus, Send, ShieldAlert, Trash2, Webhook } from "lucide-react";
+import { Bell, BellOff, ChevronDown, FlaskConical, Loader2, MoreHorizontal, Pencil, Plus, ShieldAlert, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useParams } from "react-router";
 import { toast } from "sonner";
@@ -11,6 +11,7 @@ import { callTool } from "@/api/tools";
 import { keys } from "@/apps/api";
 import { ConfirmDialog, EmptyState, QueryError, Section, ToneBadge } from "@/apps/components";
 import { PageHeader } from "@/components/app-shell";
+import { StatusBadge } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -21,16 +22,9 @@ import { dateTime, relativeTime } from "@/lib/format";
 import { errorMessage } from "@/lib/messages";
 import { useCanWrite, usePlatformAdmin } from "@/lib/use-role";
 import { cn } from "@/lib/utils";
-import { type Channel, type Delivery, describeRule, nkeys, type ProviderType, providerSummary, useChannels, useDeliveries } from "./api";
+import { type Channel, type Delivery, describeRule, nkeys, PROVIDERS, providerSummary, useChannels, useDeliveries } from "./api";
 import { ChannelDialog } from "./channel-dialog";
-
-export const PROVIDER_ICON: Record<ProviderType, typeof Bell> = {
-  webhook: Webhook,
-  slack: Hash,
-  discord: MessageCircle,
-  telegram: Send,
-  email: Mail,
-};
+import { PROVIDER_ICON } from "./icons";
 
 const DELIVERY_TONE: Record<Delivery["status"], "ok" | "bad" | "busy" | "idle" | "warn"> = {
   queued: "busy",
@@ -73,7 +67,19 @@ export function NotificationsPage() {
       />
       <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
         {channels.isLoading ? (
-          <Skeleton className="h-40" />
+          [0, 1].map((i) => (
+            <Card key={i} className="gap-0 py-0">
+              <div className="flex gap-3 px-5 py-4">
+                <Skeleton className="size-10 rounded-lg" />
+                <div className="grid flex-1 gap-2">
+                  <Skeleton className="h-4 w-36" />
+                  <Skeleton className="h-3 w-64" />
+                  <Skeleton className="h-5 w-48 rounded-md" />
+                </div>
+              </div>
+              <Skeleton className="h-8 rounded-none rounded-b-xl" />
+            </Card>
+          ))
         ) : channels.error ? (
           <QueryError error={channels.error} />
         ) : !channels.data?.length ? (
@@ -132,59 +138,58 @@ function ChannelCard({ org, c, canWrite, expanded, onToggle, onEdit }: { org: st
     try {
       await callTool("notification_channel_update", { name: c.name, enabled: !c.enabled }, org);
       await refresh();
+      toast.success(c.enabled ? `${c.name} turned off` : `${c.name} turned on`);
     } catch (e) {
       toast.error(errorMessage(e));
     }
   };
   const last = c.last_delivery;
+  const label = PROVIDERS.find((p) => p.id === c.provider.type)?.label ?? c.provider.type;
   return (
     <Card className="gap-0 overflow-hidden py-0">
-      <div className="flex flex-wrap items-start gap-4 px-5 py-4">
-        <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border bg-muted/40">
-          <Icon className="size-5 text-muted-foreground" />
-        </div>
-        <div className="min-w-0 flex-1 basis-72 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium">{c.name}</span>
-            <span className="text-xs text-muted-foreground capitalize">{c.provider.type}</span>
-            {!c.enabled && (
-              <span className="inline-flex items-center gap-1 rounded border px-1.5 text-xs text-muted-foreground">
-                <BellOff className="size-3" /> off
-              </span>
+      <div className="flex flex-wrap items-start gap-x-4 gap-y-3 px-5 py-4">
+        <div className={cn("flex min-w-0 flex-1 basis-72 gap-3", !c.enabled && "opacity-60")}>
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border bg-gradient-to-b from-muted/30 to-muted shadow-xs">
+            <Icon className="size-[18px] text-foreground/70" />
+          </div>
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[15px] font-semibold tracking-tight">{c.name}</span>
+              <StatusBadge tone="muted">{label}</StatusBadge>
+              {!c.enabled && (
+                <StatusBadge tone="neutral">
+                  <BellOff className="size-3" />
+                  Off
+                </StatusBadge>
+              )}
+            </div>
+            <p className="truncate font-mono text-xs text-muted-foreground" title={providerSummary(c.provider)}>
+              {providerSummary(c.provider)}
+            </p>
+            {c.rules.length > 0 && (
+              <ul className="flex flex-wrap gap-1.5 pt-0.5">
+                {c.rules.map((r, i) => (
+                  <li key={i} className="max-w-full truncate rounded-md border bg-muted/40 px-2 py-0.5 text-xs text-foreground/80" title={describeRule(r)}>
+                    {describeRule(r)}
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
-          <p className="truncate text-xs text-muted-foreground">{providerSummary(c.provider)}</p>
-          <ul className="grid gap-0.5 text-sm">
-            {c.rules.map((r, i) => (
-              <li key={i} className="truncate">
-                {describeRule(r)}
-              </li>
-            ))}
-          </ul>
-          <button type="button" onClick={onToggle} className="flex flex-wrap items-center gap-2 pt-1 text-xs text-muted-foreground hover:text-foreground" aria-expanded={expanded}>
-            {last ? (
-              <>
-                <DeliveryBadge status={last.status} />
-                <span>
-                  {last.test ? "test" : last.kind} {relativeTime(last.at / 1000)}
-                </span>
-              </>
-            ) : (
-              <span>nothing sent yet</span>
-            )}
-            <span className="underline underline-offset-2">{expanded ? "Hide deliveries" : "Deliveries"}</span>
-          </button>
         </div>
-        {canWrite && (
-          <div className="flex shrink-0 items-center gap-2">
-            <Switch checked={c.enabled} onCheckedChange={toggle} aria-label={c.enabled ? `Turn ${c.name} off` : `Turn ${c.name} on`} />
-            <Button variant="outline" onClick={test} disabled={testing}>
+        {canWrite ? (
+          <div className="flex shrink-0 items-center gap-2 pl-13 sm:pl-0">
+            <label className="mr-1 flex items-center gap-2 text-xs text-muted-foreground">
+              <Switch checked={c.enabled} onCheckedChange={toggle} aria-label={c.enabled ? `Turn ${c.name} off` : `Turn ${c.name} on`} />
+              <span className="w-5">{c.enabled ? "On" : "Off"}</span>
+            </label>
+            <Button variant="outline" size="sm" onClick={test} disabled={testing || !c.enabled}>
               {testing ? <Loader2 className="animate-spin" /> : <FlaskConical />}
               Test
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon" aria-label={`Actions for ${c.name}`}>
+                <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${c.name}`}>
                   <MoreHorizontal />
                 </Button>
               </DropdownMenuTrigger>
@@ -201,8 +206,31 @@ function ChannelCard({ org, c, canWrite, expanded, onToggle, onEdit }: { org: st
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
+        ) : (
+          <StatusBadge tone={c.enabled ? "success" : "neutral"}>{c.enabled ? "On" : "Off"}</StatusBadge>
         )}
       </div>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className="flex w-full items-center gap-2 border-t bg-muted/30 px-5 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:bg-muted/60 focus-visible:outline-none"
+      >
+        {last ? (
+          <>
+            <DeliveryBadge status={last.status} />
+            <span className="min-w-0 truncate">
+              <span className="font-mono">{last.test ? "test" : last.kind}</span> {relativeTime(last.at / 1000)}
+            </span>
+          </>
+        ) : (
+          <span>Nothing sent yet</span>
+        )}
+        <span className="ml-auto inline-flex shrink-0 items-center gap-1 font-medium">
+          {expanded ? "Hide deliveries" : "Deliveries"}
+          <ChevronDown className={cn("size-3.5 transition-transform", expanded && "rotate-180")} />
+        </span>
+      </button>
       {expanded && <Deliveries org={org} name={c.name} />}
       <ConfirmDialog
         open={del}
@@ -222,47 +250,47 @@ function ChannelCard({ org, c, canWrite, expanded, onToggle, onEdit }: { org: st
 
 function Deliveries({ org, name }: { org: string; name: string }) {
   const d = useDeliveries(org, name);
-  if (d.isLoading) return <Skeleton className="m-5 h-16" />;
-  if (d.error) return <div className="border-t p-5"><QueryError error={d.error} /></div>;
-  if (!d.data?.length) return <p className="border-t px-5 py-4 text-sm text-muted-foreground">No deliveries yet: the last 50 are kept here.</p>;
+  if (d.isLoading) {
+    return (
+      <div className="grid gap-3 border-t px-5 py-4">
+        <Skeleton className="h-3.5 w-3/4" />
+        <Skeleton className="h-3.5 w-2/3" />
+      </div>
+    );
+  }
+  if (d.error)
+    return (
+      <div className="border-t p-5">
+        <QueryError error={d.error} />
+      </div>
+    );
+  if (!d.data?.length) return <p className="border-t px-5 py-4 text-[13px] text-muted-foreground">No deliveries yet. The last 50 are kept here.</p>;
   return (
-    <div className="overflow-x-auto border-t">
-      <table className="w-full min-w-[36rem] text-sm">
-        <thead className="bg-muted/30 text-left text-xs text-muted-foreground">
-          <tr>
-            <th className="px-5 py-2 font-medium">When</th>
-            <th className="px-2 py-2 font-medium">Event</th>
-            <th className="px-2 py-2 font-medium">Status</th>
-            <th className="px-5 py-2 font-medium">Detail</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y">
-          {d.data.map((x) => (
-            <tr key={x.id} className="align-top">
-              <td className="px-5 py-2 whitespace-nowrap" title={dateTime(x.at / 1000)}>
-                {relativeTime(x.at / 1000)}
-              </td>
-              <td className="max-w-80 px-2 py-2">
-                <span className="font-mono text-xs">{x.test ? "test" : x.kind}</span>
-                <span className="block truncate text-xs text-muted-foreground" title={x.summary}>
-                  {x.summary}
-                </span>
-              </td>
-              <td className="px-2 py-2">
-                <DeliveryBadge status={x.status} />
-              </td>
-              <td className="px-5 py-2 text-xs">
-                <span className="tabular-nums">
-                  {x.attempts} {x.attempts === 1 ? "attempt" : "attempts"}
-                  {x.http_status ? ` · HTTP ${x.http_status}` : ""}
-                </span>
-                {x.error && <span className="block break-words text-destructive">{x.error}</span>}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <ul className="animate-fade-up divide-y border-t">
+      {d.data.map((x) => (
+        <li key={x.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 px-5 py-2.5 text-sm sm:grid-cols-[6.5rem_minmax(0,1fr)_auto_5rem] sm:items-center">
+          <span className="sm:order-1">
+            <DeliveryBadge status={x.status} />
+          </span>
+          <span className="text-right text-xs text-muted-foreground tabular-nums sm:order-4" title={dateTime(x.at / 1000)}>
+            {relativeTime(x.at / 1000)}
+          </span>
+          <div className="col-span-2 min-w-0 sm:order-2 sm:col-span-1">
+            <p className="flex min-w-0 items-baseline gap-2">
+              <span className="shrink-0 font-mono text-xs">{x.test ? "test" : x.kind}</span>
+              <span className="truncate text-xs text-muted-foreground" title={x.summary}>
+                {x.summary}
+              </span>
+            </p>
+            {x.error && <p className="text-xs break-words text-destructive">{x.error}</p>}
+          </div>
+          <span className="col-span-2 text-xs text-muted-foreground tabular-nums sm:order-3 sm:col-span-1 sm:text-right">
+            {x.attempts} {x.attempts === 1 ? "attempt" : "attempts"}
+            {x.http_status ? ` · HTTP ${x.http_status}` : ""}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 

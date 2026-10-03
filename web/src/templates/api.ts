@@ -112,7 +112,24 @@ export interface DeployAnswer {
   conflicts?: string[];
   error?: string;
   instance?: TemplateInstance;
+  /** The apps being deployed, in order (without `wait`). */
   deploying?: string[];
+  /** The first app's deployment, queued before the answer (without `wait`). */
+  first_deployment?: { app: string; id: number };
+}
+
+/**
+ * Where a just-started template deploy is followed: the first app's
+ * deployment, then the apps after it in deploy order (`?then=`). Null when
+ * the answer has no first deployment (an older daemon, or its queueing
+ * failed and the background run retries).
+ */
+export function followOf(r: DeployAnswer): { app: string; id: number; then: string[] } | null {
+  const f = r.first_deployment;
+  if (!f) return null;
+  const order = r.deploying ?? r.plan.order;
+  const at = order.indexOf(f.app);
+  return { app: f.app, id: f.id, then: at < 0 ? order.filter((a) => a !== f.app) : order.slice(at + 1) };
 }
 
 export interface TemplateInstance {

@@ -1,7 +1,7 @@
 // /orgs/:org/backups: the org's backup destinations (S3-compatible
 // buckets), every database's schedules, and the restore history.
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Cloud, DatabaseBackup, FlaskConical, Loader2, Plus, Trash2 } from "lucide-react";
+import { ChevronRight, Cloud, DatabaseBackup, FlaskConical, KeyRound, Loader2, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
@@ -12,6 +12,7 @@ import { useOrgLive } from "@/apps/live";
 import { bytes } from "@/apps/util";
 import { PageHeader } from "@/components/app-shell";
 import { ScheduleText } from "@/components/cron-field";
+import { StatusBadge } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { relativeTime } from "@/lib/format";
@@ -41,7 +42,7 @@ export function BackupsPage() {
         description="Where databases are backed up to, what runs when, and what was restored."
         actions={
           <>
-            {canWrite && (
+            {canWrite && !!dests.data?.length && (
               <Button onClick={() => setAdd(true)}>
                 <Plus />
                 New destination
@@ -53,11 +54,12 @@ export function BackupsPage() {
       <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
         <Section title="Destinations" description="S3-compatible buckets: AWS S3, Cloudflare R2, Backblaze B2, MinIO, RustFS, Garage. Keys are org secrets.">
           {dests.isLoading ? (
-            <Skeleton className="h-20" />
+            <RowsSkeleton />
           ) : dests.error ? (
             <QueryError error={dests.error} />
           ) : !dests.data?.length ? (
             <EmptyState
+              compact
               icon={Cloud}
               title="No destinations"
               action={
@@ -82,11 +84,11 @@ export function BackupsPage() {
 
         <Section title="Schedules" description="Every database's backups. Open a database to run, edit or restore one.">
           {backups.isLoading ? (
-            <Skeleton className="h-20" />
+            <RowsSkeleton />
           ) : backups.error ? (
             <QueryError error={backups.error} />
           ) : !backups.data?.length ? (
-            <EmptyState icon={DatabaseBackup} title="Nothing is backed up yet">
+            <EmptyState compact icon={DatabaseBackup} title="Nothing is backed up yet">
               Create a database in a project, then schedule its backups from its Backups tab.
             </EmptyState>
           ) : (
@@ -95,26 +97,33 @@ export function BackupsPage() {
                 <li key={b.backup.name}>
                   <Link
                     to={`/orgs/${o}/apps/${b.backup.database}/backups`}
-                    className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-5 py-3 text-sm hover:bg-muted/40 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_9rem_1rem]"
+                    className="group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1.5 px-5 py-3 text-sm transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none sm:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_10rem_1rem]"
                   >
-                    <div className="min-w-0">
-                      <p className="truncate font-medium">{b.backup.name}</p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {b.backup.database} → {b.backup.destination}
-                      </p>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-muted/50">
+                        <DatabaseBackup className="size-4 text-muted-foreground" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold">{b.backup.name}</p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {b.backup.database} → {b.backup.destination}
+                        </p>
+                      </div>
                     </div>
-                    <ChevronRight className="size-4 text-muted-foreground sm:order-last" />
-                    <div className="col-span-2 min-w-0 sm:col-span-1">
+                    <ChevronRight className="size-4 text-muted-foreground/60 transition-colors group-hover:text-foreground sm:order-last" />
+                    <div className="col-span-2 min-w-0 pl-11 sm:col-span-1 sm:pl-0">
                       <ScheduleText schedule={b.backup.schedule} timezone={b.backup.timezone} next={b.next_run} enabled={b.backup.enabled} />
                     </div>
-                    <div className="col-span-2 flex items-center gap-2 sm:col-span-1">
-                      {b.last_run ? (
+                    <div className="col-span-2 flex items-center gap-2 pl-11 sm:col-span-1 sm:pl-0">
+                      {!b.backup.enabled ? (
+                        <StatusBadge tone="muted">Paused</StatusBadge>
+                      ) : b.last_run ? (
                         <>
                           <RunBadge status={b.last_run.status} />
-                          <span className="truncate text-xs text-muted-foreground">{relativeTime(b.last_run.started_at / 1000)}</span>
+                          <span className="truncate text-xs text-muted-foreground tabular-nums">{relativeTime(b.last_run.started_at / 1000)}</span>
                         </>
                       ) : (
-                        <span className="text-xs text-muted-foreground">never run</span>
+                        <StatusBadge tone="muted">Never run</StatusBadge>
                       )}
                     </div>
                   </Link>
@@ -135,10 +144,7 @@ export function BackupsPage() {
                 empty="Restore from a backup's files, on a database's Backups tab."
                 detail={(r) => (
                   <span className="text-xs">
-                    into{" "}
-                    <Link className="font-mono underline-offset-2 hover:underline" to={`/orgs/${o}/apps/${String(r.detail?.target ?? "")}/database`}>
-                      {String(r.detail?.target ?? "")}
-                    </Link>
+                    into <span className="font-mono">{String(r.detail?.target ?? "")}</span>
                     {r.detail?.new ? " (new)" : ""}
                     {r.detail?.bytes ? <span className="text-muted-foreground"> · {bytes(r.detail.bytes as number)}</span> : null}
                   </span>
@@ -153,11 +159,38 @@ export function BackupsPage() {
         open={!!log}
         onOpenChange={(o2) => !o2 && setLog(null)}
         title={log ? `Restore #${log.id}` : ""}
+        description={
+          log?.detail?.target ? (
+            <>
+              Into{" "}
+              <Link className="font-mono text-foreground underline-offset-2 hover:underline" to={`/orgs/${o}/apps/${encodeURIComponent(String(log.detail.target))}/database`}>
+                {String(log.detail.target)}
+              </Link>
+              {log.detail.new ? ", a new database" : ""}.
+            </>
+          ) : undefined
+        }
         logKey={log ? `restore-${log.id}` : ""}
         filename={log ? `restore-${log.id}.log` : "log.txt"}
         fetchChunk={(offset) => callTool("backup_run_log", { restore: true, run: log?.id ?? 1, offset }, org)}
       />
     </>
+  );
+}
+
+function RowsSkeleton() {
+  return (
+    <div className="-mx-5 -mb-5 divide-y border-t">
+      {[0, 1].map((i) => (
+        <div key={i} className="flex items-center gap-3 px-5 py-3.5">
+          <Skeleton className="size-8 rounded-md" />
+          <div className="grid flex-1 gap-1.5">
+            <Skeleton className="h-3.5 w-32" />
+            <Skeleton className="h-3 w-56" />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -178,22 +211,34 @@ function DestinationRow({ org, d, canWrite, usedBy }: { org: string; d: Destinat
     }
   };
   return (
-    <li className="grid grid-cols-[minmax(0,1fr)] gap-2 px-5 py-3">
+    <li className="grid grid-cols-[minmax(0,1fr)] gap-2.5 px-5 py-3.5">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div className="min-w-0 flex-1 basis-72">
-          <p className="font-medium">{d.name}</p>
-          <p className="truncate font-mono text-xs text-muted-foreground" title={d.endpoint}>
-            {d.endpoint} · {d.bucket}
-            {d.prefix ? `/${d.prefix}` : ""} · {d.region}
-            {d.path_style ? " · path-style" : ""}
-          </p>
-          <p className="truncate text-xs text-muted-foreground">
-            keys in <span className="font-mono">{d.access_key_secret}</span>, <span className="font-mono">{d.secret_key_secret}</span> · used by {usedBy}{" "}
-            {usedBy === 1 ? "backup" : "backups"}
-          </p>
+        <div className="flex min-w-0 flex-1 basis-72 gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/50">
+            <Cloud className="size-4 text-muted-foreground" />
+          </span>
+          <div className="min-w-0 flex-1 space-y-0.5">
+            <p className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold">{d.name}</span>
+              <StatusBadge tone={usedBy ? "neutral" : "muted"}>
+                {usedBy ? `${usedBy} ${usedBy === 1 ? "backup" : "backups"}` : "Unused"}
+              </StatusBadge>
+            </p>
+            <p className="truncate font-mono text-xs text-muted-foreground" title={d.endpoint}>
+              {d.bucket}
+              {d.prefix ? `/${d.prefix}` : ""} · {d.endpoint.replace(/^https?:\/\//, "")} · {d.region}
+              {d.path_style ? " · path-style" : ""}
+            </p>
+            <p className="flex min-w-0 items-center gap-1 truncate text-xs text-muted-foreground">
+              <KeyRound className="size-3 shrink-0" />
+              <span className="truncate font-mono">
+                {d.access_key_secret}, {d.secret_key_secret}
+              </span>
+            </p>
+          </div>
         </div>
         {canWrite && (
-          <div className="flex gap-2">
+          <div className="flex gap-2 pl-12 sm:pl-0">
             <Button variant="outline" size="sm" onClick={test} disabled={testing}>
               {testing ? <Loader2 className="animate-spin" /> : <FlaskConical />}
               Test
@@ -205,7 +250,11 @@ function DestinationRow({ org, d, canWrite, usedBy }: { org: string; d: Destinat
           </div>
         )}
       </div>
-      {result && <TestOutcome r={result} />}
+      {result && (
+        <div className="sm:pl-12">
+          <TestOutcome r={result} />
+        </div>
+      )}
       <ConfirmDialog
         open={del}
         onOpenChange={setDel}

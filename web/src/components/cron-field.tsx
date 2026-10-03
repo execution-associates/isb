@@ -3,7 +3,6 @@
 import { CalendarClock } from "lucide-react";
 import { useMemo } from "react";
 import { Field } from "@/components/form";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CRON_PRESETS, cronPreview, formatRun, parseOffset } from "@/lib/cron";
 import { relativeTime } from "@/lib/format";
@@ -55,33 +54,41 @@ export function CronField({
         </Field>
       </div>
       <div className="flex flex-wrap gap-1.5">
-        {CRON_PRESETS.map((x) => (
-          <Button
-            key={x.value}
-            type="button"
-            size="xs"
-            variant="outline"
-            className={cn(value.trim() === x.value && "border-foreground/50 bg-accent")}
-            onClick={() => onChange(x.value)}
-          >
-            {x.label}
-          </Button>
-        ))}
+        {CRON_PRESETS.map((x) => {
+          const on = value.trim() === x.value;
+          return (
+            <button
+              key={x.value}
+              type="button"
+              aria-pressed={on}
+              className={cn(
+                "inline-flex h-7 items-center rounded-full border px-3 text-xs font-medium transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none",
+                on ? "border-foreground bg-foreground text-background" : "bg-card text-foreground/80 hover:border-foreground/30 hover:text-foreground",
+              )}
+              onClick={() => onChange(x.value)}
+            >
+              {x.label}
+            </button>
+          );
+        })}
       </div>
       {p.ok && !tzError && (
-        <div className="rounded-md border bg-muted/30 px-3 py-2.5 text-sm">
+        <div className="rounded-lg border bg-muted/30 px-3.5 py-3 text-sm">
           <div className="flex items-center gap-2 font-medium">
-            <CalendarClock className="size-4 text-muted-foreground" />
-            {p.text}
-            {offset !== 0 && <span className="font-normal text-muted-foreground">({timezone})</span>}
+            <CalendarClock className="size-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0">
+              {p.text}
+              {offset !== 0 && <span className="font-normal text-muted-foreground"> ({timezone})</span>}
+            </span>
           </div>
-          <ul className="mt-1.5 grid gap-0.5 text-xs text-muted-foreground tabular-nums">
-            {p.runs.map((t) => (
-              <li key={t}>
-                {formatRun(t, offset)} · {relativeTime(t)}
+          <ol className="mt-2 grid gap-1 pl-6 text-xs tabular-nums">
+            {p.runs.map((t, i) => (
+              <li key={t} className="flex flex-wrap items-baseline justify-between gap-x-3">
+                <span className={cn(i === 0 ? "text-foreground" : "text-muted-foreground")}>{formatRun(t, offset)}</span>
+                <span className="text-muted-foreground">{relativeTime(t)}</span>
               </li>
             ))}
-          </ul>
+          </ol>
         </div>
       )}
     </div>

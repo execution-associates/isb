@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, Laptop, Link2, Loader2, Plus, Trash2 } from "lucide-react";
+import { Fingerprint, KeyRound, Laptop, Link2, Loader2, LockKeyhole, Plus, Trash2, User } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
 import { toast } from "sonner";
@@ -8,16 +8,17 @@ import { ApiError } from "@/api/client";
 import { PageHeader } from "@/components/app-shell";
 import { CopyField, Field, FormError, NewPasswordFields, newPasswordOk, PasswordInput, SubmitButton } from "@/components/form";
 import { ProviderIcon } from "@/components/sign-in-methods";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/status";
+import { Tag } from "@/pages/org-ui";
 import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Section as AppSection } from "@/apps/components";
+import { PersonAvatar } from "@/components/confirm";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ACCESS, type Access, describeScopes, scopesFor } from "@/lib/admin";
-import { dateTime, describeAgent, initials, relativeTime } from "@/lib/format";
+import { dateTime, describeAgent, relativeTime } from "@/lib/format";
 import { errorMessage, signInErrorMessage } from "@/lib/messages";
 import { useMe, useProviders } from "@/lib/session";
 import { creationOptions, credentialJSON, passkeysSupported, webauthnErrorMessage } from "@/lib/webauthn";
@@ -36,23 +37,28 @@ function Section({
   children: ReactNode;
 }) {
   return (
-    <Card id={id} className="min-w-0 scroll-mt-20 gap-5">
-      <CardHeader>
-        <CardTitle>
-          <h2>{title}</h2>
-        </CardTitle>
-        {description && <CardDescription>{description}</CardDescription>}
-        {action && <CardAction>{action}</CardAction>}
-      </CardHeader>
-      <CardContent>{children}</CardContent>
-    </Card>
+    <div id={id} className="min-w-0 scroll-mt-20">
+      <AppSection title={<h2>{title}</h2>} description={description} actions={action}>
+        {children}
+      </AppSection>
+    </div>
+  );
+}
+
+/** A quiet one-line note for an empty list. */
+function None({ icon, children }: { icon: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-dashed px-4 py-3 text-[13px] text-muted-foreground [&_svg]:size-4">
+      {icon}
+      {children}
+    </div>
   );
 }
 
 function Row({ icon, title, meta, children }: { icon: ReactNode; title: ReactNode; meta?: ReactNode; children?: ReactNode }) {
   return (
     <li className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
-      <div className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground [&_svg]:size-4">
+      <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground [&_svg]:size-4">
         {icon}
       </div>
       <div className="min-w-0 flex-1">
@@ -143,21 +149,49 @@ export function AccountPage() {
     }
   }, [code, setParams]);
   const session = me.auth.kind === "session";
+  const providers = useProviders();
 
   return (
     <>
       <PageHeader title="Account" description="Your profile, how you sign in, and the tokens your scripts and agents use." />
-      <div className="grid gap-6">
-        <Profile me={me} />
-        {session ? (
-          <>
-            <Password me={me} />
-            <Identities />
-            <Passkeys />
-          </>
-        ) : null}
-        <Tokens me={me} />
-        {session && <Sessions />}
+      <div className="grid items-start gap-8 lg:grid-cols-[11rem_minmax(0,1fr)]">
+        <nav aria-label="Account sections" className="sticky top-20 hidden flex-col gap-0.5 lg:flex">
+          {(
+            [
+              ["profile", "Profile", User],
+              ...(session
+                ? [
+                    ["password", "Password", LockKeyhole],
+                    ...(providers.data?.providers.length ? [["identities", "Linked accounts", Link2]] : []),
+                    ["passkeys", "Passkeys", Fingerprint],
+                  ]
+                : []),
+              ["tokens", "API tokens", KeyRound],
+              ...(session ? [["sessions", "Sessions", Laptop]] : []),
+            ] as [string, string, typeof User][]
+          ).map(([id, label, Icon]) => (
+            <a
+              key={id}
+              href={`#${id}`}
+              className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <Icon className="size-4" />
+              {label}
+            </a>
+          ))}
+        </nav>
+        <div className="grid min-w-0 gap-6">
+          <Profile me={me} />
+          {session ? (
+            <>
+              <Password me={me} />
+              <Identities />
+              <Passkeys />
+            </>
+          ) : null}
+          <Tokens me={me} />
+          {session && <Sessions />}
+        </div>
       </div>
     </>
   );
@@ -167,31 +201,30 @@ function Profile({ me }: { me: Me }) {
   return (
     <Section id="profile" title="Profile">
       <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-        <Avatar className="size-14 rounded-lg">
-          <AvatarFallback className="rounded-lg text-lg">{initials(me.user.name, me.user.email)}</AvatarFallback>
-        </Avatar>
-        <dl className="grid flex-1 gap-x-8 gap-y-3 text-sm sm:grid-cols-3">
+        <PersonAvatar name={me.user.name} email={me.user.email} className="size-14 text-lg" />
+        <div className="min-w-0 flex-1 space-y-2">
           <div className="min-w-0">
-            <dt className="text-muted-foreground">Name</dt>
-            <dd className="truncate font-medium">{me.user.name || "—"}</dd>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="truncate text-base font-semibold">{me.user.name || me.user.email.split("@")[0]}</span>
+              {me.platform_admin && <StatusBadge tone="info">Platform admin</StatusBadge>}
+            </div>
+            <div className="truncate text-[13px] text-muted-foreground">{me.user.email}</div>
           </div>
-          <div className="min-w-0">
-            <dt className="text-muted-foreground">Email</dt>
-            <dd className="truncate font-medium">{me.user.email}</dd>
+          <div className="flex flex-wrap gap-1.5">
+            {me.memberships.map((m) => (
+              <Tag key={m.org} className="h-6 gap-1 text-xs">
+                <span className="text-foreground/80">{m.org}</span>
+                <span className="opacity-60">·</span>
+                {m.role}
+              </Tag>
+            ))}
+            {me.memberships.length === 0 && <span className="text-[13px] text-muted-foreground">No org memberships</span>}
           </div>
-          <div className="min-w-0">
-            <dt className="text-muted-foreground">Orgs</dt>
-            <dd className="flex flex-wrap gap-1.5 pt-0.5">
-              {me.platform_admin && <Badge>platform admin</Badge>}
-              {me.memberships.map((m) => (
-                <Badge key={m.org} variant="secondary">
-                  {m.org} · {m.role}
-                </Badge>
-              ))}
-              {!me.platform_admin && me.memberships.length === 0 && "none"}
-            </dd>
-          </div>
-        </dl>
+        </div>
+        <div className="text-xs text-muted-foreground sm:text-right">
+          Member since
+          <div className="text-[13px] text-foreground tabular-nums">{new Date(me.user.created_at * 1000).toLocaleDateString()}</div>
+        </div>
       </div>
     </Section>
   );
@@ -220,9 +253,9 @@ function Password({ me }: { me: Me }) {
       <Section
         id="password"
         title="Password"
-        description="You sign in without a password. To add one, use “Forgot password?” on the sign-in page with your email."
+        description="You sign in without a password."
       >
-        <></>
+        <None icon={<LockKeyhole />}>To add one, use “Forgot password?” on the sign-in page with your email.</None>
       </Section>
     );
   }
@@ -394,7 +427,7 @@ function Passkeys() {
           ))}
         </ul>
       ) : (
-        <p className="text-sm text-muted-foreground">No passkeys yet.</p>
+        <None icon={<Fingerprint />}>No passkeys yet.</None>
       )}
       <Dialog open={open} onOpenChange={(o) => (setOpen(o), o || setError(null))}>
         <DialogContent>
@@ -497,15 +530,9 @@ function Tokens({ me }: { me: Me }) {
               icon={<KeyRound />}
               title={
                 <>
-                  {t.name}
-                  <Badge variant="secondary" className="font-normal">
-                    {t.org ?? "platform"}
-                  </Badge>
-                  {t.scopes?.length > 0 && (
-                    <Badge variant="outline" className="font-normal">
-                      {describeScopes(t.scopes)}
-                    </Badge>
-                  )}
+                  <span className="truncate">{t.name}</span>
+                  <Tag className="text-foreground/80">{t.org ?? "platform"}</Tag>
+                  {t.scopes?.length > 0 && <Tag>{describeScopes(t.scopes)}</Tag>}
                 </>
               }
               meta={`Created ${relativeTime(t.created_at)} · ${t.last_used ? `last used ${relativeTime(t.last_used)}` : "never used"} · ${t.expires_at ? `expires ${relativeTime(t.expires_at)}` : "no expiry"}`}
@@ -525,7 +552,7 @@ function Tokens({ me }: { me: Me }) {
           ))}
         </ul>
       ) : (
-        <p className="text-sm text-muted-foreground">No tokens yet.</p>
+        <None icon={<KeyRound />}>No tokens yet. Make one for each script or agent, so you can revoke it alone.</None>
       )}
       <Dialog open={open} onOpenChange={close}>
         <DialogContent>
@@ -664,7 +691,7 @@ function Sessions() {
         <ListSkeleton />
       ) : (
         <ul className="divide-y">
-          {list.data?.sessions.map((s) => (
+          {[...(list.data?.sessions ?? [])].sort((a, b) => Number(b.current) - Number(a.current) || b.last_seen - a.last_seen).map((s) => (
             <Row
               key={s.id}
               icon={<Laptop />}
@@ -672,9 +699,9 @@ function Sessions() {
                 <>
                   {describeAgent(s.user_agent)}
                   {s.current && (
-                    <Badge variant="outline" className="border-success/40 font-normal text-success">
-                      this browser
-                    </Badge>
+                    <StatusBadge tone="success" className="h-5">
+                      This browser
+                    </StatusBadge>
                   )}
                 </>
               }

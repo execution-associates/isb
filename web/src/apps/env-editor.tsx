@@ -25,6 +25,7 @@ export function EnvEditor({
   missing,
   readOnly,
   label,
+  placeholder,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -33,6 +34,8 @@ export function EnvEditor({
   missing: Set<string>;
   readOnly?: boolean;
   label: string;
+  /** Shown, dimmed, while the text is empty. */
+  placeholder?: string;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const lines = analysis.lines;
@@ -44,12 +47,12 @@ export function EnvEditor({
   return (
     <div
       ref={scroller}
-      className="relative max-h-[65svh] min-h-64 overflow-auto rounded-lg border bg-muted/20 font-mono text-[13px] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 dark:bg-input/20"
+      className="relative max-h-[65svh] min-h-64 overflow-auto rounded-lg border bg-background font-mono text-[13px] shadow-xs transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 dark:bg-input/20"
     >
       <div className="relative flex min-w-full" style={{ width: `calc(${cols + gutter + 2}ch + 2rem)` }}>
         <div
           aria-hidden
-          className="sticky left-0 z-10 shrink-0 border-r bg-muted/60 py-3 pr-2 pl-3 text-right text-muted-foreground/70 select-none dark:bg-muted/40"
+          className="sticky left-0 z-10 shrink-0 border-r bg-muted py-3 pr-2 pl-3 text-right text-muted-foreground/60 tabular-nums select-none dark:bg-muted/60"
           style={{ width: `calc(${gutter}ch + 1.25rem)`, lineHeight: `${LINE_H}px` }}
         >
           {Array.from({ length: rows }, (_, i) => (
@@ -59,6 +62,11 @@ export function EnvEditor({
           ))}
         </div>
         <div className="relative flex-1">
+          {!value && placeholder && (
+            <pre aria-hidden className="pointer-events-none absolute inset-x-0 top-0 m-0 px-3 py-3 whitespace-pre text-muted-foreground/60" style={{ lineHeight: `${LINE_H}px` }}>
+              {placeholder}
+            </pre>
+          )}
           <pre aria-hidden className="pointer-events-none m-0 px-3 py-3 whitespace-pre" style={{ lineHeight: `${LINE_H}px`, tabSize: 4 }}>
             {lines.map((toks, i) => (
               <div key={i} style={{ minHeight: LINE_H }}>

@@ -4,32 +4,43 @@ import { Eye, KeyRound, Loader2, Minus, Plus, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
-import { CopyField, Field, FormError, SubmitButton } from "@/components/form";
+import { CopyField, Field, FormError } from "@/components/form";
+import { StatusDot } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { canWrite } from "@/lib/admin";
 import { errorMessage } from "@/lib/messages";
-import { type App, type AppSource, type Builder, type BuildSettings, type GitAuth, isGit, keys, serviceOf, useStack } from "./api";
+import { useMe } from "@/lib/session";
+import type { Tone } from "@/lib/status";
+import { type App, type AppSource, type Builder, type BuildSettings, type GitAuth, type InstanceDetail, isGit, keys, serviceOf, useStack } from "./api";
 import { ConfirmDialog, Section } from "./components";
 import { gitUrlProblem } from "./new-app-dialog";
 import { useAppUpdate } from "./save";
+import { SaveFooter } from "./save-footer";
 import { formatKv, mergePatch, parseKv, sameJson, stableJson } from "./util";
 
 export function GeneralTab({ org, app }: { org: string; app: App }) {
+  // Viewers read the settings: the controls are disabled and nothing saves.
+  const writer = canWrite(useMe().data!, org);
   return (
     <div className="grid gap-6">
-      <SourceSection org={org} app={app} />
-      {isGit(app.source) && app.build && <BuildSection org={org} app={app} build={app.build} />}
-      <ScaleSection org={org} app={app} />
-      <RuntimeSection org={org} app={app} />
-      <HealthSection org={org} app={app} />
-      <WebhookSection org={org} app={app} />
+      <SourceSection org={org} app={app} writer={writer} />
+      {isGit(app.source) && app.build && <BuildSection org={org} app={app} build={app.build} writer={writer} />}
+      <ScaleSection org={org} app={app} writer={writer} />
+      <RuntimeSection org={org} app={app} writer={writer} />
+      <HealthSection org={org} app={app} writer={writer} />
+      <WebhookSection org={org} app={app} writer={writer} />
     </div>
   );
 }
+
+type Props = { org: string; app: App; writer: boolean };
+
+const NEXT_DEPLOY = "Applies at the next deploy.";
 
 /** Re-seed a form from the app when the app changes underneath (another tab, an agent). */
 function useSeed<T>(seed: () => T, dep: unknown): [T, (v: T) => void, () => void] {
@@ -42,6 +53,21 @@ function useSeed<T>(seed: () => T, dep: unknown): [T, (v: T) => void, () => void
   return [v, setV, () => setV(seed())];
 }
 
+/** A switch with its label and a one-line hint. */
+function SwitchRow({ id, label, hint, checked, onChange }: { id: string; label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-start gap-3">
+      <Switch id={id} checked={checked} onCheckedChange={onChange} className="mt-0.5" />
+      <div className="grid gap-0.5">
+        <Label htmlFor={id} className="font-medium">
+          {label}
+        </Label>
+        {hint && <p className="text-xs leading-relaxed text-muted-foreground">{hint}</p>}
+      </div>
+    </div>
+  );
+}
+
 type AuthKind = "none" | "token" | "ssh";
 
 function authKind(a: GitAuth | undefined): AuthKind {
@@ -51,7 +77,7 @@ function authKind(a: GitAuth | undefined): AuthKind {
   return "none";
 }
 
-function SourceSection({ org, app }: { org: string; app: App }) {
+function SourceSection({ org, app, writer }: Props) {
   const seed = () => {
     const g = isGit(app.source) ? app.source.git : null;
     return {
@@ -67,7 +93,7 @@ function SourceSection({ org, app }: { org: string; app: App }) {
     };
   };
   const [f, setF, reset] = useSeed(seed, app.source);
-  const { save, pending, error } = useAppUpdate(org, app.name);
+  const { save, pending, error, saved } = useAppUpdate(org, app.name);
   const qc = useQueryClient();
   const [key, setKey] = useState<string | null>(null);
   const [keyPending, setKeyPending] = useState(false);
@@ -102,7 +128,7 @@ function SourceSection({ org, app }: { org: string; app: App }) {
     // An image is not built; a repository needs a builder.
     if (f.kind === "image" && app.build) patch.build = null;
     if (f.kind === "git" && !app.build) patch.build = { builder: { type: "railpack" } };
-    await save(patch);
+    await save(patch, { quiet: true });
   };
 
   const makeKey = async () => {
@@ -120,57 +146,54 @@ function SourceSection({ org, app }: { org: string; app: App }) {
   };
 
   const sshUrl = /^(ssh:\/\/|[A-Za-z0-9._-]+@)/.test(f.url.trim());
+  const typeField = (
+    <Field label="Type">
+      {(id) => (
+        <Select value={f.kind} onValueChange={(v) => set({ kind: v as "image" | "git" })}>
+          <SelectTrigger id={id} className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="image">Container image</SelectItem>
+            <SelectItem value="git">Git repository</SelectItem>
+          </SelectContent>
+        </Select>
+      )}
+    </Field>
+  );
   return (
     <form onSubmit={submit}>
       <Section
         title="Source"
         description={f.kind === "image" ? "The image each deploy pulls, pinned to its digest." : "The repository each deploy fetches and builds."}
-        footer={
-          <>
-            {dirty && (
-              <Button type="button" variant="ghost" onClick={reset}>
-                Discard
-              </Button>
-            )}
-            <SubmitButton pending={pending} disabled={!dirty}>
-              Save source
-            </SubmitButton>
-          </>
-        }
+        footer={writer && <SaveFooter dirty={dirty} pending={pending} saved={saved} onDiscard={reset} label="Save source" note={NEXT_DEPLOY} />}
       >
-        <div className="grid gap-4">
+        <fieldset disabled={!writer} className="grid min-w-0 gap-5">
           <FormError>{error}</FormError>
-          <Field label="Type">
-            {(id) => (
-              <Select value={f.kind} onValueChange={(v) => set({ kind: v as "image" | "git" })}>
-                <SelectTrigger id={id} className="w-full sm:w-64">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="image">Container image</SelectItem>
-                  <SelectItem value="git">Git repository</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-          </Field>
           {f.kind === "image" ? (
-            <Field label="Image" error={imgErr} hint="docker:nginx:1.27, ghcr:org/app:tag, or a local alias.">
-              {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.image} onChange={(e) => set({ image: e.target.value })} />}
-            </Field>
+            <div className="grid items-start gap-4 sm:grid-cols-[12rem_minmax(0,1fr)]">
+              {typeField}
+              <Field label="Image" error={imgErr} hint="docker:nginx:1.27, ghcr:org/app:tag, or a local alias.">
+                {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.image} onChange={(e) => set({ image: e.target.value })} />}
+              </Field>
+            </div>
           ) : (
             <>
-              <Field label="Repository URL" error={f.url ? urlErr : null}>
-                {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.url} onChange={(e) => set({ url: e.target.value })} />}
-              </Field>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Branch, tag or commit" hint="A push to this branch deploys, through the webhook.">
-                  {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.ref} onChange={(e) => set({ ref: e.target.value })} />}
-                </Field>
-                <Field label="Subdirectory" hint="Build from here; empty for the repository's root.">
-                  {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.subdir} onChange={(e) => set({ subdir: e.target.value })} />}
+              <div className="grid items-start gap-4 sm:grid-cols-[12rem_minmax(0,1fr)]">
+                {typeField}
+                <Field label="Repository URL" error={f.url ? urlErr : null}>
+                  {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.url} onChange={(e) => set({ url: e.target.value })} />}
                 </Field>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid items-start gap-4 sm:grid-cols-2">
+                <Field label="Branch, tag or commit" hint="A push to this branch deploys.">
+                  {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.ref} onChange={(e) => set({ ref: e.target.value })} />}
+                </Field>
+                <Field label="Subdirectory" hint="Empty builds from the repository's root.">
+                  {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.subdir} onChange={(e) => set({ subdir: e.target.value })} placeholder="/" />}
+                </Field>
+              </div>
+              <div className="grid items-start gap-4 sm:grid-cols-2">
                 <Field label="Access">
                   {(id) => (
                     <Select value={f.auth} onValueChange={(v) => set({ auth: v as AuthKind })}>
@@ -190,44 +213,42 @@ function SourceSection({ org, app }: { org: string; app: App }) {
                     {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.secret} onChange={(e) => set({ secret: e.target.value })} />}
                   </Field>
                 )}
+                {f.auth === "token" && (
+                  <Field label="Username" hint="Optional. x-access-token works for GitHub, GitLab and Gitea.">
+                    {(id, d) => <Input id={id} aria-describedby={d} spellCheck={false} value={f.username} onChange={(e) => set({ username: e.target.value })} placeholder="x-access-token" />}
+                  </Field>
+                )}
               </div>
-              {f.auth === "token" && (
-                <Field label="Username (optional)" hint="Default x-access-token, which GitHub, GitLab and Gitea accept.">
-                  {(id, d) => <Input id={id} aria-describedby={d} className="sm:w-64" spellCheck={false} value={f.username} onChange={(e) => set({ username: e.target.value })} />}
-                </Field>
-              )}
-              <div className="flex items-center gap-3">
-                <Switch id="git-submodules" checked={f.submodules} onCheckedChange={(v) => set({ submodules: v })} />
-                <Label htmlFor="git-submodules" className="font-normal">
-                  Check out submodules too
-                </Label>
-              </div>
-              {sshUrl && (
-                <div className="grid gap-3 rounded-lg border border-dashed p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="space-y-0.5">
-                      <p className="text-sm font-medium">Deploy key</p>
-                      <p className="text-sm text-muted-foreground">
-                        Generate an ed25519 key: isb keeps the private half as <span className="font-mono">app.{app.name}.deploy-key</span> and uses it for this app.
-                      </p>
+              <SwitchRow id="git-submodules" label="Check out submodules" checked={f.submodules} onChange={(v) => set({ submodules: v })} />
+              {sshUrl && writer && (
+                <div className="grid gap-3 rounded-lg border bg-muted/30 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 gap-3">
+                      <KeyRound className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                      <div className="grid gap-0.5">
+                        <p className="text-sm font-medium">Deploy key</p>
+                        <p className="text-xs leading-relaxed text-muted-foreground">
+                          An ed25519 key for this app. isb keeps the private half as <span className="font-mono">app.{app.name}.deploy-key</span>.
+                        </p>
+                      </div>
                     </div>
-                    <Button type="button" variant="outline" disabled={keyPending || dirty} onClick={() => (f.auth === "ssh" ? setKeyConfirm(true) : makeKey())}>
+                    <Button type="button" variant="outline" className="shrink-0" disabled={keyPending || dirty} onClick={() => (f.auth === "ssh" ? setKeyConfirm(true) : makeKey())}>
                       {keyPending ? <Loader2 className="animate-spin" /> : <KeyRound />}
                       {f.auth === "ssh" ? "New deploy key" : "Generate deploy key"}
                     </Button>
                   </div>
                   {dirty && <p className="text-xs text-muted-foreground">Save the source first.</p>}
                   {key && (
-                    <>
+                    <div className="grid gap-2">
                       <CopyField value={key} label="Copy key" />
                       <p className="text-xs text-muted-foreground">Add it to the repository's deploy keys (read-only), then deploy.</p>
-                    </>
+                    </div>
                   )}
                 </div>
               )}
             </>
           )}
-        </div>
+        </fieldset>
       </Section>
       <ConfirmDialog
         open={keyConfirm}
@@ -241,7 +262,7 @@ function SourceSection({ org, app }: { org: string; app: App }) {
   );
 }
 
-function BuildSection({ org, app, build }: { org: string; app: App; build: BuildSettings }) {
+function BuildSection({ org, app, build, writer }: Props & { build: BuildSettings }) {
   const seed = () => ({
     type: build.builder.type,
     path: build.builder.type === "dockerfile" ? (build.builder.path ?? "Dockerfile") : "Dockerfile",
@@ -251,7 +272,7 @@ function BuildSection({ org, app, build }: { org: string; app: App; build: Build
     untrusted: build.untrusted !== false,
   });
   const [f, setF, reset] = useSeed(seed, build);
-  const { save, pending, error } = useAppUpdate(org, app.name);
+  const { save, pending, error, saved } = useAppUpdate(org, app.name);
   const set = (p: Partial<typeof f>) => setF({ ...f, ...p });
   const kv = parseKv(f.args);
   const builder: Builder =
@@ -266,29 +287,18 @@ function BuildSection({ org, app, build }: { org: string; app: App; build: Build
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (kv.errors.length) return;
-    await save({ build: mergePatch(build, next) });
+    await save({ build: mergePatch(build, next) }, { quiet: true });
   };
   return (
     <form onSubmit={submit}>
       <Section
         title="Build"
         description="How the repository becomes an image. Each build runs in a fresh sandbox in this org, never on the host."
-        footer={
-          <>
-            {dirty && (
-              <Button type="button" variant="ghost" onClick={reset}>
-                Discard
-              </Button>
-            )}
-            <SubmitButton pending={pending} disabled={!dirty}>
-              Save build
-            </SubmitButton>
-          </>
-        }
+        footer={writer && <SaveFooter dirty={dirty} pending={pending} saved={saved} onDiscard={reset} label="Save build" note={NEXT_DEPLOY} invalid={kv.errors.length > 0} />}
       >
-        <div className="grid gap-4">
+        <fieldset disabled={!writer} className="grid min-w-0 gap-5">
           <FormError>{error}</FormError>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid items-start gap-4 sm:grid-cols-2">
             <Field label="Builder">
               {(id) => (
                 <Select value={f.type} onValueChange={(v) => set({ type: v as Builder["type"] })}>
@@ -296,7 +306,7 @@ function BuildSection({ org, app, build }: { org: string; app: App; build: Build
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="railpack">Railpack</SelectItem>
+                    <SelectItem value="railpack">Railpack (auto-detect)</SelectItem>
                     <SelectItem value="nixpacks">Nixpacks</SelectItem>
                     <SelectItem value="dockerfile">Dockerfile</SelectItem>
                     <SelectItem value="buildpacks">Buildpacks</SelectItem>
@@ -305,40 +315,47 @@ function BuildSection({ org, app, build }: { org: string; app: App; build: Build
               )}
             </Field>
             {f.type === "buildpacks" && (
-              <Field label="Builder image (optional)">
-                {(id) => <Input id={id} className="font-mono" spellCheck={false} value={f.bp} onChange={(e) => set({ bp: e.target.value })} placeholder="paketobuildpacks/builder-jammy-base" />}
+              <Field label="Builder image" hint="Optional.">
+                {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.bp} onChange={(e) => set({ bp: e.target.value })} placeholder="paketobuildpacks/builder-jammy-base" />}
               </Field>
             )}
           </div>
           {f.type === "dockerfile" && (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid items-start gap-4 sm:grid-cols-2">
               <Field label="Dockerfile path" hint="Relative to the build context.">
                 {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.path} onChange={(e) => set({ path: e.target.value })} />}
               </Field>
-              <Field label="Target stage (optional)">
-                {(id) => <Input id={id} className="font-mono" spellCheck={false} value={f.target} onChange={(e) => set({ target: e.target.value })} />}
+              <Field label="Target stage" hint="Optional. Empty builds the last stage.">
+                {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.target} onChange={(e) => set({ target: e.target.value })} />}
               </Field>
             </div>
           )}
-          <Field label="Build arguments" error={kv.errors[0] ?? null} hint="KEY=VALUE per line: Dockerfile ARGs, buildpack environment. Not secrets: they can end up in the image.">
+          <Field label="Build arguments" error={kv.errors[0] ?? null} hint="KEY=VALUE per line. Not for secrets: they can end up in the image.">
             {(id, d) => (
               <Textarea id={id} aria-describedby={d} rows={3} spellCheck={false} className="font-mono text-xs" value={f.args} onChange={(e) => set({ args: e.target.value })} placeholder="NODE_ENV=production" />
             )}
           </Field>
-          <div className="flex items-start gap-3">
-            <Switch id="build-vm" checked={f.untrusted} onCheckedChange={(v) => set({ untrusted: v })} className="mt-0.5" />
-            <div className="space-y-0.5">
-              <Label htmlFor="build-vm">Build in a VM</Label>
-              <p className="text-xs text-muted-foreground">A VM has its own kernel: the safe choice for code you have not read. Off builds in a container, which is faster.</p>
-            </div>
-          </div>
-        </div>
+          <SwitchRow
+            id="build-vm"
+            label="Build in a VM"
+            hint="Its own kernel: the safe choice for code you have not read. Off builds in a container, which is faster."
+            checked={f.untrusted}
+            onChange={(v) => set({ untrusted: v })}
+          />
+        </fieldset>
       </Section>
     </form>
   );
 }
 
-function ScaleSection({ org, app }: { org: string; app: App }) {
+function replicaTone(i: InstanceDetail): Tone {
+  if (i.health === "unhealthy") return "danger";
+  if (i.status !== "Running") return "warning";
+  if (i.health === "starting") return "info";
+  return "success";
+}
+
+function ScaleSection({ org, app, writer }: Props) {
   const stack = useStack(org, app.stack);
   const svc = serviceOf(stack.data, app.name);
   const [n, setN] = useState(app.replicas);
@@ -354,7 +371,7 @@ function ScaleSection({ org, app }: { org: string; app: App }) {
       try {
         await callTool("stack_scale", { name: app.stack, service: app.name, replicas: n }, org);
         await qc.invalidateQueries({ queryKey: keys.org(org) });
-        toast.success(`Scaling ${app.name} to ${n}`);
+        toast.success(n === 0 ? `Stopping ${app.name}` : `Scaling ${app.name} to ${n}`);
       } catch (e) {
         toast.error(errorMessage(e));
       }
@@ -362,38 +379,59 @@ function ScaleSection({ org, app }: { org: string; app: App }) {
       toast.success(`Saved: ${n} replica${n === 1 ? "" : "s"} from the first deploy`);
     }
   };
+  const instances = [...(svc?.instances ?? [])].sort((a, b) => a.slot - b.slot);
   return (
     <Section
       title="Scale"
-      description={
-        svc
-          ? `${svc.running} of ${svc.replicas} running, ${svc.healthy} healthy. Scaling applies now, without a deploy.`
-          : "Replicas once deployed. Published ports and domains spread requests over the healthy ones."
-      }
+      description={svc ? "Replicas of this app. Scaling applies now, without a deploy." : "Replicas once deployed. Domains and published ports spread requests over the healthy ones."}
     >
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center rounded-md border">
-          <Button type="button" variant="ghost" size="icon" aria-label="Fewer replicas" disabled={n <= 0} onClick={() => setN(Math.max(0, n - 1))}>
-            <Minus />
-          </Button>
-          <Input
-            aria-label="Replicas"
-            inputMode="numeric"
-            className="h-9 w-16 border-0 text-center tabular-nums shadow-none focus-visible:ring-0"
-            value={n}
-            onChange={(e) => setN(Math.min(100, Number(e.target.value.replace(/\D/g, "")) || 0))}
-          />
-          <Button type="button" variant="ghost" size="icon" aria-label="More replicas" disabled={n >= 100} onClick={() => setN(Math.min(100, n + 1))}>
-            <Plus />
-          </Button>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex h-10 items-center rounded-lg border bg-background shadow-xs">
+            <Button type="button" variant="ghost" size="icon" className="h-full rounded-r-none" aria-label="Fewer replicas" disabled={!writer || n <= 0} onClick={() => setN(Math.max(0, n - 1))}>
+              <Minus />
+            </Button>
+            <Input
+              aria-label="Replicas"
+              inputMode="numeric"
+              disabled={!writer}
+              className="h-full w-14 rounded-none border-0 border-x text-center text-base font-semibold tabular-nums shadow-none focus-visible:ring-0 dark:bg-transparent"
+              value={n}
+              onChange={(e) => setN(Math.min(100, Number(e.target.value.replace(/\D/g, "")) || 0))}
+            />
+            <Button type="button" variant="ghost" size="icon" className="h-full rounded-l-none" aria-label="More replicas" disabled={!writer || n >= 100} onClick={() => setN(Math.min(100, n + 1))}>
+              <Plus />
+            </Button>
+          </div>
+          {writer && (
+            <Button onClick={apply} disabled={!changed || pending}>
+              {pending && <Loader2 className="animate-spin" />}
+              {!svc ? "Save" : !changed ? "Scale" : n === 0 ? "Stop all replicas" : `Scale to ${n}`}
+            </Button>
+          )}
         </div>
-        <Button onClick={apply} disabled={!changed || pending}>
-          {pending && <Loader2 className="animate-spin" />}
-          {svc ? "Scale" : "Save"}
-        </Button>
-        {n === 0 && <span className="text-sm text-muted-foreground">0 stops the app without removing it.</span>}
-        {app.volumes?.length ? <span className="text-sm text-muted-foreground">Replicas share the app's volumes.</span> : null}
+        {svc && (
+          <div className="flex min-w-0 items-center gap-3 text-[13px] text-muted-foreground">
+            {instances.length > 0 && (
+              <span className="flex flex-wrap gap-1" aria-hidden>
+                {instances.slice(0, 24).map((i) => (
+                  <StatusDot key={i.name} tone={replicaTone(i)} className="size-2.5" title={`Replica ${i.slot}: ${i.status.toLowerCase()}`} />
+                ))}
+              </span>
+            )}
+            <span className="tabular-nums">
+              <span className="font-medium text-foreground">{svc.running}</span> of {svc.replicas} running,{" "}
+              <span className="font-medium text-foreground">{svc.healthy}</span> healthy
+            </span>
+          </div>
+        )}
       </div>
+      {(n === 0 || app.volumes?.length) && (
+        <p className="mt-3 text-xs text-muted-foreground">
+          {n === 0 ? "0 stops the app without removing it. " : ""}
+          {app.volumes?.length ? "Replicas share the app's volumes." : ""}
+        </p>
+      )}
       {error && (
         <div className="mt-3">
           <FormError>{error}</FormError>
@@ -410,7 +448,7 @@ export function commandText(c: string | string[] | undefined): string {
   return c.map((a) => (/^[A-Za-z0-9_./:=@%+,-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`)).join(" ");
 }
 
-function RuntimeSection({ org, app }: { org: string; app: App }) {
+function RuntimeSection({ org, app, writer }: Props) {
   const seed = () => ({
     port: app.port ? String(app.port) : "",
     command: commandText(app.command),
@@ -418,7 +456,7 @@ function RuntimeSection({ org, app }: { org: string; app: App }) {
     memory: app.resources?.memory ?? "",
   });
   const [f, setF, reset] = useSeed(seed, [app.port, app.command, app.resources]);
-  const { save, pending, error } = useAppUpdate(org, app.name);
+  const { save, pending, error, saved } = useAppUpdate(org, app.name);
   const set = (p: Partial<typeof f>) => setF({ ...f, ...p });
   const s = seed();
   const dirty = JSON.stringify(f) !== JSON.stringify(s);
@@ -438,43 +476,32 @@ function RuntimeSection({ org, app }: { org: string; app: App }) {
       if (f.memory.trim()) r.memory = f.memory.trim();
       patch.resources = Object.keys(r).length ? mergePatch(app.resources ?? {}, r) : null;
     }
-    await save(patch);
+    await save(patch, { quiet: true });
   };
   return (
     <form onSubmit={submit}>
       <Section
         title="Runtime"
-        description="How each replica runs. Changes take effect at the next deploy."
-        footer={
-          <>
-            {dirty && (
-              <Button type="button" variant="ghost" onClick={reset}>
-                Discard
-              </Button>
-            )}
-            <SubmitButton pending={pending} disabled={!dirty}>
-              Save runtime
-            </SubmitButton>
-          </>
-        }
+        description="How each replica runs."
+        footer={writer && <SaveFooter dirty={dirty} pending={pending} saved={saved} onDiscard={reset} label="Save runtime" note={NEXT_DEPLOY} invalid={!!(portErr || cpuErr || memErr)} />}
       >
-        <div className="grid gap-4">
+        <fieldset disabled={!writer} className="grid min-w-0 gap-5">
           <FormError>{error}</FormError>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Field label="Port" error={portErr} hint="What the app listens on.">
-              {(id, d) => <Input id={id} aria-describedby={d} inputMode="numeric" value={f.port} onChange={(e) => set({ port: e.target.value.replace(/\D/g, "") })} placeholder="8080" />}
+          <div className="grid grid-cols-2 items-start gap-4 sm:grid-cols-3">
+            <Field label="Port" error={portErr} hint="What the app listens on." className="col-span-2 sm:col-span-1">
+              {(id, d) => <Input id={id} aria-describedby={d} inputMode="numeric" className="tabular-nums" value={f.port} onChange={(e) => set({ port: e.target.value.replace(/\D/g, "") })} placeholder="8080" />}
             </Field>
             <Field label="CPUs per replica" error={cpuErr} hint="Empty: the org's default.">
-              {(id, d) => <Input id={id} aria-describedby={d} value={f.cpus} onChange={(e) => set({ cpus: e.target.value })} placeholder="default" />}
+              {(id, d) => <Input id={id} aria-describedby={d} className="tabular-nums" value={f.cpus} onChange={(e) => set({ cpus: e.target.value })} placeholder="Default" />}
             </Field>
             <Field label="Memory per replica" error={memErr} hint="Empty: the org's default.">
-              {(id, d) => <Input id={id} aria-describedby={d} value={f.memory} onChange={(e) => set({ memory: e.target.value })} placeholder="default" />}
+              {(id, d) => <Input id={id} aria-describedby={d} className="tabular-nums" value={f.memory} onChange={(e) => set({ memory: e.target.value })} placeholder="Default" />}
             </Field>
           </div>
-          <Field label="Command" hint="Overrides the image's command; split like a shell would. Empty: the image's own.">
-            {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.command} onChange={(e) => set({ command: e.target.value })} placeholder="the image's own" />}
+          <Field label="Command" hint="Overrides the image's command, split like a shell would. Empty runs the image's own.">
+            {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.command} onChange={(e) => set({ command: e.target.value })} placeholder="The image's own" />}
           </Field>
-        </div>
+        </fieldset>
       </Section>
     </form>
   );
@@ -489,7 +516,7 @@ function healthText(t: string | string[] | undefined): string {
   return commandText(t);
 }
 
-function HealthSection({ org, app }: { org: string; app: App }) {
+function HealthSection({ org, app, writer }: Props) {
   const h = app.healthcheck;
   const seed = () => ({
     test: healthText(h?.test),
@@ -499,7 +526,7 @@ function HealthSection({ org, app }: { org: string; app: App }) {
     start_period: h?.start_period ?? "",
   });
   const [f, setF, reset] = useSeed(seed, h);
-  const { save, pending, error } = useAppUpdate(org, app.name);
+  const { save, pending, error, saved } = useAppUpdate(org, app.name);
   const set = (p: Partial<typeof f>) => setF({ ...f, ...p });
   const dirty = JSON.stringify(f) !== JSON.stringify(seed());
   const dur = (v: string) => (v && !/^\d+(ms|s|m|h)?$/.test(v.trim()) ? "e.g. 5s, 1m." : null);
@@ -508,7 +535,7 @@ function HealthSection({ org, app }: { org: string; app: App }) {
     e.preventDefault();
     if (Object.values(errs).some(Boolean)) return;
     if (!f.test.trim()) {
-      await save({ healthcheck: null });
+      await save({ healthcheck: null }, { quiet: true });
       return;
     }
     const next: Record<string, unknown> = { test: ["CMD-SHELL", f.test.trim()] };
@@ -516,52 +543,41 @@ function HealthSection({ org, app }: { org: string; app: App }) {
     if (f.timeout.trim()) next.timeout = f.timeout.trim();
     if (f.retries.trim()) next.retries = Number(f.retries);
     if (f.start_period.trim()) next.start_period = f.start_period.trim();
-    await save({ healthcheck: mergePatch(h ?? {}, next) });
+    await save({ healthcheck: mergePatch(h ?? {}, next) }, { quiet: true });
   };
   return (
     <form onSubmit={submit}>
       <Section
         title="Health check"
-        description="A replica takes traffic once its check passes, and is replaced when it keeps failing. Without one, a running replica is in rotation."
-        footer={
-          <>
-            {dirty && (
-              <Button type="button" variant="ghost" onClick={reset}>
-                Discard
-              </Button>
-            )}
-            <SubmitButton pending={pending} disabled={!dirty}>
-              Save health check
-            </SubmitButton>
-          </>
-        }
+        description="A replica takes traffic once its check passes and is replaced when it keeps failing. Without one, a running replica is in rotation."
+        footer={writer && <SaveFooter dirty={dirty} pending={pending} saved={saved} onDiscard={reset} label="Save health check" note={NEXT_DEPLOY} invalid={Object.values(errs).some(Boolean)} />}
       >
-        <div className="grid gap-4">
+        <fieldset disabled={!writer} className="grid min-w-0 gap-5">
           <FormError>{error}</FormError>
           <Field label="Command" hint="A shell line run in the replica; exit 0 is healthy. Empty: no health check.">
             {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.test} onChange={(e) => set({ test: e.target.value })} placeholder="wget -qO- http://localhost:8080/healthz" />}
           </Field>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div className="grid grid-cols-2 items-start gap-4 sm:grid-cols-4">
             <Field label="Interval" error={errs.interval}>
-              {(id) => <Input id={id} value={f.interval} onChange={(e) => set({ interval: e.target.value })} placeholder="30s" />}
+              {(id) => <Input id={id} className="tabular-nums" value={f.interval} onChange={(e) => set({ interval: e.target.value })} placeholder="30s" />}
             </Field>
             <Field label="Timeout" error={errs.timeout}>
-              {(id) => <Input id={id} value={f.timeout} onChange={(e) => set({ timeout: e.target.value })} placeholder="30s" />}
+              {(id) => <Input id={id} className="tabular-nums" value={f.timeout} onChange={(e) => set({ timeout: e.target.value })} placeholder="30s" />}
             </Field>
             <Field label="Retries">
-              {(id) => <Input id={id} inputMode="numeric" value={f.retries} onChange={(e) => set({ retries: e.target.value.replace(/\D/g, "") })} placeholder="3" />}
+              {(id) => <Input id={id} inputMode="numeric" className="tabular-nums" value={f.retries} onChange={(e) => set({ retries: e.target.value.replace(/\D/g, "") })} placeholder="3" />}
             </Field>
             <Field label="Start period" error={errs.start_period}>
-              {(id) => <Input id={id} value={f.start_period} onChange={(e) => set({ start_period: e.target.value })} placeholder="0s" />}
+              {(id) => <Input id={id} className="tabular-nums" value={f.start_period} onChange={(e) => set({ start_period: e.target.value })} placeholder="0s" />}
             </Field>
           </div>
-        </div>
+        </fieldset>
       </Section>
     </form>
   );
 }
 
-function WebhookSection({ org, app }: { org: string; app: App }) {
+function WebhookSection({ org, app, writer }: Props) {
   const [secret, setSecret] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [rotate, setRotate] = useState(false);
@@ -582,35 +598,49 @@ function WebhookSection({ org, app }: { org: string; app: App }) {
     <Section
       title="Webhook"
       description={
-        isGit(app.source)
-          ? `A push to ${app.source.git.ref} deploys. GitHub: content type application/json, this secret. Gitea/Forgejo: this secret. GitLab: secret token.`
-          : "Any authenticated call deploys, pulling the tag's current digest: a registry's webhook, or a CI job with ?token=SECRET."
+        isGit(app.source) ? (
+          <>
+            A push to <span className="font-mono text-foreground/80">{app.source.git.ref}</span> deploys. GitHub: content type application/json and this secret. Gitea
+            and Forgejo: this secret. GitLab: as the secret token.
+          </>
+        ) : (
+          <>
+            Any authenticated call deploys, pulling the tag's current digest: a registry's webhook, or a CI job with <span className="font-mono">?token=SECRET</span>.
+          </>
+        )
       }
     >
-      <div className="grid gap-4">
+      <div className="grid gap-5">
         <div className="grid gap-2">
-          <Label>URL</Label>
-          <CopyField value={url} label="Copy URL" />
+          <Label>Payload URL</Label>
+          <CopyField value={url} label="Copy" />
         </div>
-        <div className="grid gap-2">
-          <Label>Secret</Label>
-          {secret ? (
-            <CopyField value={secret} label="Copy secret" />
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" onClick={() => reveal(false)} disabled={pending}>
-                {pending ? <Loader2 className="animate-spin" /> : <Eye />}
-                Reveal secret
+        {writer && (
+          <div className="grid gap-2">
+            <Label>Secret</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="min-w-0 flex-1 basis-60">
+                {secret ? (
+                  <CopyField value={secret} label="Copy" />
+                ) : (
+                  <div className="flex h-9 items-center rounded-md border border-dashed bg-muted/30 px-3 font-mono text-xs tracking-[0.2em] text-muted-foreground select-none" aria-label="Hidden">
+                    ••••••••••••••••••••
+                  </div>
+                )}
+              </div>
+              {!secret && (
+                <Button type="button" variant="outline" onClick={() => reveal(false)} disabled={pending}>
+                  {pending ? <Loader2 className="animate-spin" /> : <Eye />}
+                  Reveal
+                </Button>
+              )}
+              <Button type="button" variant="ghost" className="text-muted-foreground" onClick={() => setRotate(true)} disabled={pending}>
+                <RefreshCw />
+                Rotate
               </Button>
             </div>
-          )}
-          <div>
-            <Button type="button" variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setRotate(true)} disabled={pending}>
-              <RefreshCw />
-              Rotate secret
-            </Button>
           </div>
-        </div>
+        )}
       </div>
       <ConfirmDialog
         open={rotate}

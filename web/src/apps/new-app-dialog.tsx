@@ -1,8 +1,8 @@
 // "New app" from an environment: from an image or git here; Database opens
 // the database dialog and Template the catalog, aimed at this environment.
 import { useQueryClient } from "@tanstack/react-query";
-import { Box, Database, GitBranch, LayoutTemplate, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { ArrowUpRight, Box, CircleCheck, Database, GitBranch, LayoutTemplate, Loader2, Plus, Rocket } from "lucide-react";
+import { type ReactNode, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
@@ -16,6 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import { errorMessage } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 import { type App, type Builder, type Deployment, keys } from "./api";
+import { openDeployment } from "./use-deploy";
 import { nameProblem } from "./util";
 import { NewDatabaseDialog } from "@/data/new-database";
 
@@ -33,6 +34,16 @@ export function gitUrlProblem(url: string): string | null {
   }
   if (/^[A-Za-z0-9._-]+@[^\s:]+:\S+$/.test(u)) return null;
   return "An https://, ssh://, git:// or git@host:owner/repo URL.";
+}
+
+/** A numbered step heading inside the dialog. */
+function StepLabel({ n, children }: { n: number; children: ReactNode }) {
+  return (
+    <p className="flex items-center gap-2 text-[13px] font-medium">
+      <span className="flex size-5 items-center justify-center rounded-full border bg-muted text-[11px] font-semibold text-muted-foreground tabular-nums">{n}</span>
+      {children}
+    </p>
+  );
 }
 
 export function NewAppDialog({
@@ -136,16 +147,23 @@ export function NewAppDialog({
     };
     try {
       const r = await callTool<{ app: App; deployment?: Deployment }>("app_create", args, org);
-      await qc.invalidateQueries({ queryKey: keys.org(org) });
+      // The app page renders from the cache at once, with no loading state.
+      qc.setQueryData(keys.app(org, name), r.app);
       if (auth === "ssh-generate") {
+        void qc.invalidateQueries({ queryKey: keys.org(org) });
         const k = await callTool<{ public_key: string }>("app_deploy_key", { name }, org);
         setKeyStep({ app: name, key: k.public_key });
         return;
       }
-      toast.success(`App ${name} created`);
       onOpenChange(false);
       reset();
-      navigate(r.deployment ? `${base}/${name}/deployments/${r.deployment.id}` : `${base}/${name}`);
+      if (r.deployment) {
+        openDeployment(qc, navigate, org, r.deployment);
+      } else {
+        toast.success(`App ${name} created`);
+        navigate(`${base}/${encodeURIComponent(name)}`);
+        void qc.invalidateQueries({ queryKey: keys.org(org) });
+      }
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -159,7 +177,7 @@ export function NewAppDialog({
     try {
       const r = await callTool<{ deployment: Deployment }>("app_deploy", { name: keyStep.app }, org);
       onOpenChange(false);
-      navigate(`${base}/${keyStep.app}/deployments/${r.deployment.id}`);
+      openDeployment(qc, navigate, org, r.deployment);
       reset();
     } catch (err) {
       setError(errorMessage(err));
@@ -208,20 +226,26 @@ export function NewAppDialog({
     <>
     <NewDatabaseDialog org={org} project={project} environment={environment} open={dbOpen} onOpenChange={setDbOpen} />
     <Dialog open={open} onOpenChange={close}>
-      <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-xl">
+      <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>New app</DialogTitle>
           <DialogDescription>
-            In {project} / {environment}. Other apps here reach it as <span className="font-mono">{name || "NAME"}.{project}-{environment}</span>.
+            In <span className="font-medium text-foreground">{project}</span> / <span className="font-medium text-foreground">{environment}</span>. Other apps here
+            reach it as{" "}
+            <span className="font-mono text-xs text-foreground/80">
+              {name || "NAME"}.{project}-{environment}
+            </span>
+            .
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={submit} className="grid gap-4">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label="Source">
+        <form onSubmit={submit} className="grid gap-5">
+          <StepLabel n={1}>Choose a source</StepLabel>
+          <div className="-mt-2 grid grid-cols-2 gap-2.5 sm:grid-cols-4" role="radiogroup" aria-label="Source">
             {(
               [
-                ["image", Box, "Image", "A container image"],
-                ["git", GitBranch, "Git", "Build a repository"],
-                ["database", Database, "Database", "Postgres, MySQL, Redis…"],
+                ["image", Box, "Image", "Run a container image"],
+                ["git", GitBranch, "Git repository", "Build and run a repo"],
+                ["database", Database, "Database", "Postgres, MySQL, Redis"],
                 ["template", LayoutTemplate, "Template", "A one-click app"],
               ] as const
             ).map(([k, Icon, label, hint]) => {
@@ -243,32 +267,53 @@ export function NewAppDialog({
                     } else setKind(k);
                   }}
                   className={cn(
-                    "flex flex-col items-start gap-1 rounded-lg border p-3 text-left text-sm transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none",
-                    active ? "border-foreground/60 bg-accent" : "hover:bg-accent/60",
+                    "group relative flex flex-row items-center gap-2.5 rounded-xl border bg-background p-2.5 text-left sm:flex-col sm:items-start sm:gap-2.5 sm:p-3.5 text-sm shadow-xs transition-[border-color,box-shadow,background-color] focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none",
+                    active ? "border-foreground/70 ring-1 ring-foreground/70" : "hover:border-foreground/25 hover:bg-muted/40",
                   )}
                 >
-                  <Icon className="size-4" />
-                  <span className="font-medium">{label}</span>
-                  <span className="text-xs text-muted-foreground">{hint}</span>
+                  <span
+                    className={cn(
+                      "flex size-8 shrink-0 items-center justify-center rounded-lg border transition-colors sm:size-9",
+                      active ? "border-foreground bg-foreground text-background" : "bg-gradient-to-b from-background to-muted text-muted-foreground group-hover:text-foreground",
+                    )}
+                  >
+                    <Icon className="size-4" />
+                  </span>
+                  <span className="grid gap-0.5">
+                    <span className="flex items-center gap-1 font-medium">
+                      {label}
+                      {(k === "database" || k === "template") && <ArrowUpRight className="size-3.5 text-muted-foreground" aria-label="Opens its own flow" />}
+                    </span>
+                    <span className="hidden text-xs leading-snug text-muted-foreground sm:block">{hint}</span>
+                  </span>
+                  {active && <CircleCheck className="absolute top-3 right-3 size-4 text-foreground" aria-hidden />}
                 </button>
               );
             })}
           </div>
+          <StepLabel n={2}>{kind === "image" ? "Configure the image" : "Configure the repository"}</StepLabel>
           <FormError>{error}</FormError>
-          <Field label="Name" error={show(nameErr, name)} hint="The service name in its environment: a-z, 0-9 and -.">
-            {(id, d) => (
-              <Input
-                id={id}
-                aria-describedby={d}
-                autoFocus
-                autoComplete="off"
-                spellCheck={false}
-                value={name}
-                onChange={(e) => setName(e.target.value.toLowerCase())}
-                placeholder="web"
-              />
-            )}
-          </Field>
+          <div className="-mt-1 grid grid-cols-[minmax(0,1fr)_6.5rem] items-start gap-3 sm:grid-cols-[minmax(0,1fr)_9rem] sm:gap-4">
+            <Field label="Name" error={show(nameErr, name)} hint="a-z, 0-9 and -.">
+              {(id, d) => (
+                <Input
+                  id={id}
+                  aria-describedby={d}
+                  autoFocus
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={name}
+                  onChange={(e) => setName(e.target.value.toLowerCase())}
+                  placeholder="web"
+                />
+              )}
+            </Field>
+            <Field label="Port" error={portErr} hint="Optional.">
+              {(id, d) => (
+                <Input id={id} aria-describedby={d} inputMode="numeric" className="tabular-nums" value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))} placeholder="80" />
+              )}
+            </Field>
+          </div>
           {kind === "image" ? (
             <Field label="Image" error={show(imageErr, image)} hint="docker:nginx:1.27, ghcr:org/app:tag, or a local alias. Pinned to its digest at each deploy.">
               {(id, d) => (
@@ -357,29 +402,26 @@ export function NewAppDialog({
               </div>
             </>
           )}
-          <Field label="Port (optional)" error={portErr} hint="The port the app listens on; domains use it by default.">
-            {(id, d) => (
-              <Input id={id} aria-describedby={d} inputMode="numeric" className="sm:w-40" value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))} placeholder="80" />
-            )}
-          </Field>
-          <div className="flex items-center justify-between gap-4 rounded-lg border p-3">
-            <div className="space-y-0.5">
-              <Label htmlFor="new-app-deploy">Deploy right away</Label>
-              <p className="text-xs text-muted-foreground">
-                {kind === "git" && auth === "ssh-generate" ? "After you add the deploy key." : "Then follow the deployment's log live."}
-              </p>
+          <div className="-mx-6 -mb-6 mt-1 flex flex-col gap-4 border-t bg-muted/40 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <Switch id="new-app-deploy" className="mt-0.5" checked={deploy} onCheckedChange={setDeploy} disabled={kind === "git" && auth === "ssh-generate"} />
+              <div className="grid gap-0.5">
+                <Label htmlFor="new-app-deploy">Deploy right away</Label>
+                <p className="text-xs text-muted-foreground">
+                  {kind === "git" && auth === "ssh-generate" ? "After you add the deploy key." : "And follow its log live."}
+                </p>
+              </div>
             </div>
-            <Switch id="new-app-deploy" checked={deploy} onCheckedChange={setDeploy} disabled={kind === "git" && auth === "ssh-generate"} />
+            <div className="flex flex-col-reverse gap-2 sm:flex-row">
+              <Button type="button" variant="outline" onClick={() => close(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={pending || (touched && invalid)}>
+                {pending ? <Loader2 className="animate-spin" /> : deploy && auth !== "ssh-generate" ? <Rocket /> : <Plus />}
+                {deploy && auth !== "ssh-generate" ? "Create and deploy" : "Create app"}
+              </Button>
+            </div>
           </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => close(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={pending || (touched && invalid)}>
-              {pending && <Loader2 className="animate-spin" />}
-              {deploy && auth !== "ssh-generate" ? "Create and deploy" : "Create app"}
-            </Button>
-          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>

@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { callTool } from "@/api/tools";
 import type { Deployment } from "@/apps/api";
+import { splitStack } from "@/apps/live";
 import { durationSeconds } from "@/jobs/api";
 
 export interface PreviewSettings {
@@ -42,6 +43,14 @@ export interface Preview {
   /** new, queued, building, deploying, done, failed, superseded, removing */
   status: string;
   last_deployment: Deployment | null;
+}
+
+/** What a preview event's message starts with (src/app/preview.rs pevent). */
+export const previewPrefix = (app: string, n?: number) => (n === undefined ? `app ${app} preview #` : `app ${app} preview #${n}: `);
+
+/** Whether a feed event is about `app`'s previews (or preview `n`) in `org`. */
+export function isPreviewEvent(e: { stack: string; service?: string; message: string }, org: string, app: string, n?: number): boolean {
+  return splitStack(e.stack).org === org && e.service === app && e.message.startsWith(previewPrefix(app, n));
 }
 
 export const pkeys = {

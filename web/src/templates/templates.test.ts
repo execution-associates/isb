@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { emptyMeans, filterTemplates, formProblems, tagCounts, type TemplateSummary, valuesToSend, type Variable, variableProblem } from "./api";
+import { type DeployAnswer, emptyMeans, filterTemplates, followOf, formProblems, tagCounts, type TemplateSummary, valuesToSend, type Variable, variableProblem } from "./api";
 
 const v = (p: Partial<Variable>): Variable => ({ name: "x", required: false, generated: false, ...p });
 
@@ -72,5 +72,19 @@ describe("catalog search", () => {
       ["dev", 1],
       ["git", 1],
     ]);
+  });
+});
+
+describe("following a template deploy", () => {
+  const answer = (first?: { app: string; id: number }, deploying?: string[]): DeployAnswer =>
+    ({ ref: "builtin/x", plan: { order: ["x-db", "x-cache", "x"] } as DeployAnswer["plan"], first_deployment: first, deploying }) as DeployAnswer;
+
+  it("opens the first app's deployment and chains the rest in order", () => {
+    expect(followOf(answer({ app: "x-db", id: 4 }))).toEqual({ app: "x-db", id: 4, then: ["x-cache", "x"] });
+    expect(followOf(answer({ app: "x-db", id: 4 }, ["x-db", "x"]))).toEqual({ app: "x-db", id: 4, then: ["x"] });
+  });
+
+  it("falls back when no deployment was queued", () => {
+    expect(followOf(answer())).toBeNull();
   });
 });

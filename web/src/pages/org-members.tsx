@@ -1,36 +1,23 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound, Mail, MoreHorizontal, RefreshCw, Trash2, UserMinus, UserPlus, Users } from "lucide-react";
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { auth, type Invitation, type Member, type OrgToken, type Role } from "@/api/auth";
 import { PageHeader } from "@/components/app-shell";
-import { ConfirmDialog, Empty, Panel } from "@/components/confirm";
+import { ConfirmDialog, Empty, EmptyLine, Panel, PersonAvatar } from "@/components/confirm";
 import { FormError } from "@/components/form";
 import { InviteDialog } from "@/components/invite-dialog";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/status";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { describeScopes, maxGrant, memberLock, roleChoices } from "@/lib/admin";
-import { dateTime, initials, relativeTime } from "@/lib/format";
+import { dateTime, relativeTime } from "@/lib/format";
 import { errorMessage } from "@/lib/messages";
+import { cn } from "@/lib/utils";
 import { useOrgPage } from "@/pages/org-common";
-
-const Rows = () => (
-  <div className="space-y-2 p-5">
-    <Skeleton className="h-9" />
-    <Skeleton className="h-9" />
-  </div>
-);
+import { IconLead, ListRow, RolePill, RowsSkeleton, Tag } from "@/pages/org-ui";
 
 export function MembersPage() {
   const { org, me, redirect } = useOrgPage();
@@ -56,16 +43,20 @@ export function MembersPage() {
         }
       />
       <div className="grid gap-6">
-        <MembersPanel org={org} />
-        {manage && <InvitationsPanel org={org} />}
-        {manage && <TokensPanel org={org} />}
+        <MembersPanel org={org} onInvite={manage ? () => setInvite(true) : undefined} />
+        {manage && (
+          <div className="grid items-start gap-6 xl:grid-cols-2">
+            <InvitationsPanel org={org} onInvite={() => setInvite(true)} />
+            <TokensPanel org={org} />
+          </div>
+        )}
       </div>
       <InviteDialog org={org} open={invite} onOpenChange={setInvite} />
     </>
   );
 }
 
-function MembersPanel({ org }: { org: string }) {
+function MembersPanel({ org, onInvite }: { org: string; onInvite?: () => void }) {
   const { me } = useOrgPage();
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -86,64 +77,71 @@ function MembersPanel({ org }: { org: string }) {
   };
 
   return (
-    <Panel
-      title="Members"
-      description={list.data ? `${members.length} ${members.length === 1 ? "person" : "people"}` : undefined}
-    >
+    <Panel title="People" count={list.data ? members.length : undefined} description="Everyone with a role in this org.">
       {list.isLoading ? (
-        <Rows />
+        <RowsSkeleton />
       ) : list.error ? (
         <div className="p-5">
           <FormError>{errorMessage(list.error)}</FormError>
         </div>
       ) : members.length === 0 ? (
-        <Empty icon={<Users />} title="Nobody here yet">
-          Invite the first owner; they manage the org from then on.
+        <Empty
+          icon={<Users />}
+          title="Nobody here yet"
+          action={
+            onInvite && (
+              <Button size="sm" onClick={onInvite}>
+                <UserPlus />
+                Invite the first owner
+              </Button>
+            )
+          }
+        >
+          The first person you invite as owner manages the org from then on.
         </Empty>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="pl-5">Person</TableHead>
-              <TableHead className="w-32 sm:w-36">Role</TableHead>
-              <TableHead className="hidden md:table-cell">Last active</TableHead>
-              <TableHead className="w-10 pr-3 sm:w-12 sm:pr-5" aria-label="Actions" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+        <>
+          <div className="hidden grid-cols-[minmax(0,1fr)_8rem_8rem_2.5rem] gap-3 border-b bg-muted/30 px-5 py-2 text-xs font-medium text-muted-foreground md:grid">
+            <span>Person</span>
+            <span>Role</span>
+            <span className="text-right">Last active</span>
+            <span className="sr-only">Actions</span>
+          </div>
+          <ul className="divide-y">
             {members.map((m) => {
               const self = m.user.id === me.user.id;
               const lock = memberLock(me, org, { role: m.role, userId: m.user.id }, owners);
               const choices = lock ? [] : roleChoices(me, org, m.role);
               return (
-                <TableRow key={m.user.id}>
-                  <TableCell className="max-w-0 pl-5">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <Avatar className="hidden size-8 shrink-0 rounded-md sm:flex">
-                        <AvatarFallback className="rounded-md text-xs">{initials(m.user.name, m.user.email)}</AvatarFallback>
-                      </Avatar>
-                      <div className="min-w-0">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className="truncate font-medium">{m.user.name || m.user.email.split("@")[0]}</span>
-                          {self && (
-                            <Badge variant="secondary" className="font-normal">
-                              you
-                            </Badge>
-                          )}
-                          {m.user.disabled && (
-                            <Badge variant="outline" className="border-destructive/40 font-normal text-destructive">
-                              disabled
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="truncate text-xs text-muted-foreground">{m.user.email}</div>
+                <li
+                  key={m.user.id}
+                  className={cn(
+                    "grid grid-cols-[minmax(0,1fr)_auto_2rem] items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30 sm:px-5 md:grid-cols-[minmax(0,1fr)_8rem_8rem_2.5rem]",
+                    m.user.disabled && "opacity-70",
+                  )}
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <PersonAvatar name={m.user.name} email={m.user.email} />
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate text-sm font-medium">{m.user.name || m.user.email.split("@")[0]}</span>
+                        {self && <span className="shrink-0 rounded bg-muted px-1.5 py-px text-[11px] font-medium text-muted-foreground">you</span>}
+                        {m.user.disabled && (
+                          <StatusBadge tone="danger" className="h-5">
+                            Disabled
+                          </StatusBadge>
+                        )}
+                      </div>
+                      <div className="truncate text-xs text-muted-foreground">
+                        {m.user.email}
+                        <span className="md:hidden"> · {m.last_active ? `active ${relativeTime(m.last_active)}` : "never active"}</span>
                       </div>
                     </div>
-                  </TableCell>
-                  <TableCell>
+                  </div>
+                  <div>
                     {choices.length > 1 ? (
                       <Select value={m.role} onValueChange={(v) => setRole(m, v as Role)}>
-                        <SelectTrigger size="sm" className="w-28 capitalize" aria-label={`Role of ${m.user.email}`}>
+                        <SelectTrigger size="sm" className="w-[6.75rem] text-xs capitalize data-[size=sm]:h-7" aria-label={`Role of ${m.user.email}`}>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -155,15 +153,13 @@ function MembersPanel({ org }: { org: string }) {
                         </SelectContent>
                       </Select>
                     ) : (
-                      <Badge variant={m.role === "owner" ? "default" : "secondary"} className="capitalize" title={lock ?? undefined}>
-                        {m.role}
-                      </Badge>
+                      <RolePill role={m.role} title={lock ?? undefined} />
                     )}
-                  </TableCell>
-                  <TableCell className="hidden text-muted-foreground md:table-cell" title={dateTime(m.last_active)}>
+                  </div>
+                  <div className="hidden text-right text-xs text-muted-foreground tabular-nums md:block" title={dateTime(m.last_active)}>
                     {m.last_active ? relativeTime(m.last_active) : "Never"}
-                  </TableCell>
-                  <TableCell className="pr-5 text-right">
+                  </div>
+                  <div className="flex justify-end">
                     {(self || !lock) && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -179,12 +175,12 @@ function MembersPanel({ org }: { org: string }) {
                         </DropdownMenuContent>
                       </DropdownMenu>
                     )}
-                  </TableCell>
-                </TableRow>
+                  </div>
+                </li>
               );
             })}
-          </TableBody>
-        </Table>
+          </ul>
+        </>
       )}
       <ConfirmDialog
         open={!!removing}
@@ -213,56 +209,70 @@ function MembersPanel({ org }: { org: string }) {
   );
 }
 
-function InvitationsPanel({ org }: { org: string }) {
+function InvitationsPanel({ org, onInvite }: { org: string; onInvite: () => void }) {
   const qc = useQueryClient();
   const list = useQuery({ queryKey: ["invitations", org], queryFn: () => auth.orgInvitations(org) });
   const [resend, setResend] = useState<Invitation | null>(null);
   const [revoking, setRevoking] = useState<Invitation | null>(null);
   const items = list.data?.invitations ?? [];
   return (
-    <Panel title="Pending invitations" description="Links work once and expire after 7 days.">
+    <Panel
+      title="Pending invitations"
+      count={list.data ? items.length : undefined}
+      description="Each link works once and expires after 7 days."
+    >
       {list.isLoading ? (
-        <Rows />
+        <RowsSkeleton rows={2} />
       ) : list.error ? (
         <div className="p-5">
           <FormError>{errorMessage(list.error)}</FormError>
         </div>
       ) : items.length === 0 ? (
-        <Empty icon={<Mail />} title="No pending invitations" />
+        <EmptyLine
+          icon={<Mail />}
+          action={
+            <Button variant="outline" size="sm" onClick={onInvite}>
+              <UserPlus />
+              Invite
+            </Button>
+          }
+        >
+          No invitations waiting.
+        </EmptyLine>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="pl-5">Email</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead className="hidden sm:table-cell">Expires</TableHead>
-              <TableHead className="w-24 pr-5" aria-label="Actions" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.map((i) => (
-              <TableRow key={i.id}>
-                <TableCell className="max-w-0 truncate pl-5 font-medium">{i.email}</TableCell>
-                <TableCell>
-                  <Badge variant="secondary" className="capitalize">
-                    {i.role}
-                  </Badge>
-                </TableCell>
-                <TableCell className="hidden text-muted-foreground sm:table-cell" title={dateTime(i.expires_at)}>
-                  {relativeTime(i.expires_at)}
-                </TableCell>
-                <TableCell className="pr-5 text-right whitespace-nowrap">
-                  <Button variant="ghost" size="icon-sm" aria-label={`New link for ${i.email}`} title="New link" onClick={() => setResend(i)}>
-                    <RefreshCw />
-                  </Button>
-                  <Button variant="ghost" size="icon-sm" aria-label={`Revoke invitation for ${i.email}`} title="Revoke" onClick={() => setRevoking(i)}>
-                    <Trash2 />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <ul className="divide-y">
+          {items.map((i) => (
+            <ListRow
+              key={i.id}
+              lead={
+                <IconLead dashed>
+                  <Mail />
+                </IconLead>
+              }
+              title={
+                <>
+                  <span className="truncate">{i.email}</span>
+                  <RolePill role={i.role} />
+                </>
+              }
+              sub={<span title={dateTime(i.expires_at)}>Sent {relativeTime(i.created_at)} · expires {relativeTime(i.expires_at)}</span>}
+            >
+              <Button variant="ghost" size="icon-sm" aria-label={`New link for ${i.email}`} title="Make a new link" onClick={() => setResend(i)}>
+                <RefreshCw />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground hover:text-destructive"
+                aria-label={`Revoke invitation for ${i.email}`}
+                title="Revoke"
+                onClick={() => setRevoking(i)}
+              >
+                <Trash2 />
+              </Button>
+            </ListRow>
+          ))}
+        </ul>
       )}
       <InviteDialog
         org={org}
@@ -292,57 +302,61 @@ function TokensPanel({ org }: { org: string }) {
   const [revoking, setRevoking] = useState<OrgToken | null>(null);
   const items = list.data?.tokens ?? [];
   return (
-    <Panel
-      title="API tokens"
-      description={
-        <>
-          Every token confined to {org}, whoever made it. People make their own on their Account page.
-        </>
-      }
-    >
+    <Panel title="API tokens" count={list.data ? items.length : undefined} description={`Every token confined to ${org}, whoever made it.`}>
       {list.isLoading ? (
-        <Rows />
+        <RowsSkeleton rows={2} />
       ) : list.error ? (
         <div className="p-5">
           <FormError>{errorMessage(list.error)}</FormError>
         </div>
       ) : items.length === 0 ? (
-        <Empty icon={<KeyRound />} title="No tokens in this org" />
+        <EmptyLine
+          icon={<KeyRound />}
+          action={
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/account#tokens">Make a token</Link>
+            </Button>
+          }
+        >
+          No tokens yet. People make their own on their Account page.
+        </EmptyLine>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="pl-5">Token</TableHead>
-              <TableHead className="hidden sm:table-cell">Held by</TableHead>
-              <TableHead className="hidden md:table-cell">Last used</TableHead>
-              <TableHead className="hidden lg:table-cell">Expires</TableHead>
-              <TableHead className="w-12 pr-5" aria-label="Actions" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.map((t) => (
-              <TableRow key={t.id}>
-                <TableCell className="max-w-0 pl-5">
-                  <div className="truncate font-medium">{t.name}</div>
-                  <div className="truncate text-xs text-muted-foreground">{describeScopes(t.scopes)}</div>
-                  <div className="truncate text-xs text-muted-foreground sm:hidden">{t.user.email}</div>
-                </TableCell>
-                <TableCell className="hidden max-w-0 truncate text-muted-foreground sm:table-cell">{t.user.email}</TableCell>
-                <TableCell className="hidden text-muted-foreground md:table-cell">
-                  {t.last_used ? relativeTime(t.last_used) : "Never"}
-                </TableCell>
-                <TableCell className="hidden text-muted-foreground lg:table-cell">
-                  {t.expires_at ? relativeTime(t.expires_at) : "Never"}
-                </TableCell>
-                <TableCell className="pr-5 text-right">
-                  <Button variant="ghost" size="icon-sm" aria-label={`Revoke ${t.name}`} title="Revoke" onClick={() => setRevoking(t)}>
-                    <Trash2 />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <ul className="divide-y">
+          {items.map((t) => (
+            <ListRow
+              key={t.id}
+              lead={
+                <IconLead>
+                  <KeyRound />
+                </IconLead>
+              }
+              title={
+                <>
+                  <span className="truncate">{t.name}</span>
+                  <Tag>{describeScopes(t.scopes)}</Tag>
+                </>
+              }
+              sub={
+                <>
+                  {t.user.email} · {t.last_used ? `used ${relativeTime(t.last_used)}` : "never used"}
+                  <span className="md:hidden"> · {t.expires_at ? `expires ${relativeTime(t.expires_at)}` : "no expiry"}</span>
+                </>
+              }
+              meta={<span title={dateTime(t.expires_at)}>{t.expires_at ? `Expires ${relativeTime(t.expires_at)}` : "No expiry"}</span>}
+            >
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground hover:text-destructive"
+                aria-label={`Revoke ${t.name}`}
+                title="Revoke"
+                onClick={() => setRevoking(t)}
+              >
+                <Trash2 />
+              </Button>
+            </ListRow>
+          ))}
+        </ul>
       )}
       <ConfirmDialog
         open={!!revoking}

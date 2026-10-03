@@ -2,17 +2,25 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CircleAlert, KeyRound, Loader2, Rocket, Save, Undo2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
 import { FormError } from "@/components/form";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { canWrite } from "@/lib/admin";
 import { errorMessage } from "@/lib/messages";
+import { useMe } from "@/lib/session";
+import { cn } from "@/lib/utils";
 import { type App, type Deployment, keys, useSecretNames } from "./api";
 import { QueryError, Section } from "./components";
 import { EnvEditor } from "./env-editor";
 import { analyzeEnv, missingSecrets } from "./envtext";
+import { openDeployment } from "./use-deploy";
+
+const PLACEHOLDER = "# One variable per line\nPORT=8080\nDATABASE_URL=${{secret.database-url}}";
+
+const SECRET_CHIP = "rounded-sm bg-violet-500/15 px-1.5 py-0.5 font-mono text-xs text-violet-700 dark:text-violet-300";
 
 export function EnvironmentTab({ org, app }: { org: string; app: App }) {
   const env = useQuery({
@@ -20,6 +28,7 @@ export function EnvironmentTab({ org, app }: { org: string; app: App }) {
     queryFn: () => callTool<{ env: string }>("app_env_get", { name: app.name }, org).then((r) => r.env),
   });
   const secrets = useSecretNames(org);
+  const writer = canWrite(useMe().data!, org);
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [text, setText] = useState<string | null>(null);
@@ -48,10 +57,10 @@ export function EnvironmentTab({ org, app }: { org: string; app: App }) {
       const r = await callTool<{ env: string; deployment?: Deployment }>("app_env_set", { name: app.name, env: value, deploy }, org);
       qc.setQueryData(keys.env(org, app.name), r.env);
       setText(null);
-      await qc.invalidateQueries({ queryKey: keys.org(org) });
       if (r.deployment) {
-        navigate(`/orgs/${encodeURIComponent(org)}/apps/${app.name}/deployments/${r.deployment.id}`);
+        openDeployment(qc, navigate, org, r.deployment);
       } else {
+        await qc.invalidateQueries({ queryKey: keys.org(org) });
         toast.success("Environment saved. It takes effect at the next deploy.");
       }
     } catch (e) {
@@ -61,65 +70,97 @@ export function EnvironmentTab({ org, app }: { org: string; app: App }) {
     }
   };
 
-  if (env.isLoading) return <Skeleton className="h-80" />;
   if (env.error) return <QueryError error={env.error} />;
   const blocked = errors.length > 0 || missing.size > 0;
+  const o = encodeURIComponent(org);
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_17rem]">
       <Section
         title="Environment variables"
         description={
           <>
-            One <span className="font-mono">KEY=value</span> per line; <span className="font-mono">#</span> comments are kept. Refer to an org secret with{" "}
-            <span className="rounded-sm bg-violet-500/15 px-1 font-mono text-violet-700 dark:text-violet-300">{"${{secret.NAME}}"}</span>: only the reference is ever shown.
+            One <span className="font-mono text-foreground/80">KEY=value</span> per line; <span className="font-mono">#</span> comments are kept. Refer to an org secret
+            with <span className={cn(SECRET_CHIP, "px-1 py-0 text-[12px]")}>{"${{secret.NAME}}"}</span> and only the reference is ever shown.
           </>
         }
         footer={
-          <>
-            {dirty && (
-              <Button type="button" variant="ghost" onClick={() => setText(null)} disabled={!!pending}>
-                <Undo2 />
-                Discard
+          writer && (
+            <>
+              <span className={cn("mr-auto text-xs text-muted-foreground", !dirty && "hidden sm:inline")}>
+                {dirty ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="size-1.5 rounded-full bg-warning" aria-hidden />
+                    Unsaved changes
+                  </span>
+                ) : (
+                  "Applies at the next deploy."
+                )}
+              </span>
+              {dirty && (
+                <Button type="button" variant="ghost" onClick={() => setText(null)} disabled={!!pending}>
+                  <Undo2 />
+                  Discard
+                </Button>
+              )}
+              <Button type="button" variant="outline" onClick={() => save(false)} disabled={!dirty || blocked || !!pending}>
+                {pending === "save" ? <Loader2 className="animate-spin" /> : <Save />}
+                Save
               </Button>
-            )}
-            <Button type="button" variant="outline" onClick={() => save(false)} disabled={!dirty || blocked || !!pending}>
-              {pending === "save" ? <Loader2 className="animate-spin" /> : <Save />}
-              Save
-            </Button>
-            <Button type="button" onClick={() => save(true)} disabled={blocked || !!pending}>
-              {pending === "deploy" ? <Loader2 className="animate-spin" /> : <Rocket />}
-              {dirty ? "Save and deploy" : "Deploy"}
-            </Button>
-          </>
+              <Button type="button" onClick={() => save(true)} disabled={blocked || !!pending}>
+                {pending === "deploy" ? <Loader2 className="animate-spin" /> : <Rocket />}
+                {dirty ? "Save and deploy" : "Deploy"}
+              </Button>
+            </>
+          )
         }
       >
         <div className="grid gap-3">
           <FormError>{error}</FormError>
-          <EnvEditor value={value} onChange={setText} analysis={analysis} missing={missing} label={`Environment of ${app.name}`} />
+          {env.isLoading ? (
+            <div className="grid min-h-64 content-start gap-2.5 rounded-lg border p-4" aria-busy>
+              {[48, 64, 36, 56, 40].map((w, i) => (
+                <Skeleton key={i} className="h-3.5" style={{ width: `${w}%` }} />
+              ))}
+            </div>
+          ) : (
+            <EnvEditor
+              value={value}
+              onChange={setText}
+              analysis={analysis}
+              missing={missing}
+              readOnly={!writer}
+              label={`Environment of ${app.name}`}
+              placeholder={writer ? PLACEHOLDER : "No variables."}
+            />
+          )}
           {(errors.length > 0 || warnings.length > 0 || missing.size > 0) && (
-            <ul className="grid gap-1.5 text-sm">
+            <ul className="grid gap-1.5 rounded-lg border bg-muted/30 px-3 py-2.5 text-[13px]">
               {errors.map((p, i) => (
                 <li key={`e${i}`} className="flex gap-2 text-destructive">
-                  <CircleAlert className="mt-0.5 size-4 shrink-0" />
+                  <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
                   <span>
-                    Line {p.line}: {p.message}
+                    <span className="font-medium tabular-nums">Line {p.line}:</span> {p.message}
                   </span>
                 </li>
               ))}
               {[...missing].map((m) => (
                 <li key={`m${m}`} className="flex gap-2 text-destructive">
-                  <KeyRound className="mt-0.5 size-4 shrink-0" />
+                  <KeyRound className="mt-0.5 size-3.5 shrink-0" />
                   <span>
-                    No secret <span className="font-mono">{m}</span> in {org}. Create it first (Secrets), or fix the name.
+                    No secret <span className="font-mono">{m}</span> in {org}.{" "}
+                    <Link to={`/orgs/${o}/secrets`} className="font-medium underline underline-offset-4">
+                      Create it
+                    </Link>{" "}
+                    or fix the name.
                   </span>
                 </li>
               ))}
               {warnings.map((p, i) => (
                 <li key={`w${i}`} className="flex gap-2 text-warning">
-                  <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
                   <span>
-                    Line {p.line}: {p.message}
+                    <span className="font-medium tabular-nums">Line {p.line}:</span> {p.message}
                   </span>
                 </li>
               ))}
@@ -127,42 +168,37 @@ export function EnvironmentTab({ org, app }: { org: string; app: App }) {
           )}
         </div>
       </Section>
-      <div className="grid content-start gap-4 text-sm">
-        <Section title="In this environment">
-          <dl className="grid gap-2">
-            <div className="flex justify-between gap-2">
-              <dt className="text-muted-foreground">Variables</dt>
-              <dd className="tabular-nums">{analysis.vars.size}</dd>
+      <div className="grid content-start gap-4">
+        <Section title="Summary">
+          <dl className="grid grid-cols-2 gap-3">
+            <div className="rounded-lg border bg-muted/30 px-3 py-2.5">
+              <dt className="text-xs text-muted-foreground">Variables</dt>
+              <dd className="text-xl font-semibold tabular-nums">{analysis.vars.size}</dd>
             </div>
-            <div className="flex justify-between gap-2">
-              <dt className="text-muted-foreground">Secret references</dt>
-              <dd className="tabular-nums">{analysis.secrets.length}</dd>
+            <div className="rounded-lg border bg-muted/30 px-3 py-2.5">
+              <dt className="text-xs text-muted-foreground">Secrets</dt>
+              <dd className="text-xl font-semibold tabular-nums">{analysis.secrets.length}</dd>
             </div>
           </dl>
           {analysis.secrets.length > 0 && (
             <ul className="mt-3 flex flex-wrap gap-1.5">
               {analysis.secrets.map((s) => (
-                <li
-                  key={s}
-                  className={
-                    missing.has(s)
-                      ? "rounded-sm bg-destructive/10 px-1.5 py-0.5 font-mono text-xs text-destructive"
-                      : "rounded-sm bg-violet-500/15 px-1.5 py-0.5 font-mono text-xs text-violet-700 dark:text-violet-300"
-                  }
-                >
+                <li key={s} className={missing.has(s) ? "rounded-sm bg-destructive/10 px-1.5 py-0.5 font-mono text-xs text-destructive" : SECRET_CHIP}>
                   {s}
                 </li>
               ))}
             </ul>
           )}
         </Section>
-        <p className="px-1 text-xs leading-relaxed text-muted-foreground">
-          Plain values are instance configuration, readable by whoever can read the instance. Put anything sensitive in a secret. Other apps here are reachable by name:{" "}
-          <span className="font-mono">
-            NAME.{app.project}-{app.environment}
-          </span>
-          .
-        </p>
+        <div className="grid gap-2 px-1 text-xs leading-relaxed text-muted-foreground">
+          <p>Plain values are readable by whoever can read the instance. Put anything sensitive in a secret.</p>
+          <p>
+            Other apps here are reachable by name:{" "}
+            <span className="font-mono break-words text-foreground/80">
+              NAME.{app.project}-{app.environment}
+            </span>
+          </p>
+        </div>
       </div>
     </div>
   );

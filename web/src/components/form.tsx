@@ -82,11 +82,11 @@ export function Field({
       </div>
       {children(id, hint || error ? hid : undefined)}
       {error ? (
-        <p id={hid} className="text-sm text-destructive">
+        <p id={hid} className="text-[13px] text-destructive">
           {error}
         </p>
       ) : hint ? (
-        <p id={hid} className="text-sm text-muted-foreground">
+        <p id={hid} className="text-[13px] leading-relaxed text-muted-foreground">
           {hint}
         </p>
       ) : null}
@@ -157,6 +157,33 @@ export function CopyButton({ value, label = "Copy" }: { value: string; label?: s
   );
 }
 
+/** A small icon-only copy button, for a value shown inline (an address, a name). */
+export function CopyIconButton({ value, label = "Copy", className }: { value: string; label?: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // clipboard blocked (http on a non-localhost origin)
+    }
+  };
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-sm"
+      onClick={copy}
+      aria-label={copied ? "Copied" : label}
+      title={copied ? "Copied" : label}
+      className={cn("size-7 shrink-0 text-muted-foreground hover:text-foreground", className)}
+    >
+      {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
+    </Button>
+  );
+}
+
 /** A read-only value with a copy button, for secrets shown once. */
 export function CopyField({ value, label = "Copy", mono = true }: { value: string; label?: string; mono?: boolean }) {
   return (
@@ -175,7 +202,7 @@ export function CopyField({ value, label = "Copy", mono = true }: { value: strin
 
 export function Divider({ children }: { children: ReactNode }) {
   return (
-    <div className="relative flex items-center gap-3 text-xs text-muted-foreground uppercase">
+    <div className="relative flex items-center gap-3 text-xs text-muted-foreground">
       <span className="h-px flex-1 bg-border" />
       {children}
       <span className="h-px flex-1 bg-border" />

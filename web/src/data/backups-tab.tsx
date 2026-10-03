@@ -2,7 +2,7 @@
 // and the files in its bucket (restore from any), plus the restores into or
 // from this database.
 import { useQueryClient } from "@tanstack/react-query";
-import { ArchiveRestore, DatabaseBackup, FileArchive, Loader2, MoreHorizontal, Pause, Pencil, Play, Plus, Trash2, Upload } from "lucide-react";
+import { ArchiveRestore, Cloud, DatabaseBackup, FileArchive, Loader2, MoreHorizontal, Pause, Pencil, Play, Plus, Trash2, Upload } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
@@ -11,6 +11,7 @@ import { keys } from "@/apps/api";
 import { ConfirmDialog, EmptyState, QueryError, Section } from "@/apps/components";
 import { bytes } from "@/apps/util";
 import { ScheduleText } from "@/components/cron-field";
+import { StatusBadge } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -35,7 +36,24 @@ export function BackupsTab({ org, app }: { org: string; app: { name: string } })
   const [create, setCreate] = useState(false);
   const [log, setLog] = useState<LogTarget | null>(null);
 
-  if (db.isLoading || backups.isLoading) return <Skeleton className="h-64" />;
+  if (db.isLoading || backups.isLoading) {
+    return (
+      <div className="grid gap-6">
+        <Skeleton className="h-4 w-2/3" />
+        <Card className="gap-3 px-5 py-5">
+          <div className="flex gap-3">
+            <Skeleton className="size-9 rounded-lg" />
+            <div className="grid flex-1 gap-2">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-3 w-64" />
+              <Skeleton className="h-3 w-52" />
+            </div>
+          </div>
+        </Card>
+        <Skeleton className="h-36 rounded-xl" />
+      </div>
+    );
+  }
   if (db.error || !db.data) return <QueryError error={db.error} />;
   if (backups.error) return <QueryError error={backups.error} />;
   const list = backups.data ?? [];
@@ -85,7 +103,7 @@ export function BackupsTab({ org, app }: { org: string; app: { name: string } })
       )}
 
       <Section title="Restores" description="Into this database, or from its backups into new ones. Newest first.">
-        <div className="-mx-5 -mb-5">
+        <div className="-mx-5 -mb-5 border-t">
           <RunsTable
             runs={restoreRuns}
             onOpen={(r) => setLog({ kind: "restore", run: r })}
@@ -167,22 +185,32 @@ function BackupCard({
   return (
     <Card className="gap-0 overflow-hidden py-0">
       <div className="flex flex-wrap items-start gap-4 px-5 pt-5 pb-4">
-        <div className="min-w-0 flex-1 basis-72 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium">{b.name}</span>
-            {entry.last_run && <RunBadge status={entry.last_run.status} />}
-            {!b.enabled && <span className="rounded border px-1.5 text-xs text-muted-foreground">paused</span>}
+        <div className="flex min-w-0 flex-1 basis-72 gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/50">
+            <DatabaseBackup className="size-4 text-muted-foreground" />
+          </span>
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[15px] font-semibold tracking-tight">{b.name}</span>
+              {entry.last_run && <RunBadge status={entry.last_run.status} />}
+              {!b.enabled && <StatusBadge tone="muted">Paused</StatusBadge>}
+            </div>
+            <div className="text-sm">
+              <ScheduleText schedule={b.schedule} timezone={b.timezone} next={entry.next_run} enabled={b.enabled} />
+            </div>
+            <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1">
+                <Cloud className="size-3.5" />
+                <span className="font-mono">{b.destination}</span>
+              </span>
+              <span>keep {b.keep}</span>
+              <span>{b.compression}</span>
+              <span>{entry.last_run ? `last ${relativeTime(entry.last_run.started_at / 1000)}` : "never run"}</span>
+            </p>
           </div>
-          <div className="text-sm">
-            <ScheduleText schedule={b.schedule} timezone={b.timezone} next={entry.next_run} enabled={b.enabled} />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            to <span className="font-mono">{b.destination}</span> · keep {b.keep} · {b.compression}
-            {entry.last_run ? ` · last ${relativeTime(entry.last_run.started_at / 1000)}` : " · never run"}
-          </p>
         </div>
         {canWrite && (
-          <div className="flex shrink-0 gap-2">
+          <div className="flex shrink-0 gap-2 pl-12 sm:pl-0">
             <Button variant="outline" onClick={runNow} disabled={busy || running}>
               {busy || running ? <Loader2 className="animate-spin" /> : <Upload />}
               {running ? "Backing up" : "Back up now"}
@@ -224,11 +252,12 @@ function BackupCard({
             onClick={() => setView(v)}
             aria-pressed={view === v}
             className={cn(
-              "relative px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground",
+              "relative px-2.5 py-2 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none",
               view === v && "text-foreground after:absolute after:inset-x-2 after:-bottom-px after:h-0.5 after:rounded-full after:bg-foreground",
             )}
           >
             {v === "runs" ? "Runs" : "Files in the bucket"}
+            {v === "runs" && runs.data?.length ? <span className="ml-1.5 text-xs text-muted-foreground tabular-nums">{runs.data.length}</span> : null}
           </button>
         ))}
       </div>
@@ -241,7 +270,10 @@ function BackupCard({
           <RunsTable runs={runs.data ?? []} onOpen={(r) => onLog({ kind: "backup", backup: b.name, run: r })} detail={sizeDetail} empty={`The first runs ${entry.next_run ? relativeTime(Date.parse(entry.next_run) / 1000) : "when resumed"}.`} />
         )
       ) : files.isLoading ? (
-        <Skeleton className="m-5 h-24" />
+        <div className="grid gap-3 p-5">
+          <Skeleton className="h-3.5 w-3/4" />
+          <Skeleton className="h-3.5 w-2/3" />
+        </div>
       ) : files.error ? (
         <div className="p-5">
           <QueryError error={files.error} />
@@ -251,19 +283,20 @@ function BackupCard({
           <QueryError error={new Error(fileList.error)} />
         </div>
       ) : !fileList?.length ? (
-        <EmptyState icon={FileArchive} title="No files yet">
+        <EmptyState compact icon={FileArchive} title="No files yet">
           A successful run puts one here.
         </EmptyState>
       ) : (
         <ul className="divide-y">
           {fileList.map((f) => (
-            <li key={f.key} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3 text-sm">
+            <li key={f.key} className="flex items-center gap-3 px-5 py-2.5 text-sm transition-colors hover:bg-muted/30">
+              <FileArchive className="size-4 shrink-0 text-muted-foreground" />
               <div className="min-w-0 flex-1">
                 <p className="truncate font-mono text-xs" title={f.key}>
                   {f.key.split("/").pop()}
                 </p>
-                <p className="text-xs text-muted-foreground">
-                  {new Date(f.taken_at).toLocaleString()} · {bytes(f.size)} · {f.compression}
+                <p className="text-xs text-muted-foreground tabular-nums" title={new Date(f.taken_at).toLocaleString()}>
+                  {relativeTime(Date.parse(f.taken_at) / 1000)} · {bytes(f.size)} · {f.compression}
                 </p>
               </div>
               {canWrite && (

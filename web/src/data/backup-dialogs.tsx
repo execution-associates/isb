@@ -2,12 +2,13 @@
 // destination (backup_destination_create with a test), and a restore
 // (backup_restore into this database or a new one).
 import { useQueryClient } from "@tanstack/react-query";
-import { CircleCheck, CircleX, Loader2 } from "lucide-react";
+import { CircleCheck, CircleX, Cloud, Loader2, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
 import { keys, useSecretNames } from "@/apps/api";
+import { EmptyState } from "@/apps/components";
 import { CronField } from "@/components/cron-field";
 import { Field, FormError, PasswordInput } from "@/components/form";
 import { Button } from "@/components/ui/button";
@@ -109,11 +110,22 @@ export function BackupScheduleDialog({
           <DialogDescription>The engine's own dump runs inside the database and streams, compressed, to the bucket. The oldest beyond the count kept are deleted.</DialogDescription>
         </DialogHeader>
         {noDest ? (
-          <div className="grid gap-3 text-sm">
-            <p>The org has no backup destination yet. Add an S3-compatible bucket first.</p>
-            <Button asChild className="justify-self-start">
-              <Link to={`/orgs/${encodeURIComponent(org)}/backups`}>Add a destination</Link>
-            </Button>
+          <div className="rounded-lg border border-dashed">
+            <EmptyState
+              compact
+              icon={Cloud}
+              title="No backup destination yet"
+              action={
+                <Button asChild>
+                  <Link to={`/orgs/${encodeURIComponent(org)}/backups`}>
+                    <Plus />
+                    Add a destination
+                  </Link>
+                </Button>
+              }
+            >
+              Backups go to an S3-compatible bucket. Add one on the Backups page first.
+            </EmptyState>
           </div>
         ) : (
           <form onSubmit={submit} className="grid gap-4">
@@ -191,12 +203,14 @@ export interface TestResult {
 
 export function TestOutcome({ r }: { r: TestResult }) {
   return r.ok ? (
-    <p className="flex items-center gap-2 text-sm text-success">
-      <CircleCheck className="size-4" />
-      Wrote, read back and deleted a test object{r.ms !== undefined ? ` in ${r.ms} ms` : ""}.
+    <p className="flex animate-fade-up items-center gap-2 rounded-md border border-success/25 bg-success/10 px-3 py-2 text-[13px] text-success">
+      <CircleCheck className="size-4 shrink-0" />
+      <span>
+        Wrote, read back and deleted a test object{r.ms !== undefined ? <span className="tabular-nums"> in {r.ms} ms</span> : ""}.
+      </span>
     </p>
   ) : (
-    <p className="flex items-start gap-2 text-sm text-destructive">
+    <p className="flex animate-fade-up items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-[13px] text-destructive">
       <CircleX className="mt-0.5 size-4 shrink-0" />
       <span className="min-w-0 break-words">{r.error ?? "The test failed."}</span>
     </p>
@@ -325,11 +339,21 @@ export function DestinationDialog({ org, open, onOpenChange }: { org: string; op
           <div className="grid gap-3 rounded-lg border p-3">
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <span className="font-medium">Key pair</span>
-              <div className="ml-auto flex gap-1">
+              <div className="ml-auto inline-flex rounded-md border bg-muted/50 p-0.5" role="radiogroup" aria-label="Key pair">
                 {(["new", "existing"] as const).map((k) => (
-                  <Button key={k} type="button" size="xs" variant="outline" className={cn(f.keys === k && "border-foreground/50 bg-accent")} onClick={() => set({ keys: k })}>
+                  <button
+                    key={k}
+                    type="button"
+                    role="radio"
+                    aria-checked={f.keys === k}
+                    className={cn(
+                      "rounded-[5px] px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none",
+                      f.keys === k && "bg-background text-foreground shadow-xs",
+                    )}
+                    onClick={() => set({ keys: k })}
+                  >
                     {k === "new" ? "Enter keys" : "Existing secrets"}
-                  </Button>
+                  </button>
                 ))}
               </div>
             </div>
@@ -492,12 +516,23 @@ export function RestoreDialog({
                 aria-checked={mode === k}
                 onClick={() => setMode(k)}
                 className={cn(
-                  "flex flex-col items-start justify-start rounded-lg border p-3 text-left text-sm transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none",
-                  mode === k ? (k === "into" ? "border-destructive/60 bg-destructive/5" : "border-foreground/60 bg-accent") : "hover:bg-accent/60",
+                  "flex items-start gap-3 rounded-lg border p-3 text-left text-sm transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none",
+                  mode === k ? (k === "into" ? "border-destructive/60 bg-destructive/5" : "border-foreground/50 bg-accent/60") : "hover:bg-accent/50",
                 )}
               >
-                <span className="font-medium">{label}</span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">{hint}</span>
+                <span
+                  aria-hidden
+                  className={cn(
+                    "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border",
+                    mode === k && (k === "into" ? "border-destructive" : "border-foreground"),
+                  )}
+                >
+                  {mode === k && <span className={cn("size-2 rounded-full", k === "into" ? "bg-destructive" : "bg-foreground")} />}
+                </span>
+                <span className="min-w-0">
+                  <span className="font-medium">{label}</span>
+                  <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{hint}</span>
+                </span>
               </button>
             ))}
           </div>

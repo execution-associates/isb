@@ -5,14 +5,14 @@ import { cn } from "@/lib/utils";
 import { initialsOf } from "./api";
 
 const HUES = [
-  "bg-sky-500/15 text-sky-700 dark:text-sky-300",
-  "bg-violet-500/15 text-violet-700 dark:text-violet-300",
-  "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-  "bg-amber-500/15 text-amber-700 dark:text-amber-300",
-  "bg-rose-500/15 text-rose-700 dark:text-rose-300",
-  "bg-teal-500/15 text-teal-700 dark:text-teal-300",
-  "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300",
-  "bg-orange-500/15 text-orange-700 dark:text-orange-300",
+  "from-sky-500/20 to-sky-500/5 text-sky-700 ring-sky-500/20 dark:text-sky-300",
+  "from-violet-500/20 to-violet-500/5 text-violet-700 ring-violet-500/20 dark:text-violet-300",
+  "from-emerald-500/20 to-emerald-500/5 text-emerald-700 ring-emerald-500/20 dark:text-emerald-300",
+  "from-amber-500/20 to-amber-500/5 text-amber-700 ring-amber-500/25 dark:text-amber-300",
+  "from-rose-500/20 to-rose-500/5 text-rose-700 ring-rose-500/20 dark:text-rose-300",
+  "from-teal-500/20 to-teal-500/5 text-teal-700 ring-teal-500/20 dark:text-teal-300",
+  "from-indigo-500/20 to-indigo-500/5 text-indigo-700 ring-indigo-500/20 dark:text-indigo-300",
+  "from-orange-500/20 to-orange-500/5 text-orange-700 ring-orange-500/25 dark:text-orange-300",
 ];
 
 export function hueOf(name: string): number {
@@ -23,7 +23,14 @@ export function hueOf(name: string): number {
 
 export function TemplateLogo({ name, className }: { name: string; className?: string }) {
   return (
-    <span aria-hidden className={cn("flex size-10 shrink-0 items-center justify-center rounded-lg text-sm font-semibold", HUES[hueOf(name)], className)}>
+    <span
+      aria-hidden
+      className={cn(
+        "flex size-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br text-sm font-semibold tracking-tight ring-1 ring-inset",
+        HUES[hueOf(name)],
+        className,
+      )}
+    >
       {initialsOf(name)}
     </span>
   );

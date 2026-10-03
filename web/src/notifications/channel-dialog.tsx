@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { errorMessage } from "@/lib/messages";
 import { cn } from "@/lib/utils";
+import { PROVIDER_ICON } from "./icons";
 import { buildRule, type Channel, channelNameProblem, EVENT_GROUPS, type Provider, type ProviderType, PROVIDERS, providerSecrets, selectedKinds, splitList } from "./api";
 
 interface RuleForm {
@@ -204,22 +205,28 @@ export function ChannelDialog({ org, existing, open, onOpenChange }: { org: stri
             {(id, d) => <Input id={id} aria-describedby={d} disabled={!!existing} autoFocus={!existing} spellCheck={false} value={name} onChange={(e) => setName(e.target.value.toLowerCase())} placeholder="ops" />}
           </Field>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-5" role="radiogroup" aria-label="Destination">
-            {PROVIDERS.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                role="radio"
-                aria-checked={type === p.id}
-                onClick={() => setType(p.id)}
-                className={cn(
-                  "flex flex-col items-start justify-start rounded-lg border p-2.5 text-left text-sm transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none",
-                  type === p.id ? "border-foreground/60 bg-accent" : "hover:bg-accent/60",
-                )}
-              >
-                <span className="font-medium">{p.label}</span>
-                <span className="mt-0.5 block text-xs leading-tight text-muted-foreground">{p.hint}</span>
-              </button>
-            ))}
+            {PROVIDERS.map((p) => {
+              const Icon = PROVIDER_ICON[p.id];
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={type === p.id}
+                  onClick={() => setType(p.id)}
+                  className={cn(
+                    "flex flex-col items-start justify-start gap-1.5 rounded-lg border p-2.5 text-left text-sm transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none",
+                    type === p.id ? "border-foreground/60 bg-accent shadow-xs" : "hover:bg-accent/60",
+                  )}
+                >
+                  <Icon className={cn("size-4", type === p.id ? "text-foreground" : "text-muted-foreground")} />
+                  <span>
+                    <span className="block font-medium">{p.label}</span>
+                    <span className="mt-0.5 block text-xs leading-tight text-muted-foreground">{p.hint}</span>
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           {type === "webhook" && (

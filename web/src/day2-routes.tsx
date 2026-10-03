@@ -11,7 +11,23 @@ const TemplatePage = lazy(() => import("@/templates/template-page").then((m) => 
 const BackupsPage = lazy(() => import("@/data/backups-page").then((m) => ({ default: m.BackupsPage })));
 const NotificationsPage = lazy(() => import("@/notifications/notifications-page").then((m) => ({ default: m.NotificationsPage })));
 
-const page = (el: ReactNode) => <Suspense fallback={<Skeleton className="h-64" />}>{el}</Suspense>;
+/** While a page's code loads: its header and a card, not one grey slab. */
+function PageFallback() {
+  return (
+    <div className="grid gap-8">
+      <div className="grid gap-2">
+        <Skeleton className="h-7 w-40" />
+        <Skeleton className="h-4 w-full max-w-md" />
+      </div>
+      <div className="grid gap-4">
+        <Skeleton className="h-28 rounded-xl" />
+        <Skeleton className="h-28 rounded-xl" />
+      </div>
+    </div>
+  );
+}
+
+const page = (el: ReactNode) => <Suspense fallback={<PageFallback />}>{el}</Suspense>;
 
 export function day2Routes() {
   return (

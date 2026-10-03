@@ -1,15 +1,30 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building2, MoreHorizontal, Plus, ScrollText, Server, ShieldCheck, ShieldOff, Trash2, UserCheck, UserX, Users } from "lucide-react";
+import {
+  Boxes,
+  Building2,
+  FolderOpen,
+  MoreHorizontal,
+  Network,
+  Plus,
+  ScrollText,
+  Server,
+  ShieldCheck,
+  ShieldOff,
+  Trash2,
+  UserCheck,
+  UserX,
+  Users,
+} from "lucide-react";
 import { useState } from "react";
-import { Link, Navigate, NavLink, useNavigate, useParams } from "react-router";
+import { Link, Navigate, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
 import { type AdminUser, auth } from "@/api/auth";
 import { callTool, type OrgView, type ServerStatus } from "@/api/tools";
+import { TabLinks } from "@/apps/components";
 import { PageHeader } from "@/components/app-shell";
-import { ConfirmDialog, Empty, Panel } from "@/components/confirm";
-import { Field, FormError, SubmitButton } from "@/components/form";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog, Empty, Panel, PersonAvatar } from "@/components/confirm";
+import { CopyIconButton, Field, FormError, SubmitButton } from "@/components/form";
+import { StatusBadge, StatusDot } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -22,12 +37,13 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { limitLabel, orgNameProblem, parseEgress, plural } from "@/lib/admin";
-import { dateTime, initials, relativeTime } from "@/lib/format";
+import { dateTime, relativeTime } from "@/lib/format";
 import { errorMessage } from "@/lib/messages";
 import { useMe } from "@/lib/session";
 import { cn } from "@/lib/utils";
 import { HistoryPanel } from "@/pages/history";
 import { DeleteOrgDialog } from "@/pages/org-settings";
+import { RowsSkeleton, Tag } from "@/pages/org-ui";
 
 const TABS = [
   { id: "orgs", label: "Orgs", icon: Building2 },
@@ -45,23 +61,7 @@ export function AdminPage() {
   return (
     <>
       <PageHeader title="Platform" description="Every org and user on this server. Only platform admins see this." />
-      <nav className="mb-6 flex gap-1 overflow-x-auto border-b" aria-label="Platform sections">
-        {TABS.map((t) => (
-          <NavLink
-            key={t.id}
-            to={`/admin/${t.id}`}
-            className={({ isActive }) =>
-              cn(
-                "-mb-px flex items-center gap-2 border-b-2 border-transparent px-3 py-2 text-sm font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground",
-                isActive && "border-foreground text-foreground",
-              )
-            }
-          >
-            <t.icon className="size-4" />
-            {t.label}
-          </NavLink>
-        ))}
-      </nav>
+      <TabLinks tabs={TABS.map((t) => ({ ...t, to: `/admin/${t.id}` }))} active={tab} />
       {tab === "orgs" && <OrgsTab />}
       {tab === "users" && <UsersTab />}
       {tab === "server" && <ServerTab />}
@@ -70,12 +70,22 @@ export function AdminPage() {
   );
 }
 
-const Loading = () => (
-  <div className="space-y-2 p-5">
-    <Skeleton className="h-9" />
-    <Skeleton className="h-9" />
-  </div>
-);
+const Loading = () => <RowsSkeleton />;
+
+/** An org's initial on a stable hue, as the sidebar's org switcher shows it. */
+function OrgMark({ name }: { name: string }) {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return (
+    <span
+      aria-hidden
+      className="flex size-8 shrink-0 items-center justify-center rounded-lg text-xs font-semibold text-white uppercase shadow-xs"
+      style={{ background: `linear-gradient(135deg, oklch(0.62 0.13 ${h}), oklch(0.5 0.13 ${(h + 40) % 360}))` }}
+    >
+      {name.slice(0, 1)}
+    </span>
+  );
+}
 
 function OrgsTab() {
   const list = useQuery({ queryKey: ["tool", "org_list"], queryFn: () => callTool<{ orgs: OrgView[] }>("org_list") });
@@ -85,7 +95,8 @@ function OrgsTab() {
   return (
     <Panel
       title="Orgs"
-      description={list.data ? `${orgs.length} on this server` : undefined}
+      count={list.data ? orgs.length : undefined}
+      description="Each org is an isolated incus project with its own network, members and secrets."
       action={
         <Button size="sm" onClick={() => setCreating(true)}>
           <Plus />
@@ -103,47 +114,74 @@ function OrgsTab() {
         <Empty icon={<Building2 />} title="No orgs" />
       ) : (
         <Table>
-          <TableHeader>
-            <TableRow>
+          <TableHeader className="bg-muted/30">
+            <TableRow className="hover:bg-transparent">
               <TableHead className="pl-5">Org</TableHead>
-              <TableHead className="hidden sm:table-cell">Members</TableHead>
-              <TableHead className="hidden sm:table-cell">Stacks</TableHead>
-              <TableHead className="hidden md:table-cell">Instances</TableHead>
+              <TableHead className="hidden text-right sm:table-cell">Members</TableHead>
+              <TableHead className="hidden text-right sm:table-cell">Stacks</TableHead>
+              <TableHead className="hidden w-44 pl-8 md:table-cell">Instances</TableHead>
               <TableHead className="hidden lg:table-cell">Subnet</TableHead>
               <TableHead className="hidden lg:table-cell">Quota</TableHead>
               <TableHead className="w-12 pr-5" aria-label="Actions" />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {orgs.map((o) => (
-              <TableRow key={o.name}>
-                <TableCell className="pl-5">
-                  <Link to={`/orgs/${encodeURIComponent(o.name)}/settings`} className="font-medium break-all hover:underline">
-                    {o.name}
-                  </Link>
-                  <div className="truncate text-xs text-muted-foreground sm:hidden">
-                    {plural(o.members, "member")} · {plural(o.stacks, "stack")}
-                  </div>
-                </TableCell>
-                <TableCell className="hidden tabular-nums sm:table-cell">{o.members}</TableCell>
-                <TableCell className="hidden tabular-nums sm:table-cell">{o.stacks}</TableCell>
-                <TableCell className="hidden tabular-nums md:table-cell">
-                  {o.instances}
-                  {o.instances_limit && <span className="text-muted-foreground"> / {o.instances_limit}</span>}
-                </TableCell>
-                <TableCell className="hidden font-mono text-xs lg:table-cell">{o.subnet ?? "—"}</TableCell>
-                <TableCell className="hidden text-muted-foreground lg:table-cell">
-                  {o.name === "default" ? "—" : !o.cpus && !o.memory ? "No quota" : `${limitLabel(o.cpus)} CPU · ${limitLabel(o.memory)}`}
-                </TableCell>
-                <TableCell className="pr-5 text-right">
-                  {o.name !== "default" && (
-                    <Button variant="ghost" size="icon-sm" aria-label={`Delete ${o.name}`} title="Delete" onClick={() => setDeleting(o)}>
-                      <Trash2 />
-                    </Button>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
+            {orgs.map((o) => {
+              const lim = o.instances_limit && /^\d+$/.test(o.instances_limit) ? Number(o.instances_limit) : null;
+              return (
+                <TableRow key={o.name} className="relative">
+                  <TableCell className="py-3 pl-5">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <OrgMark name={o.name} />
+                      <div className="min-w-0">
+                        <Link
+                          to={`/orgs/${encodeURIComponent(o.name)}/settings`}
+                          className="font-medium break-all after:absolute after:inset-0 focus-visible:outline-none"
+                        >
+                          {o.name}
+                        </Link>
+                        <div className="truncate text-xs text-muted-foreground sm:hidden">
+                          {plural(o.members, "member")} · {plural(o.stacks, "stack")} · {plural(o.instances, "instance")}
+                        </div>
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell className="hidden text-right tabular-nums sm:table-cell">{o.members}</TableCell>
+                  <TableCell className="hidden text-right tabular-nums sm:table-cell">{o.stacks}</TableCell>
+                  <TableCell className="hidden pl-8 md:table-cell">
+                    <div className="flex items-center gap-2.5">
+                      <span className="tabular-nums">
+                        {o.instances}
+                        {lim && <span className="text-muted-foreground"> / {lim}</span>}
+                      </span>
+                      {lim && (
+                        <span className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
+                          <span className="block h-full rounded-full bg-brand" style={{ width: `${Math.min(100, (o.instances / lim) * 100)}%` }} />
+                        </span>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell className="hidden font-mono text-xs text-muted-foreground lg:table-cell">{o.subnet ?? "—"}</TableCell>
+                  <TableCell className="hidden text-[13px] text-muted-foreground lg:table-cell">
+                    {o.name === "default" ? "—" : !o.cpus && !o.memory ? "No quota" : `${limitLabel(o.cpus)} CPU · ${limitLabel(o.memory)}`}
+                  </TableCell>
+                  <TableCell className="relative z-10 pr-5 text-right">
+                    {o.name !== "default" && (
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-muted-foreground hover:text-destructive"
+                        aria-label={`Delete ${o.name}`}
+                        title="Delete"
+                        onClick={() => setDeleting(o)}
+                      >
+                        <Trash2 />
+                      </Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       )}
@@ -273,7 +311,8 @@ function UsersTab() {
   } as const;
   const w = action ? words[action.change] : null;
   return (
-    <Panel title="Users" description={list.data ? `${users.length} account${users.length === 1 ? "" : "s"}` : undefined}>
+    <Panel title="Users" count={list.data ? users.length : undefined} description="Every account on this server and the orgs it belongs to.">
+
       {list.isLoading ? (
         <Loading />
       ) : list.error ? (
@@ -282,8 +321,8 @@ function UsersTab() {
         </div>
       ) : (
         <Table>
-          <TableHeader>
-            <TableRow>
+          <TableHeader className="bg-muted/30">
+            <TableRow className="hover:bg-transparent">
               <TableHead className="pl-5 md:w-2/5">User</TableHead>
               <TableHead className="hidden md:table-cell">Orgs</TableHead>
               <TableHead className="hidden sm:table-cell">Last active</TableHead>
@@ -295,24 +334,22 @@ function UsersTab() {
               const self = u.id === me.user.id;
               return (
                 <TableRow key={u.id} className={cn(u.disabled && "opacity-70")}>
-                  <TableCell className="max-w-0 pl-5">
+                  <TableCell className="max-w-0 py-3 pl-5">
                     <div className="flex min-w-0 items-center gap-3">
-                      <Avatar className="hidden size-8 shrink-0 rounded-md sm:flex">
-                        <AvatarFallback className="rounded-md text-xs">{initials(u.name, u.email)}</AvatarFallback>
-                      </Avatar>
+                      <PersonAvatar name={u.name} email={u.email} />
                       <div className="min-w-0">
-                        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
                           <span className="truncate font-medium">{u.name || u.email.split("@")[0]}</span>
-                          {self && (
-                            <Badge variant="secondary" className="font-normal">
-                              you
-                            </Badge>
+                          {self && <span className="rounded bg-muted px-1.5 py-px text-[11px] font-medium text-muted-foreground">you</span>}
+                          {u.platform_admin && (
+                            <StatusBadge tone="info" className="h-5">
+                              Platform admin
+                            </StatusBadge>
                           )}
-                          {u.platform_admin && <Badge className="font-normal">platform admin</Badge>}
                           {u.disabled && (
-                            <Badge variant="outline" className="border-destructive/40 font-normal text-destructive">
-                              disabled
-                            </Badge>
+                            <StatusBadge tone="danger" className="h-5">
+                              Disabled
+                            </StatusBadge>
                           )}
                         </div>
                         <div className="truncate text-xs text-muted-foreground">{u.email}</div>
@@ -323,16 +360,18 @@ function UsersTab() {
                     {u.memberships.length ? (
                       <div className="flex flex-wrap gap-1">
                         {u.memberships.map((m) => (
-                          <Badge key={m.org} variant="outline" className="font-normal">
-                            {m.org} · {m.role}
-                          </Badge>
+                          <Tag key={m.org} className="h-6 gap-1 text-xs">
+                            <span className="text-foreground/80">{m.org}</span>
+                            <span className="opacity-60">·</span>
+                            {m.role}
+                          </Tag>
                         ))}
                       </div>
                     ) : (
-                      <span className="text-muted-foreground">None</span>
+                      <span className="text-[13px] text-muted-foreground">None</span>
                     )}
                   </TableCell>
-                  <TableCell className="hidden text-muted-foreground sm:table-cell" title={dateTime(u.last_active)}>
+                  <TableCell className="hidden text-[13px] text-muted-foreground tabular-nums sm:table-cell" title={dateTime(u.last_active)}>
                     {u.last_active ? relativeTime(u.last_active) : "Never"}
                   </TableCell>
                   <TableCell className="pr-5 text-right">
@@ -406,54 +445,99 @@ function ServerTab() {
     queryFn: () => callTool<ServerStatus>("server_status"),
     refetchInterval: 15_000,
   });
-  if (s.isLoading) return <Loading />;
+  if (s.isLoading)
+    return (
+      <div className="grid gap-6">
+        <div className="grid gap-3 sm:grid-cols-3">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-20 rounded-xl" />
+          ))}
+        </div>
+        <Skeleton className="h-40 rounded-xl" />
+      </div>
+    );
   if (s.error) return <FormError>{errorMessage(s.error)}</FormError>;
   const d = s.data!;
+  const down = d.routes.reduce((n, r) => n + r.backends.filter((b) => b.down).length, 0);
   return (
     <div className="grid gap-6">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        {[
-          ["isb", d.isb],
-          ["incus", d.incus],
-          ["State directory", d.state_dir],
-        ].map(([k, v]) => (
-          <div key={k} className="min-w-0 rounded-xl border bg-card px-5 py-4 shadow-sm">
-            <div className="text-xs text-muted-foreground">{k}</div>
-            <div className="mt-1 truncate font-mono text-sm font-medium" title={v}>
-              {v}
+        {(
+          [
+            [Server, "isb", d.isb],
+            [Boxes, "incus", d.incus],
+            [FolderOpen, "State directory", d.state_dir],
+          ] as const
+        ).map(([Icon, k, v]) => (
+          <div key={k} className="flex min-w-0 items-center gap-3 rounded-xl border bg-card px-4 py-3.5 shadow-xs">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/50 text-muted-foreground">
+              <Icon className="size-4" />
+            </span>
+            <div className="min-w-0">
+              <div className="text-xs text-muted-foreground">{k}</div>
+              <div className="flex min-w-0 items-center gap-1">
+                <span className="truncate font-mono text-[13px] font-medium" title={v}>
+                  {v}
+                </span>
+                {k === "State directory" && <CopyIconButton value={v} label="Copy path" className="size-6" />}
+              </div>
             </div>
           </div>
         ))}
       </div>
-      <Panel title="Load balancer" description="Published ports and the replicas behind them.">
+      <Panel
+        title={
+          <>
+            Load balancer
+            {d.routes.length > 0 &&
+              (down ? (
+                <StatusBadge tone="warning">{plural(down, "backend")} down</StatusBadge>
+              ) : (
+                <StatusBadge tone="success">All backends up</StatusBadge>
+              ))}
+          </>
+        }
+        description="Published ports and the replicas behind them."
+      >
         {d.routes.length === 0 ? (
-          <Empty title="No published ports" />
+          <Empty icon={<Network />} title="No published ports">
+            Ports a stack publishes show up here with the replicas serving them.
+          </Empty>
         ) : (
           <Table>
-            <TableHeader>
-              <TableRow>
+            <TableHeader className="bg-muted/30">
+              <TableRow className="hover:bg-transparent">
                 <TableHead className="pl-5">Route</TableHead>
                 <TableHead>Listen</TableHead>
                 <TableHead className="hidden md:table-cell">Backends</TableHead>
-                <TableHead className="hidden pr-5 sm:table-cell">Accepted</TableHead>
+                <TableHead className="hidden pr-5 text-right sm:table-cell">Connections</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {d.routes.map((r) => (
                 <TableRow key={r.route}>
-                  <TableCell className="max-w-0 truncate pl-5 font-medium">{r.route}</TableCell>
-                  <TableCell className="font-mono text-xs">{r.listen}</TableCell>
+                  <TableCell className="max-w-0 truncate py-3 pl-5 font-medium">{r.route}</TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">{r.listen}</TableCell>
                   <TableCell className="hidden md:table-cell">
                     <div className="flex flex-wrap gap-1">
                       {r.backends.map((b) => (
-                        <Badge key={b.addr} variant="outline" className={cn("font-mono text-[11px] font-normal", b.down && "border-destructive/40 text-destructive")}>
+                        <span
+                          key={b.addr}
+                          title={b.down ? "Down" : `${b.active} active`}
+                          className={cn(
+                            "inline-flex h-6 items-center gap-1.5 rounded-md border px-2 font-mono text-[11px]",
+                            b.down && "border-destructive/30 text-destructive",
+                          )}
+                        >
+                          <StatusDot tone={b.down ? "danger" : "success"} className="size-1.5" />
                           {b.addr}
-                        </Badge>
+                          {!b.down && b.active > 0 && <span className="text-muted-foreground tabular-nums">{b.active}</span>}
+                        </span>
                       ))}
                     </div>
                   </TableCell>
-                  <TableCell className="hidden pr-5 tabular-nums sm:table-cell">
-                    {r.accepted}
+                  <TableCell className="hidden pr-5 text-right tabular-nums sm:table-cell">
+                    {r.accepted.toLocaleString()}
                     {r.failures > 0 && <span className="text-destructive"> · {r.failures} failed</span>}
                   </TableCell>
                 </TableRow>

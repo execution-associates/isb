@@ -1,12 +1,12 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, FileUp, KeyRound, Link2, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2, Vault } from "lucide-react";
+import { Boxes, Eye, FileUp, HardDrive, KeyRound, Link2, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2, Vault } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { callTool, type SecretList, type SecretMeta, type SecretReference } from "@/api/tools";
 import { PageHeader } from "@/components/app-shell";
 import { ConfirmDialog, Empty, Panel } from "@/components/confirm";
 import { CopyButton, CopyField, Field, FormError, PasswordInput, SubmitButton } from "@/components/form";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -18,7 +18,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   b64ToBytes,
   bytesToB64,
@@ -34,6 +33,7 @@ import { dateTime, relativeTime } from "@/lib/format";
 import { errorMessage } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 import { useOrgPage } from "@/pages/org-common";
+import { Tag } from "@/pages/org-ui";
 
 /** The local secret the onepassword driver reads its service-account token from. */
 const OP_TOKEN = "onepassword-token";
@@ -57,7 +57,7 @@ export function SecretsPage() {
     <>
       <PageHeader
         title="Secrets"
-        description={`Values ${org}'s stacks use by name. They are encrypted at rest and never listed; stacks roll when one changes.`}
+        description={`Values ${org}'s stacks use by name. Encrypted at rest and never listed; stacks roll when one changes.`}
         actions={
           <Button onClick={() => setCreating(true)}>
             <Plus />
@@ -66,41 +66,88 @@ export function SecretsPage() {
         }
       />
       <div className="grid gap-6">
-        <Panel title="Stored secrets" description={list.data ? `${secrets.length} in ${org}` : undefined}>
+        <Panel title="Stored secrets" count={list.data ? secrets.length : undefined} description="Kept by isb in this org's local store, or read from a driver.">
           {list.isLoading ? (
-            <div className="space-y-2 p-5">
-              <Skeleton className="h-9" />
-              <Skeleton className="h-9" />
-            </div>
+            <SecretsSkeleton />
           ) : list.error ? (
             <div className="p-5">
               <FormError>{errorMessage(list.error)}</FormError>
             </div>
           ) : secrets.length === 0 ? (
-            <Empty icon={<KeyRound />} title="No secrets yet">
-              Create one here, or deploy a stack whose compose file gives a secret a value; stacks refer to it as{" "}
-              <code className="font-mono text-xs">{"{external: true}"}</code>.
+            <Empty
+              icon={<KeyRound />}
+              title="No secrets yet"
+              action={
+                <Button size="sm" onClick={() => setCreating(true)}>
+                  <Plus />
+                  New secret
+                </Button>
+              }
+            >
+              Create one here, or deploy a stack whose compose file gives a secret a value. Stacks refer to it as{" "}
+              <code className="font-mono text-xs text-foreground">{"{external: true}"}</code>.
             </Empty>
           ) : (
             <SecretsTable org={org} secrets={secrets} reveal={reveal} />
           )}
         </Panel>
         <ReferencesPanel org={org} refs={list.data?.references ?? []} reveal={reveal} loading={list.isLoading} />
-        <OnePasswordPanel org={org} token={opToken} />
+        <OnePasswordPanel org={org} token={opToken} loading={list.isLoading} />
       </div>
       <ValueDialog org={org} open={creating} onOpenChange={setCreating} />
     </>
   );
 }
 
-function UsedBy({ stacks }: { stacks: string[] }) {
-  if (!stacks.length) return <span className="text-muted-foreground">Not used</span>;
+const COLS = "md:grid-cols-[minmax(0,1.4fr)_7rem_4rem_7rem_minmax(0,1fr)_4.5rem]";
+
+function SecretsSkeleton() {
   return (
-    <div className="flex flex-wrap gap-1">
+    <div className="divide-y">
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="flex items-center gap-3 px-5 py-3.5">
+          <Skeleton className="size-8 rounded-lg" />
+          <Skeleton className="h-3.5 w-44" />
+          <Skeleton className="ml-auto h-5 w-16 rounded-full" />
+          <Skeleton className="hidden h-3 w-20 md:block" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** The store a value comes from, as a small tag with its icon. */
+function DriverTag({ driver }: { driver: string }) {
+  const Icon = driver === "onepassword" ? Vault : driver === "local" ? HardDrive : KeyRound;
+  return (
+    <span className="inline-flex h-5 w-fit shrink-0 items-center gap-1 rounded-full border bg-muted/50 px-2 text-[11px] font-medium text-muted-foreground">
+      <Icon className="size-3" />
+      {driver === "onepassword" ? "1Password" : driver}
+    </span>
+  );
+}
+
+function UsedBy({ stacks }: { stacks: string[] }) {
+  if (!stacks.length) return <span className="text-xs text-muted-foreground/70">Not used</span>;
+  return (
+    <div className="flex min-w-0 flex-wrap gap-1">
       {stacks.map((s) => (
-        <Badge key={s} variant="outline" className="font-normal">
-          {s}
-        </Badge>
+        <span key={s} className="inline-flex h-5 max-w-full items-center gap-1 truncate rounded-md border bg-background px-1.5 font-mono text-[11px] text-foreground/80">
+          <Boxes className="size-3 shrink-0 text-muted-foreground" />
+          <span className="truncate">{s}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function ListHeader({ cols }: { cols: [string, string?][] }) {
+  return (
+    <div className={cn("hidden gap-4 border-b bg-muted/30 px-5 py-2 text-xs font-medium text-muted-foreground md:grid", COLS)}>
+      {cols.map(([label, cls], i) => (
+        <span key={i} className={cls}>
+          {label}
+        </span>
       ))}
     </div>
   );
@@ -114,42 +161,54 @@ function SecretsTable({ org, secrets, reveal }: { org: string; secrets: SecretMe
   const refresh = useRefresh(org);
   return (
     <>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="pl-5">Name</TableHead>
-            <TableHead className="hidden sm:table-cell">Driver</TableHead>
-            <TableHead className="hidden sm:table-cell">Version</TableHead>
-            <TableHead className="hidden md:table-cell">Updated</TableHead>
-            <TableHead className="hidden lg:table-cell">Used by</TableHead>
-            <TableHead className="w-12 pr-5" aria-label="Actions" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {secrets.map((s) => (
-            <TableRow key={s.name}>
-              <TableCell className="max-w-0 pl-5">
-                <div className="truncate font-mono text-[13px] font-medium">{s.name}</div>
-                <div className="mt-1 flex flex-wrap gap-1 empty:hidden">
-                  {Object.entries(s.labels ?? {}).map(([k, v]) => (
-                    <Badge key={k} variant="secondary" className="max-w-full truncate font-mono text-[11px] font-normal">
-                      {k}={v}
-                    </Badge>
-                  ))}
+      <ListHeader cols={[["Name"], ["Driver"], ["Version"], ["Updated"], ["Used by"], ["", "sr-only"]]} />
+      <ul className="divide-y">
+        {secrets.map((s) => {
+          const labels = Object.entries(s.labels ?? {});
+          return (
+            <li key={s.name} className={cn("grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1.5 px-4 py-3 transition-colors hover:bg-muted/30 sm:px-5", COLS)}>
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="hidden size-8 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground sm:flex">
+                  <KeyRound className="size-3.5" />
+                </span>
+                <div className="min-w-0">
+                  <div className="truncate font-mono text-[13px] font-medium" title={s.name}>
+                    {s.name}
+                  </div>
+                  {labels.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {labels.map(([k, v]) => (
+                        <Tag key={k} mono>
+                          {k}={v}
+                        </Tag>
+                      ))}
+                    </div>
+                  )}
+                  {/* Phone: the columns fold into one meta line. */}
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground md:hidden">
+                    <DriverTag driver={s.driver} />
+                    <span className="font-mono tabular-nums">v{s.version}</span>
+                    <span>· {relativeTime(s.updated_at)}</span>
+                    {s.used_by.length > 0 && <span className="w-full truncate">Used by {s.used_by.join(", ")}</span>}
+                  </div>
                 </div>
-                <div className="mt-1 text-xs text-muted-foreground sm:hidden">
-                  {s.driver} · v{s.version} · {s.used_by.length ? `used by ${s.used_by.join(", ")}` : "not used"}
-                </div>
-              </TableCell>
-              <TableCell className="hidden text-muted-foreground sm:table-cell">{s.driver}</TableCell>
-              <TableCell className="hidden tabular-nums sm:table-cell">v{s.version}</TableCell>
-              <TableCell className="hidden text-muted-foreground md:table-cell" title={dateTime(s.updated_at)}>
+              </div>
+              <div className="hidden md:block">
+                <DriverTag driver={s.driver} />
+              </div>
+              <div className="hidden font-mono text-xs text-muted-foreground tabular-nums md:block">v{s.version}</div>
+              <div className="hidden text-xs text-muted-foreground tabular-nums md:block" title={dateTime(s.updated_at)}>
                 {relativeTime(s.updated_at)}
-              </TableCell>
-              <TableCell className="hidden lg:table-cell">
+              </div>
+              <div className="hidden min-w-0 md:block">
                 <UsedBy stacks={s.used_by} />
-              </TableCell>
-              <TableCell className="pr-5 text-right">
+              </div>
+              <div className="flex items-center justify-end gap-0.5">
+                {reveal && (
+                  <Button variant="ghost" size="icon-sm" aria-label={`Reveal ${s.name}`} title="Reveal value" onClick={() => setRevealing(s.name)}>
+                    <Eye />
+                  </Button>
+                )}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${s.name}`}>
@@ -181,11 +240,11 @@ function SecretsTable({ org, secrets, reveal }: { org: string; secrets: SecretMe
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
       <ValueDialog org={org} open={!!setting} onOpenChange={(o) => !o && setSetting(null)} existing={setting ?? undefined} />
       <RevealDialog org={org} name={revealing} onClose={() => setRevealing(null)} />
       <ConfirmDialog
@@ -235,110 +294,135 @@ function ReferencesPanel({ org, refs, reveal, loading }: { org: string; refs: Se
   return (
     <Panel
       title="Driver references"
+      count={refs.length}
       description="Values stacks read straight from an external store. isb checks them for new versions on each stack's refresh interval; refresh to check now."
     >
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="pl-5">Reference</TableHead>
-            <TableHead className="hidden sm:table-cell">Driver</TableHead>
-            <TableHead className="hidden sm:table-cell">Version</TableHead>
-            <TableHead className="hidden md:table-cell">Used by</TableHead>
-            <TableHead className="w-24 pr-5" aria-label="Actions" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {refs.map((r) => (
-            <TableRow key={r.name}>
-              <TableCell className="max-w-0 pl-5">
-                <div className="truncate font-mono text-[13px]">{r.name}</div>
-                <div className="text-xs text-muted-foreground sm:hidden">
-                  {r.driver} · v{r.version}
+      <ListHeader cols={[["Reference"], ["Driver"], ["Version"], ["", ""], ["Used by"], ["", "sr-only"]]} />
+      <ul className="divide-y">
+        {refs.map((r) => (
+          <li key={r.name} className={cn("grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 px-4 py-3 transition-colors hover:bg-muted/30 sm:px-5", COLS)}>
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="hidden size-8 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground sm:flex">
+                <Link2 className="size-3.5" />
+              </span>
+              <div className="min-w-0">
+                <div className="truncate font-mono text-[13px]" title={r.name}>
+                  {r.name}
                 </div>
-              </TableCell>
-              <TableCell className="hidden text-muted-foreground sm:table-cell">{r.driver}</TableCell>
-              <TableCell className="hidden tabular-nums sm:table-cell">v{r.version}</TableCell>
-              <TableCell className="hidden md:table-cell">
-                <UsedBy stacks={r.used_by} />
-              </TableCell>
-              <TableCell className="pr-5 text-right whitespace-nowrap">
-                {reveal && (
-                  <Button variant="ghost" size="icon-sm" aria-label={`Reveal ${r.name}`} title="Reveal value" onClick={() => setRevealing(r.name)}>
-                    <Eye />
-                  </Button>
-                )}
-                <Button variant="ghost" size="icon-sm" aria-label={`Refresh ${r.name}`} title="Refresh now" onClick={() => refresh(r.name)}>
-                  <RefreshCw />
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground md:hidden">
+                  <DriverTag driver={r.driver} />
+                  <span className="font-mono tabular-nums">v{r.version}</span>
+                </div>
+              </div>
+            </div>
+            <div className="hidden md:block">
+              <DriverTag driver={r.driver} />
+            </div>
+            <div className="hidden font-mono text-xs text-muted-foreground tabular-nums md:block">v{r.version}</div>
+            <div className="hidden md:block" />
+            <div className="hidden min-w-0 md:block">
+              <UsedBy stacks={r.used_by} />
+            </div>
+            <div className="flex items-center justify-end gap-0.5">
+              {reveal && (
+                <Button variant="ghost" size="icon-sm" aria-label={`Reveal ${r.name}`} title="Reveal value" onClick={() => setRevealing(r.name)}>
+                  <Eye />
                 </Button>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+              )}
+              <Button variant="ghost" size="icon-sm" aria-label={`Refresh ${r.name}`} title="Refresh now" onClick={() => refresh(r.name)}>
+                <RefreshCw />
+              </Button>
+            </div>
+          </li>
+        ))}
+      </ul>
       <RevealDialog org={org} name={revealing} onClose={() => setRevealing(null)} />
     </Panel>
   );
 }
 
-function OnePasswordPanel({ org, token }: { org: string; token?: SecretMeta }) {
+function Step({ n, children }: { n: number; children: ReactNode }) {
+  return (
+    <li className="flex gap-3">
+      <span className="flex size-5 shrink-0 items-center justify-center rounded-full border bg-background text-[11px] font-semibold text-foreground tabular-nums">
+        {n}
+      </span>
+      <div className="min-w-0 text-[13px] leading-relaxed text-muted-foreground">{children}</div>
+    </li>
+  );
+}
+
+const Code = ({ children }: { children: ReactNode }) => (
+  <code className="rounded border bg-muted/50 px-1 py-px font-mono text-[12px] text-foreground">{children}</code>
+);
+
+function OnePasswordPanel({ org, token, loading }: { org: string; token?: SecretMeta; loading: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <Panel
+      icon={<Vault />}
       title={
-        <span className="flex items-center gap-2">
-          <Vault className="size-4" />
+        <>
           1Password
-          {token ? (
-            <Badge variant="outline" className="border-success/40 font-normal text-success">
-              connected
-            </Badge>
-          ) : (
-            <Badge variant="secondary" className="font-normal">
-              not set up
-            </Badge>
-          )}
-        </span>
+          {!loading &&
+            (token ? (
+              <StatusBadge tone="success">Connected</StatusBadge>
+            ) : (
+              <StatusBadge tone="muted">Not set up</StatusBadge>
+            ))}
+        </>
       }
       description="Let stacks read values straight from a 1Password vault, read-only, with this org's own service account."
       action={
-        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <Button variant={token ? "outline" : "default"} size="sm" onClick={() => setOpen(true)}>
           <Link2 />
-          {token ? "Replace token" : "Set up"}
+          {token ? "Replace token" : "Connect 1Password"}
         </Button>
       }
     >
-      <div className="grid gap-4 p-5 text-sm md:grid-cols-2">
-        <ol className="list-decimal space-y-2 pl-5 text-muted-foreground marker:text-foreground">
-          <li>
-            In 1Password, create a <span className="text-foreground">service account</span> with read access to the
-            vaults this org may use, and copy its token.
-          </li>
-          <li>
-            Store it here as <code className="font-mono text-xs text-foreground">{OP_TOKEN}</code> (a local secret).
-            Each org uses only its own token.
+      <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <ol className="space-y-3.5">
+          <Step n={1}>
+            In 1Password, create a <span className="font-medium text-foreground">service account</span> with read access to
+            the vaults this org may use, and copy its token.
+          </Step>
+          <Step n={2}>
+            Store it here as <Code>{OP_TOKEN}</Code>, a local secret. Each org uses only its own token.
             {token && (
-              <span className="block text-xs">
+              <span className="mt-1 block text-xs">
                 Set {relativeTime(token.updated_at)}, version {token.version}.
               </span>
             )}
-          </li>
-          <li>
-            Refer to a value as <code className="font-mono text-xs text-foreground">vault/item/field</code> (or{" "}
-            <code className="font-mono text-xs text-foreground">vault/item/section/field</code>): the{" "}
-            <code className="font-mono text-xs">op://</code> path without its scheme. Use an item's ID if its title
-            contains a <code className="font-mono text-xs">/</code>.
-          </li>
+          </Step>
+          <Step n={3}>
+            Refer to a value as <Code>vault/item/field</Code> (or <Code>vault/item/section/field</Code>): the{" "}
+            <Code>op://</Code> path without its scheme. Use an item's ID if its title contains a <Code>/</Code>.
+          </Step>
         </ol>
-        <pre className="overflow-x-auto rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed">
-          {`secrets:
+        <div className="min-w-0 overflow-hidden rounded-lg border border-terminal-border bg-terminal">
+          <div className="flex items-center justify-between border-b border-terminal-border px-3 py-1.5">
+            <span className="font-mono text-[11px] text-neutral-400">compose.yaml</span>
+          </div>
+          <pre className="overflow-x-auto p-3 font-mono text-xs leading-relaxed text-neutral-200">
+            <span className="text-neutral-400">secrets:</span>
+            {`
   db_password:
-    driver: onepassword
-    name: prod/postgres/password
-    refresh: 15m      # default 1h
-services:
+    driver: `}
+            <span className="text-emerald-300">onepassword</span>
+            {`
+    name: `}
+            <span className="text-emerald-300">prod/postgres/password</span>
+            {`
+    refresh: 15m      `}
+            <span className="text-neutral-500"># default 1h</span>
+            {`
+`}
+            <span className="text-neutral-400">services:</span>
+            {`
   web:
     secrets: [db_password]`}
-        </pre>
+          </pre>
+        </div>
       </div>
       <ValueDialog
         org={org}
@@ -614,13 +698,21 @@ function RevealDialog({ org, name, onClose }: { org: string; name: string | null
     <Dialog open={!!name} onOpenChange={(o) => !o && close()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle className="break-all">{value ? name : `Reveal ${name}?`}</DialogTitle>
+          <div className="mb-1 flex size-9 items-center justify-center rounded-lg border bg-muted/50 text-muted-foreground">
+            <Eye className="size-4" />
+          </div>
+          <DialogTitle className="font-mono text-base break-all">{value ? name : `Reveal ${name}?`}</DialogTitle>
           <DialogDescription>
             {value
               ? `Hidden again in ${left} second${left === 1 ? "" : "s"}.`
               : `The value is shown on this screen for ${REVEAL_SECONDS} seconds. Make sure nobody is looking over your shoulder.`}
           </DialogDescription>
         </DialogHeader>
+        {value && (
+          <div className="h-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label="Time left" aria-valuemin={0} aria-valuemax={REVEAL_SECONDS} aria-valuenow={left}>
+            <div className="h-full rounded-full bg-warning transition-[width] duration-1000 ease-linear" style={{ width: `${(left / REVEAL_SECONDS) * 100}%` }} />
+          </div>
+        )}
         <FormError>{error}</FormError>
         {value &&
           (value.text !== null && value.text.includes("\n") ? (

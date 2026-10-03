@@ -10,6 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { StatusDot } from "@/components/status";
+import type { Tone } from "@/lib/status";
 import { type App, serviceOf, useStack } from "./api";
 import { EmptyState } from "./components";
 import { terminalUrl } from "./util";
@@ -44,7 +47,9 @@ export default function TerminalTab({ org, app }: { org: string; app: App }) {
       fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
       fontSize: 13,
       scrollback: 5000,
-      theme: { background: "#09090b", foreground: "#e4e4e7", cursor: "#e4e4e7", selectionBackground: "#3f3f46" },
+      // Transparent, so the panel's terminal colour shows through in both themes.
+      allowTransparency: true,
+      theme: { background: "#00000000", foreground: "#e4e4e7", cursor: "#e4e4e7", selectionBackground: "#3f3f46" },
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -103,7 +108,7 @@ export default function TerminalTab({ org, app }: { org: string; app: App }) {
     session.current = { ws, term, ro };
   };
 
-  if (stack.isLoading) return null;
+  if (stack.isLoading) return <Skeleton className="h-[min(60svh,32rem)] rounded-xl" />;
   if (!svc || svc.replicas === 0) {
     return (
       <Card className="py-0">
@@ -115,15 +120,18 @@ export default function TerminalTab({ org, app }: { org: string; app: App }) {
   }
   const slots = [...svc.instances].sort((a, b) => a.slot - b.slot);
   const live = state.kind === "open" || state.kind === "connecting";
+  const tone: Tone = state.kind === "open" ? "success" : state.kind === "connecting" ? "info" : state.kind === "closed" ? "muted" : "neutral";
+  const stateLabel = state.kind === "open" ? "Connected" : state.kind === "connecting" ? "Connecting" : state.kind === "closed" ? "Disconnected" : "Not connected";
+  const replica = slot === "auto" ? "any replica" : `replica ${slot}`;
   return (
     <div className="grid gap-4">
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="grid gap-1.5">
-          <Label htmlFor="term-replica" className="text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <Label htmlFor="term-replica" className="text-xs font-normal text-muted-foreground">
             Replica
           </Label>
           <Select value={slot} onValueChange={setSlot} disabled={live}>
-            <SelectTrigger id="term-replica" className="w-48">
+            <SelectTrigger id="term-replica" className="w-52">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -148,30 +156,47 @@ export default function TerminalTab({ org, app }: { org: string; app: App }) {
             Disconnect
           </Button>
         ) : (
-          <Button onClick={connect}>
-            <PlugZap />
-            {state.kind === "idle" ? "Connect" : "Reconnect"}
-          </Button>
+          state.kind !== "idle" && (
+            <Button onClick={connect}>
+              <PlugZap />
+              Reconnect
+            </Button>
+          )
         )}
-        <p className="w-full text-sm text-muted-foreground sm:w-auto sm:min-w-0 sm:flex-1 sm:text-right">
-          {state.kind === "connecting" && (
-            <span className="inline-flex items-center gap-1.5">
-              <Loader2 className="size-3.5 animate-spin" />
-              Connecting...
-            </span>
-          )}
-          {state.kind === "open" && "Connected. The shell ends when you disconnect or leave the page."}
+        <p className="w-full text-[13px] text-muted-foreground sm:w-auto sm:min-w-0 sm:flex-1 sm:text-right">
+          {state.kind === "open" && "The shell ends when you disconnect or leave the page."}
           {state.kind === "closed" && state.message}
-          {state.kind === "idle" && "A login shell (bash, else sh) as the image's user. Images without a shell cannot have one."}
+          {(state.kind === "idle" || state.kind === "connecting") && "A login shell (bash, else sh) as the image's user."}
         </p>
       </div>
-      <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 p-2 shadow-sm">
-        <div ref={box} className="h-[min(60svh,32rem)] w-full" />
-        {state.kind === "idle" && (
-          <div className="-mt-[min(60svh,32rem)] flex h-[min(60svh,32rem)] items-center justify-center text-sm text-zinc-500">
-            Connect to open a shell in {app.name}.
-          </div>
-        )}
+      <div className="overflow-hidden rounded-xl border border-terminal-border bg-terminal text-zinc-200 shadow-sm">
+        <div className="flex min-h-11 items-center gap-2 border-b border-white/[0.07] px-3 py-1.5 text-xs text-zinc-400">
+          <span className="flex shrink-0 gap-1.5" aria-hidden>
+            <span className="size-2.5 rounded-full bg-zinc-700" />
+            <span className="size-2.5 rounded-full bg-zinc-700" />
+            <span className="size-2.5 rounded-full bg-zinc-700" />
+          </span>
+          <span className="ml-1 min-w-0 truncate font-medium text-zinc-300">
+            {app.name} <span className="font-normal text-zinc-500">· {replica}</span>
+          </span>
+          <span className="ml-auto inline-flex shrink-0 items-center gap-1.5" role="status">
+            {state.kind === "connecting" ? <Loader2 className="size-3 animate-spin" /> : <StatusDot tone={tone} pulse={state.kind === "open"} className="size-1.5" />}
+            {stateLabel}
+          </span>
+        </div>
+        <div className="relative p-2">
+          <div ref={box} className="h-[min(60svh,32rem)] w-full" />
+          {state.kind === "idle" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center">
+              <TerminalSquare className="size-6 text-zinc-600" />
+              <p className="text-sm text-zinc-400">Open a shell in {app.name}.</p>
+              <Button size="sm" className="bg-zinc-100 text-zinc-900 hover:bg-white" onClick={connect}>
+                <PlugZap />
+                Connect
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

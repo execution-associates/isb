@@ -1,19 +1,19 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, ShieldAlert, Trash2 } from "lucide-react";
+import { ArrowUpRight, Boxes, Cpu, Globe, HardDrive, Info, MemoryStick, Network, Pencil, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { callTool, type OrgView } from "@/api/tools";
 import { PageHeader } from "@/components/app-shell";
-import { ConfirmDialog, Panel } from "@/components/confirm";
-import { Field, FormError, SubmitButton } from "@/components/form";
-import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog, EmptyLine, Panel } from "@/components/confirm";
+import { CopyIconButton, Field, FormError, SubmitButton } from "@/components/form";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { limitLabel, parseEgress } from "@/lib/admin";
 import { errorMessage } from "@/lib/messages";
+import { cn } from "@/lib/utils";
 import { useOrgPage } from "@/pages/org-common";
 
 export function SettingsPage() {
@@ -40,18 +40,26 @@ export function SettingsPage() {
       />
       {info.isLoading ? (
         <div className="grid gap-6">
-          <Skeleton className="h-40" />
-          <Skeleton className="h-40" />
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {[0, 1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-24 rounded-xl" />
+            ))}
+          </div>
+          <Skeleton className="h-56 rounded-xl" />
+          <Skeleton className="h-28 rounded-xl" />
         </div>
       ) : info.error ? (
         <FormError>{errorMessage(info.error)}</FormError>
       ) : o ? (
         <div className="grid gap-6">
           {isDefault && (
-            <p className="rounded-lg border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
-              The <span className="font-medium text-foreground">default</span> org is incus' own default project. It
-              predates orgs, so it has no quota, bridge or egress rules of its own, and it can't be deleted.
-            </p>
+            <div className="flex items-start gap-3 rounded-xl border bg-muted/40 px-4 py-3 text-[13px] leading-relaxed text-muted-foreground">
+              <Info className="mt-0.5 size-4 shrink-0" />
+              <p>
+                The <span className="font-medium text-foreground">default</span> org is incus' own default project. It
+                predates orgs, so it has no quota, bridge or egress rules of its own, and it can't be deleted.
+              </p>
+            </div>
           )}
           <LimitsPanel org={org} o={o} editable={platform && !isDefault} />
           {!isDefault && <NetworkPanel o={o} />}
@@ -63,11 +71,48 @@ export function SettingsPage() {
   );
 }
 
-function Stat({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) {
+/** A number a quota limit may cap, as a whole number (incus states counts as strings). */
+const count = (v: string | null) => (v && /^\d+$/.test(v.trim()) ? Number(v) : null);
+
+/** Used against limit as a bar; the tone warms as it fills. */
+function Meter({ used, limit }: { used: number; limit: number }) {
+  const pct = Math.min(100, Math.round((used / Math.max(limit, 1)) * 100));
+  const tone = pct >= 90 ? "bg-destructive" : pct >= 75 ? "bg-warning" : "bg-brand";
   return (
-    <div className="min-w-0 rounded-lg border bg-background/50 px-4 py-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 truncate text-lg font-semibold tabular-nums">{value}</div>
+    <div className="h-1.5 overflow-hidden rounded-full bg-muted" role="meter" aria-valuemin={0} aria-valuemax={limit} aria-valuenow={used}>
+      <div className={cn("h-full rounded-full transition-[width]", tone)} style={{ width: `${Math.max(pct, used > 0 ? 3 : 0)}%` }} />
+    </div>
+  );
+}
+
+function QuotaTile({
+  icon: Icon,
+  label,
+  value,
+  limit,
+  used,
+  sub,
+}: {
+  icon: typeof Cpu;
+  label: string;
+  value: ReactNode;
+  limit?: number | null;
+  used?: number;
+  sub?: ReactNode;
+}) {
+  const metered = used !== undefined && limit;
+  return (
+    <div className="flex min-w-0 flex-col gap-2.5 rounded-lg border bg-background/60 px-4 py-3.5">
+      <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+        <Icon className="size-3.5" />
+        {label}
+      </div>
+      <div className="truncate text-xl font-semibold tracking-tight tabular-nums">{value}</div>
+      {metered ? (
+        <Meter used={used} limit={limit} />
+      ) : (
+        <div className="h-1.5 rounded-full border border-dashed border-border" aria-hidden />
+      )}
       {sub && <div className="truncate text-xs text-muted-foreground">{sub}</div>}
     </div>
   );
@@ -75,6 +120,8 @@ function Stat({ label, value, sub }: { label: string; value: ReactNode; sub?: Re
 
 function LimitsPanel({ org, o, editable }: { org: string; o: OrgView; editable: boolean }) {
   const [open, setOpen] = useState(false);
+  const instLimit = count(o.instances_limit);
+  const unlimited = <span className="text-muted-foreground">Unlimited</span>;
   return (
     <Panel
       title="Quota"
@@ -83,21 +130,50 @@ function LimitsPanel({ org, o, editable }: { org: string; o: OrgView; editable: 
         editable && (
           <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
             <Pencil />
-            Edit
+            Edit quota
           </Button>
         )
       }
     >
       <div className="grid grid-cols-2 gap-3 p-5 lg:grid-cols-4">
-        <Stat label="Instances" value={o.instances_limit ? `${o.instances} / ${o.instances_limit}` : o.instances} sub={o.instances_limit ? "in use / limit" : "no limit"} />
-        <Stat label="CPUs" value={limitLabel(o.cpus)} />
-        <Stat label="Memory" value={limitLabel(o.memory)} />
-        <Stat label="Disk" value={limitLabel(o.disk)} />
-        <Stat label="Default CPUs per instance" value={o.default_cpus ?? "—"} />
-        <Stat label="Default memory per instance" value={o.default_memory ?? "—"} />
-        <Stat label="Stacks" value={o.stacks} />
-        <Stat label="Members" value={o.members} />
+        <QuotaTile
+          icon={Boxes}
+          label="Instances"
+          value={
+            instLimit ? (
+              <>
+                {o.instances}
+                <span className="text-base font-normal text-muted-foreground"> / {instLimit}</span>
+              </>
+            ) : (
+              o.instances
+            )
+          }
+          used={o.instances}
+          limit={instLimit}
+          sub={instLimit ? `${Math.max(instLimit - o.instances, 0)} left` : "No limit"}
+        />
+        <QuotaTile icon={Cpu} label="CPUs" value={o.cpus ? limitLabel(o.cpus) : unlimited} sub={o.cpus ? "Across the org" : "No limit"} />
+        <QuotaTile icon={MemoryStick} label="Memory" value={o.memory ? limitLabel(o.memory) : unlimited} sub={o.memory ? "Across the org" : "No limit"} />
+        <QuotaTile icon={HardDrive} label="Disk" value={o.disk ? limitLabel(o.disk) : unlimited} sub={o.disk ? "Across the org" : "No limit"} />
       </div>
+      <dl className="grid grid-cols-2 border-t text-sm sm:grid-cols-4 sm:divide-x">
+        {(
+          [
+            ["Default CPUs", o.default_cpus ?? "None", "per instance"],
+            ["Default memory", o.default_memory ?? "None", "per instance"],
+            ["Stacks", o.stacks, "deployed"],
+            ["Members", o.members, "people"],
+          ] as [string, ReactNode, string][]
+        ).map(([k, v, unit]) => (
+          <div key={k} className="min-w-0 px-5 py-3">
+            <dt className="text-xs text-muted-foreground">{k}</dt>
+            <dd className="mt-0.5 truncate">
+              <span className="font-medium tabular-nums">{v}</span> <span className="text-xs text-muted-foreground">{unit}</span>
+            </dd>
+          </div>
+        ))}
+      </dl>
       <LimitsDialog org={org} o={o} open={open} onOpenChange={setOpen} />
     </Panel>
   );
@@ -191,41 +267,65 @@ function LimitsDialog({ org, o, open, onOpenChange }: { org: string; o: OrgView;
   );
 }
 
-function Row({ label, children }: { label: string; children: ReactNode }) {
+/** A key and a value with a copy button: the value is mono when it is an identifier. */
+function KeyValue({ label, value, children, hint }: { label: string; value?: string | null; children?: ReactNode; hint?: ReactNode }) {
   return (
-    <div className="grid gap-1 px-5 py-3 sm:grid-cols-[12rem_minmax(0,1fr)] sm:gap-4">
-      <dt className="text-sm text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 text-sm break-words">{children}</dd>
+    <div className="grid gap-1 px-5 py-3 sm:grid-cols-[11rem_minmax(0,1fr)] sm:items-center sm:gap-4">
+      <dt className="text-[13px] text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 text-sm">
+        {children ?? (
+          <div className="flex min-w-0 items-center gap-1">
+            {value ? (
+              <>
+                <code className="truncate font-mono text-[13px]">{value}</code>
+                <CopyIconButton value={value} label={`Copy ${label.toLowerCase()}`} />
+              </>
+            ) : (
+              <span className="text-muted-foreground">None</span>
+            )}
+          </div>
+        )}
+        {hint && <div className="mt-0.5 text-xs text-muted-foreground">{hint}</div>}
+      </dd>
     </div>
   );
 }
 
 function NetworkPanel({ o }: { o: OrgView }) {
+  const svc = `<service>.<stack>.${o.domain}`;
   return (
-    <Panel title="Network" description="Each org has its own bridge. Instances reach each other and the internet, and no other private network.">
+    <Panel
+      icon={<Network />}
+      title="Network"
+      description="Each org has its own bridge. Instances reach each other and the internet, and no other private network."
+    >
       <dl className="divide-y">
-        <Row label="Bridge">
-          <code className="font-mono text-xs">{o.network ?? "—"}</code>
-        </Row>
-        <Row label="Subnet">
-          <code className="font-mono text-xs">{o.subnet ?? "—"}</code>
-        </Row>
-        <Row label="Service names">
-          {o.service_names ? (
-            <>
-              <code className="font-mono text-xs">{`<service>.<stack>.${o.domain}`}</code>
-              <span className="block text-xs text-muted-foreground">
+        <KeyValue label="Bridge" value={o.network} />
+        <KeyValue label="Subnet" value={o.subnet} />
+        <KeyValue label="Incus project" value={o.project} />
+        <KeyValue
+          label="Service names"
+          hint={
+            o.service_names ? (
+              <>
                 or <code className="font-mono">{"<service>.<stack>"}</code> from inside the org
-              </span>
-            </>
+              </>
+            ) : undefined
+          }
+        >
+          {o.service_names ? (
+            <div className="flex min-w-0 items-center gap-1">
+              <code className="truncate font-mono text-[13px]">{svc}</code>
+              <CopyIconButton value={svc} label="Copy service name pattern" />
+            </div>
           ) : (
-            <span className="text-muted-foreground">
+            <span className="text-[13px] text-muted-foreground">
               Off: instances only, as <code className="font-mono text-xs">{`<instance>.${o.domain}`}</code>. The host
               needs <code className="font-mono text-xs">sudo isb host setup</code>.
             </span>
           )}
-        </Row>
-        <Row label="Host directories">
+        </KeyValue>
+        <KeyValue label="Host directories" hint={<>Set on the host with <code className="font-mono">isb org create --bind-root</code>.</>}>
           {o.bind_roots.length ? (
             <div className="flex flex-wrap gap-1">
               {o.bind_roots.map((r) => (
@@ -235,23 +335,32 @@ function NetworkPanel({ o }: { o: OrgView }) {
               ))}
             </div>
           ) : (
-            <span className="text-muted-foreground">None: managed volumes only</span>
+            <span className="text-[13px] text-muted-foreground">None: managed volumes only</span>
           )}
-          <span className="mt-1 block text-xs text-muted-foreground">Set on the host with isb org create --bind-root.</span>
-        </Row>
-        <Row label="Incus project">
-          <code className="font-mono text-xs">{o.project}</code>
-        </Row>
+        </KeyValue>
       </dl>
     </Panel>
   );
+}
+
+/** What an egress rule lets through, in words. */
+function egressWhat(rule: string): string {
+  const m = rule.match(/^([^:]+)(?::([^/]+))?(?:\/(tcp|udp))?$/);
+  if (!m) return "";
+  const [, dest, ports, proto] = m;
+  const whole = dest.includes("/") && !dest.endsWith("/32") ? "network" : "address";
+  if (!ports) return `Everything to that ${whole}`;
+  const p = proto?.toUpperCase() ?? "TCP";
+  return ports.includes(",") || ports.includes("-") ? `${p} ports ${ports}` : `${p} port ${ports}`;
 }
 
 function EgressPanel({ org, o, editable }: { org: string; o: OrgView; editable: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <Panel
+      icon={<Globe />}
       title="Egress exceptions"
+      count={o.egress.length}
       description="Private destinations this org may reach despite the default deny: a tailnet host, another org's published service."
       action={
         editable && (
@@ -262,21 +371,20 @@ function EgressPanel({ org, o, editable }: { org: string; o: OrgView; editable: 
         )
       }
     >
-      <div className="p-5">
-        {o.egress.length ? (
-          <ul className="flex flex-wrap gap-2">
-            {o.egress.map((e) => (
-              <li key={e}>
-                <Badge variant="outline" className="font-mono text-xs font-normal">
-                  {e}
-                </Badge>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-sm text-muted-foreground">None. The org reaches the internet and its own subnet only.</p>
-        )}
-      </div>
+      {o.egress.length ? (
+        <ul className="divide-y">
+          {o.egress.map((e) => (
+            <li key={e} className="flex items-center gap-3 px-5 py-2.5">
+              <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground" />
+              <code className="min-w-0 truncate font-mono text-[13px]">{e}</code>
+              <span className="ml-auto hidden shrink-0 text-xs text-muted-foreground sm:inline">{egressWhat(e)}</span>
+              <CopyIconButton value={e} label="Copy rule" className="ml-auto sm:ml-0" />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <EmptyLine icon={<ShieldCheck />}>None. The org reaches the internet and its own subnet only.</EmptyLine>
+      )}
       <EgressDialog org={org} o={o} open={open} onOpenChange={setOpen} />
     </Panel>
   );
@@ -419,19 +527,13 @@ function DangerPanel({ org, o }: { org: string; o: OrgView }) {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   return (
-    <Panel
-      tone="danger"
-      title={
-        <span className="flex items-center gap-2">
-          <ShieldAlert className="size-4" />
-          Danger zone
-        </span>
-      }
-    >
-      <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
-        <div className="text-sm">
+    <Panel tone="danger" icon={<ShieldAlert />} title="Danger zone" description="Actions here can't be undone.">
+      <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 text-sm">
           <p className="font-medium">Delete this org</p>
-          <p className="text-muted-foreground">Everything in it is deleted. Its secrets stay on the host's disk.</p>
+          <p className="text-[13px] text-muted-foreground">
+            Its project, volumes, network and members go. Its secrets stay on the host's disk.
+          </p>
         </div>
         <Button variant="destructive" className="shrink-0" onClick={() => setOpen(true)}>
           <Trash2 />
