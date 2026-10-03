@@ -78,7 +78,10 @@ const APP_PROPS: &str = r#"{
   "port": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "The port the app listens on."},
   "healthcheck": {"type": "object", "description": "A compose healthcheck: {test, interval, timeout, retries, start_period}."},
   "resources": {"type": "object", "description": "{cpus, memory} per replica."},
-  "command": {"description": "argv (a list) or a command line."}
+  "command": {"description": "argv (a list) or a command line."},
+  "files": {"type": "array", "items": {"type": "object"}, "description": "[{path, secret, mode?}]: an org secret's value as a file at an absolute path (config files, certificates)."},
+  "user": {"type": "string", "description": "The user the app runs as; numeric (uid[:gid]) on an OCI image."},
+  "working_dir": {"type": "string"}
 }"#;
 
 fn app_props() -> Value {

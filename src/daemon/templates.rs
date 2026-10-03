@@ -56,7 +56,9 @@ impl Templates {
     }
 
     fn instances_dir(&self, org: &OrgId) -> PathBuf {
-        crate::app::org_root(&self.state, org).join("templates")
+        crate::app::org_root(&self.state, org)
+            .join("templates")
+            .join("instances")
     }
 
     fn instance_path(&self, org: &OrgId, name: &str) -> Result<PathBuf> {

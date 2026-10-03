@@ -70,6 +70,14 @@ isb app deployments NAME [--json] | logs NAME [ID] [-f]
 isb app env NAME | env-set NAME [FILE|-] [--deploy]   the environment as .env text
 isb app webhook NAME [--rotate] | deploy-key NAME
 
+# one-click apps, per org, on the isb serve daemon (docs/templates.md); all take --org ORG
+isb template ls [WORDS...] [--tag T] [--catalog C] [--json]
+isb template show REF [--json]             variables, apps, notes; a Dokploy template's translation report
+isb template deploy REF --project P [--env E] [--name N] [-s K=V]... [--dry-run] [-d] [--json]
+                                           creates the apps and secrets, deploys them in order; waits unless -d
+isb template instances [--json] | rm NAME  deployed templates; rm deletes their apps (volumes kept) and secrets
+isb template catalog ls | add NAME --format native|dokploy LOCATION | rm NAME   (add, rm: platform admins)
+
 # builds and the local registry, on the isb serve daemon (docs/builds.md); --org ORG
 isb build DIR --app APP [--tag T] [--builder railpack|nixpacks|dockerfile] [--dockerfile PATH]
               [--target STAGE] [--arg K=V]... [--subdir DIR] [--untrusted] [--timeout D] [-d]

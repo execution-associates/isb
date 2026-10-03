@@ -59,6 +59,9 @@ token deploys an app.
 | `healthcheck` | A compose `healthcheck`. Without one, a running replica is in rotation. |
 | `resources` | `{cpus, memory}` per replica. |
 | `command` | argv, or a line split like a shell would. |
+| `files` | `[{path, secret, mode?}]`: the org secret `secret`'s value as a file at `path` (config files, certificates), delivered like a stack's file secrets ([secrets.md](secrets.md#stacks)). Mode default `0400`. |
+| `user` | The user the app runs as; numeric (`uid[:gid]`) on an OCI image. |
+| `working_dir` | The working directory. |
 
 Changing a setting (`app_update`, a JSON merge patch where `null` clears a
 field; `isb app update NAME -f patch.yaml`) takes effect at the next deploy.

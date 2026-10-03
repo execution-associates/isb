@@ -822,7 +822,11 @@ as is), owned by `uid`/`gid` (default: a numeric `user`, else root) with `mode`
 `/run` is a tmpfs in a systemd guest, so isb also keeps a root-only copy in
 `/var/lib/isb/secrets` with a script that puts the files back; a supervised
 unit runs it before every start, so after a reboot the app has its secrets with
-no isb around. The values never appear in instance config or in `isb config`.
+no isb around. On an OCI image the files can only be written once the app (the
+instance's init) is running, so when one was missing or different isb restarts
+the app once, and an app that reads its config at startup sees it; files already
+in place (a daemon restart) restart nothing. The values never appear in instance
+config or in `isb config`.
 A new version of a secret replaces a stack's instances (it is part of the
 revision).
 
