@@ -101,12 +101,16 @@ minime only runs binaries downloaded from our CI runs.
 
 ## Phase 0: platform support
 
-- [~] (subagent p0.1) P0.1 macOS build: make the crate compile and its unit tests pass on
+- [x] (816a9fc, 6bee7c1) P0.1 macOS build: make the crate compile and its unit tests pass on
   macOS (gate `/proc`-based code: foreground ancestor polling via `sysctl`/
   `libproc` equivalents or `getppid` chains, host metrics via `sysctl`, peer
   credentials via `getpeereid`). CI: add macOS to the release matrix
   (aarch64-apple-darwin, x86_64-apple-darwin). **Verify:** `cargo test` on
   minime.
+- [ ] P0.1b npm darwin packages: `sdk/typescript/npm/darwin-{arm64,x64}`,
+  optionalDependencies + `os`, `platformPackage()` in `src/binary.ts`, darwin
+  rows in `sdk-typescript.yml`. bun.lock needs the packages published first
+  (or regenerated). PyPI darwin wheels are in the workflow, untested until a tag.
 - [ ] P0.2 `isb machine`: Lima-backed incus VM on macOS (init with CPU/memory/
   disk, start, stop, rm, status, ssh), incus installed from Zabbly, socket
   forwarded to `~/.isb/machine/<name>/incus.sock`, `$HOME` shared at the same
@@ -239,5 +243,8 @@ minime only runs binaries downloaded from our CI runs.
   with the acting user or agent.
 
 ## Log
+
+- 2026-10-03: P1.1 core landed (org create/ls/show/rm, --org, host setup);
+  stacks and the daemon are not org-aware yet (next).
 
 - 2026-10-03: plan written; branch `platform` off main at 0.7.0.
