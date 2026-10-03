@@ -167,9 +167,7 @@ impl ImageSource {
             if remote == "oci" {
                 // oci:registry.example.com/team/app:tag
                 let (host, path) = alias.split_once('/').ok_or_else(|| {
-                    Error::invalid(format!(
-                        "{s:?}: an oci: image is oci:REGISTRY/PATH[:TAG]"
-                    ))
+                    Error::invalid(format!("{s:?}: an oci: image is oci:REGISTRY/PATH[:TAG]"))
                 })?;
                 return Ok(ImageSource {
                     spec: s.into(),

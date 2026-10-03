@@ -44,6 +44,7 @@ pub mod rpc;
 pub mod sandbox;
 pub mod shorthand;
 pub mod spec;
+pub mod stack;
 pub mod supervise;
 pub mod volume;
 

@@ -103,10 +103,14 @@ pub fn render(
     login_shell: Option<&str>,
     uses_secrets: bool,
 ) -> Result<UnitFiles> {
-    let argv = effective_argv(spec, login_shell)
-        .ok_or_else(|| Error::invalid(format!("{service}: restart needs a command to supervise")))?;
+    let argv = effective_argv(spec, login_shell).ok_or_else(|| {
+        Error::invalid(format!("{service}: restart needs a command to supervise"))
+    })?;
     let policy = spec.deploy.as_ref().and_then(|d| d.restart_policy.clone());
-    let restart = match (spec.restart.unwrap_or_default(), policy.as_ref().and_then(|p| p.condition)) {
+    let restart = match (
+        spec.restart.unwrap_or_default(),
+        policy.as_ref().and_then(|p| p.condition),
+    ) {
         (_, Some(RestartCondition::None)) => "no",
         (_, Some(RestartCondition::OnFailure)) => "on-failure",
         (_, Some(RestartCondition::Any)) => "always",
@@ -169,7 +173,10 @@ pub fn render(
             .join(" "),
     );
     u.push('\n');
-    u.push_str(&format!("Restart={restart}\nRestartSec={}ms\n", delay.as_millis()));
+    u.push_str(&format!(
+        "Restart={restart}\nRestartSec={}ms\n",
+        delay.as_millis()
+    ));
     u.push_str("KillMode=mixed\nTimeoutStopSec=10\n");
     u.push_str("\n[Install]\nWantedBy=multi-user.target\n");
 
@@ -207,10 +214,21 @@ fn check(out: ExecOutput, what: &str) -> Result<ExecOutput> {
 /// Install (or update) the unit for a long-running service and make sure it
 /// is enabled and running. Returns true when the unit or its environment
 /// changed, in which case the app was restarted.
-pub fn install(sb: &Sandbox, service: &str, spec: &SandboxSpec, uses_secrets: bool) -> Result<bool> {
+pub fn install(
+    sb: &Sandbox,
+    service: &str,
+    spec: &SandboxSpec,
+    uses_secrets: bool,
+) -> Result<bool> {
     let client = sb.client();
     let name = sb.name();
-    if !root_exec(sb, &["test", "-d", "/run/systemd/system"], Duration::from_secs(30))?.success() {
+    if !root_exec(
+        sb,
+        &["test", "-d", "/run/systemd/system"],
+        Duration::from_secs(30),
+    )?
+    .success()
+    {
         return Err(Error::invalid(format!(
             "{name}: restart needs systemd in the guest to supervise command; this image has none (use an OCI image, or drop restart)"
         )));
@@ -239,13 +257,21 @@ pub fn install(sb: &Sandbox, service: &str, spec: &SandboxSpec, uses_secrets: bo
     }
     let unit = unit_name(service);
     check(
-        root_exec(sb, &["systemctl", "enable", "--quiet", &unit], Duration::from_secs(60))?,
+        root_exec(
+            sb,
+            &["systemctl", "enable", "--quiet", &unit],
+            Duration::from_secs(60),
+        )?,
         &format!("systemctl enable {unit}"),
     )?;
     // --no-block: a unit waiting for its secrets would otherwise hold this.
     let verb = if changed { "restart" } else { "start" };
     check(
-        root_exec(sb, &["systemctl", verb, "--no-block", &unit], Duration::from_secs(60))?,
+        root_exec(
+            sb,
+            &["systemctl", verb, "--no-block", &unit],
+            Duration::from_secs(60),
+        )?,
         &format!("systemctl {verb} {unit}"),
     )?;
     Ok(changed)
@@ -254,7 +280,11 @@ pub fn install(sb: &Sandbox, service: &str, spec: &SandboxSpec, uses_secrets: bo
 /// Stop and disable a service's unit, if it is installed.
 pub fn uninstall(sb: &Sandbox, service: &str) -> Result<()> {
     let unit = unit_name(service);
-    let _ = root_exec(sb, &["systemctl", "disable", "--now", "--quiet", &unit], Duration::from_secs(60))?;
+    let _ = root_exec(
+        sb,
+        &["systemctl", "disable", "--now", "--quiet", &unit],
+        Duration::from_secs(60),
+    )?;
     Ok(())
 }
 
@@ -265,7 +295,11 @@ pub fn restart_app(sb: &Sandbox, service: &str, oci: bool) -> Result<()> {
     }
     let unit = unit_name(service);
     check(
-        root_exec(sb, &["systemctl", "restart", "--no-block", &unit], Duration::from_secs(60))?,
+        root_exec(
+            sb,
+            &["systemctl", "restart", "--no-block", &unit],
+            Duration::from_secs(60),
+        )?,
         &format!("systemctl restart {unit}"),
     )
     .map(|_| ())
@@ -295,9 +329,9 @@ pub fn push_secrets(
     let name = sb.name();
     let (def_uid, def_gid) = numeric_user(spec.user.as_deref()).unwrap_or((0, 0));
     for s in &spec.secrets {
-        let value = values.get(&s.source).ok_or_else(|| {
-            Error::invalid(format!("{name}: no value for secret {:?}", s.source))
-        })?;
+        let value = values
+            .get(&s.source)
+            .ok_or_else(|| Error::invalid(format!("{name}: no value for secret {:?}", s.source)))?;
         let path = s.guest_path();
         let parent = path.rsplit_once('/').map(|(p, _)| p).unwrap_or("/");
         make_dirs(client, name, parent)?;
@@ -423,7 +457,16 @@ pub fn logs(sb: &Sandbox, service: &str, oci: bool, lines: usize) -> Result<Stri
     let n = lines.to_string();
     let out = root_exec(
         sb,
-        &["journalctl", "-u", &unit_name(service), "-n", &n, "-o", "short-iso", "--no-pager"],
+        &[
+            "journalctl",
+            "-u",
+            &unit_name(service),
+            "-n",
+            &n,
+            "-o",
+            "short-iso",
+            "--no-pager",
+        ],
         Duration::from_secs(60),
     )?;
     Ok(check(out, "journalctl")?.stdout_text())
@@ -479,10 +522,17 @@ mod tests {
             "image: x\nrestart: on-failure\ncommand: [/usr/bin/app, '50%']\ndeploy: {restart_policy: {delay: 2s, max_attempts: 3, window: 1m}}\n",
         );
         let f = render("api", &s, None, true).unwrap();
-        assert!(f.unit.contains("ExecStart=\"/usr/bin/app\" \"50%%\"\n"), "{}", f.unit);
+        assert!(
+            f.unit.contains("ExecStart=\"/usr/bin/app\" \"50%%\"\n"),
+            "{}",
+            f.unit
+        );
         assert!(f.unit.contains("Restart=on-failure\n"));
         assert!(f.unit.contains("RestartSec=2000ms\n"));
-        assert!(f.unit.contains("StartLimitIntervalSec=60\nStartLimitBurst=3\n"));
+        assert!(
+            f.unit
+                .contains("StartLimitIntervalSec=60\nStartLimitBurst=3\n")
+        );
         assert!(f.unit.contains(SECRETS_READY));
         assert!(!f.unit.contains("User="));
     }

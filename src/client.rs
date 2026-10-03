@@ -463,13 +463,20 @@ impl Client {
     }
 
     /// Create a directory in an instance; an existing one is left as is.
-    pub fn make_dir(&self, instance: &str, path: &str, uid: u32, gid: u32, mode: u32) -> Result<()> {
+    pub fn make_dir(
+        &self,
+        instance: &str,
+        path: &str,
+        uid: u32,
+        gid: u32,
+        mode: u32,
+    ) -> Result<()> {
         match self.file_request(instance, path, &[], uid, gid, mode, "directory") {
-            Err(Error::Api { status, ref message, .. })
-                if status == 409 || message.to_ascii_lowercase().contains("exist") =>
-            {
-                Ok(())
-            }
+            Err(Error::Api {
+                status,
+                ref message,
+                ..
+            }) if status == 409 || message.to_ascii_lowercase().contains("exist") => Ok(()),
             r => r,
         }
     }

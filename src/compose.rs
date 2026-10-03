@@ -334,7 +334,8 @@ fn validate_services(file: &mut crate::spec::ComposeFile) -> std::result::Result
                     s.source
                 ));
             }
-            s.file_mode().map_err(|e| format!("service {service:?}: {e}"))?;
+            s.file_mode()
+                .map_err(|e| format!("service {service:?}: {e}"))?;
         }
         if let Some(h) = &spec.healthcheck {
             h.probe().map_err(|e| format!("service {service:?}: {e}"))?;
@@ -371,7 +372,9 @@ fn validate_services(file: &mut crate::spec::ComposeFile) -> std::result::Result
 
 /// Service names with every service after the ones it depends on (ties in
 /// name order). A cycle is an error.
-pub fn dependency_order(file: &crate::spec::ComposeFile) -> std::result::Result<Vec<String>, String> {
+pub fn dependency_order(
+    file: &crate::spec::ComposeFile,
+) -> std::result::Result<Vec<String>, String> {
     let mut order: Vec<String> = Vec::new();
     let mut remaining: Vec<&String> = file.services.keys().collect();
     while !remaining.is_empty() {
@@ -483,14 +486,16 @@ pub fn up_handles(
         if !spec.secrets.is_empty() {
             crate::supervise::push_secrets(&sb, spec, &secret_values)?;
         }
-        if spec.long_running() && spec.command.is_some() && !d.image.is_oci() {
-            if crate::supervise::install(&sb, &s, spec, !spec.secrets.is_empty())? {
-                report(&format!(
-                    "{}: supervising command as {}",
-                    d.name,
-                    crate::supervise::unit_name(&s)
-                ));
-            }
+        if spec.long_running()
+            && spec.command.is_some()
+            && !d.image.is_oci()
+            && crate::supervise::install(&sb, &s, spec, !spec.secrets.is_empty())?
+        {
+            report(&format!(
+                "{}: supervising command as {}",
+                d.name,
+                crate::supervise::unit_name(&s)
+            ));
         }
         if healthy_needed.contains(&s) {
             wait_healthy(&sb, &s, spec, report)?;
@@ -514,7 +519,10 @@ pub fn wait_healthy(
     let deadline = (check.start_period + check.interval * check.retries)
         .max(std::time::Duration::from_secs(60));
     let started = std::time::Instant::now();
-    report(&format!("{}: waiting for {service} to be healthy", sb.name()));
+    report(&format!(
+        "{}: waiting for {service} to be healthy",
+        sb.name()
+    ));
     loop {
         let p = crate::supervise::probe(sb, &check);
         if p.ok {

@@ -249,7 +249,11 @@ fn follow_console(sb: Sandbox, prefix: Option<String>, tx: mpsc::Sender<Msg>) {
     std::thread::spawn(move || {
         let mut out = LineWriter::new(prefix);
         // Skip what was logged before this run, like `journalctl -n 0`.
-        let mut seen = sb.client().console_log(sb.name()).map(|b| b.len()).unwrap_or(0);
+        let mut seen = sb
+            .client()
+            .console_log(sb.name())
+            .map(|b| b.len())
+            .unwrap_or(0);
         loop {
             std::thread::sleep(Duration::from_secs(1));
             let Ok(log) = sb.client().console_log(sb.name()) else {

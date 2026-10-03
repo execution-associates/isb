@@ -954,6 +954,18 @@ impl Sandbox {
         }
     }
 
+    /// A handle on `name` with the exec defaults and readiness of `d` (a
+    /// sibling built from the same spec, such as another replica).
+    pub(crate) fn like(client: &Client, name: &str, d: &Desired) -> Sandbox {
+        Sandbox {
+            client: client.clone(),
+            name: name.to_string(),
+            exec_defaults: d.exec.clone(),
+            ready: d.ready.clone(),
+            ready_timeout: d.ready_timeout,
+        }
+    }
+
     /// Create and start a new sandbox; fails if it already exists. Relative bind
     /// paths resolve against the current directory.
     pub fn create(client: &Client, spec: &SandboxSpec) -> Result<Sandbox> {

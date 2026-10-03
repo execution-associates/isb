@@ -1244,10 +1244,7 @@ fn depends_on<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<BTreeMap<String, Dependency>, D::Error> {
     Ok(match DependsOnRepr::deserialize(d)? {
-        DependsOnRepr::List(l) => l
-            .into_iter()
-            .map(|s| (s, Dependency::default()))
-            .collect(),
+        DependsOnRepr::List(l) => l.into_iter().map(|s| (s, Dependency::default())).collect(),
         DependsOnRepr::Map(m) => m,
     })
 }
@@ -1463,9 +1460,9 @@ impl<'de> Deserialize<'de> for SecretRef {
         let id = |v: Option<flex::Scalar>, what: &str| -> Result<Option<u32>, D::Error> {
             v.map(|s| {
                 let s = s.into_string();
-                s.trim()
-                    .parse()
-                    .map_err(|_| D::Error::custom(format!("secret {what} must be a number, got {s:?}")))
+                s.trim().parse().map_err(|_| {
+                    D::Error::custom(format!("secret {what} must be a number, got {s:?}"))
+                })
             })
             .transpose()
         };
@@ -1525,10 +1522,7 @@ impl SandboxSpec {
 
     /// `deploy.replicas`, default 1.
     pub fn replicas(&self) -> u32 {
-        self.deploy
-            .as_ref()
-            .and_then(|d| d.replicas)
-            .unwrap_or(1)
+        self.deploy.as_ref().and_then(|d| d.replicas).unwrap_or(1)
     }
 
     /// The health probe, if any.
