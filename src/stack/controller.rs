@@ -26,6 +26,7 @@ use crate::error::{Error, Result};
 use crate::org::OrgId;
 use crate::plan::{Desired, split_addr};
 use crate::sandbox::{EnsureOptions, Sandbox};
+use crate::secrets::Secrets;
 use crate::spec::{
     DependCondition, FailureAction, HealthProbe, PortBind, RestartCondition, RestartMode,
     SandboxSpec, UpdateConfig, UpdateOrder,
@@ -211,6 +212,13 @@ struct Inner {
     status: Mutex<BTreeMap<(String, String), ServiceStatus>>,
     events: Mutex<(u64, VecDeque<Event>)>,
     snapshot: Mutex<Snapshot>,
+    /// The org stores secret values are read from at delivery.
+    secrets: Arc<Secrets>,
+    /// Held across read-modify-save of a definition, so a version bump and
+    /// a deploy never overwrite each other.
+    edit: Mutex<()>,
+    /// When driver-backed secrets are next checked for a new version.
+    refresh: Mutex<super::secrets::RefreshSchedule>,
 }
 
 impl Inner {
@@ -242,6 +250,8 @@ impl Inner {
 
 /// How often the metrics sampler runs.
 const SAMPLE_EVERY: Duration = Duration::from_secs(2);
+/// The longest wait between looking for driver-backed secrets that are due.
+const SECRET_TICK: Duration = Duration::from_secs(10);
 
 /// The daemon's stack controller.
 #[derive(Clone)]
@@ -250,8 +260,14 @@ pub struct Controller {
 }
 
 impl Controller {
-    /// Load every stored stack and start reconciling it.
-    pub fn start(client: Client, store: Store, interval: Duration) -> Result<Controller> {
+    /// Load every stored stack and start reconciling it. Secret values are
+    /// read from `secrets` whenever they are delivered.
+    pub fn start(
+        client: Client,
+        store: Store,
+        interval: Duration,
+        secrets: Arc<Secrets>,
+    ) -> Result<Controller> {
         let c = Controller {
             inner: Arc::new(Inner {
                 client,
@@ -263,8 +279,23 @@ impl Controller {
                 status: Mutex::new(BTreeMap::new()),
                 events: Mutex::new((0, VecDeque::new())),
                 snapshot: Mutex::new(Snapshot::default()),
+                secrets,
+                edit: Mutex::new(()),
+                refresh: Mutex::new(Default::default()),
             }),
         };
+        // Driver-backed secrets are polled on their refresh intervals; the
+        // tick only decides which are due.
+        let weak = Arc::downgrade(&c.inner);
+        let _ = std::thread::Builder::new()
+            .name("isb-secrets".into())
+            .spawn(move || {
+                while let Some(inner) = weak.upgrade() {
+                    let tick = inner.interval.clamp(Duration::from_secs(1), SECRET_TICK);
+                    Controller { inner }.check_due_secrets();
+                    std::thread::sleep(tick);
+                }
+            });
         // A weak handle, so the sampler ends with the controller.
         let weak = Arc::downgrade(&c.inner);
         let _ = std::thread::Builder::new()
@@ -305,7 +336,148 @@ impl Controller {
             eprintln!("isb serve: resuming stack {}", def.name);
             c.apply(Arc::new(def));
         }
+        // A vault may have moved on while the daemon was down.
+        for def in c.definitions() {
+            let keys: Vec<String> = def.secrets.keys().cloned().collect();
+            c.check_bindings(&def.qualified(), &keys, false);
+        }
         Ok(c)
+    }
+
+    /// A stored secret got a new value (`isb secret set`): every stack in
+    /// the org bound to it moves to the new version and rolls. Returns the
+    /// stacks rolled.
+    pub fn secret_changed(&self, org: &OrgId, name: &str) -> Vec<String> {
+        let mut rolled = Vec::new();
+        for def in self.definitions() {
+            if def.org != *org {
+                continue;
+            }
+            let keys: Vec<String> = def
+                .secrets
+                .iter()
+                .filter(|(_, b)| b.name == name)
+                .map(|(k, _)| k.clone())
+                .collect();
+            if !keys.is_empty() && self.check_bindings(&def.qualified(), &keys, false) {
+                rolled.push(def.qualified());
+            }
+        }
+        rolled
+    }
+
+    /// Re-read every binding to `name` in the org from its driver now
+    /// (`isb secret refresh`). Returns each driver and version found, and
+    /// the stacks rolled.
+    pub fn refresh_secret(
+        &self,
+        org: &OrgId,
+        name: &str,
+    ) -> Result<crate::stack::secrets::Refreshed> {
+        let mut found = Vec::new();
+        let mut rolled = Vec::new();
+        for def in self.definitions() {
+            if def.org != *org {
+                continue;
+            }
+            let q = def.qualified();
+            let keys: Vec<String> = def
+                .secrets
+                .iter()
+                .filter(|(_, b)| b.name == name)
+                .map(|(k, _)| k.clone())
+                .collect();
+            for k in &keys {
+                let b = &def.secrets[k];
+                let v = self.inner.secrets.refresh_in(&b.driver, org, name)?;
+                found.push((b.driver.clone(), v));
+                let every = def
+                    .file
+                    .secrets
+                    .get(k)
+                    .map(crate::spec::SecretDef::refresh_interval)
+                    .unwrap_or(crate::spec::DEFAULT_SECRET_REFRESH);
+                self.inner
+                    .refresh
+                    .lock()
+                    .unwrap()
+                    .reset(&q, k, every, Instant::now());
+            }
+            if !keys.is_empty() && self.check_bindings(&q, &keys, true) {
+                rolled.push(q);
+            }
+        }
+        Ok((found, rolled))
+    }
+
+    /// The driver-backed bindings whose refresh interval is up.
+    fn check_due_secrets(&self) {
+        let defs: Vec<(String, Arc<StackDef>)> = self
+            .inner
+            .stacks
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(q, d)| (q.clone(), d.clone()))
+            .collect();
+        let due = self
+            .inner
+            .refresh
+            .lock()
+            .unwrap()
+            .due(defs.iter().map(|(q, d)| (q.as_str(), &**d)), Instant::now());
+        let mut by_stack: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for (q, k) in due {
+            by_stack.entry(q).or_default().push(k);
+        }
+        for (q, keys) in by_stack {
+            self.check_bindings(&q, &keys, false);
+        }
+    }
+
+    /// Compare the given bindings of a stack with the store's current
+    /// versions; on any change, save the new versions and roll. `quiet`
+    /// skips logging lookups that fail (the caller reports them).
+    fn check_bindings(&self, q: &str, keys: &[String], quiet: bool) -> bool {
+        let _g = self.inner.edit.lock().unwrap();
+        let Ok(cur) = self.get_def(q) else {
+            return false;
+        };
+        let mut def = (*cur).clone();
+        let mut moved = Vec::new();
+        for k in keys {
+            let Some(b) = def.secrets.get_mut(k) else {
+                continue;
+            };
+            match self.inner.secrets.version_in(&b.driver, &def.org, &b.name) {
+                Ok(v) if v != b.version => {
+                    moved.push(format!("{} v{} -> v{v}", b.name, b.version));
+                    b.version = v;
+                }
+                Ok(_) => {}
+                // The services keep the value they have.
+                Err(e) if !quiet => self.note(
+                    "warn",
+                    q,
+                    format!("secret {}: cannot check its version: {e}", b.name),
+                ),
+                Err(_) => {}
+            }
+        }
+        if moved.is_empty() {
+            return false;
+        }
+        if let Err(e) = self.inner.store.save(&def) {
+            self.note("error", q, format!("cannot save new secret versions: {e}"));
+            return false;
+        }
+        self.apply(Arc::new(def));
+        self.note(
+            "info",
+            q,
+            format!("new secret version ({}): rolling", moved.join(", ")),
+        );
+        true
     }
 
     pub fn balancer(&self) -> &Balancer {
@@ -346,7 +518,13 @@ impl Controller {
     /// What deploying `def` would change, without deploying it.
     pub fn plan(&self, def: &StackDef) -> Result<Vec<DeployChange>> {
         self.validate(def)?;
-        let old = self.inner.stacks.lock().unwrap().get(&def.name).cloned();
+        let old = self
+            .inner
+            .stacks
+            .lock()
+            .unwrap()
+            .get(&def.qualified())
+            .cloned();
         diff(old.as_deref(), def)
     }
 
@@ -372,6 +550,7 @@ impl Controller {
     /// itself happens in the background.
     pub fn deploy(&self, mut def: StackDef) -> Result<Vec<DeployChange>> {
         self.validate(&def)?;
+        let _g = self.inner.edit.lock().unwrap();
         let old = self
             .inner
             .stacks
@@ -441,10 +620,13 @@ impl Controller {
     /// its named volumes too. Returns once the workers have cleaned up (or
     /// after `timeout`).
     pub fn remove(&self, name: &str, volumes: bool, timeout: Duration) -> Result<()> {
-        let Some(def) = self.inner.stacks.lock().unwrap().remove(name) else {
-            return Err(Error::NotFound(format!("stack {name}")));
-        };
-        self.inner.store.remove(&def.org, &def.name)?;
+        {
+            let _g = self.inner.edit.lock().unwrap();
+            let Some(def) = self.inner.stacks.lock().unwrap().remove(name) else {
+                return Err(Error::NotFound(format!("stack {name}")));
+            };
+            self.inner.store.remove(&def.org, &def.name)?;
+        }
         let ws: Vec<Arc<WorkerShared>> = self
             .inner
             .workers
@@ -482,6 +664,7 @@ impl Controller {
     /// Go back to the previous deployment (the current one becomes the
     /// previous, so a second rollback undoes the first).
     pub fn rollback(&self, name: &str) -> Result<Vec<DeployChange>> {
+        let _g = self.inner.edit.lock().unwrap();
         let cur = self.get_def(name)?;
         let prev = cur
             .previous
@@ -489,6 +672,13 @@ impl Controller {
             .ok_or_else(|| Error::invalid(format!("stack {name} has no previous deployment")))?;
         let mut def = *prev;
         def.deployed_at = now_secs();
+        // The store keeps only each secret's current value: that is what a
+        // rollback delivers, under its current version.
+        for b in def.secrets.values_mut() {
+            if let Ok(v) = self.inner.secrets.version_in(&b.driver, &def.org, &b.name) {
+                b.version = v;
+            }
+        }
         let mut cur2 = (*cur).clone();
         cur2.previous = None;
         let changes = diff(Some(&cur), &def)?;
@@ -500,6 +690,7 @@ impl Controller {
 
     /// Change one service's replica count.
     pub fn scale(&self, name: &str, service: &str, replicas: u32) -> Result<()> {
+        let _g = self.inner.edit.lock().unwrap();
         let cur = self.get_def(name)?;
         let mut def = (*cur).clone();
         let spec = def
@@ -517,6 +708,7 @@ impl Controller {
     /// (`docker service update --force`): picks up a moved image tag or a
     /// changed bind-mounted file.
     pub fn redeploy(&self, name: &str, service: &str) -> Result<()> {
+        let _g = self.inner.edit.lock().unwrap();
         let cur = self.get_def(name)?;
         cur.service(service)?;
         let mut def = (*cur).clone();
@@ -739,10 +931,10 @@ fn published(spec: &SandboxSpec) -> Result<Vec<Published>> {
 
 /// A stack's instance as listed.
 #[derive(Debug, Clone)]
-struct Inst {
-    name: String,
+pub(crate) struct Inst {
+    pub(crate) name: String,
     slot: u32,
-    rev: String,
+    pub(crate) rev: String,
     status: String,
 }
 
@@ -753,7 +945,11 @@ impl Inst {
 }
 
 /// A stack's instances (of one service), using incus' server-side filter.
-fn list_instances(client: &Client, stack: &str, service: Option<&str>) -> Result<Vec<Inst>> {
+pub(crate) fn list_instances(
+    client: &Client,
+    stack: &str,
+    service: Option<&str>,
+) -> Result<Vec<Inst>> {
     let mut filter = format!("config.user.{LABEL_STACK} eq {stack}");
     if let Some(s) = service {
         filter.push_str(&format!(" and config.user.{LABEL_SERVICE} eq {s}"));
@@ -1529,15 +1725,41 @@ impl Worker {
 
     /// Secrets and the app's unit, after a boot or on creation.
     fn setup(&self, def: &StackDef, sb: &Sandbox, spec: &SandboxSpec, oci: bool) -> Result<()> {
+        // Read from the store now, never from the definition.
+        let keys = spec.secret_keys();
+        let values = if keys.is_empty() {
+            BTreeMap::new()
+        } else {
+            super::secrets::values(&self.inner.secrets, &def.org, &def.secrets, keys)?
+        };
         if !spec.secrets.is_empty() {
-            supervise::push_secrets(sb, spec, &def.secret_values()?)?;
+            supervise::push_secrets(sb, spec, &values)?;
         }
         if spec.command.is_some() && !oci {
             let mut s = spec.clone();
             s.restart = Some(RestartMode::Always);
-            supervise::install(sb, &self.service, &s, !spec.secrets.is_empty())?;
+            let env = supervise::secret_env(spec, &values)?;
+            supervise::install(sb, &self.service, &s, !spec.secrets.is_empty(), &env)?;
         }
         Ok(())
+    }
+
+    /// An OCI instance's secret variables, for its config (`environment.KEY`).
+    fn oci_secret_env(
+        &self,
+        def: &StackDef,
+        spec: &SandboxSpec,
+    ) -> Result<BTreeMap<String, String>> {
+        if spec.env.secrets.is_empty() {
+            return Ok(BTreeMap::new());
+        }
+        let values = super::secrets::values(
+            &self.inner.secrets,
+            &def.org,
+            &def.secrets,
+            spec.env.secrets.values().map(String::as_str),
+        )?;
+        supervise::secret_env(spec, &values)
     }
 
     /// The app's process is up: its unit is active, or (OCI, or no command)
@@ -1594,6 +1816,13 @@ impl Worker {
         probe: Option<&HealthProbe>,
         monitor: Duration,
     ) -> Result<()> {
+        // Before anything is stopped: a secret that cannot be read leaves
+        // the old instance serving.
+        let secret_env = if oci {
+            self.oci_secret_env(def, spec)?
+        } else {
+            BTreeMap::new()
+        };
         if let (Some(o), UpdateOrder::StopFirst) = (old, order) {
             self.log(&format!("slot {slot}: replacing {o} (stop-first)"));
             self.slot_state(def, slot, Some("draining"), None, None);
@@ -1605,6 +1834,8 @@ impl Worker {
         self.slot_state(def, slot, None, Some(&name), Some("creating"));
         let mut s = instance_spec(def, &self.service, spec, slot, rev)?;
         s.name = Some(name.clone());
+        // `env.secrets` stays set, so the values are redacted in reports.
+        s.env.vars.extend(secret_env);
         let d = crate::sandbox::resolve(self.client(), &s, &def.file.volumes, &def.base_dir)?;
         let stack = self.q.clone();
         let mut report = |m: &str| eprintln!("isb serve: {stack}: {m}");

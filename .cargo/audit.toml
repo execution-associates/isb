@@ -1,0 +1,6 @@
+# cargo-audit (CI's rustsec/audit-check) does not read deny.toml; keep this
+# list in step with its [advisories] ignore, which has the reasoning.
+[advisories]
+ignore = [
+    "RUSTSEC-2023-0071", # rsa via age's ssh feature: isb never decrypts or signs with RSA keys
+]

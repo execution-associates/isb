@@ -1,8 +1,9 @@
 # Secrets
 
 `isb serve` keeps a secret store per org: named values, encrypted at rest,
-that you manage with `isb secret` or the `secret_*` tools. Stacks refer to a
-stored secret by name from their compose file (`external: true`).
+that you manage with `isb secret` or the `secret_*` tools. Stacks refer to
+stored secrets by name and version, never by value, so a new version rolls the
+services that use it ([Stacks](#stacks)).
 
 ```sh
 printf %s "$DB_PASSWORD" | isb secret create db_password    # value from stdin
@@ -52,8 +53,8 @@ renamed into place, so a crash never leaves half a value. A `.age` file is a
 standard age file: `age -d -i KEY <name>.age` decrypts it with the daemon's
 key or a break-glass key.
 
-`isb secret refresh NAME` re-reads a secret from its source; for `local` it is
-a no-op.
+`isb secret refresh NAME` re-reads a secret from its source and rolls the
+stacks using it if its version moved; for `local` it is a no-op.
 
 ### `onepassword`
 
@@ -94,6 +95,29 @@ and logs one line saying where. **Keep that file out of unencrypted
 backups**, and add a break-glass recipient: without one, losing the key loses
 every secret. At startup the daemon logs where the key came from and its
 public key, and warns when there is no break-glass recipient.
+
+### As a systemd credential
+
+`isb serve install` moves the key into an encrypted systemd credential where
+it can: with systemd 256 or later (`systemd-creds --version`), it encrypts the
+key (generating one if there is none) with `systemd-creds encrypt --user
+--name=isb-age-key` into `~/.config/isb/isb-age-key.cred` (0600) and adds
+`LoadCredentialEncrypted=isb-age-key:%h/.config/isb/isb-age-key.cred` to the
+unit, so the daemon reads it from `$CREDENTIALS_DIRECTORY` (lookup step 2).
+Running the installer again re-encrypts the plaintext key if there is one,
+and otherwise keeps the credential; it never makes a new key while a
+credential exists.
+
+The plaintext `age.txt` is then unused by the daemon; removing it is your
+call, and the installer prints the command (`shred -u
+~/.config/isb/age.txt`). **Add a break-glass recipient first** (and run `isb
+secret reencrypt --all`): the credential is bound to this machine and user,
+so it cannot be decrypted anywhere else, and without the plaintext file or a
+break-glass key, losing the host loses every secret. With the plaintext gone,
+`isb up` reads store secrets only through a running daemon.
+
+On an older systemd the daemon keeps reading `age.txt`, and the installer says
+to keep it out of backups.
 
 ## Break-glass recipients
 
@@ -158,7 +182,10 @@ A top-level secret has exactly one source:
 | `environment` | An environment variable of whoever deploys the file. |
 | `external: true` | The org's secret store, under `name` (default: the key). |
 | `age` | The inline ciphertext, decrypted with the daemon's key. |
-| `driver` + `name` | A secrets driver, by that driver's reference. |
+| `driver` + `name` | A secrets driver, by that driver's reference; `refresh` (default `1h`) is how often a stack checks it for a new version. |
+
+A service uses a secret as a file (`secrets:`, under `/run/secrets`) or as an
+environment variable (`environment: {KEY: {secret: NAME}}`):
 
 ```yaml
 secrets:
@@ -168,13 +195,76 @@ secrets:
 services:
   web:
     image: dev-base
+    command: [./serve]
     secrets: [db_password, {source: tls_key, target: key.pem}]
+    environment:
+      API_TOKEN: {secret: api_token}
 ```
 
-`external`, `age` and `driver` are accepted and validated; `isb up` and `isb
-stack deploy` do not deliver them yet, and a service that uses one fails to
-deploy with a message saying so. `isb secret rm` refuses to delete a secret
-that a deployed stack's services use through `external: true`.
+### As environment variables
+
+`KEY: {secret: NAME}` delivers the value as the variable `KEY`. It must be
+text (UTF-8, no NUL); mount anything else as a file.
+
+- **System images:** the variable is written only to the supervised command's
+  0600 environment file in the guest (`/etc/isb/<service>.env`, the unit's
+  `EnvironmentFile=`), and given to a foreground `isb up` command through
+  exec. It never reaches instance config. The service needs a `command`.
+- **OCI images:** the app is the instance's init process, which only incus
+  can give an environment, so the variable is instance config
+  (`environment.KEY`). **That is plaintext in the incus database**, visible to
+  anyone who can run `incus config show` on the instance (or read incusd's
+  database, or a backup of it). isb shows it as `(secret)` in plans and
+  reports. Prefer a file mount (`secrets:`) when the image can read one.
+
+## Stacks
+
+A deployed stack never holds a secret's value. For each top-level secret its
+services use, the definition records a reference: the name in the org's
+store (or a driver's reference), the driver, and the version deployed
+(`stack_config` shows them). Where the value comes from:
+
+- `external: true` names an existing secret in the stack's org; the deploy
+  fails if there is none.
+- `file:` and `environment:` are read by the client running `isb stack
+  deploy`, which sends the values; the daemon stores each as a `local` secret
+  named `<stack>_<key>` in the org, as swarm does. A value equal to the stored
+  one keeps its version.
+- `age:` is decrypted by the daemon and stored the same way.
+- `driver: X, name: REF` is read through driver X.
+
+The controller reads each value from the store whenever it delivers it (a new
+instance, a reboot), never from the definition. A service's revision includes
+each of its secrets' name and version, so a new version is a new revision and
+the service rolls, per its `update_config`:
+
+- `isb secret set NAME` (or `secret_set`) rolls every stack in the org bound
+  to `NAME` right away, and says which.
+- Driver-backed secrets are polled: every `refresh` interval (default 1h) the
+  controller asks the driver for the current version, and rolls on a change.
+  `isb secret refresh NAME` (a store name or a stack's driver reference)
+  checks now.
+
+`isb stack rm` deletes the `<stack>_<key>` secrets the stack stored, unless
+another stack has come to use them. `isb secret rm` refuses to delete a
+secret that a deployed stack uses. The store keeps only each secret's current
+value, so `isb stack rollback` delivers today's values.
+
+When `isb serve` starts on state written before stacks held references (stack
+definitions with base64 values), it moves each value into the org's store as
+`<stack>_<key>`, rewrites the definition with references, relabels the
+running instances with the new revision so nothing rolls, and logs one line
+per stack. Starting again changes nothing.
+
+## `isb up`
+
+`isb up` delivers the same sources. `file:` and `environment:` it reads
+itself. `external`, `age` and `driver` it reads from the org's store (`--org`,
+default `default`): through `isb serve`'s `secret_resolve` tool when the
+daemon answers on its socket, otherwise directly from `<state-dir>/orgs/` with
+the daemon's key, found in the same order the daemon looks for it (`isb up`
+never generates one). When the key exists only as the daemon's systemd
+credential, the daemon must be running.
 
 ## Tools
 
@@ -184,14 +274,15 @@ Each takes `org` (default `default`). Values travel base64.
 | Tool | Does |
 |---|---|
 | `secret_create` | Create (`name`, `value`, optional `driver`, `labels`); fails if it exists. |
-| `secret_set` | New value (`name`, `value`); returns the metadata with the new version. |
+| `secret_set` | New value (`name`, `value`); returns the metadata with the new version, and the stacks rolling to it (`rolled`). |
 | `secret_get` | `{meta, value}`. |
 | `secret_list` | `{secrets: [meta...]}`, no values. |
 | `secret_inspect` | One secret's metadata. |
 | `secret_delete` | Delete, unless a deployed stack uses it. |
-| `secret_refresh` | Re-read from an external source. |
+| `secret_refresh` | Re-read from an external source (a store name, or a stack's driver reference); `rolled` lists the stacks rolling. |
 | `secret_reencrypt` | Re-encrypt to the current recipients (`org`, or `all: true`). |
 | `secret_recipients` | The public keys values are encrypted to. |
+| `secret_resolve` | Local callers only: the values of a compose file's `external`/`age`/`driver` secrets, for `isb up`. |
 
 Remote callers (through Cloudflare Access) see these tools unless
 `--deny-tools` hides them, for example `--deny-tools 'secret_*'`, and they

@@ -65,11 +65,21 @@ changing the env file or upgrading isb. If the binary path contains a version
 upgrade. Without lingering (`loginctl enable-linger $USER`), user services stop
 when you log out; the installer says so.
 
+The installer also sets up the daemon's secrets key. Where `systemd-creds` can
+make user credentials (systemd 256 or later), it encrypts the key (generating
+one if there is none) into `~/.config/isb/isb-age-key.cred` and the unit loads
+it with `LoadCredentialEncrypted=isb-age-key:%h/.config/isb/isb-age-key.cred`;
+it then prints the command that removes the plaintext key, and why to add a
+break-glass recipient first. On an older systemd the daemon keeps reading
+`~/.config/isb/age.txt`, and the installer says to keep that file out of
+backups. See [secrets.md](secrets.md#the-daemons-key).
+
 The daemon's user needs the incus socket (usually the `incus-admin` group).
 Stack definitions are kept in `$XDG_STATE_HOME/isb/stacks/` (0600 files;
-they hold secret values), override with `--state-dir`. The secret store is
-under `<state-dir>/orgs/`, encrypted to the daemon's age key, which it finds
-(or generates) at startup; see [secrets.md](secrets.md#the-daemons-key).
+they hold references to secrets, never values), override with `--state-dir`.
+The secret store is under `<state-dir>/orgs/`, encrypted to the daemon's age
+key, which it finds (or generates) at startup; see
+[secrets.md](secrets.md#the-daemons-key).
 
 ## Remote MCP through Cloudflare Tunnel and Access
 
@@ -147,8 +157,9 @@ And always:
 
 - `${VAR}` in a remote caller's compose file is filled from the `vars` it sent,
   never from the daemon's environment.
-- Secret values come in the call (`secrets`, or `vars` for an `environment:`
-  secret).
+- `file:` and `environment:` secret values come in the call (`secrets`, or
+  `vars` for an `environment:` secret) and are stored in the org's store;
+  `external`, `age` and `driver` secrets are read by the daemon.
 - Relative paths resolve in `<state-dir>/files/<stack>` unless the caller
   names a `base_dir` inside a bind root.
 - A sandbox a remote caller creates is labelled `isb.owner=mcp:<identity>`.
@@ -165,17 +176,17 @@ directly.
 | `stack_deploy` | Deploy or update a stack from compose YAML (`name`, `compose`, `vars`, `secrets`, `base_dir`, `wait`, `timeout`). Returns the change per service; `wait` blocks until it settles. |
 | `stack_list` | Every stack with its services' state. |
 | `stack_status` | One stack in detail: replicas, health, rotation, restarts, probe output, ports and backends. |
-| `stack_config` | The deployed compose file (secret names only). |
+| `stack_config` | The deployed compose file, and its secrets as references (store name, driver, version), never values. |
 | `stack_logs` | Recent output of a service's replicas. |
 | `stack_scale` | Set a service's replicas. |
 | `stack_redeploy` | Replace a service's replicas though nothing changed. |
 | `stack_rollback` | Back to the previous deployment. |
-| `stack_remove` | Delete a stack's instances and ports (volumes with `volumes: true`). |
+| `stack_remove` | Delete a stack's instances and ports (volumes with `volumes: true`), and the `<stack>_<key>` secrets it stored that no other stack uses. |
 | `sandbox_create` | Create or reconcile one sandbox from a service spec (object or YAML). |
 | `sandbox_list` | Instances, filtered by labels. |
 | `sandbox_exec` | Run argv in a sandbox: exit code, stdout, stderr (each capped at 256 KiB, keeping the end), optional stdin text and timeout (default 10m). |
 | `sandbox_remove` | Delete a sandbox (not a stack replica). |
-| `secret_create`, `secret_set`, `secret_get`, `secret_list`, `secret_inspect`, `secret_delete`, `secret_refresh`, `secret_reencrypt`, `secret_recipients` | An org's secret store; values base64. See [secrets.md](secrets.md). Remote callers reach every org's secrets, values included, unless `--deny-tools 'secret_*'`. |
+| `secret_create`, `secret_set`, `secret_get`, `secret_list`, `secret_inspect`, `secret_delete`, `secret_refresh`, `secret_reencrypt`, `secret_recipients`, `secret_resolve` | An org's secret store; values base64. `secret_set` and `secret_refresh` roll the stacks using the secret. `secret_resolve` (local callers only) is how `isb up` reads store-backed secrets. See [secrets.md](secrets.md). Remote callers reach every org's secrets, values included, unless `--deny-tools 'secret_*'`. |
 | `server_status` | Versions, and the balancer's routes with live counters. |
 | `overview` | Everything a dashboard shows in one call: host CPU and memory with history, every stack in detail, sandboxes with their CPU and memory, the latest event number. |
 | `events` | The event feed (deploys, rollouts, health changes, restarts, failures) after a `since` cursor, optionally waiting up to 30 s for one. |

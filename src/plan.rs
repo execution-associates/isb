@@ -284,6 +284,10 @@ pub struct Desired {
     /// `raw.idmap` is then a decision, not an omission.
     #[serde(skip)]
     pub idmap_mode: Option<crate::spec::IdmapMode>,
+    /// Config keys holding secret values (`environment.KEY` from
+    /// `{secret: NAME}`): set, but never shown in plans or reports.
+    #[serde(skip)]
+    pub sensitive: BTreeSet<String>,
 }
 
 /// Named-volume definitions available to a sandbox (from a compose file's
@@ -846,6 +850,12 @@ pub fn resolve(
         ready_timeout,
         exec: spec.exec_defaults(),
         idmap_mode,
+        sensitive: spec
+            .env
+            .secrets
+            .keys()
+            .map(|k| format!("environment.{k}"))
+            .collect(),
     })
 }
 
@@ -939,6 +949,10 @@ pub enum Action {
         to: String,
         /// Only takes effect after a restart.
         restart: bool,
+        /// A secret value: `from` and `to` say `(secret)`, and the value set
+        /// is the desired config's.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        secret: bool,
     },
     AddDevice {
         device: String,
@@ -1008,6 +1022,7 @@ impl std::fmt::Display for Action {
                 from,
                 to,
                 restart,
+                ..
             } => write!(
                 f,
                 "~ config {key}: {} -> {to}{}",
@@ -1128,6 +1143,9 @@ pub fn device_matches(desired: &DesiredDevice, actual: &Props) -> bool {
     strip(&d) == strip(&a)
 }
 
+/// What plans and reports show for a secret value.
+pub const REDACTED: &str = "(secret)";
+
 fn restart_needed(key: &str) -> bool {
     key.starts_with("raw.") || key.starts_with("security.") || key.starts_with("oci.")
 }
@@ -1161,7 +1179,18 @@ pub fn diff(
         actions.push(Action::CreateInstance {
             image: desired.image.spec.clone(),
             pool: desired.pool.clone(),
-            config: desired.config.clone(),
+            config: desired
+                .config
+                .iter()
+                .map(|(k, v)| {
+                    let v = if desired.sensitive.contains(k) {
+                        REDACTED.to_string()
+                    } else {
+                        v.clone()
+                    };
+                    (k.clone(), v)
+                })
+                .collect(),
             devices: desired
                 .devices
                 .iter()
@@ -1220,11 +1249,14 @@ pub fn diff(
     for (k, v) in &desired.config {
         let cur = actual.config.get(k);
         if cur != Some(v) {
+            let secret = desired.sensitive.contains(k);
+            let hide = |s: &String| if secret { REDACTED.into() } else { s.clone() };
             actions.push(Action::SetConfig {
                 key: k.clone(),
-                from: cur.cloned(),
-                to: v.clone(),
+                from: cur.map(hide),
+                to: hide(v),
                 restart: restart_needed(k),
+                secret,
             });
         }
     }
@@ -1698,14 +1730,54 @@ mod tests {
             key: "limits.cpu".into(),
             from: Some("4".into()),
             to: "8".into(),
-            restart: false
+            restart: false,
+            secret: false,
         }));
         assert!(p.actions.contains(&Action::SetConfig {
             key: "raw.idmap".into(),
             from: None,
             to: "both 1000 1000".into(),
-            restart: true
+            restart: true,
+            secret: false,
         }));
+    }
+
+    #[test]
+    fn secret_environment_is_set_but_never_shown() {
+        let t = tmp();
+        let mut s = lasso_spec(t.path().to_str().unwrap());
+        s.env.secrets.insert("TOKEN".into(), "tok".into());
+        s.env.vars.insert("TOKEN".into(), "hunter2".into());
+        let d = resolve(&s, &VolumeDefs::new(), &host(), Path::new("/")).unwrap();
+        assert_eq!(d.config["environment.TOKEN"], "hunter2");
+        let created = diff(&d, None, &[], DiffOptions::default()).unwrap();
+        let shown = format!(
+            "{:?} {}",
+            created.actions,
+            serde_json::to_string(&created).unwrap()
+        );
+        assert!(!shown.contains("hunter2"), "{shown}");
+        let mut a = actual_from(&d);
+        a.config
+            .insert("environment.TOKEN".into(), "old-value".into());
+        let p = diff(&d, Some(&a), &[], DiffOptions::default()).unwrap();
+        let shown = format!(
+            "{} {}",
+            p.actions
+                .iter()
+                .map(|a| a.to_string())
+                .collect::<Vec<_>>()
+                .join("; "),
+            serde_json::to_string(&p).unwrap()
+        );
+        assert!(
+            !shown.contains("hunter2") && !shown.contains("old-value"),
+            "{shown}"
+        );
+        assert!(p.actions.iter().any(|a| matches!(
+            a,
+            Action::SetConfig { key, secret: true, .. } if key == "environment.TOKEN"
+        )));
     }
 
     #[test]

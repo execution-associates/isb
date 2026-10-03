@@ -95,6 +95,11 @@ minime only runs binaries downloaded from our CI runs.
   on new bridges, so `sudo isb host setup` installs wildcard allows once
   (`ufw allow in on isbbr+` 67/udp, 53; `ufw route allow in on isbbr+ out on
   <uplink>`); ufw's routed default-deny keeps org bridges apart.
+- **Service names cost dnsmasq its AppArmor profile.** Names come from a
+  per-org hosts directory (`/var/lib/isb/dns/<org>`, made by `isb host
+  setup`) wired in with `raw.dnsmasq=hostsdir=`, and incus runs a bridge's
+  dnsmasq unconfined once `raw.dnsmasq` is set. It still runs as `incus`.
+  Accepted for now; an opt-out per org is the fallback.
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
@@ -142,11 +147,11 @@ minime only runs binaries downloaded from our CI runs.
   org mapped to the incus `default` project for backwards compatibility).
   Stacks and sandboxes live inside their org. **Verify:** two orgs, a stack
   in each, neither can see or reach the other (exec, list, network).
-- [~] (orchestrator) P1.2 Per-org network policy: allow within the org, deny across orgs and
+- [x] (fec1f95) P1.2 Per-org network policy: allow within the org, deny across orgs and
   to private ranges by default (done with P1.1: the org ACL), named exceptions
-  in the org config (todo).
+  in the org config (`--allow-egress CIDR[:PORTS[/proto]]`, done).
   **Verify:** curl across orgs fails, within succeeds, egress to internet ok.
-- [~] (subagent p1.3) P1.3 Service discovery: stable names per service inside an org
+- [x] (fec1f95) P1.3 Service discovery: stable names per service inside an org
   (`<service>.<stack>.isb` or similar), resolving to the instance (1 replica)
   or an org-local balancer address (replicas). **Verify:** an app reaches its
   postgres by name through a rolling replacement of the postgres.
@@ -156,10 +161,10 @@ minime only runs binaries downloaded from our CI runs.
   argon2id passwords, sessions with secure cookies, first-run admin setup,
   invitations, roles (platform admin; org admin/member), API tokens (hashed,
   org-scoped). **Verify:** unit tests + login over HTTP.
-- [~] (subagent p1.5) P1.5 OAuth/OIDC: GitHub, Google, generic OIDC (discovery, PKCE),
+- [~] (97da457, merged; browser verify pending) P1.5 OAuth/OIDC: GitHub, Google, generic OIDC (discovery, PKCE),
   account linking by verified email. **Verify:** GitHub login end to end in a
   browser against the hcloud box.
-- [~] (subagent p1.5) P1.6 Passkeys (WebAuthn): register and sign in. **Verify:** browser on
+- [~] (97da457, merged; browser verify pending) P1.6 Passkeys (WebAuthn): register and sign in. **Verify:** browser on
   minime (Touch ID or a virtual authenticator via CDP).
 - [x] (platform) P1.7 REST + SSE API generated from the tool registry: `/api/v1/<tool>`,
   OpenAPI document, `/api/v1/events` SSE, auth by session or token; MCP keeps
@@ -172,16 +177,16 @@ minime only runs binaries downloaded from our CI runs.
   encrypt|reencrypt|refresh`, per org; daemon key lookup and generation;
   break-glass recipients. **Verify:** unit tests; reencrypt round trip with a
   second recipient.
-- [~] (subagent p1.9) P1.9 Stacks reference secrets by name+version; revision uses versions;
+- [x] (fb3f72d) P1.9 Stacks reference secrets by name+version; revision uses versions;
   migrate existing stack state (base64 values) into the local store on daemon
   start. **Verify:** existing e2e stack survives the upgrade; a `secret set`
   rolls the dependent service.
-- [~] (subagent p1.9) P1.10 Inline `age:` secrets in compose, `{secret: name}` env delivery
+- [x] (fb3f72d, acc77ad) P1.10 Inline `age:` secrets in compose, `{secret: name}` env delivery
   (unit env file; OCI incus config), external-driver refresh polling.
   **Verify:** integration test for each delivery path.
 - [x] (platform) P1.11 `onepassword` driver (via `op` service account token stored as a
   local secret, or titan's broker). **Verify:** against a titan vault.
-- [~] (subagent p1.9) P1.12 Secret tools on MCP/REST (`secret_list|get|set|delete`), org-scoped;
+- [~] (e1ab878; Linux done, macOS keychain with P0.3) P1.12 Secret tools on MCP/REST (`secret_list|get|set|delete`), org-scoped;
   `isb serve install` creates the systemd credential (Linux) / keychain-backed
   file (macOS). **Verify:** an org agent rotates a secret over MCP and the
   service rolls.

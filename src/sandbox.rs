@@ -305,7 +305,7 @@ pub fn apply(
         }
         // Batched config/device changes land before whatever comes next (a start,
         // most importantly, so a stopped instance boots with the right devices).
-        flush_updates(client, name, &mut pending, &mut out, report)?;
+        flush_updates(client, desired, &mut pending, &mut out, report)?;
         match action {
             Action::Note { message } => report(&format!("{name}: note: {message}")),
             Action::CreateVolume {
@@ -354,13 +354,13 @@ pub fn apply(
         }
         out.applied.push(action.clone());
     }
-    flush_updates(client, name, &mut pending, &mut out, report)?;
+    flush_updates(client, desired, &mut pending, &mut out, report)?;
     Ok(out)
 }
 
 fn flush_updates(
     client: &Client,
-    name: &str,
+    desired: &Desired,
     pending: &mut Vec<&Action>,
     out: &mut ApplyReport,
     report: &mut dyn FnMut(&str),
@@ -368,6 +368,7 @@ fn flush_updates(
     if pending.is_empty() {
         return Ok(());
     }
+    let name = desired.name.as_str();
     for a in pending.iter() {
         report(&format!("{name}: {a}"));
     }
@@ -380,8 +381,15 @@ fn flush_updates(
             &mut |config, devices| {
                 for a in &actions {
                     match a {
-                        Action::SetConfig { key, to, .. } => {
-                            config.insert(key.clone(), json!(to));
+                        Action::SetConfig {
+                            key, to, secret, ..
+                        } => {
+                            // A secret's action carries a placeholder.
+                            let v = match (secret, desired.config.get(key)) {
+                                (true, Some(v)) => v,
+                                _ => to,
+                            };
+                            config.insert(key.clone(), json!(v));
                         }
                         Action::AddDevice { device, props } => {
                             devices.insert(device.clone(), json!(props));

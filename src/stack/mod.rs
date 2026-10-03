@@ -18,6 +18,8 @@
 //!   `start-first` rollout has no gap.
 
 pub mod controller;
+pub mod migrate;
+pub mod secrets;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -29,6 +31,7 @@ use crate::org::OrgId;
 use crate::spec::{ComposeFile, SandboxSpec};
 
 pub use controller::Controller;
+pub use secrets::SecretBinding;
 
 /// Instance config keys (without `user.`) that tie an instance to its stack.
 pub const LABEL_STACK: &str = "isb.stack";
@@ -47,9 +50,10 @@ pub struct StackDef {
     pub file: ComposeFile,
     /// Where relative bind paths resolve.
     pub base_dir: PathBuf,
-    /// Secret values, base64, keyed by top-level secret.
+    /// The secrets the services use, by top-level key: references into the
+    /// org's store by name and version, never values ([`secrets`]).
     #[serde(default)]
-    pub secrets: BTreeMap<String, String>,
+    pub secrets: BTreeMap<String, SecretBinding>,
     /// Bumped per service by a forced update, to replace instances whose spec
     /// did not change (a moved image tag, say).
     #[serde(default)]
@@ -87,17 +91,25 @@ impl StackDef {
         qualified(&self.org, &self.name)
     }
 
-    pub fn secret_values(&self) -> Result<BTreeMap<String, Vec<u8>>> {
-        self.secrets
-            .iter()
-            .map(|(k, v)| Ok((k.clone(), crate::rpc::b64_decode(v)?)))
-            .collect()
-    }
-
     /// The service's revision: a hash of what shapes its instances. Replica
     /// count, rollout settings and dependencies are left out, so changing
-    /// them never replaces an instance.
+    /// them never replaces an instance. A secret counts by its binding
+    /// (store name, driver, version), so a new version is a new revision.
     pub fn revision(&self, service: &str) -> Result<String> {
+        self.revision_with(service, &|key| {
+            self.secrets
+                .get(key)
+                .map(|b| format!("{}\0{}\0{}", b.name, b.driver, b.version).into_bytes())
+                .unwrap_or_default()
+        })
+    }
+
+    /// [`StackDef::revision`] with each secret's contribution given.
+    pub(crate) fn revision_with(
+        &self,
+        service: &str,
+        secret: &dyn Fn(&str) -> Vec<u8>,
+    ) -> Result<String> {
         let spec = self.service(service)?;
         let mut s = spec.clone();
         s.name = None;
@@ -116,12 +128,12 @@ impl StackDef {
         h.write(serde_json::to_string(&s)?.as_bytes());
         for r in &spec.secrets {
             h.write(r.source.as_bytes());
-            h.write(
-                self.secrets
-                    .get(&r.source)
-                    .map(String::as_bytes)
-                    .unwrap_or_default(),
-            );
+            h.write(&secret(&r.source));
+        }
+        for (var, key) in &spec.env.secrets {
+            h.write(b"env");
+            h.write(var.as_bytes());
+            h.write(&secret(key));
         }
         // Named volumes are part of the instance's devices; their definitions
         // are only used at creation, but a renamed one must move the instance.
@@ -134,21 +146,15 @@ impl StackDef {
         Ok(format!("{:08x}", h.finish() as u32))
     }
 
-    /// Names of the org's stored secrets (top-level `external: true`) that
-    /// the stack's services use: what `isb secret rm` must not pull out
-    /// from under it.
+    /// Names in the org's store that the stack's services use (external
+    /// ones, and the `<stack>_<key>` ones it owns): what `isb secret rm`
+    /// must not pull out from under it.
     pub fn store_secrets(&self) -> std::collections::BTreeSet<String> {
-        self.file
-            .services
-            .values()
-            .flat_map(|s| s.secrets.iter())
-            .filter_map(|r| {
-                self.file
-                    .secrets
-                    .get(&r.source)
-                    .and_then(|d| d.store_name(&r.source))
-                    .map(String::from)
-            })
+        let used = secrets::used_keys(&self.file);
+        self.secrets
+            .iter()
+            .filter(|(k, _)| used.contains(*k))
+            .map(|(_, b)| b.name.clone())
             .collect()
     }
 
@@ -266,7 +272,8 @@ impl Store {
         }
     }
 
-    pub fn load_all(&self) -> Result<Vec<StackDef>> {
+    /// Every stored definition's file, in every org.
+    pub fn files(&self) -> Result<Vec<PathBuf>> {
         let mut dirs = vec![self.dir.join("stacks")];
         if let Ok(rd) = std::fs::read_dir(self.dir.join("orgs")) {
             for e in rd.flatten() {
@@ -281,12 +288,21 @@ impl Store {
             for e in rd {
                 let p = e?.path();
                 if p.extension().is_some_and(|x| x == "json") {
-                    let text = std::fs::read_to_string(&p)?;
-                    match serde_json::from_str::<StackDef>(&text) {
-                        Ok(d) => out.push(d),
-                        Err(e) => eprintln!("isb serve: skipping {}: {e}", p.display()),
-                    }
+                    out.push(p);
                 }
+            }
+        }
+        out.sort();
+        Ok(out)
+    }
+
+    pub fn load_all(&self) -> Result<Vec<StackDef>> {
+        let mut out = Vec::new();
+        for p in self.files()? {
+            let text = std::fs::read_to_string(&p)?;
+            match serde_json::from_str::<StackDef>(&text) {
+                Ok(d) => out.push(d),
+                Err(e) => eprintln!("isb serve: skipping {}: {e}", p.display()),
             }
         }
         out.sort_by_key(|d| d.qualified());
@@ -368,30 +384,110 @@ mod tests {
         assert_ne!(a.revision("web").unwrap(), d.revision("web").unwrap());
     }
 
-    #[test]
-    fn revision_follows_secret_values() {
-        let y = "secrets: {k: {environment: K}}\nservices:\n  web: {image: x, secrets: [k]}\n";
-        let mut a = def(y);
-        a.secrets.insert("k".into(), "YQ==".into());
-        let mut b = def(y);
-        b.secrets.insert("k".into(), "Yg==".into());
-        assert_ne!(a.revision("web").unwrap(), b.revision("web").unwrap());
+    fn binding(name: &str, version: u64) -> SecretBinding {
+        SecretBinding {
+            name: name.into(),
+            driver: "local".into(),
+            version,
+            owned: false,
+        }
     }
 
     #[test]
-    fn store_secrets_are_the_used_external_ones() {
-        let d = def(concat!(
+    fn revision_follows_secret_versions() {
+        let y = "secrets: {k: {external: true}, e: {external: true}}\nservices:\n  web: {image: x, secrets: [k]}\n  api: {image: docker:busybox, environment: {TOKEN: {secret: e}}}\n";
+        let mut a = def(y);
+        a.secrets.insert("k".into(), binding("k", 1));
+        a.secrets.insert("e".into(), binding("e", 1));
+        let (web, api) = (a.revision("web").unwrap(), a.revision("api").unwrap());
+        // A new version of the file secret rolls web, not api.
+        let mut b = a.clone();
+        b.secrets.get_mut("k").unwrap().version = 2;
+        assert_ne!(b.revision("web").unwrap(), web);
+        assert_eq!(b.revision("api").unwrap(), api);
+        // A new version of the env secret rolls api, not web.
+        let mut c = a.clone();
+        c.secrets.get_mut("e").unwrap().version = 2;
+        assert_eq!(c.revision("web").unwrap(), web);
+        assert_ne!(c.revision("api").unwrap(), api);
+        // So does pointing it at another store name, at the same version.
+        let mut d = a.clone();
+        d.secrets.get_mut("e").unwrap().name = "other".into();
+        assert_ne!(d.revision("api").unwrap(), api);
+        // And delivering it as another variable.
+        let mut e = a.clone();
+        let env = &mut e.file.services.get_mut("api").unwrap().env.secrets;
+        env.clear();
+        env.insert("TOKEN2".into(), "e".into());
+        assert_ne!(e.revision("api").unwrap(), api);
+        // Bookkeeping is not part of it.
+        let mut f = a.clone();
+        f.secrets.get_mut("k").unwrap().owned = true;
+        f.deployed_at = 99;
+        assert_eq!(f.revision("web").unwrap(), web);
+    }
+
+    #[test]
+    fn revision_without_secrets_is_unchanged_by_bindings() {
+        // A stack with no secrets hashes exactly as before secrets became
+        // references, so upgrading never rolls it.
+        let a = def("services:\n  web: {image: x, environment: {A: '1'}}\n");
+        assert_eq!(
+            a.revision("web").unwrap(),
+            a.revision_with("web", &|_| b"ignored".to_vec()).unwrap()
+        );
+    }
+
+    #[test]
+    fn store_secrets_are_the_bound_names() {
+        let mut d = def(concat!(
             "secrets:\n",
             "  a: {external: true}\n",
             "  b: {external: true, name: db.password}\n",
             "  c: {environment: C}\n",
+            "  e: {external: true}\n",
             "  unused: {external: true}\n",
             "services:\n",
             "  web: {image: x, secrets: [a, c]}\n",
-            "  db: {image: x, secrets: [{source: b, target: pw}]}\n",
+            "  db: {image: x, secrets: [{source: b, target: pw}], command: [x], environment: {E: {secret: e}}}\n",
         ));
+        d.secrets.insert("a".into(), binding("a", 1));
+        d.secrets.insert("b".into(), binding("db.password", 1));
+        d.secrets.insert("c".into(), binding("app_c", 1));
+        d.secrets.insert("e".into(), binding("e", 1));
+        // A stale binding for a key no service uses does not count.
+        d.secrets.insert("unused".into(), binding("unused", 1));
         let s: Vec<String> = d.store_secrets().into_iter().collect();
-        assert_eq!(s, ["a", "db.password"]);
+        assert_eq!(s, ["a", "app_c", "db.password", "e"]);
+    }
+
+    #[test]
+    fn environment_round_trips_with_secrets() {
+        let d = def(
+            "services:\n  web: {image: x, environment: {A: 1, T: {secret: tok}}}\nsecrets: {tok: {external: true}}\n",
+        );
+        let env = &d.file.services["web"].env;
+        assert_eq!(env["A"], "1");
+        assert_eq!(env.secrets["T"], "tok");
+        let json = serde_json::to_string(&d.file).unwrap();
+        assert!(
+            json.contains(r#""environment":{"A":"1","T":{"secret":"tok"}}"#),
+            "{json}"
+        );
+        let back: crate::spec::ComposeFile = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, d.file);
+        assert!(
+            serde_yaml_ng::from_str::<crate::spec::SandboxSpec>(
+                "image: x\nenvironment: {T: {secret: tok, extra: 1}}\n"
+            )
+            .is_err()
+        );
+        assert!(
+            serde_yaml_ng::from_str::<crate::spec::SandboxSpec>(
+                "image: x\nenvironment: {T: {secret: ''}}\n"
+            )
+            .is_err()
+        );
     }
 
     #[test]

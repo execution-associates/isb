@@ -90,6 +90,27 @@ pub(crate) fn string_map<'de, D: Deserializer<'de>>(
     Ok(m.into_iter().map(|(k, v)| (k, v.into_string())).collect())
 }
 
+/// One `environment` value: a scalar, or a top-level secret delivered as the
+/// variable.
+#[derive(Deserialize, JsonSchema)]
+#[serde(untagged, deny_unknown_fields)]
+pub(crate) enum EnvValue {
+    Scalar(Scalar),
+    Secret {
+        /// A top-level secret's key.
+        secret: String,
+    },
+}
+
+/// An environment: a map (a value may be `{secret: NAME}`), or docker's
+/// list of `KEY=VALUE` strings.
+#[derive(Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub(crate) enum EnvMapOrList {
+    Map(std::collections::BTreeMap<String, EnvValue>),
+    List(Vec<String>),
+}
+
 /// A map, or docker's list of `KEY=VALUE` strings.
 #[derive(Deserialize, JsonSchema)]
 #[serde(untagged)]

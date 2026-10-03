@@ -46,6 +46,15 @@ class Deploy(TypedDict, total=False):
     update_config: Optional[UpdateConfig]
 
 
+class _EnvValueSecretRequired(TypedDict):
+    #: A top-level secret's key.
+    secret: str
+
+
+class EnvValueSecret(_EnvValueSecretRequired, total=False):
+    pass
+
+
 class ExecSpec(TypedDict, total=False):
     """The `exec:` block of a service: exec defaults with no docker equivalent."""
     #: Environment for exec only (merged over `environment`, never stored in
@@ -216,9 +225,10 @@ class SandboxSpec(TypedDict, total=False):
     #: including the image's own entrypoint.
     entrypoint: Optional[Command]
     #: Instance environment (`environment.<KEY>`), seen by every exec: a map, or
-    #: a list of `KEY=VALUE`. Not for secrets: it is plain instance config,
-    #: readable by anyone who can read the instance.
-    environment: MapOrList
+    #: a list of `KEY=VALUE`. A plain value is instance config, readable by
+    #: anyone who can read the instance. `KEY: {secret: NAME}` delivers the
+    #: top-level secret NAME as the variable (docs/secrets.md).
+    environment: EnvMapOrList
     #: More exec defaults: an exec-only environment and the login shell.
     exec: ExecSpec
     #: A recurring health test, as in docker compose. `isb stack deploy`
@@ -298,6 +308,10 @@ class SecretDef(TypedDict, total=False):
     #: With `external`: the store's name for it. With `driver`: the
     #: driver's reference (a 1Password `op://` path, say).
     name: Optional[str]
+    #: With `driver`: how often `isb serve` checks the driver for a new
+    #: version (`30m`, `1h`; default 1h). A new version rolls the services
+    #: using it.
+    refresh: Optional[str]
 
 
 class _SecretRefRequired(TypedDict):
@@ -414,9 +428,10 @@ class SandboxSpecFields(TypedDict, total=False):
     #: including the image's own entrypoint.
     entrypoint: Optional[Command]
     #: Instance environment (`environment.<KEY>`), seen by every exec: a map, or
-    #: a list of `KEY=VALUE`. Not for secrets: it is plain instance config,
-    #: readable by anyone who can read the instance.
-    environment: MapOrList
+    #: a list of `KEY=VALUE`. A plain value is instance config, readable by
+    #: anyone who can read the instance. `KEY: {secret: NAME}` delivers the
+    #: top-level secret NAME as the variable (docs/secrets.md).
+    environment: EnvMapOrList
     #: More exec defaults: an exec-only environment and the login shell.
     exec: ExecSpec
     #: A recurring health test, as in docker compose. `isb stack deploy`
@@ -475,6 +490,8 @@ class SandboxSpecFields(TypedDict, total=False):
 
 
 DependsOnRepr = Union[Sequence[str], Mapping[str, Dependency]]
+EnvValue = Union[Scalar, EnvValueSecret]
+EnvMapOrList = Union[Mapping[str, EnvValue], Sequence[str]]
 IdmapSpec = Union[IdmapMode, IdmapMap, IdmapRaw]
 PortSpec = Union[str, PortMapping, ProxyPort]
 ReadyCheck = Union[Literal["running", "agent", "default_route"], ReadyCheckUserExists, ReadyCheckPathWritable, ReadyCheckCommand]
@@ -488,6 +505,9 @@ __all__ = [
     "Dependency",
     "DependsOnRepr",
     "Deploy",
+    "EnvMapOrList",
+    "EnvValue",
+    "EnvValueSecret",
     "ExecSpec",
     "FailureAction",
     "Healthcheck",

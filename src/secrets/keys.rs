@@ -190,6 +190,16 @@ pub struct LoadedKey {
 
 /// Find the daemon's key, or generate one at `default_file`.
 pub fn load_identity(src: &KeySources) -> Result<LoadedKey> {
+    lookup_identity(src, true)
+}
+
+/// Find the daemon's key; never generate one (a client reading the store
+/// must not mint a key the daemon would then use).
+pub fn find_identity(src: &KeySources) -> Result<LoadedKey> {
+    lookup_identity(src, false)
+}
+
+fn lookup_identity(src: &KeySources, generate: bool) -> Result<LoadedKey> {
     let loaded = |identity, origin| LoadedKey {
         identity,
         origin,
@@ -223,6 +233,12 @@ pub fn load_identity(src: &KeySources) -> Result<LoadedKey> {
             }
         }
         return Ok(k);
+    }
+    if !generate {
+        return Err(Error::invalid(format!(
+            "no secrets key: not in $ISB_AGE_KEY, $CREDENTIALS_DIRECTORY/{CREDENTIAL_NAME}, $ISB_AGE_KEY_FILE or {}",
+            p.display()
+        )));
     }
     let id = generate_identity_file(p)?;
     let mut k = loaded(id, KeyOrigin::Generated(p.clone()));
@@ -475,6 +491,24 @@ mod tests {
                 .to_public()
                 .to_string(),
             pk(0)
+        );
+    }
+
+    #[test]
+    fn find_never_generates() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = sources(dir.path());
+        let e = find_identity(&src).err().unwrap().to_string();
+        assert!(e.contains("no secrets key"), "{e}");
+        assert!(!src.default_file.exists());
+        let k = load_identity(&src).unwrap();
+        assert_eq!(
+            find_identity(&src)
+                .unwrap()
+                .identity
+                .to_public()
+                .to_string(),
+            k.identity.to_public().to_string()
         );
     }
 
