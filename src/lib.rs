@@ -45,6 +45,7 @@ pub mod org;
 pub mod plan;
 pub mod rpc;
 pub mod sandbox;
+pub mod secrets;
 pub mod server;
 pub mod shorthand;
 pub mod spec;

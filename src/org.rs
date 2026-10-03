@@ -62,7 +62,9 @@ impl OrgId {
         if project == "default" {
             return Some(OrgId::default_org());
         }
-        project.strip_prefix("isb-").and_then(|o| OrgId::new(o).ok())
+        project
+            .strip_prefix("isb-")
+            .and_then(|o| OrgId::new(o).ok())
     }
 
     /// This org's directory under a daemon state directory.

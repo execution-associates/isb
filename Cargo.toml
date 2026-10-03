@@ -38,6 +38,11 @@ base64 = { version = "0.23", default-features = false, features = ["alloc"] }
 ring = { version = "0.17", default-features = false, features = ["alloc"] }
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 ratatui = "0.29.0"
+# The secrets store: age encryption to the daemon's key plus break-glass
+# recipients (age X25519 keys, or ssh-ed25519/ssh-rsa public keys).
+age = { version = "0.12", default-features = false, features = ["armor", "ssh"] }
+# ~/.config/isb/secrets.toml
+toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
 
 [dev-dependencies]
 tempfile = "3"
