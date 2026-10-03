@@ -249,10 +249,7 @@ impl AgentClient {
     pub fn terminal(&self, who: &Assertion, org: &OrgId, t: &TermRequest) -> Result<Box<dyn Pty>> {
         use tungstenite::client::IntoClientRequest;
         let s = self.connect(CONNECT_TIMEOUT)?;
-        let mut q = format!("app={}&cols={}&rows={}", t.app, t.cols, t.rows);
-        if let Some(n) = t.slot {
-            q.push_str(&format!("&slot={n}"));
-        }
+        let q = t.query();
         let url = format!("wss://{}/orgs/{org}/api/v1/terminal?{q}", self.authority());
         let mut req = url
             .into_client_request()
@@ -283,7 +280,7 @@ impl AgentClient {
         Ok(Box::new(RemotePty {
             ws,
             done: false,
-            target: format!("{}:{}", self.name, t.app),
+            target: format!("{}:{}", self.name, t.target()),
         }))
     }
 }

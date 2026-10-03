@@ -119,6 +119,20 @@ export interface Passkey {
   last_used: number | null;
 }
 
+/** An SSH public key on the account: what `isb ssh-proxy` lets in (docs/ssh.md). */
+export interface SshKey {
+  id: number;
+  user_id: number;
+  name: string;
+  algorithm: string;
+  /** `algorithm base64`, no comment. */
+  public_key: string;
+  /** OpenSSH's `SHA256:...`. */
+  fingerprint: string;
+  created_at: number;
+  last_used: number | null;
+}
+
 export interface InvitationInfo {
   org: string;
   email: string;
@@ -199,6 +213,10 @@ export const auth = {
   /** Where to send the browser to sign in with (or link) a provider. */
   oauthStart: (provider: string, b: { next?: string; invite?: string; intent?: "login" | "link" }) =>
     post<{ url: string }>(`${A}/oauth/${encodeURIComponent(provider)}/start`, b),
+
+  sshKeys: () => get<{ ssh_keys: SshKey[] }>(`${A}/ssh-keys`),
+  addSshKey: (b: { public_key: string; name?: string }) => post<{ ssh_key: SshKey }>(`${A}/ssh-keys`, b),
+  deleteSshKey: (id: number) => del(`${A}/ssh-keys/${id}`),
 
   passkeys: () => get<{ passkeys: Passkey[] }>(`${A}/passkeys`),
   deletePasskey: (id: number) => del(`${A}/passkeys/${id}`),

@@ -20,6 +20,7 @@ pub mod policy;
 pub mod previews;
 pub mod secrets;
 mod servers;
+mod ssh;
 pub mod superadmin;
 pub mod templates;
 mod terminal;
@@ -638,6 +639,7 @@ fn visible_orgs(c: &Caller) -> Option<Vec<crate::org::OrgId>> {
 fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate::server::Hooks {
     use crate::server::Authenticated;
     let term = terminal::terminal(d.clone());
+    let ssh = ssh::ssh(d.clone(), users.clone());
     let u = users.clone();
     let gate = d.gate.clone();
     let authn: crate::server::mcp::Authn = Arc::new(move |req, id| {
@@ -713,6 +715,7 @@ fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate:
         authorize: Some(authorize),
         events: Some(events),
         terminal: Some(term),
+        ssh: Some(ssh),
         audit: None,
         route: None,
     }
@@ -1405,6 +1408,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
     audit::register(&mut r, d.audit.clone())?;
     audit::register_history(&mut r, d.audit.clone())?;
     servers::register(&mut r, d.clone())?;
+    ssh::register(&mut r, d.clone())?;
     Ok(r)
 }
 

@@ -23,6 +23,8 @@ mod data;
 mod notify;
 #[path = "isb/servers.rs"]
 mod servers;
+#[path = "isb/ssh.rs"]
+mod ssh;
 #[path = "isb/templates.rs"]
 mod templates;
 
@@ -316,6 +318,27 @@ enum Cmd {
     /// API tokens for `isb serve`.
     #[command(subcommand)]
     Token(TokenCmd),
+    /// SSH public keys on isb accounts: what `isb ssh-proxy` lets into an
+    /// org's instances (docs/ssh.md).
+    #[command(subcommand)]
+    Key(ssh::KeyCmd),
+    /// SSH's stdio over isb serve's websocket to an instance of an org, for
+    /// ssh's ProxyCommand (`isb ssh-config` writes it). Nothing listens in
+    /// the instance and no port opens anywhere.
+    SshProxy {
+        /// ORG/INSTANCE, or INSTANCE in --org.
+        target: String,
+        /// Whose isb SSH keys to let in, for the local socket (which has no
+        /// account of its own).
+        #[arg(long = "as")]
+        keys_of: Option<String>,
+        #[command(flatten)]
+        remote: ssh::RemoteArgs,
+    },
+    /// `Host` blocks for ~/.ssh/config (ProxyCommand isb ssh-proxy, the
+    /// instance's host key pinned in isb's known_hosts), so plain ssh, scp,
+    /// editors and `herdr machine add` reach an org's instances.
+    SshConfig(ssh::ConfigArgs),
     /// The audit log of `isb serve` (`<state>/audit.db`): who did what.
     #[command(subcommand)]
     Audit(AuditCmd),
@@ -1385,6 +1408,13 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
             db,
         } => invite_cmd(&org, &email, &role, &db),
         Cmd::Token(c) => token_cmd(c),
+        Cmd::Key(c) => ssh::key(c),
+        Cmd::SshProxy {
+            target,
+            keys_of,
+            remote,
+        } => ssh::proxy(&ctx.global.org, &target, keys_of, &remote),
+        Cmd::SshConfig(a) => ssh::config(&ctx.global.org, a),
         Cmd::Audit(c) => audit_cmd(c),
         Cmd::History(a) => history_cmd(a),
         Cmd::Create(a) => create(ctx, a),

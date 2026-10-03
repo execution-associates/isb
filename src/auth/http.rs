@@ -299,6 +299,11 @@ impl AuthApi {
             ("GET", ["tokens"]) => self.with_principal(req, |p| self.tokens(p)),
             ("POST", ["tokens"]) => self.with_principal(req, |p| self.create_token(req, p)),
             ("DELETE", ["tokens", id]) => self.with_principal(req, |p| self.delete_token(p, id)),
+            ("GET", ["ssh-keys"]) => self.with_principal(req, |p| self.ssh_keys(p)),
+            ("POST", ["ssh-keys"]) => self.with_principal(req, |p| self.add_ssh_key(req, p)),
+            ("DELETE", ["ssh-keys", id]) => {
+                self.with_principal(req, |p| self.delete_ssh_key(p, id))
+            }
             ("POST", ["password"]) => self.with_principal(req, |p| self.password(req, p)),
             ("POST", ["password-reset", "request"]) => self.reset_request(req),
             ("POST", ["password-reset", "confirm"]) => self.reset_confirm(req),
@@ -402,6 +407,20 @@ impl AuthApi {
                 token_org.map(|o| o.to_string()),
                 Some(id.to_string()),
             ),
+            ("POST", ["ssh-keys"]) => {
+                if let Some(id) = answer["ssh_key"]["id"].as_i64() {
+                    details.insert("id".into(), json!(id));
+                }
+                if let Some(a) = answer["ssh_key"]["algorithm"].as_str() {
+                    details.insert("kind".into(), json!(a));
+                }
+                (
+                    "auth.ssh_key_add",
+                    None,
+                    answer["ssh_key"]["fingerprint"].as_str().map(String::from),
+                )
+            }
+            ("DELETE", ["ssh-keys", id]) => ("auth.ssh_key_remove", None, Some(id.to_string())),
             ("POST", ["password"]) => ("auth.password_change", None, None),
             ("POST", ["password-reset", "request"]) => {
                 ("auth.password_reset_request", None, field(&body, "email"))
@@ -906,6 +925,46 @@ impl AuthApi {
         Ok(Response::new(204))
     }
 
+    // ---- SSH keys ----
+
+    fn ssh_keys(&self, p: &Principal) -> Result<Response, AuthError> {
+        let list = if p.user.id > 0 {
+            self.store.list_ssh_keys(p.user.id)?
+        } else {
+            Vec::new()
+        };
+        Ok(Response::json(200, &json!({"ssh_keys": list})))
+    }
+
+    fn add_ssh_key(&self, req: &Request, p: &Principal) -> Result<Response, AuthError> {
+        #[derive(Deserialize)]
+        struct B {
+            public_key: String,
+            #[serde(default)]
+            name: Option<String>,
+        }
+        if p.user.id <= 0 {
+            return Err(AuthError::Forbidden(
+                "a superadmin without an isb account has no SSH keys of its own".into(),
+            ));
+        }
+        let b: B = body(req)?;
+        let k = self.store.add_ssh_key(
+            p.user.id,
+            &b.public_key,
+            b.name.as_deref().filter(|n| !n.trim().is_empty()),
+        )?;
+        Ok(Response::json(201, &json!({"ssh_key": k})))
+    }
+
+    fn delete_ssh_key(&self, p: &Principal, id: &str) -> Result<Response, AuthError> {
+        let id = parse_id(id)?;
+        if !self.store.delete_ssh_key(p.user.id, id)? {
+            return Err(AuthError::NotFound(format!("SSH key {id}")));
+        }
+        Ok(Response::new(204))
+    }
+
     // ---- passwords ----
 
     fn password(&self, req: &Request, p: &Principal) -> Result<Response, AuthError> {
@@ -1342,8 +1401,11 @@ fn not_found_or_405(seg: &[&str]) -> Response {
         ["login" | "logout" | "invitations" | "password"] => "POST",
         ["invitations" | "password-reset", _] => "POST",
         ["me" | "sessions" | "providers" | "identities" | "passkeys"] => "GET",
-        ["tokens"] => "GET, POST",
-        ["sessions" | "tokens" | "identities" | "passkeys", _] => "DELETE",
+        ["tokens" | "ssh-keys"] => "GET, POST",
+        [
+            "sessions" | "tokens" | "identities" | "passkeys" | "ssh-keys",
+            _,
+        ] => "DELETE",
         ["admin", "users"] => "GET",
         ["admin", "users", _] => "PATCH",
         ["oauth", _, "start"] => "GET, POST",

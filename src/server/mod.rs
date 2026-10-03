@@ -25,6 +25,8 @@ pub mod client;
 pub mod http;
 pub mod mcp;
 pub mod service;
+pub mod ssh;
+pub mod ssh_config;
 pub mod tailnet;
 pub mod terminal;
 

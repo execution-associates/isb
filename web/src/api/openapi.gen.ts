@@ -1904,6 +1904,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/ssh_host_keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * SSH host keys
+         * @description An instance's SSH host public keys (from /etc/ssh), for pinning in known_hosts, and the user `isb ssh-config` logs in as by default (the first ordinary user, else root). Empty keys: no host keys yet (the first `isb ssh-proxy` connection generates them) or no OpenSSH server installed.
+         */
+        post: operations["ssh_host_keys"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/stack_config": {
         parameters: {
             query?: never;
@@ -6217,6 +6237,43 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ssh_host_keys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
                 };

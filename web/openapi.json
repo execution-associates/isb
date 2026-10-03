@@ -5638,6 +5638,54 @@
         "summary": "Server status"
       }
     },
+    "/api/v1/tools/ssh_host_keys": {
+      "post": {
+        "description": "An instance's SSH host public keys (from /etc/ssh), for pinning in known_hosts, and the user `isb ssh-config` logs in as by default (the first ordinary user, else root). Empty keys: no host keys yet (the first `isb ssh-proxy` connection generates them) or no OpenSSH server installed.",
+        "operationId": "ssh_host_keys",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "SSH host keys"
+      }
+    },
     "/api/v1/tools/stack_config": {
       "post": {
         "description": "The compose file a stack was deployed with, resolved, and its secrets as references (store name, driver, version; never values).",

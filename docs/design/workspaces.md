@@ -133,13 +133,12 @@ stated in one place.
 
 ### W3. Doors
 
-- **Web terminal**: already exists for apps; extend to the workspace and its
-  sandboxes, with several tabs and reattach.
-- **SSH without opening ports**: `isb workspace ssh` speaks SSH's stdio over
-  the daemon's authenticated websocket (`ProxyCommand isb workspace proxy
-  %h`). `isb workspace ssh-config` prints `Host` blocks, so plain `ssh`,
-  `scp`, editors and `herdr machine add` all work. Keys: the user's public
-  keys from their isb account, installed for the workspace user.
+- **Web terminal**: opens on any instance of the org (`?instance=`); the UI
+  still needs several tabs and reattach.
+- **SSH without opening ports** ships generic over an org's instances
+  ([ssh.md](../ssh.md)): `isb ssh-proxy`, `isb ssh-config`, keys on the isb
+  account. Left: `isb workspace ssh` and `isb workspace ssh-config` as
+  aliases that name the org's workspace.
 - **Ports**: the workspace can publish ports through the org's ingress (a dev
   server preview at `<port>.workspace.<domain>`), with the same Access and
   domain rules as apps.

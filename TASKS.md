@@ -478,6 +478,23 @@ minime only runs binaries downloaded from our CI runs.
   **Verify:** an org in its own VM on titan runs an app, its server shows
   healthy, and deleting the org deletes the VM.
 
+## Workspaces (docs/design/workspaces.md)
+
+- [x] (workspaces-ssh) W3 Doors, generic over an org's instances: SSH over
+  the daemon's websocket (`sshd -i` through incus exec, the caller's isb
+  SSH keys per connection, live sessions re-checked every 15 s), `isb key`,
+  the Account page's SSH keys, `isb ssh-proxy`, `isb ssh-config` (pinned
+  host keys, herdr line), `ssh_host_keys`, `?instance=` on the web
+  terminal, audit `ssh.open/close` and `auth.ssh_key_*` (docs/ssh.md).
+  **Verified** on titan: ssh, scp (20 MB both ways), a removed key refused
+  and its live session ended in 8 s, viewer and `read` tokens refused,
+  an instance's own authorized_keys ignored, `herdr machine add` saved and
+  reached the host (isolated HOME).
+- [ ] W3 follow-ups: `isb workspace ssh`/`ssh-config` aliases once W1
+  lands; the Connect panel (SSH config, herdr line) on the workspace page;
+  terminal tabs and reattach in the UI; SSH to orgs placed on a server;
+  Access credentials in `isb ssh-proxy`.
+
 ## Log
 
 - 2026-10-03: P1.1 done (orgs isolate, verified by integration test

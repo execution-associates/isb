@@ -382,6 +382,53 @@ fn auth_events_are_audited() {
         ("auth.passkey_remove", "not_found")
     );
 
+    // SSH keys: added with the fingerprint as the target, listed, removed.
+    let key =
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK85M+Nlyes6IrHWrRVqw80hYRdvPHO+GwqREPk1qxkh m@laptop";
+    let mut kid = 0;
+    let e = t.one(|| {
+        let (st, v, _) = t.call("POST", "ssh-keys", &mc, Some(json!({"public_key": key})));
+        assert_eq!(st, 201, "{v}");
+        assert_eq!(v["ssh_key"]["name"], "m@laptop");
+        kid = v["ssh_key"]["id"].as_i64().unwrap();
+    });
+    assert_eq!(
+        (e.action.as_str(), e.target.as_deref(), e.outcome.as_str()),
+        (
+            "auth.ssh_key_add",
+            Some("SHA256:OGav3hSvMQSOfHiDB0OdyYFOPHDbUJTzSsNvCdLadvQ"),
+            "ok"
+        )
+    );
+    assert_eq!(e.details["kind"], "ssh-ed25519");
+    // Options smuggled in front of a key: refused, and recorded.
+    let e = t.one(|| {
+        let (st, _, _) = t.call(
+            "POST",
+            "ssh-keys",
+            &mc,
+            Some(json!({"public_key": format!("command=\"sh\" {key}")})),
+        );
+        assert_eq!(st, 400);
+    });
+    assert_eq!(
+        (e.action.as_str(), e.outcome.as_str()),
+        ("auth.ssh_key_add", "invalid")
+    );
+    let (st, v, _) = t.call("GET", "ssh-keys", &mc, None);
+    assert_eq!((st, v["ssh_keys"].as_array().map(Vec::len)), (200, Some(1)));
+    // Another account cannot remove it.
+    let (st, _, _) = t.call("DELETE", &format!("ssh-keys/{kid}"), &root_c, None);
+    assert_eq!(st, 404);
+    let e = t.one(|| {
+        let (st, _, _) = t.call("DELETE", &format!("ssh-keys/{kid}"), &mc, None);
+        assert_eq!(st, 204);
+    });
+    assert_eq!(
+        (e.action.as_str(), e.target),
+        ("auth.ssh_key_remove", Some(kid.to_string()))
+    );
+
     // Platform administration: one row per change.
     let before = t.log.head().unwrap();
     let (st, _, _) = t.call(

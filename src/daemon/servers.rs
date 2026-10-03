@@ -866,6 +866,8 @@ pub(super) fn agent_hooks(base: &Hooks, orgs: Arc<crate::servers::store::AgentOr
         authorize: Some(authorize),
         events: base.events.clone(),
         terminal: base.terminal.clone(),
+        // SSH to an org on a server is not forwarded yet (docs/ssh.md).
+        ssh: None,
         audit: base.audit.clone(),
         route: None,
     }

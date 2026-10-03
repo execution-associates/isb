@@ -492,6 +492,8 @@ pub struct Hooks {
     pub events: Option<Events>,
     /// Opens a terminal for `GET /orgs/<org>/api/v1/terminal` (a websocket).
     pub terminal: Option<super::terminal::Terminal>,
+    /// Opens an SSH session for `GET /orgs/<org>/api/v1/ssh` (a websocket).
+    pub ssh: Option<super::ssh::Ssh>,
     /// Hears every tool call on every surface, and terminal sessions.
     pub audit: Option<Audit>,
     /// Forwards calls for orgs placed on another server.
@@ -592,6 +594,9 @@ impl Endpoint {
                         }
                         if tail == "api/v1/terminal" {
                             return self.terminal(req, &org);
+                        }
+                        if tail == "api/v1/ssh" {
+                            return self.ssh(req, &org);
                         }
                     }
                 }
@@ -736,10 +741,10 @@ impl Endpoint {
         Some(r)
     }
 
-    /// `GET /orgs/<org>/api/v1/terminal?app=NAME`: a websocket to a shell,
-    /// admitted as `sandbox_exec` in the org would be.
+    /// `GET /orgs/<org>/api/v1/terminal?app=NAME` (or `?instance=NAME`): a
+    /// websocket to a shell, admitted as `sandbox_exec` in the org would be.
     fn terminal(&self, req: &Request, org: &crate::org::OrgId) -> Response {
-        use super::terminal::{origin_allowed, term_request, upgrade, websocket_key};
+        use super::terminal::{origin_allowed, term_request, websocket_key};
         if req.method != "GET" {
             return Response::text(405, "method not allowed").header("Allow", "GET");
         }
@@ -764,23 +769,92 @@ impl Endpoint {
             Ok(t) => t,
             Err(m) => return rest_error(400, "invalid", &m),
         };
+        let args = match &t.instance {
+            Some(i) => json!({"org": org.as_str(), "name": i}),
+            None => json!({"org": org.as_str(), "app": t.app}),
+        };
+        let (open, o) = (open.clone(), org.clone());
+        self.session(
+            req,
+            caller,
+            org,
+            Session::Terminal,
+            args,
+            &key,
+            move |c: &Caller| open(c, &o, &t),
+        )
+    }
+
+    /// `GET /orgs/<org>/api/v1/ssh?instance=NAME`: a websocket carrying an
+    /// SSH connection to the instance's sshd, admitted as `sandbox_exec` in
+    /// the org would be ([`super::ssh`]).
+    fn ssh(&self, req: &Request, org: &crate::org::OrgId) -> Response {
+        use super::ssh::{origin_allowed, ssh_request};
+        if req.method != "GET" {
+            return Response::text(405, "method not allowed").header("Allow", "GET");
+        }
+        let Some(open) = &self.hooks.ssh else {
+            return Response::text(404, "not found");
+        };
+        let caller = match self.authenticate(req) {
+            Ok(c) => c,
+            Err(r) => return r,
+        };
+        if !origin_allowed(req) {
+            eprintln!(
+                "isb serve: refused SSH from origin {:?}",
+                req.header("origin")
+            );
+            return rest_error(403, "forbidden", "origin not allowed");
+        }
+        let Some(key) = super::terminal::websocket_key(req) else {
+            return rest_error(400, "invalid", "expected a websocket upgrade");
+        };
+        let s = match ssh_request(req) {
+            Ok(s) => s,
+            Err(m) => return rest_error(400, "invalid", &m),
+        };
+        let args = json!({"org": org.as_str(), "name": s.instance});
+        let (open, o) = (open.clone(), org.clone());
+        self.session(
+            req,
+            caller,
+            org,
+            Session::Ssh,
+            args,
+            &key,
+            move |c: &Caller| open(c, &o, &s),
+        )
+    }
+
+    /// Admit a websocket session as `sandbox_exec` in `org`, then upgrade
+    /// and open it, telling the audit hook when it opens and closes.
+    #[allow(clippy::too_many_arguments)]
+    fn session<F>(
+        &self,
+        req: &Request,
+        caller: Caller,
+        org: &crate::org::OrgId,
+        kind: Session,
+        args: Value,
+        key: &str,
+        open: F,
+    ) -> Response
+    where
+        F: FnOnce(&Caller) -> crate::Result<Box<dyn super::terminal::Pty>> + Send + 'static,
+    {
         let origin = origin(req, &caller, false);
         let audit = self.hooks.audit.clone();
-        let args = json!({"org": org.as_str(), "app": t.app});
         match self.admit("sandbox_exec", json!({}), &caller, Some(org)) {
             Ok(_) => {}
             Err(Admit::Unknown) => {
-                return rest_error(
-                    404,
-                    "not_found",
-                    "terminals are not offered on this listener",
-                );
+                return rest_error(404, "not_found", kind.not_offered());
             }
             Err(Admit::Refused(e)) => {
                 if let Some(a) = &audit {
                     a(&Audited {
                         caller: &caller,
-                        action: "terminal.open",
+                        action: kind.opened(),
                         tool: None,
                         args: &args,
                         outcome: Err(&e),
@@ -790,18 +864,23 @@ impl Endpoint {
                 return error_response(&e);
             }
         }
-        let (open, org) = (open.clone(), org.clone());
-        eprintln!("isb serve: {caller} opened a terminal to {org}/{}", t.app);
-        upgrade(&key, move || {
-            let r = open(&caller, &org, &t);
+        let what = args
+            .get("app")
+            .or_else(|| args.get("name"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        eprintln!("isb serve: {caller} opened {} to {org}/{what}", kind.noun());
+        super::terminal::upgrade_with(key, kind.limits(), move || {
+            let r = open(&caller);
             let Some(a) = audit else { return r };
             let mut args = args;
-            if let Ok(p) = &r {
+            if let (Ok(p), Session::Terminal, Some(_)) = (&r, kind, args.get("app")) {
                 args["replica"] = json!(p.target());
             }
             a(&Audited {
                 caller: &caller,
-                action: "terminal.open",
+                action: kind.opened(),
                 tool: None,
                 args: &args,
                 outcome: r.as_ref().map(|_| ()),
@@ -815,6 +894,7 @@ impl Endpoint {
                     caller,
                     args,
                     origin,
+                    closed: kind.closed(),
                 }) as Box<dyn super::terminal::Pty>
             })
         })
@@ -1158,7 +1238,47 @@ enum Admit {
     Refused(Error),
 }
 
-/// A terminal that tells the audit hook when it ends, and how long it ran.
+/// The kinds of websocket session, and what the audit log calls them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Session {
+    Terminal,
+    Ssh,
+}
+
+impl Session {
+    fn opened(self) -> &'static str {
+        match self {
+            Session::Terminal => "terminal.open",
+            Session::Ssh => "ssh.open",
+        }
+    }
+    fn closed(self) -> &'static str {
+        match self {
+            Session::Terminal => "terminal.close",
+            Session::Ssh => "ssh.close",
+        }
+    }
+    fn noun(self) -> &'static str {
+        match self {
+            Session::Terminal => "a terminal",
+            Session::Ssh => "an SSH session",
+        }
+    }
+    fn not_offered(self) -> &'static str {
+        match self {
+            Session::Terminal => "terminals are not offered on this listener",
+            Session::Ssh => "SSH is not offered on this listener",
+        }
+    }
+    fn limits(self) -> &'static super::terminal::Limits {
+        match self {
+            Session::Terminal => &super::terminal::TERMINALS,
+            Session::Ssh => &super::ssh::LIMITS,
+        }
+    }
+}
+
+/// A session that tells the audit hook when it ends, and how long it ran.
 /// Never what was typed.
 struct AuditedPty {
     inner: Box<dyn super::terminal::Pty>,
@@ -1167,6 +1287,8 @@ struct AuditedPty {
     caller: Caller,
     args: Value,
     origin: crate::audit::Origin,
+    /// `terminal.close` or `ssh.close`.
+    closed: &'static str,
 }
 
 impl super::terminal::Pty for AuditedPty {
@@ -1185,15 +1307,23 @@ impl super::terminal::Pty for AuditedPty {
     fn target(&self) -> Option<String> {
         self.inner.target()
     }
+    fn details(&self) -> Option<serde_json::Map<String, Value>> {
+        self.inner.details()
+    }
 }
 
 impl Drop for AuditedPty {
     fn drop(&mut self) {
         let mut args = self.args.clone();
+        if let (Some(d), Some(m)) = (self.inner.details(), args.as_object_mut()) {
+            for (k, v) in d {
+                m.entry(k).or_insert(v);
+            }
+        }
         args["duration_s"] = json!(self.started.elapsed().as_secs());
         (self.audit)(&Audited {
             caller: &self.caller,
-            action: "terminal.close",
+            action: self.closed,
             tool: None,
             args: &args,
             outcome: Ok(()),
@@ -1710,6 +1840,9 @@ mod tests {
             terminal: Some(Arc::new(|_c, _org, _t| {
                 Err(Error::NotFound("no such app".into()))
             })),
+            ssh: Some(Arc::new(|_c, _org, _s| {
+                Err(Error::NotFound("no such instance".into()))
+            })),
             audit: None,
             route: None,
         };
@@ -1961,10 +2094,132 @@ mod tests {
             local(),
         ));
         assert_eq!(r.status, 405);
+        // An instance of the org instead of an app.
+        assert_eq!(
+            get(&ep, "/orgs/alpha/api/v1/terminal", "instance=box", &ws).status,
+            101
+        );
         // --deny-tools sandbox_exec turns terminals off.
         ep.policy = ToolPolicy::from_lists("", "sandbox_exec");
         assert_eq!(
             get(&ep, "/orgs/alpha/api/v1/terminal", "app=web", &ws).status,
+            404
+        );
+    }
+
+    #[test]
+    fn ssh_upgrades_only_when_admitted() {
+        let mut ep = hooked();
+        let mut r = registry();
+        r.register(Tool::new("sandbox_exec", "Exec", json!({}), |_, _| {
+            Ok(Value::Null)
+        }))
+        .unwrap();
+        ep.registry = Arc::new(r);
+        let upgrade = [
+            ("Upgrade", "websocket"),
+            ("Connection", "Upgrade"),
+            ("Sec-WebSocket-Version", "13"),
+            ("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ=="),
+        ];
+        let get = |ep: &Endpoint, path: &str, query: &str, h: &[(&str, &str)], peer: Peer| {
+            let mut hs = upgrade.to_vec();
+            hs.extend_from_slice(h);
+            let mut q = req("GET", path, &hs, b"", peer);
+            q.query = Some(query.into());
+            ep.handle(&q)
+        };
+        let page = [
+            ("Host", "localhost:8092"),
+            ("Origin", "http://localhost:8092"),
+        ];
+        let ok = get(
+            &ep,
+            "/orgs/alpha/api/v1/ssh",
+            "instance=box",
+            &page,
+            local(),
+        );
+        assert_eq!(ok.status, 101);
+        assert!(ok.upgrade.is_some());
+        // The unix socket needs no Origin.
+        let unix = Peer::Unix { uid: None };
+        assert_eq!(
+            get(
+                &ep,
+                "/orgs/alpha/api/v1/ssh",
+                "instance=box",
+                &[],
+                unix.clone()
+            )
+            .status,
+            101
+        );
+        // Another org: refused before any upgrade.
+        assert_eq!(
+            get(
+                &ep,
+                "/orgs/beta/api/v1/ssh",
+                "instance=box",
+                &[],
+                unix.clone()
+            )
+            .status,
+            403
+        );
+        // A cross-site page: refused.
+        let evil = [
+            ("Host", "localhost:8092"),
+            ("Origin", "http://localhost:9999"),
+        ];
+        assert_eq!(
+            get(
+                &ep,
+                "/orgs/alpha/api/v1/ssh",
+                "instance=box",
+                &evil,
+                local()
+            )
+            .status,
+            403
+        );
+        // No instance, a bad one, or not an upgrade: 400.
+        assert_eq!(
+            get(&ep, "/orgs/alpha/api/v1/ssh", "", &[], unix.clone()).status,
+            400
+        );
+        assert_eq!(
+            get(
+                &ep,
+                "/orgs/alpha/api/v1/ssh",
+                "instance=A/b",
+                &[],
+                unix.clone()
+            )
+            .status,
+            400
+        );
+        let mut q = req("GET", "/orgs/alpha/api/v1/ssh", &[], b"", unix.clone());
+        q.query = Some("instance=box".into());
+        assert_eq!(ep.handle(&q).status, 400);
+        // --deny-tools sandbox_exec turns SSH off with terminals.
+        ep.policy = ToolPolicy::from_lists("", "sandbox_exec");
+        assert_eq!(
+            get(&ep, "/orgs/alpha/api/v1/ssh", "instance=box", &[], unix).status,
+            404
+        );
+        // No hook: no such endpoint.
+        let mut ep = hooked();
+        ep.hooks.ssh = None;
+        assert_eq!(
+            get(
+                &ep,
+                "/orgs/alpha/api/v1/ssh",
+                "instance=box",
+                &page,
+                local()
+            )
+            .status,
             404
         );
     }

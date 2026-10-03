@@ -135,6 +135,14 @@ isb token create NAME [--org ORG] [--expires 90d] [--user EMAIL] [--scope read|d
                                            prints the token, once; scopes only narrow the user's role
 isb token ls [--json] | revoke ID...
 
+# SSH into an org's instances through isb serve's websocket (docs/ssh.md)
+# --url URL (ISB_URL) with ISB_TOKEN or --token-file: a remote daemon, as the token's account;
+# without: the local socket, and `isb key` edits <state>/isb.db for --user EMAIL
+isb key add FILE|- [--name N] | ls [--json] | rm ID...
+isb ssh-config [ORG/INSTANCE...] [--user U] [--identity F] [--known-hosts F] [--as EMAIL] [-o FILE]
+                                           Host blocks (ProxyCommand isb ssh-proxy, pinned host keys); herdr lines on stderr
+isb ssh-proxy ORG/INSTANCE [--as EMAIL]    the ProxyCommand: SSH on stdin/stdout
+
 # the audit log of isb serve, on <state>/audit.db directly (docs/audit.md)
 isb audit ls [--org ORG | --platform] [--actor G] [--action G] [--target G] [--outcome ok|error|CODE]
              [--since 24h] [--until 1h] [-n 50] [--json]

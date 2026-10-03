@@ -34,8 +34,9 @@ of it) in a browser:
   text field: `G O` Overview, `G P` Projects, `G T` Templates, `G B`
   Backups, `G N` Notifications, `G M` Members, `G A` MCP, `G S` Secrets, `G ,`
   Settings, `G H` History. **Account** changes your password, links and
-  unlinks providers, adds and deletes passkeys, makes and revokes API tokens
-  (shown once), and lists your sessions.
+  unlinks providers, adds and deletes passkeys and SSH keys
+  ([ssh.md](ssh.md)), makes and revokes API tokens (shown once), and lists
+  your sessions.
 
 Each org has these sections:
 

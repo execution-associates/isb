@@ -18,7 +18,8 @@ tools. It listens in two places:
   | `/orgs/<org>/mcp` | MCP bound to one org: `org` is filled in, and any other value is refused |
   | `POST /api/v1/tools/<tool>`, `/orgs/<org>/api/v1/tools/<tool>` | REST: the arguments as a JSON body; `{"result": ...}`, or `{"error", "message", "data"}` with a matching status (400, 401, 403, 404, 409, 500, 504) |
   | `GET /api/v1/events` | server-sent events: deploys, rollouts, health and restarts in the caller's orgs; resumes from `Last-Event-ID` or `?since=` |
-  | `GET /orgs/<org>/api/v1/terminal?app=NAME` | a websocket to a shell in one of the app's replicas ([below](#the-web-terminal)) |
+  | `GET /orgs/<org>/api/v1/terminal?app=NAME` (or `?instance=NAME`) | a websocket to a shell in one of the app's replicas, or in an instance of the org ([below](#the-web-terminal)) |
+  | `GET /orgs/<org>/api/v1/ssh?instance=NAME` | a websocket carrying SSH to `sshd -i` in an instance of the org, for `isb ssh-proxy` ([ssh.md](ssh.md)) |
 
   `GET /api/v1/openapi.json` describes the REST surface, `GET /api/v1/tools`
   lists the tools, `/healthz` answers without auth, and the identity
@@ -101,13 +102,16 @@ org. API tokens can be narrowed with scopes (`read`, `deploy`, `admin`,
 `GET /orgs/<org>/api/v1/terminal?app=NAME[&slot=N][&cols=C&rows=R]`
 upgrades to a websocket bridged to a login shell (bash, else sh) in one of
 the app's running replicas (`slot`, or one in rotation), with a
-pseudo-terminal. The web UI's Terminal tab uses it.
+pseudo-terminal. The web UI's Terminal tab uses it. With
+`?instance=NAME` instead of `app`, the shell is in that instance of the org
+(a workspace, a sandbox), as root.
 
 - **Who**: the caller signs in as for any tool (session, API token, Access)
   and is admitted as if calling `sandbox_exec` in the org: the org's
   members, admins and owners (not viewers, nor tokens whose scopes leave
   out `sandbox_exec`), platform admins, and nobody when `--deny-tools`
-  covers `sandbox_exec`. Only replicas of the org's own apps are reachable.
+  covers `sandbox_exec`. Only the org's own apps and instances are
+  reachable. SSH ([ssh.md](ssh.md)) is admitted the same way.
 - **Cross-site**: a session cookie rides along on a websocket from any
   site, so a cookie-authenticated upgrade must carry an `Origin` naming the
   request's `Host`. A bearer token needs no `Origin` (a browser never adds

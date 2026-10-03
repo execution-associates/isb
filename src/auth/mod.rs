@@ -25,6 +25,7 @@ pub mod limit;
 pub mod oauth;
 pub mod oidc;
 pub mod secret;
+pub mod ssh_keys;
 pub mod superadmin;
 pub mod webauthn;
 
