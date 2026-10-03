@@ -378,7 +378,10 @@ pub fn run(
             )));
         }
     };
-    p.log(&format!("{} {arch}", uname.split_whitespace().next().unwrap_or("")));
+    p.log(&format!(
+        "{} {arch}",
+        uname.split_whitespace().next().unwrap_or("")
+    ));
     if user != "root" {
         ssh.run("check sudo", "sudo -n true", b"").map_err(|_| {
             Error::invalid(format!(

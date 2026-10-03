@@ -358,7 +358,7 @@ function SidebarContent({ me, onNavigate }: { me: Me; onNavigate?: () => void })
         {me.platform_admin && (
           <NavSection label="Platform">
             <NavItem to="/admin" icon={ShieldCheck} onNavigate={onNavigate}>
-              Orgs, users, server
+              Orgs, users, servers
             </NavItem>
             {me.superadmin && (
               <NavItem to="/host" icon={HardDrive} onNavigate={onNavigate}>

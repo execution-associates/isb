@@ -93,6 +93,8 @@ pub struct View {
     pub finished_at: Option<u64>,
     pub steps: Vec<Step>,
     pub log: Vec<String>,
+    /// Lines dropped off the top of `log` (the first kept line's number).
+    pub log_start: usize,
     pub error: Option<String>,
     /// What was asked, without secrets: enough for "retry" to ask again.
     pub request: Value,
@@ -125,6 +127,7 @@ impl Provision {
                 })
                 .collect(),
             log: Vec::new(),
+            log_start: 0,
             error: None,
             request,
             result: None,
@@ -159,6 +162,7 @@ impl Provision {
         let over = v.log.len().saturating_sub(MAX_LOG);
         if over > 0 {
             v.log.drain(..over);
+            v.log_start += over;
         }
     }
 
@@ -259,12 +263,7 @@ mod tests {
         let ok = Provision::new("box", Kind::Ssh, None, json!({}));
         ok.step("check");
         ok.finish(Ok(json!({"name": "box"})));
-        assert!(
-            ok.view()
-                .steps
-                .iter()
-                .all(|s| s.state == StepState::Done)
-        );
+        assert!(ok.view().steps.iter().all(|s| s.state == StepState::Done));
     }
 
     #[test]
@@ -284,6 +283,8 @@ mod tests {
             a.log(&format!("line {i}"));
         }
         assert_eq!(a.view().log.len(), MAX_LOG);
+        assert_eq!(a.view().log_start, 10);
+        assert_eq!(a.view().log[0], "line 10");
         assert_eq!(runs.list().len(), 1);
     }
 }

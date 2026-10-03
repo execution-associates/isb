@@ -265,7 +265,10 @@ fn bridge(host: &Client) -> Result<(String, String)> {
                 n["name"].as_str().unwrap_or("")
             ))
         })?;
-    Ok((n["name"].as_str().unwrap_or("").to_string(), addr.to_string()))
+    Ok((
+        n["name"].as_str().unwrap_or("").to_string(),
+        addr.to_string(),
+    ))
 }
 
 /// A VM that is up: where the control plane dials it, and the host's
@@ -296,7 +299,10 @@ pub fn boot(client: &Client, org: &OrgId, size: &VmSize, p: &Provision) -> Resul
                     "instance {name} in project {PROJECT} is not org {org}'s dedicated VM"
                 )));
             }
-            p.log(&format!("VM {name} exists ({})", i["status"].as_str().unwrap_or("")));
+            p.log(&format!(
+                "VM {name} exists ({})",
+                i["status"].as_str().unwrap_or("")
+            ));
         }
         None => {
             let pool = crate::sandbox::host_facts(&host)?.pick_pool(None)?;
@@ -362,16 +368,27 @@ pub fn boot(client: &Client, org: &OrgId, size: &VmSize, p: &Provision) -> Resul
     }
 }
 
-/// The VM's global IPv4 address on eth0, once it has one.
+/// The VM's global IPv4 address on the NIC isb gave it, once it has one.
+/// A guest names the interface itself (`enp5s0`), and its own incus adds
+/// bridges, so the NIC is found by its MAC address.
 fn address(sys: &Client, path: &str) -> Result<Option<String>> {
+    let i = sys.get(path)?;
     let st = sys.get(&format!("{path}/state"))?;
-    Ok(st["network"]["eth0"]["addresses"]
-        .as_array()
-        .into_iter()
-        .flatten()
+    Ok(nic_address(
+        &st,
+        i["config"]["volatile.eth0.hwaddr"].as_str(),
+    ))
+}
+
+fn nic_address(state: &Value, hwaddr: Option<&str>) -> Option<String> {
+    let hwaddr = hwaddr?.to_ascii_lowercase();
+    state["network"]
+        .as_object()?
+        .values()
+        .filter(|n| n["hwaddr"].as_str().map(str::to_ascii_lowercase) == Some(hwaddr.clone()))
+        .flat_map(|n| n["addresses"].as_array().cloned().unwrap_or_default())
         .find(|a| a["family"] == "inet" && a["scope"] == "global")
-        .and_then(|a| a["address"].as_str())
-        .map(str::to_string))
+        .and_then(|a| a["address"].as_str().map(str::to_string))
 }
 
 /// Reserve `ip` for the VM on the bridge, so it keeps it across restarts
@@ -403,11 +420,21 @@ fn pin(sys: &Client, path: &str, ip: &str, p: &Provision) {
 /// Copy the isb binary and run the bootstrap script in the VM, its output
 /// going to `p`'s log. The script (it holds the agent's key) goes on stdin
 /// and is never written to the guest's disk.
-pub fn install(client: &Client, org: &OrgId, binary: &[u8], script: &str, upload: &str, p: &Provision) -> Result<String> {
+pub fn install(
+    client: &Client,
+    org: &OrgId,
+    binary: &[u8],
+    script: &str,
+    upload: &str,
+    p: &Provision,
+) -> Result<String> {
     let sys = client.clone().project(PROJECT);
     let name = server_name(org);
     p.step("upload");
-    p.log(&format!("copying isb into the VM ({} MiB)", binary.len() >> 20));
+    p.log(&format!(
+        "copying isb into the VM ({} MiB)",
+        binary.len() >> 20
+    ));
     sys.push_file(&name, upload, binary, 0, 0, 0o700)?;
     p.step("install");
     p.log("installing incus, isb, the agent's unit and the firewall (a few minutes)");
@@ -499,8 +526,10 @@ mod tests {
             })
         );
         assert_eq!(
-            placement(&json!({"placement": {"vm": {"cpus": 8, "memory": "16GiB", "disk": "200GiB"}}}))
-                .unwrap(),
+            placement(
+                &json!({"placement": {"vm": {"cpus": 8, "memory": "16GiB", "disk": "200GiB"}}})
+            )
+            .unwrap(),
             Placement::Vm(VmSize {
                 cpus: 8,
                 memory: "16GiB".into(),
@@ -519,6 +548,24 @@ mod tests {
         ] {
             assert!(placement(&bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn the_address_is_the_nics_whatever_the_guest_calls_it() {
+        let st = json!({"network": {
+            "lo": {"hwaddr": "", "addresses": [{"family": "inet", "address": "127.0.0.1", "scope": "local"}]},
+            "incusbr0": {"hwaddr": "10:66:6a:00:00:01", "addresses": [{"family": "inet", "address": "10.9.9.1", "scope": "global"}]},
+            "enp5s0": {"hwaddr": "10:66:6a:38:c0:17", "addresses": [
+                {"family": "inet6", "address": "fd42::1", "scope": "global"},
+                {"family": "inet", "address": "10.180.0.64", "scope": "global"}
+            ]}
+        }});
+        assert_eq!(
+            nic_address(&st, Some("10:66:6A:38:C0:17")).as_deref(),
+            Some("10.180.0.64")
+        );
+        assert_eq!(nic_address(&st, None), None);
+        assert_eq!(nic_address(&st, Some("10:66:6a:ff:ff:ff")), None);
     }
 
     #[test]
@@ -555,7 +602,7 @@ mod tests {
         assert_eq!(b["devices"]["root"]["size"], "40GiB");
         assert_eq!(b["devices"]["eth0"]["network"], "incusbr0");
         assert_eq!(b["source"]["alias"], "ubuntu/24.04");
-        assert_eq!(server_name(&OrgId::new(&"a".repeat(31)).unwrap()).len(), 34);
+        assert_eq!(server_name(&OrgId::new("a".repeat(31)).unwrap()).len(), 34);
         super::super::bootstrap::validate_name(&server_name(&org)).unwrap();
     }
 }

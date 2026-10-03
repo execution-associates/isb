@@ -74,22 +74,21 @@ pub fn follow(name: &str) -> Result<Value> {
     loop {
         let v = call("server_provision_get", json!({"name": name}), SHORT)?;
         let steps = v["steps"].as_array().cloned().unwrap_or_default();
-        let started = steps
-            .iter()
-            .filter(|s| s["state"] != "pending")
-            .count();
+        let started = steps.iter().filter(|s| s["state"] != "pending").count();
         for s in steps.iter().take(started).skip(steps_seen) {
             eprintln!("==> {}", s["title"].as_str().unwrap_or(""));
         }
         steps_seen = steps_seen.max(started);
+        // Line numbers count from the run's start; the server keeps the
+        // last few hundred.
         let log = v["log"].as_array().cloned().unwrap_or_default();
-        if log.len() < lines_seen {
-            lines_seen = 0;
+        let start = v["log_start"].as_u64().unwrap_or(0) as usize;
+        for (i, l) in log.iter().enumerate() {
+            if start + i >= lines_seen {
+                eprintln!("    {}", l.as_str().unwrap_or(""));
+            }
         }
-        for l in &log[lines_seen..] {
-            eprintln!("    {}", l.as_str().unwrap_or(""));
-        }
-        lines_seen = log.len();
+        lines_seen = lines_seen.max(start + log.len());
         match v["state"].as_str() {
             Some("done") => return Ok(v["result"].clone()),
             Some("failed") => {

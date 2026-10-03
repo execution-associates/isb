@@ -167,7 +167,9 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
                 public_ingress: a.public_ingress,
             };
             s.check_add(&o)?;
-            let p = s.runs.begin(Provision::new(&o.name, Kind::Ssh, None, request))?;
+            let p = s
+                .runs
+                .begin(Provision::new(&o.name, Kind::Ssh, None, request))?;
             let mut temp_key = None;
             o.key = match (a.key, a.ssh_key) {
                 (Some(k), None) => k,
@@ -1055,7 +1057,10 @@ mod tests {
         );
         assert_eq!(d("org_create", json!({"org": "x"})), Way::Here);
         assert_eq!(
-            d("org_create", json!({"org": "x", "placement": {"server": "box"}})),
+            d(
+                "org_create",
+                json!({"org": "x", "placement": {"server": "box"}})
+            ),
             Way::OrgCreate("box".into())
         );
         assert_eq!(
