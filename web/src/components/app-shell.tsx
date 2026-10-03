@@ -1,4 +1,4 @@
-import { Check, ChevronsUpDown, Crown, HardDrive, LogOut, Menu, Monitor, Moon, Search, ShieldCheck, Sun, UserRound } from "lucide-react";
+import { Check, ChevronsUpDown, Crown, HardDrive, LogOut, Menu, Search, ShieldCheck, UserRound } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
@@ -7,9 +7,10 @@ import { isMine, queuedEvent } from "@/apps/follow";
 import { CrumbTrail } from "@/apps/components";
 import { splitStack, useLiveEvents } from "@/apps/live";
 import { deploymentPath } from "@/apps/use-deploy";
-import { Logo } from "@/components/brand";
+import { Lockup, Logo, Wordmark } from "@/components/brand";
 import { CommandPaletteProvider, SECTIONS, usePalette } from "@/components/command-palette";
 import { StatusDot } from "@/components/status";
+import { THEME_ICONS, THEMES } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -61,8 +62,8 @@ function FatalError({ error }: { error: unknown }) {
   return (
     <div className="flex min-h-svh items-center justify-center bg-background p-6 text-center">
       <div className="max-w-sm space-y-3">
-        <Logo className="mx-auto" />
-        <h1 className="text-lg font-semibold">Can't reach isb</h1>
+        <Lockup className="mx-auto h-9" />
+        <h1 className="pt-2 font-display text-lg font-semibold">Can't reach isb</h1>
         <p className="text-sm text-muted-foreground">{(error as Error)?.message}</p>
         <Button variant="outline" onClick={() => window.location.reload()}>
           Try again
@@ -76,7 +77,7 @@ function ShellSkeleton() {
   return (
     <div className="flex min-h-svh bg-sidebar">
       <div className="hidden w-60 space-y-3 p-3 md:block">
-        <Skeleton className="h-8 w-24" />
+        <Skeleton className="h-9 w-36" />
         <Skeleton className="h-11" />
         <Skeleton className="h-8" />
         <div className="space-y-1.5 pt-3">
@@ -201,13 +202,11 @@ function NavItem({ to, icon: Icon, children, onNavigate, end, shortcut }: { to: 
 function NavSection({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="grid gap-0.5">
-      <div className="truncate px-2.5 pt-1 pb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground/80 uppercase">{label}</div>
+      <div className="eyebrow truncate px-2.5 pt-1 pb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground/80 uppercase">{label}</div>
       {children}
     </div>
   );
 }
-
-const THEME_ICONS: Record<Theme, typeof Sun> = { light: Sun, dark: Moon, system: Monitor };
 
 function UserMenu({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
   const signOut = useSignOut();
@@ -284,9 +283,11 @@ function UserMenu({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent>
             <DropdownMenuRadioGroup value={theme} onValueChange={(v) => setTheme(v as Theme)}>
-              <DropdownMenuRadioItem value="light">Light</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="dark">Dark</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="system">System</DropdownMenuRadioItem>
+              {THEMES.map((t) => (
+                <DropdownMenuRadioItem key={t.value} value={t.value}>
+                  {t.label}
+                </DropdownMenuRadioItem>
+              ))}
             </DropdownMenuRadioGroup>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
@@ -330,9 +331,14 @@ function SidebarContent({ me, onNavigate }: { me: Me; onNavigate?: () => void })
   const [main, manage] = [SECTIONS.slice(0, 6), SECTIONS.slice(6)];
   return (
     <div className="flex h-full flex-col gap-3 px-3 pt-3 pb-2">
-      <Link to="/" onClick={onNavigate} className="flex h-8 items-center gap-2 px-1.5 font-semibold tracking-tight" aria-label="isb home">
-        <Logo className="size-6" />
-        <span className="text-[15px]">isb</span>
+      <Link
+        to="/"
+        onClick={onNavigate}
+        className="flex h-9 w-fit items-center rounded-md px-1.5 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+        aria-label="isb home"
+        title="Execution Associates · isb"
+      >
+        <Wordmark />
       </Link>
       <OrgSwitcher me={me} onNavigate={onNavigate} />
       <SearchButton />
@@ -507,7 +513,7 @@ export function PageHeader({ title, description, actions, icon }: { title: React
       <div className="flex min-w-0 items-start gap-3.5">
         {icon}
         <div className="min-w-0 space-y-1">
-          <h1 className="flex flex-wrap items-center gap-2.5 text-xl font-semibold tracking-tight sm:text-2xl">{title}</h1>
+          <h1 className="flex flex-wrap items-center gap-2.5 font-display text-xl font-semibold tracking-tight sm:text-2xl">{title}</h1>
           {description && <div className="max-w-2xl text-[13px] leading-relaxed text-muted-foreground sm:text-sm">{description}</div>}
         </div>
       </div>

@@ -63,7 +63,7 @@ const Line = memo(function Line({ text, n, wrap, query }: { text: string; n: num
     <div className={cn("group flex hover:bg-white/[0.035]", err && "bg-red-500/[0.07]")}>
       <span
         className={cn(
-          "sticky left-0 w-12 shrink-0 border-r border-transparent bg-terminal pr-3 text-right text-zinc-600 select-none group-hover:text-zinc-400",
+          "sticky left-0 w-12 shrink-0 border-r border-transparent bg-terminal pr-3 text-right text-zinc-500 select-none group-hover:text-zinc-400",
           err && "border-red-400/50 text-red-400/70",
         )}
       >

@@ -123,23 +123,42 @@ route; isb's own sign-in applies after it.
 
 ## Design system
 
-- **Tokens** (`web/src/index.css`): neutrals with a faint cool tint, emerald
-  as the one brand colour (active navigation, switches, focus rings), and
-  semantic status colours: success (running, done), info (building,
-  deploying), warning (degraded), destructive (failed); queued and stopped
-  are neutral. Log panels use a dark terminal surface in both themes.
-- **Logo**: the Execution Associates (EXA) monogram, a raster mark
-  (`web/src/assets/brand/exa-mark@{1,2,3}x.png`) drawn as a CSS mask filled
-  with `currentColor` (`.exa-mark`, `<Logo>`), so one asset reads on light and
-  dark. The favicons and `apple-touch-icon.png` in `web/public` are the same
-  mark, white on a dark tile.
+- **Themes**: Execution Associates (the default when no choice is saved),
+  light, dark and system. The choice is `isb-theme` in `localStorage`;
+  `web/public/theme.js` applies it before the first paint and
+  `web/src/lib/theme.ts` afterwards, and the two must agree. The Execution
+  Associates theme takes executionassociates.com's palette and type: ink
+  surfaces, white text, peach focus rings, glow pink as the brand colour,
+  Geist and Geist Mono, Archivo (widened) for page titles and sidebar labels,
+  square-ish 4 px corners, and the site's coast at night on the sign-in panel.
+  The site is dark only, so the theme is dark only: `<html>` carries `dark`
+  and `ea`, and `:root.ea` replaces the dark palette.
+- **Tokens** (`web/src/index.css`): in light and dark, neutrals with a faint
+  cool tint and emerald as the one brand colour (active navigation, switches,
+  meters); in every theme, semantic status colours: success (running, done),
+  info (building, deploying), warning (degraded), destructive (failed);
+  queued and stopped are neutral. Log panels use a dark terminal surface in
+  every theme. Text and controls meet WCAG 2.1 AA contrast in each theme.
+- **Logo**: the full Execution Associates wordmark beside the product name
+  `isb` is the home link (sidebar, sign-in pages); the EXA monogram stands in
+  where the wordmark does not fit (the phone top bar). Both are rasters
+  downscaled from the marketing site's files
+  (`web/src/assets/brand/exa-lockup@{1,2,3}x.png`,
+  `exa-mark@{1,2,3}x.png`) drawn as CSS masks filled with `currentColor`
+  (`.exa-lockup`, `.exa-mark`; `<Lockup>`, `<Logo>`, `<Wordmark>`), so one
+  asset reads on every theme. The page title is `isb`. The favicons and
+  `apple-touch-icon.png` in `web/public` are the monogram, white on a dark
+  tile.
 - **Status** goes through `lib/status.ts` (status to tone, tone to classes)
   and `<StatusBadge>`/`<StatusDot>` (`components/status.tsx`); a pulsing dot
   means in progress or live. No page picks status colours by hand.
-- **Type**: Inter for text and JetBrains Mono for identifiers and logs (both
-  SIL OFL 1.1, Latin subsets served from the binary, since the CSP allows no
-  font CDN); page titles 20-24 px semibold, section titles 15 px, body
-  13-14 px, numbers tabular.
+- **Type**: Inter for text and JetBrains Mono for identifiers and logs in
+  light and dark; Geist, Geist Mono and Archivo in the Execution Associates
+  theme (all SIL OFL 1.1, from `@fontsource-variable`, Latin subsets served
+  from the binary, since the CSP allows no font CDN; `web/src/fonts.css`).
+  Page titles use `font-display`, which is the text face except in the
+  Execution Associates theme. Page titles 20-24 px semibold, section titles
+  15 px, body 13-14 px, numbers tabular.
 - **Patterns**: a page header (title with badges, one-line description,
   actions that wrap under it on phones), breadcrumbs declared by the page and
   drawn in the top bar, settings sections with their own Save, empty states
@@ -151,7 +170,7 @@ route; isb's own sign-in applies after it.
 - **Schedules** are parsed in the page exactly as the daemon parses them:
   `web/src/lib/cron.ts` mirrors `crates/isb-core/src/cron.rs`, with its
   tests.
-- Light, dark and system themes; every page works down to phone width.
+- Every page works down to phone width.
 
 ## Developing
 

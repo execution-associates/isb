@@ -16,6 +16,7 @@ import {
   LayoutTemplate,
   LogOut,
   Monitor,
+  Palette as PaletteIcon,
   Plug,
   SquareTerminal,
   Moon,
@@ -221,6 +222,7 @@ function Palette({ me, org, close }: { me: Me; org: string | null; close: () => 
       out.push({ id: "mcp", group: "Platform", title: "MCP: connect an agent", icon: Plug, keywords: ["agents", "superadmin", "claude", "codex"], run: go("/agents") });
     }
     out.push({ id: "account", group: "You", title: "Account and API tokens", icon: UserRound, keywords: ["passkey", "password", "token", "profile"], run: go("/account") });
+    out.push({ id: "theme:ea", group: "You", title: "Execution Associates theme", icon: PaletteIcon, keywords: ["theme", "appearance", "brand", "exa", "default"], run: () => setTheme("ea") });
     out.push({ id: "theme:light", group: "You", title: "Light theme", icon: Sun, keywords: ["theme", "appearance"], run: () => setTheme("light") });
     out.push({ id: "theme:dark", group: "You", title: "Dark theme", icon: Moon, keywords: ["theme", "appearance"], run: () => setTheme("dark") });
     out.push({ id: "theme:system", group: "You", title: "System theme", icon: Monitor, keywords: ["theme", "appearance", "auto"], run: () => setTheme("system") });

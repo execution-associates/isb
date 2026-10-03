@@ -10,11 +10,29 @@ export function Logo({ className, light }: { className?: string; light?: boolean
   );
 }
 
-export function Wordmark({ className }: { className?: string }) {
+/**
+ * The full Execution Associates wordmark (monogram and name), in the current
+ * text colour (see `.exa-lockup`). Size it by height; the width follows.
+ */
+export function Lockup({ className, light }: { className?: string; light?: boolean }) {
   return (
-    <span className={cn("flex items-center gap-2.5 font-semibold tracking-tight", className)}>
-      <Logo className="size-7" />
-      <span className="text-lg">isb</span>
+    <span
+      aria-hidden="true"
+      className={cn("exa-lockup inline-block h-7 shrink-0 align-middle", light ? "text-neutral-50" : "text-foreground", className)}
+    />
+  );
+}
+
+/**
+ * The home link's contents: the Execution Associates wordmark, a hairline,
+ * and the product's name, so "isb" stays on screen beside the company's.
+ */
+export function Wordmark({ className, light, size = "md" }: { className?: string; light?: boolean; size?: "md" | "lg" }) {
+  return (
+    <span className={cn("flex items-center", size === "lg" ? "gap-3.5" : "gap-2.5", className)}>
+      <Lockup light={light} className={size === "lg" ? "h-10" : "h-7"} />
+      <span aria-hidden className={cn("w-px self-stretch", light ? "bg-white/25" : "bg-border", size === "lg" ? "my-1" : "my-0.5")} />
+      <span className={cn("font-display font-semibold tracking-tight", size === "lg" ? "text-lg" : "text-[15px]", light ? "text-neutral-50" : "text-foreground")}>isb</span>
     </span>
   );
 }
