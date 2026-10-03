@@ -480,19 +480,18 @@ pub fn select_deletions(
     keep: usize,
     protected: &BTreeSet<String>,
 ) -> Vec<String> {
-    // Retention's own tags ([`KEEP_TAG`]) never count as one of the newest.
+    // Retention's own tags ([`KEEP_TAG`]) and previews' tags
+    // ([`is_preview_tag`]) never count as one of the newest: a preview's
+    // image is kept while it is deployed (protected), and no longer.
+    let aside = |t: &TagInfo| t.tag.starts_with(KEEP_TAG) || is_preview_tag(&t.tag);
     let mut sorted: Vec<&TagInfo> = tags.iter().collect();
     sorted.sort_by(|a, b| {
-        let k = |t: &TagInfo| t.tag.starts_with(KEEP_TAG);
-        k(a).cmp(&k(b))
+        aside(a)
+            .cmp(&aside(b))
             .then_with(|| b.pushed_at.cmp(&a.pushed_at))
             .then_with(|| b.tag.cmp(&a.tag))
     });
-    let newest = sorted
-        .iter()
-        .filter(|t| !t.tag.starts_with(KEEP_TAG))
-        .count()
-        .min(keep);
+    let newest = sorted.iter().filter(|t| !aside(t)).count().min(keep);
     let mut kept: BTreeSet<&str> = protected.iter().map(String::as_str).collect();
     for t in sorted.iter().take(newest) {
         kept.insert(&t.digest);
@@ -510,6 +509,21 @@ pub fn select_deletions(
 /// Tags retention puts on deployed digests (`isb-keep-<12 hex>`), so the
 /// registry's untagged-manifest collection spares them.
 pub const KEEP_TAG: &str = "isb-keep-";
+
+/// A preview's image tag: `pr-<number>-<sha>`.
+pub fn is_preview_tag(t: &str) -> bool {
+    preview_tag_number(t).is_some()
+}
+
+/// The pull request number of a preview tag (`pr-12-abc` -> 12).
+pub fn preview_tag_number(t: &str) -> Option<u64> {
+    let rest = t.strip_prefix("pr-")?;
+    let (n, sha) = rest.split_once('-')?;
+    if sha.is_empty() || n.is_empty() || !n.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    n.parse().ok()
+}
 
 /// The daemon's handle on the registry.
 pub struct Registry {
@@ -683,6 +697,44 @@ impl Registry {
                 repo: name.clone(),
                 tags,
             });
+        }
+        Ok(out)
+    }
+
+    /// Delete the manifests of `<org>/<app>` whose every tag `doomed`
+    /// picks, except `spare` digests (what is deployed). A digest that
+    /// another tag still names stays, and so does that tag: the registry
+    /// deletes manifests, not tags. Returns `digest (tags)` of each one
+    /// deleted. Blobs go at the next `registry gc`.
+    pub fn delete_tags(
+        &self,
+        org: &OrgId,
+        app: &str,
+        doomed: &dyn Fn(&str) -> bool,
+        spare: &BTreeSet<String>,
+    ) -> Result<Vec<String>> {
+        let _g = self.lock.lock().unwrap();
+        let r = repo(org, app);
+        let mut by_digest: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for t in self.remote.tags(&r)? {
+            if let Some(d) = self.remote.resolve(&r, &t)? {
+                by_digest.entry(d).or_default().push(t);
+            }
+        }
+        let mut out = Vec::new();
+        for (d, tags) in &by_digest {
+            if spare.contains(d) || !tags.iter().all(|t| doomed(t)) {
+                continue;
+            }
+            self.remote.delete_manifest(&r, d)?;
+            out.push(format!("{d} ({})", tags.join(", ")));
+        }
+        if !out.is_empty() {
+            let mut idx = self.load_index();
+            if let Some(m) = idx.repos.get_mut(&r) {
+                m.retain(|_, (d, _)| !out.iter().any(|x| x.starts_with(d.as_str())));
+            }
+            self.save_index(&idx)?;
         }
         Ok(out)
     }
@@ -924,6 +976,21 @@ mod tests {
             select_deletions(&with_keep, 2, &none),
             vec![d(2), d(1), d(5)]
         );
+        // Preview tags are never among the newest: kept while deployed,
+        // deleted once not.
+        let mut with_pr = tags.clone();
+        with_pr.push(t("pr-7-abc", 8, 9999));
+        with_pr.push(t("pr-7-def", 9, 9998));
+        let prot9: BTreeSet<String> = [d(9)].into();
+        assert_eq!(
+            select_deletions(&with_pr, 2, &prot9),
+            vec![d(2), d(1), d(5), d(8)]
+        );
+        assert!(is_preview_tag("pr-12-0123abc"));
+        assert_eq!(preview_tag_number("pr-12-0123abc"), Some(12));
+        for t in ["pr-x-abc", "pr-12", "pr--a", "v1", "pr-12-"] {
+            assert!(!is_preview_tag(t), "{t}");
+        }
     }
 
     #[test]

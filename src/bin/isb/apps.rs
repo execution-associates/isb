@@ -183,6 +183,43 @@ pub enum AppCmd {
     },
     /// Generate an SSH deploy key for the app and print its public half.
     DeployKey { name: String },
+    /// Preview deployments per pull request (settings: `previews` in
+    /// `isb app update -f`).
+    #[command(subcommand)]
+    Previews(PreviewCmd),
+}
+
+#[derive(Subcommand)]
+pub enum PreviewCmd {
+    /// An app's previews (every app's without NAME).
+    #[command(alias = "list")]
+    Ls {
+        name: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// One preview and its deployments.
+    #[command(alias = "get")]
+    Show { name: String, number: u64 },
+    /// A preview deployment's log (default: the latest); -f follows it.
+    Logs {
+        name: String,
+        number: u64,
+        deployment: Option<u64>,
+        #[arg(short, long)]
+        follow: bool,
+    },
+    /// Build the pull request's head again and roll the preview.
+    Redeploy {
+        name: String,
+        number: u64,
+        /// Return once queued.
+        #[arg(short, long)]
+        detach: bool,
+    },
+    /// Remove a preview: its service, volumes, images and records.
+    #[command(alias = "remove")]
+    Rm { name: String, number: u64 },
 }
 
 fn with_org(org: &Option<String>, mut args: Value) -> Value {
@@ -630,6 +667,155 @@ pub fn app(org: &Option<String>, cmd: AppCmd) -> Result<u8> {
             println!("{}", r["public_key"].as_str().unwrap_or(""));
             eprintln!("add it to the repository's deploy keys (read-only)");
         }
+        AppCmd::Previews(p) => return previews(org, p),
     }
     Ok(0)
+}
+
+fn previews(org: &Option<String>, cmd: PreviewCmd) -> Result<u8> {
+    let call = |tool: &str, args: Value| call(tool, with_org(org, args), SHORT);
+    match cmd {
+        PreviewCmd::Ls { name, json } => {
+            let mut a = json!({});
+            if let Some(n) = name {
+                a["name"] = json!(n);
+            }
+            let r = call("preview_list", a)?;
+            if json {
+                print_json(&r["previews"]);
+                return Ok(0);
+            }
+            let mut rows = vec![vec![
+                "APP".into(),
+                "PR".into(),
+                "STATUS".into(),
+                "HEAD".into(),
+                "COMMIT".into(),
+                "URL".into(),
+            ]];
+            for p in r["previews"].as_array().into_iter().flatten() {
+                let sha = p["sha"].as_str().or(p["head_sha"].as_str()).unwrap_or("");
+                let mut pr = format!("#{}", p["number"]);
+                if p["fork"].as_bool() == Some(true) {
+                    pr.push_str(" (fork)");
+                }
+                rows.push(vec![
+                    p["app"].as_str().unwrap_or("").into(),
+                    pr,
+                    p["status"].as_str().unwrap_or("").into(),
+                    p["head_ref"].as_str().unwrap_or("").into(),
+                    sha[..sha.len().min(8)].into(),
+                    p["url"].as_str().unwrap_or("").into(),
+                ]);
+            }
+            table(rows);
+        }
+        PreviewCmd::Show { name, number } => {
+            let p = call("preview_get", json!({"name": name, "number": number}))?;
+            println!(
+                "preview:     #{} of {} ({}{})",
+                p["number"],
+                p["app"].as_str().unwrap_or(""),
+                p["provider"].as_str().unwrap_or(""),
+                if p["fork"].as_bool() == Some(true) {
+                    ", from a fork"
+                } else {
+                    ""
+                }
+            );
+            println!("title:       {}", p["title"].as_str().unwrap_or(""));
+            println!(
+                "branches:    {} -> {}",
+                p["head_ref"].as_str().unwrap_or(""),
+                p["base_ref"].as_str().unwrap_or("")
+            );
+            println!("stack:       {}", p["stack"].as_str().unwrap_or(""));
+            println!("status:      {}", p["status"].as_str().unwrap_or(""));
+            println!("commit:      {}", p["sha"].as_str().unwrap_or("-"));
+            println!("image:       {}", p["image"].as_str().unwrap_or("-"));
+            println!("url:         {}", p["url"].as_str().unwrap_or("-"));
+            for d in p["deployments"].as_array().into_iter().flatten() {
+                println!(
+                    "  {} {} {} {}",
+                    d["id"],
+                    d["status"].as_str().unwrap_or(""),
+                    d["by"].as_str().unwrap_or(""),
+                    d["error"].as_str().unwrap_or("")
+                );
+            }
+        }
+        PreviewCmd::Logs {
+            name,
+            number,
+            deployment,
+            follow,
+        } => {
+            let id = match deployment {
+                Some(d) => d,
+                None => {
+                    call("preview_get", json!({"name": name, "number": number}))?["deployments"][0]
+                        ["id"]
+                        .as_u64()
+                        .ok_or_else(|| {
+                            Error::Invalid(format!("preview #{number} has no deployments"))
+                        })?
+                }
+            };
+            return preview_follow(org, &name, number, id, follow);
+        }
+        PreviewCmd::Redeploy {
+            name,
+            number,
+            detach,
+        } => {
+            let d = call("preview_redeploy", json!({"name": name, "number": number}))?;
+            let id = d["deployment"]["id"].as_u64().unwrap_or(0);
+            eprintln!("preview #{number}: deployment {id} queued");
+            if !detach {
+                return preview_follow(org, &name, number, id, true);
+            }
+        }
+        PreviewCmd::Rm { name, number } => {
+            call(
+                "preview_delete",
+                json!({"name": name, "number": number, "wait": true}),
+            )?;
+            eprintln!("preview #{number} of {name} removed");
+        }
+    }
+    Ok(0)
+}
+
+/// Print a preview deployment's log; with `follow`, until it finishes
+/// (exit 1 unless it ends done).
+fn preview_follow(
+    org: &Option<String>,
+    name: &str,
+    number: u64,
+    id: u64,
+    follow: bool,
+) -> Result<u8> {
+    use std::io::Write;
+    let mut offset = 0u64;
+    loop {
+        let r = super::call(
+            "preview_log",
+            with_org(
+                org,
+                json!({"name": name, "number": number, "deployment": id, "offset": offset}),
+            ),
+            SHORT,
+        )?;
+        print!("{}", r["log"].as_str().unwrap_or(""));
+        let _ = std::io::stdout().flush();
+        offset = r["offset"].as_u64().unwrap_or(offset);
+        if !follow || r["finished"].as_bool() == Some(true) {
+            return Ok(if !follow || r["status"] == "done" {
+                0
+            } else {
+                1
+            });
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
 }

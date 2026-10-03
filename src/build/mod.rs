@@ -94,6 +94,10 @@ pub struct BuildRequest {
     pub tag: String,
     /// Build in a VM rather than a container.
     pub untrusted: bool,
+    /// Whose build cache volume to use (default: the app's). Previews
+    /// build with their own, so a pull request cannot poison the cache
+    /// production builds read.
+    pub cache: Option<String>,
 }
 
 /// What a build produced.
@@ -195,7 +199,14 @@ pub fn run_with(
     ));
     let image = ensure_builder_image(base, vm, deadline, log)?;
     let pool = crate::sandbox::host_facts(&oc)?.pick_pool(None)?;
-    let cache = ensure_cache(&oc, &pool, &req.app, vm, &opts.cache_size, log)?;
+    let cache = ensure_cache(
+        &oc,
+        &pool,
+        req.cache.as_deref().unwrap_or(&req.app),
+        vm,
+        &opts.cache_size,
+        log,
+    )?;
 
     let name = sandbox_name(&req.app);
     let _guard = Remove {
@@ -411,6 +422,16 @@ fn sandbox_name(app: &str) -> String {
     )
 }
 
+/// The name of a build cache volume: `build-cache-<key>`, `-vm` for VMs.
+pub fn cache_volume(key: &str, vm: bool) -> String {
+    let a = key.replace('.', "-");
+    if vm {
+        format!("build-cache-{a}-vm")
+    } else {
+        format!("build-cache-{a}")
+    }
+}
+
 /// The build cache volume of an app: `build-cache-<app>`, a filesystem
 /// volume for containers, a block volume (`-vm`) for VMs, whose overlay
 /// snapshots cannot live on a shared filesystem.
@@ -422,12 +443,7 @@ fn ensure_cache(
     size: &str,
     log: &mut dyn FnMut(&str),
 ) -> Result<String> {
-    let a = app.replace('.', "-");
-    let name = if vm {
-        format!("build-cache-{a}-vm")
-    } else {
-        format!("build-cache-{a}")
-    };
+    let name = cache_volume(app, vm);
     let path = format!(
         "/1.0/storage-pools/{}/volumes/custom/{}",
         encode_segment(pool),
@@ -1008,6 +1024,7 @@ mod tests {
             args: vec![],
             tag: "v1".into(),
             untrusted: false,
+            cache: None,
         }
     }
 

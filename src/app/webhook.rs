@@ -39,8 +39,54 @@ pub enum Event {
     },
     /// A generic `?token=` call with no push payload: deploy.
     Trigger,
-    /// Anything else (issues, pull requests, ...): ignored.
+    /// A pull (merge) request opened, updated or closed: previews.
+    PullRequest(PullRequest),
+    /// Anything else (issues, comments, ...): ignored.
     Other(String),
+}
+
+/// What happened to a pull request, as far as previews care.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrAction {
+    /// Opened or reopened: build and deploy a preview.
+    Open,
+    /// New commits on its head: rebuild the preview.
+    Sync,
+    /// Closed, merged or not: remove the preview.
+    Close { merged: bool },
+    /// Edited, labelled, reviewed, ...: nothing to do.
+    Other,
+}
+
+/// A pull request event (GitHub and Gitea/Forgejo `pull_request`, GitLab
+/// `Merge Request Hook`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequest {
+    pub action: PrAction,
+    /// The action as the sender named it (`synchronize`, `update`, ...).
+    pub raw_action: String,
+    /// GitHub/Gitea `number`, GitLab `iid`.
+    pub number: u64,
+    pub head_sha: Option<String>,
+    /// The branch the changes are on (in the head repository).
+    pub head_ref: String,
+    /// The branch it would merge into.
+    pub base_ref: String,
+    /// The head is in another repository than the base: a fork, whose code
+    /// nobody with push access wrote.
+    pub fork: bool,
+    pub title: String,
+}
+
+impl PullRequest {
+    /// The ref the forge keeps the request's head under, in the base
+    /// repository (so a fork's commits are fetched from the base).
+    pub fn head_ref_in_base(provider: Provider, number: u64) -> String {
+        match provider {
+            Provider::GitLab => format!("refs/merge-requests/{number}/head"),
+            _ => format!("refs/pull/{number}/head"),
+        }
+    }
 }
 
 /// Why a request was refused.
@@ -137,6 +183,12 @@ pub fn event(provider: Provider, header: &Headers, body: &[u8]) -> Event {
     match kind.as_deref().map(str::to_ascii_lowercase).as_deref() {
         Some("ping") => return Event::Ping,
         Some("push" | "push hook" | "tag push hook") => {}
+        Some("pull_request" | "merge request hook") => {
+            return match json.as_ref().and_then(|j| pull_request(provider, j)) {
+                Some(pr) => Event::PullRequest(pr),
+                None => Event::Other("pull request without a number".into()),
+            };
+        }
         Some(other) => return Event::Other(other.to_string()),
         None if provider == Provider::Generic => {}
         None => return Event::Other("unknown".into()),
@@ -173,6 +225,74 @@ pub fn event(provider: Provider, header: &Headers, body: &[u8]) -> Event {
         message,
         deleted: zero || j.get("deleted").and_then(Value::as_bool) == Some(true),
     }
+}
+
+/// A pull request from its payload: GitHub and Gitea/Forgejo share a shape
+/// (`action`, `number`, `pull_request.{head,base}`), GitLab has its own
+/// (`object_attributes`).
+fn pull_request(provider: Provider, j: &Value) -> Option<PullRequest> {
+    let s = |p: &str| j.pointer(p).and_then(Value::as_str).map(String::from);
+    if provider == Provider::GitLab
+        || j.get("object_kind").and_then(Value::as_str) == Some("merge_request")
+    {
+        let a = j.get("object_attributes")?;
+        let number = a.get("iid").and_then(Value::as_u64)?;
+        let raw = s("/object_attributes/action").unwrap_or_default();
+        // An `update` with `oldrev` moved the head; without it only the
+        // title, labels or the like changed.
+        let action = match raw.as_str() {
+            "open" | "reopen" => PrAction::Open,
+            "update" if a.get("oldrev").is_some_and(|v| v.is_string()) => PrAction::Sync,
+            "close" => PrAction::Close { merged: false },
+            "merge" => PrAction::Close { merged: true },
+            _ => PrAction::Other,
+        };
+        let src = a.get("source_project_id").and_then(Value::as_u64);
+        let dst = a.get("target_project_id").and_then(Value::as_u64);
+        return Some(PullRequest {
+            action,
+            raw_action: raw,
+            number,
+            head_sha: s("/object_attributes/last_commit/id"),
+            head_ref: s("/object_attributes/source_branch").unwrap_or_default(),
+            base_ref: s("/object_attributes/target_branch").unwrap_or_default(),
+            // Unknown counts as a fork: the safe side.
+            fork: src.is_none() || src != dst,
+            title: s("/object_attributes/title").unwrap_or_default(),
+        });
+    }
+    let pr = j.get("pull_request")?;
+    let number = j
+        .get("number")
+        .and_then(Value::as_u64)
+        .or_else(|| pr.get("number").and_then(Value::as_u64))?;
+    let raw = s("/action").unwrap_or_default();
+    let merged = pr.get("merged").and_then(Value::as_bool) == Some(true);
+    let action = match raw.as_str() {
+        "opened" | "reopened" => PrAction::Open,
+        // GitHub `synchronize`, Gitea/Forgejo `synchronized`.
+        "synchronize" | "synchronized" => PrAction::Sync,
+        "closed" => PrAction::Close { merged },
+        _ => PrAction::Other,
+    };
+    // A head repository that is gone (a deleted fork) or is not the base
+    // repository is a fork.
+    let head_repo = s("/pull_request/head/repo/full_name");
+    let base_repo = s("/pull_request/base/repo/full_name").or_else(|| s("/repository/full_name"));
+    let fork = match (&head_repo, &base_repo) {
+        (Some(h), Some(b)) => !h.eq_ignore_ascii_case(b),
+        _ => true,
+    };
+    Some(PullRequest {
+        action,
+        raw_action: raw,
+        number,
+        head_sha: s("/pull_request/head/sha"),
+        head_ref: s("/pull_request/head/ref").unwrap_or_default(),
+        base_ref: s("/pull_request/base/ref").unwrap_or_default(),
+        fork,
+        title: s("/pull_request/title").unwrap_or_default(),
+    })
 }
 
 /// A delivery id, for refusing a replayed delivery.
@@ -296,9 +416,182 @@ mod tests {
             }
         ));
         assert_eq!(event(Provider::Generic, &headers(&[]), b""), Event::Trigger);
+        // A pull request event is not a push.
+        let pr = br#"{"action":"opened","number":3,"pull_request":{"head":{"sha":"abc","ref":"f","repo":{"full_name":"o/r"}},"base":{"ref":"main","repo":{"full_name":"o/r"}}}}"#;
+        assert!(matches!(
+            event(
+                Provider::GitHub,
+                &headers(&[("X-GitHub-Event", "pull_request")]),
+                pr
+            ),
+            Event::PullRequest(_)
+        ));
         assert!(matches!(
             event(Provider::Generic, &headers(&[]), push),
             Event::Push { .. }
         ));
+    }
+
+    fn pr_of(provider: Provider, h: &[(&str, &str)], body: &str) -> PullRequest {
+        match event(provider, &headers(h), body.as_bytes()) {
+            Event::PullRequest(p) => p,
+            e => panic!("not a pull request: {e:?}"),
+        }
+    }
+
+    /// GitHub's `pull_request` payload, trimmed to what is read.
+    fn github(action: &str, head_repo: &str, merged: bool) -> String {
+        format!(
+            r#"{{"action":"{action}","number":42,"pull_request":{{"number":42,"title":"Add a thing","merged":{merged},
+            "head":{{"ref":"feature","sha":"0123456789abcdef0123456789abcdef01234567","repo":{{"full_name":"{head_repo}","fork":{}}}}},
+            "base":{{"ref":"main","sha":"fedcba","repo":{{"full_name":"acme/web"}}}}}},
+            "repository":{{"full_name":"acme/web"}}}}"#,
+            head_repo != "acme/web"
+        )
+    }
+
+    #[test]
+    fn github_pull_requests() {
+        let h = [("X-GitHub-Event", "pull_request")];
+        let p = pr_of(Provider::GitHub, &h, &github("opened", "acme/web", false));
+        assert_eq!(p.action, PrAction::Open);
+        assert_eq!(p.number, 42);
+        assert_eq!(p.head_ref, "feature");
+        assert_eq!(p.base_ref, "main");
+        assert_eq!(p.title, "Add a thing");
+        assert_eq!(
+            p.head_sha.as_deref(),
+            Some("0123456789abcdef0123456789abcdef01234567")
+        );
+        assert!(!p.fork);
+        let p = pr_of(Provider::GitHub, &h, &github("reopened", "acme/web", false));
+        assert_eq!(p.action, PrAction::Open);
+        let p = pr_of(
+            Provider::GitHub,
+            &h,
+            &github("synchronize", "acme/web", false),
+        );
+        assert_eq!(p.action, PrAction::Sync);
+        let p = pr_of(Provider::GitHub, &h, &github("closed", "acme/web", false));
+        assert_eq!(p.action, PrAction::Close { merged: false });
+        let p = pr_of(Provider::GitHub, &h, &github("closed", "acme/web", true));
+        assert_eq!(p.action, PrAction::Close { merged: true });
+        let p = pr_of(Provider::GitHub, &h, &github("labeled", "acme/web", false));
+        assert_eq!(p.action, PrAction::Other);
+        // From a fork; from a fork since deleted (head.repo null).
+        let p = pr_of(
+            Provider::GitHub,
+            &h,
+            &github("opened", "mallory/web", false),
+        );
+        assert!(p.fork);
+        let gone = r#"{"action":"synchronize","number":5,"pull_request":{"head":{"ref":"x","sha":"ab","repo":null},"base":{"ref":"main","repo":{"full_name":"acme/web"}}}}"#;
+        assert!(pr_of(Provider::GitHub, &h, gone).fork);
+        // Case differences in the name are the same repository.
+        let p = pr_of(Provider::GitHub, &h, &github("opened", "ACME/Web", false));
+        assert!(!p.fork);
+        // A pull request without a number is nothing to act on.
+        assert!(matches!(
+            event(Provider::GitHub, &headers(&h), br#"{"action":"opened"}"#),
+            Event::Other(_)
+        ));
+    }
+
+    #[test]
+    fn gitea_pull_requests() {
+        // Gitea/Forgejo send `pull_request` for open, sync and close, with
+        // `synchronized` (not GitHub's `synchronize`).
+        let body = |action: &str, head: &str, merged: bool| {
+            format!(
+                r#"{{"action":"{action}","number":7,"pull_request":{{"id":99,"number":7,"title":"t","merged":{merged},
+                "head":{{"label":"f","ref":"f","sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","repo_id":2,"repo":{{"id":2,"full_name":"{head}"}}}},
+                "base":{{"label":"main","ref":"main","sha":"b","repo_id":1,"repo":{{"id":1,"full_name":"isb/app"}}}}}},
+                "repository":{{"id":1,"full_name":"isb/app"}}}}"#
+            )
+        };
+        let h = [
+            ("X-Gitea-Event", "pull_request"),
+            ("X-Gitea-Event-Type", "pull_request"),
+        ];
+        let p = pr_of(Provider::Gitea, &h, &body("opened", "isb/app", false));
+        assert_eq!((p.action, p.number, p.fork), (PrAction::Open, 7, false));
+        let hs = [
+            ("X-Gitea-Event", "pull_request"),
+            ("X-Gitea-Event-Type", "pull_request_sync"),
+        ];
+        let p = pr_of(
+            Provider::Gitea,
+            &hs,
+            &body("synchronized", "isb/app", false),
+        );
+        assert_eq!(p.action, PrAction::Sync);
+        let p = pr_of(Provider::Gitea, &h, &body("closed", "isb/app", true));
+        assert_eq!(p.action, PrAction::Close { merged: true });
+        let p = pr_of(Provider::Gitea, &h, &body("opened", "someone/app", false));
+        assert!(p.fork);
+        let f = [("X-Forgejo-Event", "pull_request")];
+        assert_eq!(
+            pr_of(Provider::Gitea, &f, &body("reopened", "isb/app", false)).action,
+            PrAction::Open
+        );
+        // Reviews and comments on a pull request are other events.
+        let rv = [("X-Gitea-Event", "pull_request_approved")];
+        assert!(matches!(
+            event(
+                Provider::Gitea,
+                &headers(&rv),
+                body("reviewed", "isb/app", false).as_bytes()
+            ),
+            Event::Other(_)
+        ));
+    }
+
+    #[test]
+    fn gitlab_merge_requests() {
+        let body = |action: &str, oldrev: bool, src: u64| {
+            format!(
+                r#"{{"object_kind":"merge_request","project":{{"id":1,"path_with_namespace":"acme/web"}},
+                "object_attributes":{{"iid":12,"title":"MR","action":"{action}","state":"opened",
+                "source_branch":"feat","target_branch":"main","source_project_id":{src},"target_project_id":1,
+                {}"last_commit":{{"id":"cccccccccccccccccccccccccccccccccccccccc","message":"m"}}}}}}"#,
+                if oldrev {
+                    r#""oldrev":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","#
+                } else {
+                    ""
+                }
+            )
+        };
+        let h = [("X-Gitlab-Event", "Merge Request Hook")];
+        let p = pr_of(Provider::GitLab, &h, &body("open", false, 1));
+        assert_eq!((p.action, p.number, p.fork), (PrAction::Open, 12, false));
+        assert_eq!(p.head_ref, "feat");
+        assert_eq!(p.base_ref, "main");
+        assert_eq!(
+            p.head_sha.as_deref(),
+            Some("cccccccccccccccccccccccccccccccccccccccc")
+        );
+        assert_eq!(
+            pr_of(Provider::GitLab, &h, &body("reopen", false, 1)).action,
+            PrAction::Open
+        );
+        // An update with new commits carries oldrev; one without is a
+        // title or label change.
+        assert_eq!(
+            pr_of(Provider::GitLab, &h, &body("update", true, 1)).action,
+            PrAction::Sync
+        );
+        assert_eq!(
+            pr_of(Provider::GitLab, &h, &body("update", false, 1)).action,
+            PrAction::Other
+        );
+        assert_eq!(
+            pr_of(Provider::GitLab, &h, &body("close", false, 1)).action,
+            PrAction::Close { merged: false }
+        );
+        assert_eq!(
+            pr_of(Provider::GitLab, &h, &body("merge", false, 1)).action,
+            PrAction::Close { merged: true }
+        );
+        assert!(pr_of(Provider::GitLab, &h, &body("open", false, 2)).fork);
     }
 }

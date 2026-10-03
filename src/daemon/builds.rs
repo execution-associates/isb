@@ -385,6 +385,7 @@ fn build_run(ctx: &Ctx, jobs: &Arc<Jobs>, a: Value, c: &Caller) -> Result<Value>
         args: a.args.into_iter().collect(),
         tag: a.tag.clone().unwrap_or_else(|| "latest".into()),
         untrusted: a.untrusted,
+        cache: None,
     };
     let mut opts = crate::build::BuildOptions::default();
     if let Some(t) = &a.timeout {

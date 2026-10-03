@@ -14,6 +14,7 @@ pub mod apps;
 pub mod builds;
 mod orgs;
 pub mod policy;
+pub mod previews;
 pub mod secrets;
 
 use std::collections::BTreeMap;
@@ -197,6 +198,8 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         m.start(ctl.clone())?;
     }
     let apps = crate::app::Apps::new(&cfg.state_dir, client.clone(), ctl.clone(), secrets.clone());
+    // Previews past their TTL, and removals that did not finish.
+    apps.start_preview_upkeep();
     let d = Arc::new(Daemon {
         client,
         ctl: ctl.clone(),
@@ -979,6 +982,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
         }
     );
     apps::register(&mut r, d.apps.clone())?;
+    previews::register(&mut r, d.apps.clone())?;
     tool!(
         "server_status",
         "Server status",

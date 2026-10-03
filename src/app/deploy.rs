@@ -157,25 +157,26 @@ impl Deployment {
 }
 
 #[derive(Default)]
-struct Queue {
-    running: bool,
-    next: Option<u64>,
+pub(super) struct Queue {
+    pub(super) running: bool,
+    pub(super) next: Option<u64>,
 }
 
-struct Inner {
-    state: PathBuf,
-    client: Client,
-    ctl: Controller,
-    secrets: Arc<Secrets>,
-    build: BuildFn,
+pub(super) struct Inner {
+    pub(super) state: PathBuf,
+    pub(super) client: Client,
+    pub(super) ctl: Controller,
+    pub(super) secrets: Arc<Secrets>,
+    pub(super) build: BuildFn,
     digest: DigestFn,
-    timeout: Duration,
+    pub(super) timeout: Duration,
     /// Held across read-modify-write of app and project records.
-    edit: Mutex<()>,
+    pub(super) edit: Mutex<()>,
     /// Held across read-splice-deploy of a stack, so two apps deploying
     /// into one environment never drop each other's service.
-    stacks: Mutex<()>,
-    queues: Mutex<BTreeMap<(OrgId, String), Queue>>,
+    pub(super) stacks: Mutex<()>,
+    /// Keyed by app, or `<app>#pr-<n>` for a preview.
+    pub(super) queues: Mutex<BTreeMap<(OrgId, String), Queue>>,
     /// Recent webhook delivery ids, to ignore a replayed delivery.
     deliveries: Mutex<VecDeque<String>>,
 }
@@ -183,7 +184,7 @@ struct Inner {
 /// Projects, environments, apps and their deployments, for every org.
 #[derive(Clone)]
 pub struct Apps {
-    inner: Arc<Inner>,
+    pub(super) inner: Arc<Inner>,
 }
 
 impl Apps {
@@ -236,7 +237,7 @@ impl Apps {
 
     // --- paths -----------------------------------------------------------
 
-    fn apps_dir(&self, org: &OrgId) -> PathBuf {
+    pub(super) fn apps_dir(&self, org: &OrgId) -> PathBuf {
         super::org_root(&self.inner.state, org).join("apps")
     }
 
@@ -244,7 +245,7 @@ impl Apps {
         self.apps_dir(org).join("projects")
     }
 
-    fn app_dir(&self, org: &OrgId, app: &str) -> PathBuf {
+    pub(super) fn app_dir(&self, org: &OrgId, app: &str) -> PathBuf {
         self.apps_dir(org).join(app)
     }
 
@@ -469,6 +470,9 @@ impl Apps {
     /// at deploy).
     fn check_secrets(&self, org: &OrgId, spec: &AppSpec) -> Result<()> {
         let mut names = spec.env.secret_names();
+        if let Some(p) = &spec.previews {
+            names.extend(p.secret_names());
+        }
         if let Source::Git(g) = &spec.source {
             names.extend(g.auth.secret().map(String::from));
         }
@@ -576,6 +580,8 @@ impl Apps {
                 "app {name} is deploying; delete it once that finishes"
             )));
         }
+        // Its previews go first, with their stacks, volumes and images.
+        self.previews_remove_all(org, name)?;
         let stack = app.spec.stack()?;
         let q = crate::stack::qualified(org, &stack);
         {
@@ -903,6 +909,7 @@ impl Apps {
                             args: b.args.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
                             tag: co.sha.clone(),
                             untrusted: b.untrusted,
+                            cache: None,
                         };
                         log.line(&format!("building {} with {:?}", co.sha, b.builder));
                         let built =
@@ -958,7 +965,7 @@ impl Apps {
     }
 
     /// The stack definition for `file`, with its secrets bound.
-    fn stack_def(
+    pub(super) fn stack_def(
         &self,
         org: &OrgId,
         stack: &str,
@@ -991,7 +998,7 @@ impl Apps {
 
     /// Wait for one service of a stack to settle at its current revision:
     /// `(converged, why not)`.
-    fn wait_service(&self, q: &str, svc: &str) -> Result<(bool, String)> {
+    pub(super) fn wait_service(&self, q: &str, svc: &str) -> Result<(bool, String)> {
         let started = Instant::now();
         loop {
             let def = self.inner.ctl.definition(q)?;
@@ -1022,7 +1029,7 @@ impl Apps {
         }
     }
 
-    fn credentials(&self, org: &OrgId, auth: &GitAuth) -> Result<Credentials> {
+    pub(super) fn credentials(&self, org: &OrgId, auth: &GitAuth) -> Result<Credentials> {
         let read = |n: &str| {
             self.inner
                 .secrets
@@ -1097,6 +1104,7 @@ impl Apps {
                     d.finished_at = Some(crate::stack::controller::now_ms());
                     let _ = self.save_dep(&org, &d);
                 }
+                self.recover_previews(&org, &app.spec.name);
             }
         }
     }
@@ -1164,6 +1172,9 @@ impl Apps {
                 return (200, json!({"ignored": format!("event {kind}")}));
             }
             webhook::Event::Trigger => None,
+            webhook::Event::PullRequest(pr) => {
+                return self.preview_webhook(&org, &found, provider, &by, &pr);
+            }
             webhook::Event::Push {
                 reference,
                 after,
@@ -1595,5 +1606,131 @@ mod tests {
         ap.environment_delete(&org, "shop", "staging").unwrap();
         ap.project_delete(&org, "shop").unwrap();
         assert!(ap.project_list(&org).unwrap().is_empty());
+    }
+
+    #[test]
+    fn previews_from_webhooks() {
+        let dir = tempfile::tempdir().unwrap();
+        let gate = Arc::new((Mutex::new(true), std::sync::Condvar::new()));
+        let ap = apps(dir.path(), gate);
+        let org = OrgId::new("acme").unwrap();
+        ap.project_create(&org, "shop", "", &[]).unwrap();
+        assert!(
+            ap.environment_create(&org, "shop", "prod-pr-1").is_err(),
+            "preview stack names are kept"
+        );
+        let (_, secret) = ap
+            .create(
+                &org,
+                spec(json!({
+                    "name": "web", "project": "shop",
+                    "source": {"git": {"url": "https://example.invalid/acme/web.git", "ref": "main"}},
+                    "build": {"builder": {"type": "dockerfile"}},
+                    "port": 8080,
+                })),
+            )
+            .unwrap();
+        let pr = |action: &str, n: u64, head_repo: &str, base: &str| {
+            format!(
+                r#"{{"action":"{action}","number":{n},"pull_request":{{"title":"t{n}","merged":false,
+                "head":{{"ref":"f{n}","sha":"{}","repo":{{"full_name":"{head_repo}"}}}},
+                "base":{{"ref":"{base}","repo":{{"full_name":"acme/web"}}}}}}}}"#,
+                "a".repeat(40)
+            )
+            .into_bytes()
+        };
+        let mut delivery = 0;
+        let mut send = |body: &[u8]| {
+            delivery += 1;
+            let h = hdrs(&[
+                ("X-Gitea-Event", "pull_request"),
+                ("X-Gitea-Delivery", &format!("p{delivery}")),
+                ("X-Gitea-Signature", &webhook::sign(secret.as_bytes(), body)),
+            ]);
+            ap.webhook("acme", "web", &h, None, body)
+        };
+        // Previews are opt-in.
+        let (st, v) = send(&pr("opened", 1, "acme/web", "main"));
+        assert_eq!(st, 200);
+        assert!(v["ignored"].as_str().unwrap().contains("off"), "{v}");
+        ap.update(
+            &org,
+            "web",
+            &json!({"previews": {"enabled": true, "max": 2, "env": "MODE=preview\n"}}),
+        )
+        .unwrap();
+        // Another base branch, a fork: ignored.
+        let (st, v) = send(&pr("opened", 1, "acme/web", "dev"));
+        assert_eq!(st, 200);
+        assert!(
+            v["ignored"].as_str().unwrap().contains("targets dev"),
+            "{v}"
+        );
+        let (st, v) = send(&pr("opened", 1, "mallory/web", "main"));
+        assert_eq!(st, 200);
+        assert!(v["ignored"].as_str().unwrap().contains("fork"), "{v}");
+        assert!(ap.preview_list(&org, "web").unwrap().is_empty());
+        // Opened: a preview and a deploy (which fails here: no git host).
+        let (st, v) = send(&pr("opened", 1, "acme/web", "main"));
+        assert_eq!(st, 202, "{v}");
+        assert_eq!(
+            (v["preview"].as_u64(), v["deployment"].as_u64()),
+            (Some(1), Some(1))
+        );
+        let p = ap.preview_get(&org, "web", 1).unwrap();
+        assert_eq!(p.stack, "shop-production-pr-1");
+        assert_eq!((p.provider.as_str(), p.fork), ("gitea", false));
+        let d = ap
+            .preview_wait(&org, "web", 1, 1, Duration::from_secs(60))
+            .unwrap();
+        assert_eq!(d.status, Status::Failed, "{d:?}");
+        let (log, _, done) = ap.preview_log(&org, "web", 1, 1, 0).unwrap();
+        assert!(done && log.contains("refs/pull/1/head"), "{log}");
+        // Synchronize: the same preview, a second deployment.
+        let (st, v) = send(&pr("synchronize", 1, "acme/web", "main"));
+        assert_eq!((st, v["deployment"].as_u64()), (202, Some(2)), "{v}");
+        ap.preview_wait(&org, "web", 1, 2, Duration::from_secs(60))
+            .unwrap();
+        // The limit: two at once.
+        assert_eq!(send(&pr("opened", 2, "acme/web", "main")).0, 202);
+        let (st, v) = send(&pr("opened", 3, "acme/web", "main"));
+        assert_eq!(st, 200);
+        assert!(v["ignored"].as_str().unwrap().contains("2 previews"), "{v}");
+        assert!(ap.preview_get(&org, "web", 3).is_err());
+        ap.preview_wait(&org, "web", 2, 1, Duration::from_secs(60))
+            .unwrap();
+        // Forks when allowed: marked, so they build in a VM without the
+        // app's secrets.
+        ap.update(&org, "web", &json!({"previews": {"forks": true, "max": 5}}))
+            .unwrap();
+        assert_eq!(send(&pr("opened", 4, "mallory/web", "main")).0, 202);
+        assert!(ap.preview_get(&org, "web", 4).unwrap().fork);
+        ap.preview_wait(&org, "web", 4, 1, Duration::from_secs(60))
+            .unwrap();
+        // Closed: removed with its records.
+        let (st, v) = send(&pr("closed", 1, "acme/web", "main"));
+        assert_eq!(st, 202, "{v}");
+        let started = Instant::now();
+        while ap.preview_get(&org, "web", 1).is_ok() {
+            assert!(started.elapsed() < Duration::from_secs(30));
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(!dir.path().join("orgs/acme/apps/web/previews/1").exists());
+        let (st, v) = send(&pr("closed", 1, "acme/web", "main"));
+        assert_eq!(st, 200, "{v}");
+        // The tools' path: redeploy, then delete.
+        let d = ap
+            .preview_redeploy(&org, "web", 2, Trigger::Api, "t")
+            .unwrap();
+        assert_eq!(d.id, 2);
+        ap.preview_wait(&org, "web", 2, 2, Duration::from_secs(60))
+            .unwrap();
+        ap.preview_remove(&org, "web", 2, "test", true).unwrap();
+        assert!(ap.preview_get(&org, "web", 2).is_err());
+        // Deleting the app takes its previews along first; here the fork's
+        // build cache cannot be checked without incusd, so it stops there.
+        assert!(ap.delete(&org, "web").is_err());
+        assert!(ap.get(&org, "web").is_ok());
+        assert!(ap.preview_get(&org, "web", 4).unwrap().removing);
     }
 }
