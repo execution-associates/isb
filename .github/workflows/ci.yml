@@ -46,6 +46,11 @@ jobs:
   audit:
     name: audit and deny
     runs-on: ubuntu-latest
+    # audit-check reports advisory warnings as a check run; without this a
+    # warning (an unsound or unmaintained crate) fails the job on push.
+    permissions:
+      contents: read
+      checks: write
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
