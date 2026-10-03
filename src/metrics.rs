@@ -165,18 +165,13 @@ impl Sampler {
 
     fn host(&mut self) -> HostSample {
         let mut h = HostSample {
-            hostname: std::fs::read_to_string("/proc/sys/kernel/hostname")
-                .map(|s| s.trim().to_string())
-                .unwrap_or_default(),
+            hostname: sys::hostname(),
             cpus: std::thread::available_parallelism()
                 .map(|n| n.get() as u32)
                 .unwrap_or(1),
             ..Default::default()
         };
-        if let Some((busy, total)) = std::fs::read_to_string("/proc/stat")
-            .ok()
-            .and_then(|s| parse_proc_stat(&s))
-        {
+        if let Some((busy, total)) = sys::cpu_ticks() {
             if let Some((pb, pt)) = self.host_cpu {
                 if total > pt {
                     let pct = (busy.saturating_sub(pb)) as f32 / (total - pt) as f32 * 100.0;
@@ -187,16 +182,138 @@ impl Sampler {
             self.host_cpu = Some((busy, total));
         }
         h.cpu_history = self.host_hist.iter().copied().collect();
-        if let Ok(m) = std::fs::read_to_string("/proc/meminfo") {
-            let (total, avail) = parse_meminfo(&m);
+        if let Some((total, avail)) = sys::memory() {
             h.mem_total = total;
             h.mem_used = total.saturating_sub(avail);
         }
-        h.load1 = std::fs::read_to_string("/proc/loadavg")
-            .ok()
-            .and_then(|s| s.split_whitespace().next().and_then(|x| x.parse().ok()))
-            .unwrap_or(0.0);
+        h.load1 = sys::load1().unwrap_or(0.0);
         h
+    }
+}
+
+/// Host counters from /proc.
+#[cfg(target_os = "linux")]
+mod sys {
+    pub fn hostname() -> String {
+        std::fs::read_to_string("/proc/sys/kernel/hostname")
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
+    }
+
+    /// (busy, total) ticks since boot.
+    pub fn cpu_ticks() -> Option<(u64, u64)> {
+        super::parse_proc_stat(&std::fs::read_to_string("/proc/stat").ok()?)
+    }
+
+    /// (total, available) bytes.
+    pub fn memory() -> Option<(u64, u64)> {
+        Some(super::parse_meminfo(
+            &std::fs::read_to_string("/proc/meminfo").ok()?,
+        ))
+    }
+
+    pub fn load1() -> Option<f32> {
+        std::fs::read_to_string("/proc/loadavg")
+            .ok()?
+            .split_whitespace()
+            .next()?
+            .parse()
+            .ok()
+    }
+}
+
+/// Host counters from mach and sysctl.
+#[cfg(target_os = "macos")]
+mod sys {
+    use std::mem::{MaybeUninit, size_of};
+
+    pub fn hostname() -> String {
+        let mut buf = [0u8; 256];
+        // SAFETY: gethostname writes at most buf.len() bytes.
+        if unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) } != 0 {
+            return String::new();
+        }
+        let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+        String::from_utf8_lossy(&buf[..end]).into_owned()
+    }
+
+    /// The host port. Each mach_host_self() call adds a send-right reference,
+    /// so take one for the life of the process.
+    #[allow(deprecated)]
+    fn host() -> libc::mach_port_t {
+        static HOST: std::sync::OnceLock<libc::mach_port_t> = std::sync::OnceLock::new();
+        // SAFETY: no preconditions.
+        *HOST.get_or_init(|| unsafe { libc::mach_host_self() })
+    }
+
+    /// (busy, total) ticks since boot.
+    pub fn cpu_ticks() -> Option<(u64, u64)> {
+        let mut info = MaybeUninit::<libc::host_cpu_load_info>::zeroed();
+        let mut count = libc::HOST_CPU_LOAD_INFO_COUNT;
+        // SAFETY: `count` is the size of `info` in integer_t units.
+        let kr = unsafe {
+            libc::host_statistics(
+                host(),
+                libc::HOST_CPU_LOAD_INFO,
+                info.as_mut_ptr().cast(),
+                &mut count,
+            )
+        };
+        if kr != libc::KERN_SUCCESS {
+            return None;
+        }
+        // SAFETY: filled by host_statistics.
+        let t = unsafe { info.assume_init() }.cpu_ticks.map(u64::from);
+        let idle = t[libc::CPU_STATE_IDLE as usize];
+        let total: u64 = t.iter().sum();
+        Some((total - idle, total))
+    }
+
+    /// (total, available) bytes, available being free plus inactive pages:
+    /// what can be handed out without paging, as `vm_stat` reports them.
+    pub fn memory() -> Option<(u64, u64)> {
+        let mut total = 0u64;
+        let mut len = size_of::<u64>();
+        // SAFETY: hw.memsize is a u64 and `len` says so.
+        let rc = unsafe {
+            libc::sysctlbyname(
+                c"hw.memsize".as_ptr(),
+                (&raw mut total).cast(),
+                &mut len,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if rc != 0 {
+            return None;
+        }
+        let mut vm = MaybeUninit::<libc::vm_statistics64>::zeroed();
+        let mut count = libc::HOST_VM_INFO64_COUNT;
+        // SAFETY: `count` is the size of `vm` in integer_t units; the kernel
+        // fills at most that and lowers `count` if its struct is smaller.
+        let kr = unsafe {
+            libc::host_statistics64(
+                host(),
+                libc::HOST_VM_INFO64,
+                vm.as_mut_ptr().cast(),
+                &mut count,
+            )
+        };
+        if kr != libc::KERN_SUCCESS {
+            return Some((total, 0));
+        }
+        // SAFETY: zero-initialised, then (partly) filled by the kernel.
+        let vm = unsafe { vm.assume_init() };
+        // SAFETY: sysconf has no preconditions.
+        let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) }.max(0) as u64;
+        let avail = (u64::from(vm.free_count) + u64::from(vm.inactive_count)) * page;
+        Some((total, avail.min(total)))
+    }
+
+    pub fn load1() -> Option<f32> {
+        let mut l = [0f64; 1];
+        // SAFETY: room for the one sample asked for.
+        (unsafe { libc::getloadavg(l.as_mut_ptr(), 1) } == 1).then_some(l[0] as f32)
     }
 }
 
@@ -222,6 +339,7 @@ fn first_ip(state: &Value) -> Option<String> {
 }
 
 /// (busy, total) jiffies from the aggregate `cpu` line.
+#[cfg(target_os = "linux")]
 fn parse_proc_stat(s: &str) -> Option<(u64, u64)> {
     let line = s.lines().find(|l| l.starts_with("cpu "))?;
     let f: Vec<u64> = line
@@ -239,6 +357,7 @@ fn parse_proc_stat(s: &str) -> Option<(u64, u64)> {
 }
 
 /// (total, available) bytes.
+#[cfg(target_os = "linux")]
 fn parse_meminfo(s: &str) -> (u64, u64) {
     let get = |k: &str| {
         s.lines()
@@ -256,6 +375,17 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[test]
+    fn host_counters() {
+        assert!(!sys::hostname().is_empty());
+        let (busy, total) = sys::cpu_ticks().unwrap();
+        assert!(total > 0 && busy <= total);
+        let (total, avail) = sys::memory().unwrap();
+        assert!(total > 0 && avail > 0 && avail <= total);
+        assert!(sys::load1().is_some());
+    }
+
+    #[cfg(target_os = "linux")]
     #[test]
     fn proc_parsers() {
         assert_eq!(

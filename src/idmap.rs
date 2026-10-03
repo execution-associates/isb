@@ -36,7 +36,8 @@ pub fn in_subid_range(content: &str, owner: &str, id: u32) -> bool {
     })
 }
 
-/// Host facts that decide the idmap. Read from `/etc/subuid` and `/etc/subgid`.
+/// Host facts that decide the idmap. Read from `/etc/subuid` and `/etc/subgid`;
+/// empty where those do not exist (macOS), which `auto` reads as "map it".
 #[derive(Debug, Clone, Default)]
 pub struct SubIds {
     pub subuid: String,

@@ -462,6 +462,7 @@ dependencies = [
  "base64",
  "clap",
  "httparse",
+ "libc",
  "ratatui",
  "ring",
  "rustix 1.1.5",

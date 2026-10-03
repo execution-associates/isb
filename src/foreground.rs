@@ -317,11 +317,11 @@ impl LineWriter {
 /// is not mistaken for the original.
 fn ancestors() -> Vec<(u32, u64)> {
     let mut out = Vec::new();
-    let Some((mut ppid, _)) = stat("self") else {
+    let Some((mut ppid, _)) = stat(std::process::id()) else {
         return out;
     };
     while ppid > 1 && out.len() < 64 {
-        let Some((next, start)) = stat(&ppid.to_string()) else {
+        let Some((next, start)) = stat(ppid) else {
             break;
         };
         out.push((ppid, start));
@@ -331,16 +331,48 @@ fn ancestors() -> Vec<(u32, u64)> {
 }
 
 fn alive(pid: u32, start: u64) -> bool {
-    matches!(stat(&pid.to_string()), Some((_, s)) if s == start)
+    matches!(stat(pid), Some((_, s)) if s == start)
 }
 
 /// (ppid, start time) from `/proc/<pid>/stat`; `None` for a missing or
 /// zombie process.
-fn stat(pid: &str) -> Option<(u32, u64)> {
+#[cfg(target_os = "linux")]
+fn stat(pid: u32) -> Option<(u32, u64)> {
     let s = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     parse_stat(&s)
 }
 
+/// (ppid, start time in microseconds) from `proc_pidinfo`; `None` for a
+/// missing or zombie process.
+#[cfg(target_os = "macos")]
+fn stat(pid: u32) -> Option<(u32, u64)> {
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    // SAFETY: the buffer is a proc_bsdinfo of exactly `size` bytes.
+    let n = unsafe {
+        libc::proc_pidinfo(
+            libc::pid_t::try_from(pid).ok()?,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if n != size {
+        return None;
+    }
+    // SAFETY: proc_pidinfo filled all `size` bytes.
+    let info = unsafe { info.assume_init() };
+    if info.pbi_status == libc::SZOMB {
+        return None;
+    }
+    Some((
+        info.pbi_ppid,
+        info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec,
+    ))
+}
+
+#[cfg(target_os = "linux")]
 fn parse_stat(s: &str) -> Option<(u32, u64)> {
     // The command name can contain spaces and parentheses: fields resume after
     // the LAST ')'. Then: state ppid ... with starttime the 20th after it.
@@ -356,6 +388,7 @@ fn parse_stat(s: &str) -> Option<(u32, u64)> {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn parses_stat() {
         let line =
