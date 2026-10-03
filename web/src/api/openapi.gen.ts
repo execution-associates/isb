@@ -2184,6 +2184,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/org_nesting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Allow Docker in an org's workspace
+         * @description Superadmins only: whether the org's workspace (and nothing else in the org) may run with security.nesting, so Docker works inside it. allow_nesting true or false changes it; leaving it out reads it. Turning it on applies at the workspace's next start (restart_needed says so); turning it off is refused while the workspace runs with nesting: stop it first. Sandboxes, apps and builds never get nesting. It exposes more of the host kernel to the workspace (docs/concepts/security.md#the-docker-exception).
+         */
+        post: operations["org_nesting"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/org_update": {
         parameters: {
             query?: never;
@@ -3778,6 +3798,86 @@ export interface paths {
          * @description The org's workspaces (one per org unless a platform admin raised max_workspaces), as workspace_get shows each, without the session count.
          */
         post: operations["workspace_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/workspace_port_add": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish a workspace port
+         * @description Publish a port of the workspace (a dev server). Every published port can be previewed through isb (workspace_port_open). With `host` it is also served through the org's ingress like an app's domain, under the same allowlist, claims, certificates and Cloudflare Tunnel: a hostname, `default` (<port>-<workspace>.<the org's first domain>) or `auto` (a generated sslip.io name). A host is public unless something like Cloudflare Access guards it. Publishing a port again replaces its host. Org members and above.
+         */
+        post: operations["workspace_port_add"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/workspace_port_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List the workspace's ports
+         * @description The ports the workspace publishes: each with its preview host, and its ingress hostname, URL and state when it has one. Org members and above.
+         */
+        post: operations["workspace_port_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/workspace_port_open": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open a workspace port's preview
+         * @description A one-time link (good for 60 seconds) that opens a published port's preview in the caller's browser, on the preview's own origin behind isb's sign-in. Needs isb serve --preview-domain, or `origin` naming a loopback isb URL (the previews are then <port>-<workspace>-<org>.localhost). Org members and above.
+         */
+        post: operations["workspace_port_open"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/workspace_port_remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unpublish a workspace port
+         * @description Stop publishing a port: its ingress route and its previews end at once. Org members and above.
+         */
+        post: operations["workspace_port_remove"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8868,6 +8968,46 @@ export interface operations {
             };
         };
     };
+    org_nesting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description true allows it, false blocks it; leave it out to read. */
+                    allow_nesting?: boolean;
+                    /** @description The org. */
+                    org: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
     org_update: {
         parameters: {
             query?: never;
@@ -12174,6 +12314,176 @@ export interface operations {
                 "application/json": {
                     /** @description The org to act in (default: default). */
                     org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    workspace_port_add: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A hostname within the org's domains, default, or auto. Leave it out to preview through isb only. */
+                    host?: string;
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description The port a server listens on inside the workspace (on 0.0.0.0, not 127.0.0.1). */
+                    port: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    workspace_port_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    workspace_port_open: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description The isb URL the browser uses (window.location.origin), when isb has no --preview-domain. */
+                    origin?: string;
+                    /** @description The port a server listens on inside the workspace (on 0.0.0.0, not 127.0.0.1). */
+                    port: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    workspace_port_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The workspace (default: the org's only one). */
+                    name?: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description The port a server listens on inside the workspace (on 0.0.0.0, not 127.0.0.1). */
+                    port: number;
                 };
             };
         };

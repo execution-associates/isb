@@ -19,7 +19,7 @@ endpoint has neither a tool nor a documented reason in the
 
 | Category | Count |
 |---|---|
-| Tools in the web UI and MCP | 120 |
+| Tools in the web UI and MCP | 125 |
 | Account tools, the web UI through the identity endpoints | 17 |
 | Tools for MCP and the CLI only | 18 |
 | Identity endpoints with a tool | 18 |
@@ -59,6 +59,8 @@ a person on the web does not need it.
 | Create, change, delete it | Workspace: Create; Resources, Home, Environment tabs; Delete | `workspace_create`, `workspace_update`, `workspace_delete` |
 | Start, stop, restart, rebuild | Workspace header actions | `workspace_start`, `workspace_stop`, `workspace_restart`, `workspace_rebuild` |
 | Rotate its token | Workspace, Connect: Rotate token | `workspace_token_rotate` |
+| Publish, list and remove ports; open a port's preview | Workspace, Ports: Publish, the bin, Open | `workspace_port_add`, `workspace_port_list`, `workspace_port_remove`, `workspace_port_open` |
+| Docker in the workspace (superadmins) | Org settings, Docker in the workspace; the Nesting allowed badge | `org_nesting` |
 | List an org's workspaces | *MCP/CLI only*: an org has one workspace unless a platform admin raised `max_workspaces`, and the page shows it | `workspace_list` |
 | SSH host keys for `known_hosts` | *MCP/CLI only*: `isb ssh config` pins them for the SSH client; a browser has no use for them | `ssh_host_keys` |
 

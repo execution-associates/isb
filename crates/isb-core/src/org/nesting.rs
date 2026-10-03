@@ -53,15 +53,15 @@ fn project_keys(on: bool) -> [(&'static str, &'static str); 3] {
 
 /// Refuse nesting keys in an org project's instance config, unless the
 /// instance is a workspace the daemon builds. Projects outside isb's orgs
-/// (incus' own `default`, the legacy default org) are the host's: there
-/// `isb up` may ask for nesting as it always could.
+/// (incus' own `default`) are the host's: there `isb up` may ask for
+/// nesting as it always could.
 pub fn check_config(
     name: &str,
     org: Option<&OrgId>,
     config: &BTreeMap<String, String>,
     workspace: bool,
 ) -> Result<()> {
-    let Some(org) = org.filter(|o| !o.is_legacy_default()) else {
+    let Some(org) = org else {
         return Ok(());
     };
     if workspace {
@@ -79,12 +79,6 @@ pub fn check_config(
 /// (incus refuses) while an instance in the org still has nesting; the
 /// daemon takes it off the workspace first.
 pub fn set(base: &Client, org: &OrgId, on: bool) -> Result<()> {
-    resolve_default(base);
-    if org.is_legacy_default() {
-        return Err(Error::invalid(
-            "the default org on this host is incus' default project; it has no settings",
-        ));
-    }
     let h = host(base);
     let pp = format!("/1.0/projects/{}", encode_segment(&org.incus_project()));
     let p = h

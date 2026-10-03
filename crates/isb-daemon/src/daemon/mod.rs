@@ -137,8 +137,7 @@ pub struct ServeConfig {
 /// `isb serve --agent`.
 #[derive(Debug, Clone)]
 pub struct AgentConfig {
-    /// `host:port` on any address; only the control plane's client
-    /// certificate gets through.
+    /// `host:port` on any address; only the control plane's client certificate gets through.
     pub listen: String,
     /// `ca.crt`, `tls.crt`, `tls.key` from the control plane.
     pub tls_dir: PathBuf,
