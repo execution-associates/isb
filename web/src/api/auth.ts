@@ -1,40 +1,30 @@
-// The identity endpoints, /api/v1/auth/* (docs/reference/identity-api.md). They are hand
-// written, not generated: the OpenAPI document covers the tools.
-import { api, del, get, post } from "./client";
+// The identity endpoints, /api/v1/auth/* (docs/reference/identity-api.md), on the
+// typed client: paths, bodies and answers all come from the daemon's OpenAPI
+// document (web/openapi.json; `bun run gen:api` regenerates openapi.gen.ts),
+// whose identity part is generated from the server's own route table.
+import { api } from "./client";
+import type { components, paths } from "./openapi.gen";
 
-const A = "/api/v1/auth";
+type S = components["schemas"];
 
-export type Role = "owner" | "admin" | "member" | "viewer";
-
-export interface User {
-  id: number;
-  email: string;
-  name: string;
-  platform_admin: boolean;
-  created_at: number;
-  disabled: boolean;
-  has_password: boolean;
-}
-
-export interface Membership {
-  org: string;
-  role: Role;
-}
-
-export interface Me {
-  user: User;
-  platform_admin: boolean;
-  memberships: Membership[];
-  /** Every org this caller can open. */
-  orgs: string[];
-  auth:
-    | { kind: "session"; id: number }
-    | { kind: "api_token"; id: number; org: string | null; name: string; scopes?: string[] }
-    | { kind: "access" }
-    | { kind: "superadmin"; source: SuperadminVia };
-  /** The unix socket's reach over HTTP (docs/concepts/access.md#superadmins), or null. */
-  superadmin?: Superadmin | null;
-}
+export type Role = S["Role"];
+export type User = S["User"];
+export type Membership = S["Membership"];
+export type SessionAnswer = S["SessionAnswer"];
+export type Provider = S["Provider"];
+export type Providers = S["Providers"];
+export type Session = S["Session"];
+/** read, deploy, admin, tool:GLOB in `scopes`; empty: the holder's whole role. */
+export type ApiToken = S["ApiToken"];
+export type Identity = S["Identity"];
+export type Passkey = S["Passkey"];
+/** An SSH public key on the account: what `isb ssh-proxy` lets in (docs/guides/ssh.md). */
+export type SshKey = S["SshKey"];
+export type InvitationInfo = S["InvitationInfo"];
+export type Invitation = S["Invitation"];
+export type Member = S["Member"];
+export type OrgToken = S["OrgToken"];
+export type AdminUser = S["AdminUser"];
 
 /** Where a superadmin's power comes from. */
 export type SuperadminVia =
@@ -50,180 +40,108 @@ export interface Superadmin {
   account: boolean;
 }
 
-export interface SessionAnswer {
-  user: User;
-  memberships: Membership[];
-  session: { id: number; expires_at: number; idle_expires_at: number };
+/** `GET me`, with `auth` and `superadmin` narrowed to their variants. */
+export type Me = Omit<S["Me"], "auth" | "superadmin"> & {
+  auth:
+    | { kind: "session"; id: number }
+    | { kind: "api_token"; id: number; org: string | null; name: string; scopes?: string[] }
+    | { kind: "access" }
+    | { kind: "superadmin"; source: SuperadminVia }
+    | { kind: "workspace"; org: string; name: string };
+  /** The unix socket's reach over HTTP (docs/concepts/access.md#superadmins), or null. */
+  superadmin?: Superadmin | null;
+};
+
+// ---- the typed call ----
+
+type AuthPath = keyof paths & `/api/v1/auth/${string}`;
+type Method = "get" | "post" | "put" | "patch" | "delete";
+type Op<P extends AuthPath, M extends Method> = NonNullable<paths[P][M]>;
+type Json<R> = R extends { content: { "application/json": infer J } } ? J : void;
+type Answer<O> = O extends { responses: infer R }
+  ? R extends { 200: infer A }
+    ? Json<A>
+    : R extends { 201: infer A }
+      ? Json<A>
+      : R extends { 202: infer A }
+        ? Json<A>
+        : void
+  : never;
+type BodyOf<O> = O extends { requestBody: { content: { "application/json": infer B } } } ? B : undefined;
+type Params<P extends string> = P extends `${string}{${infer K}}${infer Rest}` ? { [k in K]: string | number } & Params<Rest> : unknown;
+
+/** Call an identity endpoint by its documented path: `{param}`s from `params`. */
+function call<P extends AuthPath, M extends Method>(
+  method: M,
+  path: P,
+  ...rest: [params: Params<P>, body?: BodyOf<Op<P, M>>]
+): Promise<Answer<Op<P, M>>> {
+  const [params, body] = rest;
+  const url = path.replace(/\{(\w+)\}/g, (_, k: string) =>
+    encodeURIComponent(String((params as Record<string, string | number>)[k])),
+  );
+  const b = body === undefined && method === "post" ? {} : body;
+  return api<Answer<Op<P, M>>>(method.toUpperCase(), url, b);
 }
 
-export interface Provider {
-  id: string;
-  label: string;
-  kind: "oauth2" | "oidc";
-  start: string;
-}
-
-export interface Providers {
-  providers: Provider[];
-  password: boolean;
-  passkeys: boolean;
-  open_signup: boolean;
-}
-
-export interface Session {
-  id: number;
-  created_at: number;
-  last_seen: number;
-  expires_at: number;
-  idle_expires_at: number;
-  user_agent: string | null;
-  ip: string | null;
-  current: boolean;
-}
-
-export interface ApiToken {
-  id: number;
-  name: string;
-  user_id: number;
-  org: string | null;
-  created_at: number;
-  last_used: number | null;
-  expires_at: number | null;
-  /** read, deploy, admin, tool:GLOB; empty: the holder's whole role. */
-  scopes: string[];
-}
-
-export interface Identity {
-  id: number;
-  user_id: number;
-  provider: string;
-  provider_id: string | null;
-  label: string;
-  subject: string;
-  email: string | null;
-  email_verified: boolean;
-  created_at: number;
-  last_used: number | null;
-}
-
-export interface Passkey {
-  id: number;
-  user_id: number;
-  credential_id: string;
-  name: string;
-  alg: number;
-  sign_count: number;
-  transports: string[];
-  aaguid: string | null;
-  created_at: number;
-  last_used: number | null;
-}
-
-/** An SSH public key on the account: what `isb ssh-proxy` lets in (docs/guides/ssh.md). */
-export interface SshKey {
-  id: number;
-  user_id: number;
-  name: string;
-  algorithm: string;
-  /** `algorithm base64`, no comment. */
-  public_key: string;
-  /** OpenSSH's `SHA256:...`. */
-  fingerprint: string;
-  created_at: number;
-  last_used: number | null;
-}
-
-export interface InvitationInfo {
-  org: string;
-  email: string;
-  role: Role;
-  expires_at: number;
-  account_exists: boolean;
-}
-
-export interface Invitation {
-  id: number;
-  org: string;
-  email: string;
-  role: Role;
-  created_at: number;
-  expires_at: number;
-}
-
-export interface Member {
-  user: User;
-  role: Role;
-  /** Last session or token use, unix seconds. */
-  last_active: number | null;
-}
-
-export interface OrgToken extends ApiToken {
-  user: { id: number; email: string; name: string };
-}
-
-export interface AdminUser extends User {
-  memberships: Membership[];
-  last_active: number | null;
-}
-
-const orgPath = (org: string) => `${A}/orgs/${encodeURIComponent(org)}`;
+const none = {};
 
 export const auth = {
-  setupNeeded: () => get<{ needed: boolean }>(`${A}/setup`),
-  setup: (b: { setup_token: string; email: string; name: string; password: string }) =>
-    post<SessionAnswer>(`${A}/setup`, b),
-  login: (email: string, password: string) => post<SessionAnswer>(`${A}/login`, { email, password }),
-  logout: () => post<void>(`${A}/logout`),
-  me: () => get<Me>(`${A}/me`),
-  providers: () => get<Providers>(`${A}/providers`),
+  setupNeeded: () => call("get", "/api/v1/auth/setup", none),
+  setup: (b: BodyOf<Op<"/api/v1/auth/setup", "post">>) => call("post", "/api/v1/auth/setup", none, b),
+  login: (email: string, password: string) => call("post", "/api/v1/auth/login", none, { email, password }),
+  logout: () => call("post", "/api/v1/auth/logout", none),
+  me: () => call("get", "/api/v1/auth/me", none) as Promise<Me>,
+  providers: () => call("get", "/api/v1/auth/providers", none),
 
-  sessions: () => get<{ sessions: Session[] }>(`${A}/sessions`),
-  endSession: (id: number) => del(`${A}/sessions/${id}`),
+  sessions: () => call("get", "/api/v1/auth/sessions", none),
+  endSession: (id: number) => call("delete", "/api/v1/auth/sessions/{id}", { id }),
 
   changePassword: (current_password: string, new_password: string) =>
-    post<void>(`${A}/password`, { current_password, new_password }),
-  requestReset: (email: string) => post<{ ok: true }>(`${A}/password-reset/request`, { email }),
+    call("post", "/api/v1/auth/password", none, { current_password, new_password }),
+  requestReset: (email: string) => call("post", "/api/v1/auth/password-reset/request", none, { email }),
   confirmReset: (token: string, password: string) =>
-    post<void>(`${A}/password-reset/confirm`, { token, password }),
+    call("post", "/api/v1/auth/password-reset/confirm", none, { token, password }),
 
-  tokens: () => get<{ tokens: ApiToken[] }>(`${A}/tokens`),
+  tokens: () => call("get", "/api/v1/auth/tokens", none),
   createToken: (b: { name: string; org?: string; expires?: string; scopes?: string[] }) =>
-    post<{ token: string; info: ApiToken }>(`${A}/tokens`, b),
-  revokeToken: (id: number) => del(`${A}/tokens/${id}`),
+    call("post", "/api/v1/auth/tokens", none, b),
+  revokeToken: (id: number) => call("delete", "/api/v1/auth/tokens/{id}", { id }),
 
-  invite: (b: { org: string; email: string; role?: Role }) =>
-    post<{ invitation: Invitation; token: string; link: string | null }>(`${A}/invitations`, b),
-  inspectInvitation: (token: string) => post<InvitationInfo>(`${A}/invitations/inspect`, { token }),
+  invite: (b: { org: string; email: string; role?: Role }) => call("post", "/api/v1/auth/invitations", none, b),
+  inspectInvitation: (token: string) => call("post", "/api/v1/auth/invitations/inspect", none, { token }),
   acceptInvitation: (b: { token: string; name?: string; password?: string }) =>
-    post<{ user: User; membership: Membership; created: boolean }>(`${A}/invitations/accept`, b),
-  orgInvitations: (org: string) => get<{ invitations: Invitation[] }>(`${orgPath(org)}/invitations`),
-  revokeInvitation: (org: string, id: number) => del(`${orgPath(org)}/invitations/${id}`),
-  members: (org: string) => get<{ members: Member[] }>(`${orgPath(org)}/members`),
+    call("post", "/api/v1/auth/invitations/accept", none, b),
+  orgInvitations: (org: string) => call("get", "/api/v1/auth/orgs/{org}/invitations", { org }),
+  revokeInvitation: (org: string, id: number) => call("delete", "/api/v1/auth/orgs/{org}/invitations/{id}", { org, id }),
+  members: (org: string) => call("get", "/api/v1/auth/orgs/{org}/members", { org }),
   setRole: (org: string, userId: number, role: Role) =>
-    api<{ user_id: number; role: Role }>("PUT", `${orgPath(org)}/members/${userId}`, { role }),
-  removeMember: (org: string, userId: number) => del(`${orgPath(org)}/members/${userId}`),
-  orgTokens: (org: string) => get<{ tokens: OrgToken[] }>(`${orgPath(org)}/tokens`),
+    call("put", "/api/v1/auth/orgs/{org}/members/{user_id}", { org, user_id: userId }, { role }),
+  removeMember: (org: string, userId: number) =>
+    call("delete", "/api/v1/auth/orgs/{org}/members/{user_id}", { org, user_id: userId }),
+  orgTokens: (org: string) => call("get", "/api/v1/auth/orgs/{org}/tokens", { org }),
 
-  adminUsers: () => get<{ users: AdminUser[] }>(`${A}/admin/users`),
+  adminUsers: () => call("get", "/api/v1/auth/admin/users", none),
   adminUpdateUser: (id: number, b: { disabled?: boolean; platform_admin?: boolean }) =>
-    api<{ user: User }>("PATCH", `${A}/admin/users/${id}`, b),
+    call("patch", "/api/v1/auth/admin/users/{id}", { id }, b),
 
-  identities: () => get<{ identities: Identity[] }>(`${A}/identities`),
-  unlinkIdentity: (id: number) => del(`${A}/identities/${id}`),
+  identities: () => call("get", "/api/v1/auth/identities", none),
+  unlinkIdentity: (id: number) => call("delete", "/api/v1/auth/identities/{id}", { id }),
   /** Where to send the browser to sign in with (or link) a provider. */
   oauthStart: (provider: string, b: { next?: string; invite?: string; intent?: "login" | "link" }) =>
-    post<{ url: string }>(`${A}/oauth/${encodeURIComponent(provider)}/start`, b),
+    call("post", "/api/v1/auth/oauth/{provider}/start", { provider }, b),
 
-  sshKeys: () => get<{ ssh_keys: SshKey[] }>(`${A}/ssh-keys`),
-  addSshKey: (b: { public_key: string; name?: string }) => post<{ ssh_key: SshKey }>(`${A}/ssh-keys`, b),
-  deleteSshKey: (id: number) => del(`${A}/ssh-keys/${id}`),
+  sshKeys: () => call("get", "/api/v1/auth/ssh-keys", none),
+  addSshKey: (b: { public_key: string; name?: string }) => call("post", "/api/v1/auth/ssh-keys", none, b),
+  deleteSshKey: (id: number) => call("delete", "/api/v1/auth/ssh-keys/{id}", { id }),
 
-  passkeys: () => get<{ passkeys: Passkey[] }>(`${A}/passkeys`),
-  deletePasskey: (id: number) => del(`${A}/passkeys/${id}`),
-  passkeyRegisterOptions: () => post<{ publicKey: Record<string, unknown> }>(`${A}/passkeys/register/options`),
-  passkeyRegisterVerify: (b: { name?: string; credential: unknown }) =>
-    post<{ passkey: Passkey }>(`${A}/passkeys/register/verify`, b),
+  passkeys: () => call("get", "/api/v1/auth/passkeys", none),
+  deletePasskey: (id: number) => call("delete", "/api/v1/auth/passkeys/{id}", { id }),
+  passkeyRegisterOptions: () => call("post", "/api/v1/auth/passkeys/register/options", none),
+  passkeyRegisterVerify: (b: { name?: string; credential: Record<string, unknown> }) =>
+    call("post", "/api/v1/auth/passkeys/register/verify", none, b),
   passkeyLoginOptions: (email?: string) =>
-    post<{ publicKey: Record<string, unknown> }>(`${A}/passkeys/login/options`, email ? { email } : {}),
-  passkeyLoginVerify: (credential: unknown) => post<SessionAnswer>(`${A}/passkeys/login/verify`, { credential }),
+    call("post", "/api/v1/auth/passkeys/login/options", none, email ? { email } : {}),
+  passkeyLoginVerify: (credential: Record<string, unknown>) =>
+    call("post", "/api/v1/auth/passkeys/login/verify", none, { credential }),
 };

@@ -75,7 +75,8 @@ secret reads, the rest are ordinary reads.
   there on, and removing the newest ones no longer matches the head kept
   beside them. Pruning keeps the hash of the last pruned entry, so the chain
   still starts somewhere known.
-- `audit_verify` (platform admins) and `isb audit verify` walk the chain and
+- `audit_verify` (platform admins; **Verify chain** on Admin, History in the
+  web UI) and `isb audit verify` walk the chain and
   report `{ok, rows, head: [id, hash], pruned_through, broken: [id, why]}`.
   Anyone who can write the file can rebuild a whole chain; copy the head
   somewhere else (a ticket, another host) to pin the log up to it.

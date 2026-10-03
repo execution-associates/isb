@@ -202,7 +202,7 @@ fn passkeys() -> Value {
 }
 fn public_key_options() -> Value {
     obj(
-        json!({"publicKey": {"type": "object", "description": "WebAuthn options, in the JSON form of PublicKeyCredential.parse*OptionsFromJSON()."}}),
+        json!({"publicKey": {"type": "object", "additionalProperties": true, "description": "WebAuthn options, in the JSON form of PublicKeyCredential.parse*OptionsFromJSON()."}}),
         &["publicKey"],
     )
 }
@@ -211,7 +211,7 @@ fn passkey_login_body() -> Value {
 }
 fn credential_body() -> Value {
     obj(
-        json!({"name": {"type": "string"}, "credential": {"type": "object", "description": "The browser's credential.toJSON()."}}),
+        json!({"name": {"type": "string"}, "credential": {"type": "object", "additionalProperties": true, "description": "The browser's credential.toJSON()."}}),
         &["credential"],
     )
 }
@@ -329,8 +329,7 @@ pub fn schemas() -> Value {
             .expect("required")
             .push(json!(k));
     }
-    let superadmin_via = json!({"type": "object", "properties": {"kind": {"type": "string", "enum": ["token", "tailnet", "access"]}}, "required": ["kind"], "additionalProperties": true});
-    json!({
+    let mut out = json!({
         "Role": {"type": "string", "enum": ["owner", "admin", "member", "viewer"]},
         "AuthError": obj(json!({"error": {"type": "string"}, "message": {"type": "string"}}), &["error", "message"]),
         "User": user,
@@ -342,11 +341,6 @@ pub fn schemas() -> Value {
             "last_seen": {"type": "integer"}, "expires_at": {"type": "integer"}, "idle_expires_at": {"type": "integer"},
             "user_agent": {"type": ["string", "null"]}, "ip": {"type": ["string", "null"]}, "current": {"type": "boolean"},
         }), &["id", "user_id", "created_at", "last_seen", "expires_at", "idle_expires_at", "user_agent", "ip", "current"]),
-        "SessionAnswer": obj(json!({
-            "user": r("User"),
-            "memberships": {"type": "array", "items": r("Membership")},
-            "session": obj(json!({"id": {"type": "integer"}, "expires_at": {"type": "integer"}, "idle_expires_at": {"type": "integer"}}), &["id", "expires_at", "idle_expires_at"]),
-        }), &["user", "memberships", "session"]),
         "ApiToken": obj(token_props, &token_req),
         "OrgToken": obj(org_token_props, &org_token_req),
         "Invitation": obj(json!({
@@ -363,6 +357,23 @@ pub fn schemas() -> Value {
             "algorithm": {"type": "string"}, "public_key": {"type": "string"}, "fingerprint": {"type": "string"},
             "created_at": {"type": "integer"}, "last_used": {"type": ["integer", "null"]},
         }), &["id", "user_id", "name", "algorithm", "public_key", "fingerprint", "created_at", "last_used"]),
+    });
+    if let (Some(s), Value::Object(more)) = (out.as_object_mut(), sign_in_schemas()) {
+        s.extend(more);
+    }
+    out
+}
+
+/// The schemas of the sign-in answers: sessions, identities, passkeys,
+/// providers and `me`.
+fn sign_in_schemas() -> Value {
+    let superadmin_via = json!({"type": "object", "properties": {"kind": {"type": "string", "enum": ["token", "tailnet", "access"]}}, "required": ["kind"], "additionalProperties": true});
+    json!({
+        "SessionAnswer": obj(json!({
+            "user": r("User"),
+            "memberships": {"type": "array", "items": r("Membership")},
+            "session": obj(json!({"id": {"type": "integer"}, "expires_at": {"type": "integer"}, "idle_expires_at": {"type": "integer"}}), &["id", "expires_at", "idle_expires_at"]),
+        }), &["user", "memberships", "session"]),
         "Identity": obj(json!({
             "id": {"type": "integer"}, "user_id": {"type": "integer"}, "provider": {"type": "string"},
             "provider_id": {"type": ["string", "null"]}, "label": {"type": "string"}, "subject": {"type": "string"},

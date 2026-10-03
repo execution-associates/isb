@@ -161,32 +161,44 @@ struct Id {
     org: Option<String>,
 }
 
+/// Register one account tool: its handler gets who the call acts as
+/// ([`acting`]) besides the arguments and the caller.
+macro_rules! account_tool {
+    ($r:expr, $d:expr, $name:expr, $title:expr, $desc:expr, $schema:expr, $ann:expr, $f:expr) => {{
+        let d = $d.clone();
+        let f = $f;
+        $r.register(
+            Tool::new($name, $desc, $schema, move |a, c| {
+                let p = acting(&d, c)?;
+                f(&d, &p, a, c)
+            })
+            .title($title)
+            .annotations($ann.clone()),
+        )?;
+    }};
+}
+
+/// The MCP annotations the account tools share.
+struct Ann {
+    ro: Value,
+    write: Value,
+    destructive: Value,
+}
+
 pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
-    let ro = json!({"readOnlyHint": true, "openWorldHint": false});
-    let write = json!({"destructiveHint": false, "openWorldHint": false});
-    let destructive = json!({"destructiveHint": true, "openWorldHint": false});
-
-    macro_rules! tool {
-        ($name:expr, $title:expr, $desc:expr, $schema:expr, $ann:expr, $f:expr) => {{
-            let d = d.clone();
-            let f = $f;
-            r.register(
-                Tool::new($name, $desc, $schema, move |a, c| {
-                    let p = acting(&d, c)?;
-                    f(&d, &p, a, c)
-                })
-                .title($title)
-                .annotations($ann.clone()),
-            )?;
-        }};
-    }
-
-    tool!(
+    let ann = Ann {
+        ro: json!({"readOnlyHint": true, "openWorldHint": false}),
+        write: json!({"destructiveHint": false, "openWorldHint": false}),
+        destructive: json!({"destructiveHint": true, "openWorldHint": false}),
+    };
+    account_tool!(
+        r,
+        d,
         "whoami",
         "Who am I",
         "The caller: its user, platform admin flag, orgs and roles, how it signed in (session, API token with its org and scopes, workspace, superadmin), and the orgs it can open. Every caller may ask, a workspace included.",
         schema(json!({}), &[], NO_ORG),
-        ro,
+        ann.ro,
         |d: &Daemon, p: &Principal, _a: Value, c: &Caller| -> Result<Value> {
             let mut v = ops::me(&d.users, p).map_err(err)?;
             if c.is_local() {
@@ -197,44 +209,32 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
             Ok(v)
         }
     );
-    register_members(r, &d, &ro, &write, &destructive)?;
-    register_tokens(r, &d, &ro, &write, &destructive)?;
-    register_keys(r, &d, &ro, &write, &destructive)?;
+    register_members(r, &d, &ann)?;
+    register_invitations(r, &d, &ann)?;
+    register_tokens(r, &d, &ann)?;
+    register_sessions(r, &d, &ann)?;
+    register_keys(r, &d, &ann)?;
+    register_users(r, &d, &ann)?;
     Ok(())
 }
 
-fn register_members(
-    r: &mut Registry,
-    d: &Arc<Daemon>,
-    ro: &Value,
-    write: &Value,
-    destructive: &Value,
-) -> Result<()> {
-    macro_rules! tool {
-        ($name:expr, $title:expr, $desc:expr, $schema:expr, $ann:expr, $f:expr) => {{
-            let d = d.clone();
-            let f = $f;
-            r.register(
-                Tool::new($name, $desc, $schema, move |a, c| {
-                    let p = acting(&d, c)?;
-                    f(&d, &p, a)
-                })
-                .title($title)
-                .annotations($ann.clone()),
-            )?;
-        }};
-    }
-    tool!(
+/// An org's members.
+fn register_members(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> {
+    account_tool!(
+        r,
+        d,
         "member_list",
         "List members",
         "The org's members: each user (id, email, name), their role (owner, admin, member, viewer) and when they were last active (unix seconds). Any member may list; others get not_found.",
         schema(json!({}), &[], ORG),
-        ro,
-        |d: &Daemon, p: &Principal, a: Value| -> Result<Value> {
+        ann.ro,
+        |d: &Daemon, p: &Principal, a: Value, _c: &Caller| -> Result<Value> {
             ops::members(&d.users, p, &org_of(&a)?).map_err(err)
         }
     );
-    tool!(
+    account_tool!(
+        r,
+        d,
         "member_update",
         "Change a member's role",
         "Set a member's role in the org. Owners and admins; only an owner changes an owner or makes one.",
@@ -248,8 +248,8 @@ fn register_members(
             &["role"],
             ORG
         ),
-        write,
-        |d: &Daemon, p: &Principal, a: Value| -> Result<Value> {
+        ann.write,
+        |d: &Daemon, p: &Principal, a: Value, _c: &Caller| -> Result<Value> {
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields)]
             struct A {
@@ -265,13 +265,15 @@ fn register_members(
             ops::set_role(&d.users, p, &org, uid, a.role).map_err(err)
         }
     );
-    tool!(
+    account_tool!(
+        r,
+        d,
         "member_remove",
         "Remove a member",
         "Remove a member from the org (their account stays; their tokens for the org stop working). Owners and admins remove others; anyone may remove themselves (leave).",
         schema(who(), &[], ORG),
-        destructive,
-        |d: &Daemon, p: &Principal, a: Value| -> Result<Value> {
+        ann.destructive,
+        |d: &Daemon, p: &Principal, a: Value, _c: &Caller| -> Result<Value> {
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields)]
             struct A {
@@ -287,17 +289,26 @@ fn register_members(
             Ok(json!({"removed": uid, "org": org}))
         }
     );
-    tool!(
+    Ok(())
+}
+
+/// An org's invitations.
+fn register_invitations(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> {
+    account_tool!(
+        r,
+        d,
         "invitation_list",
         "List invitations",
         "The org's pending invitations (id, email, role, expiry). Owners and admins.",
         schema(json!({}), &[], ORG),
-        ro,
-        |d: &Daemon, p: &Principal, a: Value| -> Result<Value> {
+        ann.ro,
+        |d: &Daemon, p: &Principal, a: Value, _c: &Caller| -> Result<Value> {
             ops::invitations(&d.users, p, &org_of(&a)?).map_err(err)
         }
     );
-    tool!(
+    account_tool!(
+        r,
+        d,
         "invitation_create",
         "Invite someone",
         "Invite an email address to the org with a role (default member; at most your own). Owners and admins. Returns the invitation, its token (shown once) and, when the server knows its public URL, the link to send (<public-url>/invite#<token>). Inviting the same address again replaces the invitation. isb sends no mail: hand the link over yourself.",
@@ -309,8 +320,8 @@ fn register_members(
             &["email"],
             ORG
         ),
-        write,
-        |d: &Daemon, p: &Principal, a: Value| -> Result<Value> {
+        ann.write,
+        |d: &Daemon, p: &Principal, a: Value, _c: &Caller| -> Result<Value> {
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields)]
             struct A {
@@ -325,13 +336,15 @@ fn register_members(
             ops::invite(&d.users, p, &org, &a.email, a.role, url).map_err(err)
         }
     );
-    tool!(
+    account_tool!(
+        r,
+        d,
         "invitation_revoke",
         "Revoke an invitation",
         "Withdraw a pending invitation by id (invitation_list). Owners and admins.",
         schema(json!({"id": {"type": "integer"}}), &["id"], ORG),
-        destructive,
-        |d: &Daemon, p: &Principal, a: Value| -> Result<Value> {
+        ann.destructive,
+        |d: &Daemon, p: &Principal, a: Value, _c: &Caller| -> Result<Value> {
             let org = org_of(&a)?;
             let a: Id = args(a)?;
             ops::revoke_invitation(&d.users, p, &org, a.id).map_err(err)?;
@@ -341,28 +354,11 @@ fn register_members(
     Ok(())
 }
 
-fn register_tokens(
-    r: &mut Registry,
-    d: &Arc<Daemon>,
-    ro: &Value,
-    write: &Value,
-    destructive: &Value,
-) -> Result<()> {
-    macro_rules! tool {
-        ($name:expr, $title:expr, $desc:expr, $schema:expr, $ann:expr, $f:expr) => {{
-            let d = d.clone();
-            let f = $f;
-            r.register(
-                Tool::new($name, $desc, $schema, move |a, c| {
-                    let p = acting(&d, c)?;
-                    f(&d, &p, a)
-                })
-                .title($title)
-                .annotations($ann.clone()),
-            )?;
-        }};
-    }
-    tool!(
+/// The caller's API tokens, and an org's.
+fn register_tokens(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> {
+    account_tool!(
+        r,
+        d,
         "token_list",
         "List API tokens",
         "Your API tokens' metadata (id, name, org, scopes, created, last used, expiry; never the secret), only one org's when `org` is given (an org token sees only its org's). With all=true, every token in `org`, with who holds each: owners and admins.",
@@ -371,8 +367,8 @@ fn register_tokens(
             &[],
             "Only this org's tokens (all: the org to list; default: default)."
         ),
-        ro,
-        |d: &Daemon, p: &Principal, a: Value| -> Result<Value> {
+        ann.ro,
+        |d: &Daemon, p: &Principal, a: Value, _c: &Caller| -> Result<Value> {
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields)]
             struct A {
@@ -389,7 +385,9 @@ fn register_tokens(
             ops::tokens(&d.users, p, org.as_ref()).map_err(err)
         }
     );
-    tool!(
+    account_tool!(
+        r,
+        d,
         "token_create",
         "Create an API token",
         "Mint an API token for yourself, confined to the org, optionally narrowed by scopes (read, deploy, admin, tool:GLOB; none: your whole role there) and with an expiry (90d, 12h; none: never). Returns {token, info}; the token is shown only this once. A token cannot mint tokens: this needs a signed-in browser session or an Access or tailnet identity (or `isb token create` on the host), so revoking a leaked token always ends it. Superadmin tokens are minted on the host only.",
@@ -402,43 +400,54 @@ fn register_tokens(
             &["name"],
             "The org the token is confined to (default: default)."
         ),
-        write,
-        |d: &Daemon, p: &Principal, a: Value| -> Result<Value> {
+        ann.write,
+        |d: &Daemon, p: &Principal, a: Value, _c: &Caller| -> Result<Value> {
             let org = org_of(&a)?;
             let mut b: ops::NewToken = args(a)?;
             b.org = Some(org);
             ops::create_token(&d.users, p, b).map_err(err)
         }
     );
-    tool!(
+    account_tool!(
+        r,
+        d,
         "token_revoke",
         "Revoke an API token",
         "Revoke an API token by id: your own, or any token in an org you own or administer. It stops working at once.",
         schema(json!({"id": {"type": "integer"}}), &["id"], NO_ORG),
-        destructive,
-        |d: &Daemon, p: &Principal, a: Value| -> Result<Value> {
+        ann.destructive,
+        |d: &Daemon, p: &Principal, a: Value, _c: &Caller| -> Result<Value> {
             let a: Id = args(a)?;
             ops::revoke_token(&d.users, p, a.id).map_err(err)?;
             Ok(json!({"revoked": a.id}))
         }
     );
-    tool!(
+    Ok(())
+}
+
+/// The caller's browser sessions.
+fn register_sessions(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> {
+    account_tool!(
+        r,
+        d,
         "session_list",
         "List your sessions",
         "Your signed-in browser sessions: created, last seen, expiry, user agent and address.",
         schema(json!({}), &[], NO_ORG),
-        ro,
-        |d: &Daemon, p: &Principal, _a: Value| -> Result<Value> {
+        ann.ro,
+        |d: &Daemon, p: &Principal, _a: Value, _c: &Caller| -> Result<Value> {
             ops::sessions(&d.users, p).map_err(err)
         }
     );
-    tool!(
+    account_tool!(
+        r,
+        d,
         "session_revoke",
         "End a session",
         "Sign one of your browser sessions out, by id (session_list).",
         schema(json!({"id": {"type": "integer"}}), &["id"], NO_ORG),
-        destructive,
-        |d: &Daemon, p: &Principal, a: Value| -> Result<Value> {
+        ann.destructive,
+        |d: &Daemon, p: &Principal, a: Value, _c: &Caller| -> Result<Value> {
             let a: Id = args(a)?;
             ops::revoke_session(&d.users, p, a.id).map_err(err)?;
             Ok(json!({"revoked": a.id}))
@@ -447,38 +456,23 @@ fn register_tokens(
     Ok(())
 }
 
-fn register_keys(
-    r: &mut Registry,
-    d: &Arc<Daemon>,
-    ro: &Value,
-    write: &Value,
-    destructive: &Value,
-) -> Result<()> {
-    macro_rules! tool {
-        ($name:expr, $title:expr, $desc:expr, $schema:expr, $ann:expr, $f:expr) => {{
-            let d = d.clone();
-            let f = $f;
-            r.register(
-                Tool::new($name, $desc, $schema, move |a, c| {
-                    let p = acting(&d, c)?;
-                    f(&d, &p, a)
-                })
-                .title($title)
-                .annotations($ann.clone()),
-            )?;
-        }};
-    }
-    tool!(
+/// The caller's SSH keys.
+fn register_keys(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> {
+    account_tool!(
+        r,
+        d,
         "ssh_key_list",
         "List your SSH keys",
         "The SSH public keys on your account: what `isb ssh-proxy` lets in to your orgs' workspaces and sandboxes (id, name, algorithm, fingerprint, last use).",
         schema(json!({}), &[], NO_ORG),
-        ro,
-        |d: &Daemon, p: &Principal, _a: Value| -> Result<Value> {
+        ann.ro,
+        |d: &Daemon, p: &Principal, _a: Value, _c: &Caller| -> Result<Value> {
             ops::ssh_keys(&d.users, p).map_err(err)
         }
     );
-    tool!(
+    account_tool!(
+        r,
+        d,
         "ssh_key_add",
         "Add an SSH key",
         "Add an SSH public key (an OpenSSH line: ssh-ed25519, ecdsa-sha2-*, ssh-rsa of 2048 bits or more) to your account.",
@@ -490,8 +484,8 @@ fn register_keys(
             &["public_key"],
             NO_ORG
         ),
-        write,
-        |d: &Daemon, p: &Principal, a: Value| -> Result<Value> {
+        ann.write,
+        |d: &Daemon, p: &Principal, a: Value, _c: &Caller| -> Result<Value> {
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields)]
             struct A {
@@ -504,29 +498,40 @@ fn register_keys(
             ops::add_ssh_key(&d.users, p, &a.public_key, a.name.as_deref()).map_err(err)
         }
     );
-    tool!(
+    account_tool!(
+        r,
+        d,
         "ssh_key_remove",
         "Remove an SSH key",
         "Remove one of your SSH keys by id; sessions it opened end within seconds.",
         schema(json!({"id": {"type": "integer"}}), &["id"], NO_ORG),
-        destructive,
-        |d: &Daemon, p: &Principal, a: Value| -> Result<Value> {
+        ann.destructive,
+        |d: &Daemon, p: &Principal, a: Value, _c: &Caller| -> Result<Value> {
             let a: Id = args(a)?;
             ops::delete_ssh_key(&d.users, p, a.id).map_err(err)?;
             Ok(json!({"removed": a.id}))
         }
     );
-    tool!(
+    Ok(())
+}
+
+/// Every user (platform admins).
+fn register_users(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> {
+    account_tool!(
+        r,
+        d,
         "user_list",
         "List users",
         "Platform admins: every user (id, email, name, platform admin, disabled, password or not), with their orgs and when they were last active.",
         schema(json!({}), &[], NO_ORG),
-        ro,
-        |d: &Daemon, p: &Principal, _a: Value| -> Result<Value> {
+        ann.ro,
+        |d: &Daemon, p: &Principal, _a: Value, _c: &Caller| -> Result<Value> {
             ops::users(&d.users, p).map_err(err)
         }
     );
-    tool!(
+    account_tool!(
+        r,
+        d,
         "user_update",
         "Change a user",
         "Platform admins: disable or enable a user (disabling ends their sessions), or grant or revoke platform admin. Nobody does either to themselves, and the last enabled platform admin stays one.",
@@ -542,8 +547,8 @@ fn register_keys(
             &[],
             NO_ORG
         ),
-        write,
-        |d: &Daemon, p: &Principal, a: Value| -> Result<Value> {
+        ann.write,
+        |d: &Daemon, p: &Principal, a: Value, _c: &Caller| -> Result<Value> {
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields)]
             struct A {

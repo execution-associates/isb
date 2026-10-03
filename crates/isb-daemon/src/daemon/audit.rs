@@ -207,8 +207,7 @@ pub fn outcome(r: std::result::Result<(), &Error>) -> String {
     }
 }
 
-/// The row's org: the one a call acts in, or `None` for platform-level
-/// calls (org-spanning tools without an org).
+/// The row's org: the one a call acts in; `None` for org-less calls.
 fn row_org(action: &str, args: &Value) -> Option<String> {
     let named = args.get("org").and_then(Value::as_str);
     if super::PLATFORM_TOOLS.contains(&action)

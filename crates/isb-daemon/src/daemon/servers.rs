@@ -37,7 +37,7 @@ pub struct AgentState {
     pub tls_dir: PathBuf,
 }
 
-/// Tools a control plane always runs itself, whatever org they name.
+/// Tools a control plane always runs itself, whatever org they name (and ACCOUNTS).
 const LOCAL_ONLY: &[&str] = &[
     "events",
     "audit_list",
@@ -434,7 +434,6 @@ enum Way {
 
 fn decide(name: &str, a: &Value, placement: &dyn Fn(&OrgId) -> Option<String>) -> Way {
     let all = name == "secret_reencrypt" && a.get("all").and_then(Value::as_bool) == Some(true);
-    // Account tools use the control plane's identity store.
     if name.starts_with("server_") || LOCAL_ONLY.contains(&name) || all || ACCOUNTS.contains(&name)
     {
         return Way::Here;

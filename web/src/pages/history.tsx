@@ -40,6 +40,7 @@ import { dateTime, relativeTime } from "@/lib/format";
 import { errorMessage } from "@/lib/messages";
 import { TONE_TEXT, type Tone } from "@/lib/status";
 import { cn } from "@/lib/utils";
+import { VerifyChainButton } from "@/pages/audit-verify";
 import { useOrgPage } from "@/pages/org-common";
 
 /** /orgs/:org/history: everything that happened in the org, for its members. */
@@ -205,6 +206,7 @@ export function HistoryPanel({
             {exporting ? <Loader2 className="animate-spin" /> : <Download />}
             Export JSONL
           </Button>
+          {!org && <VerifyChainButton />}
         </>
       }
     >

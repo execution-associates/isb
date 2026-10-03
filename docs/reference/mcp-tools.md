@@ -41,8 +41,8 @@ fills it in and refuses any other value. Then, in order:
   whatever the caller's role in an org (an org owner's token is refused):
   `org_list`, `org_create`, `org_update`, `org_delete`, every `server_*`
   tool, `server_status`, `registry_gc`, `notification_settings`,
-  `template_catalog_add`, `template_catalog_remove` and `audit_verify`.
-  `secret_reencrypt` with `all: true` too.
+  `template_catalog_add`, `template_catalog_remove`, `audit_verify`,
+  `user_list` and `user_update`. `secret_reencrypt` with `all: true` too.
 - **Cross-org reads** (`overview`, `events`, `stack_list`,
   `ingress_status`) are open to anyone signed in and show only the caller's
   orgs. `audit_list` and `history_query` filter themselves the same way.
@@ -54,6 +54,10 @@ fills it in and refuses any other value. Then, in order:
   `stack_rollback`, `stack_scale`, `app_deploy`, `app_rollback`,
   `build_run`), `admin` (the whole role) and `tool:GLOB`. See
   [Scopes](../concepts/access.md#scopes).
+- **Account tools** ([below](#accounts)) are judged by the identity
+  endpoints' own rules rather than a role in `org`: a workspace token reaches
+  none of them but `whoami`, a token scoped short of `admin` only reads them,
+  and a token never mints a token.
 - Some tools check more themselves; the **Who** column says so.
 
 In the tables, **Who** is the least role that may call the tool: *viewer*
@@ -278,8 +282,39 @@ and owners.
 A call for an org placed on a server is judged on the control plane, then
 again by the server's agent. `events`, `audit_list`, `audit_verify`,
 `registry_gc`, `notification_settings`, `server_status`, `template_list`,
-`template_get`, the `template_catalog_*` tools and the `server_*` tools
-always run on the control plane.
+`template_get`, the `template_catalog_*` tools, the `server_*` tools and
+the [account tools](#accounts) always run on the control plane.
+
+## Accounts
+
+[Users, roles and superadmins](../concepts/access.md). The identity
+endpoints' account pages as tools, with the same rules
+([Identity API](identity-api.md#endpoints)): a workspace token reaches none
+of them but `whoami`; a token scoped short of `admin` only reads them;
+nobody outside an org learns about it (`not_found`); only an owner (or a
+platform admin) touches an owner or makes one.
+
+| Tool | Who | Does |
+|---|---|---|
+| `whoami` | anyone signed in, a workspace included | The caller: user, platform admin flag, orgs and roles, how it signed in (`auth`), the orgs it can open, and `superadmin`. |
+| `member_list` | viewer | Each member's user (id, email, name), role and last activity. |
+| `member_update` | admin | `user_id` or `email`, `role`. |
+| `member_remove` | admin; anyone for themselves | `user_id` or `email`. Their account stays. |
+| `invitation_list` | admin | Pending invitations. |
+| `invitation_create` | admin | `email`, `role` (default member, at most your own). Returns the invitation, its `token` (shown once) and the `link` when `--public-url` is set. isb sends no mail. |
+| `invitation_revoke` | admin | `id`. |
+| `token_list` | anyone signed in | Your tokens' metadata (only `org`'s when given; an org token sees its org's). `all: true`: every token in `org`, with its holder (admins). |
+| `token_create` | a session, or an Access or tailnet identity | `name`, `expires` (`90d`; none: never), `scopes`; confined to `org`. Returns `{token, info}`, the token shown once. **A token cannot mint tokens** (an API, workspace or superadmin token is refused), so revoking a leaked token always ends it. |
+| `token_revoke` | its holder; the org's admins | `id`. |
+| `ssh_key_list`, `ssh_key_add`, `ssh_key_remove` | anyone with an account | The caller's SSH keys for [isb ssh-proxy](../guides/ssh.md): `public_key` and `name`; `id`. |
+| `session_list`, `session_revoke` | anyone with an account | The caller's browser sessions; end one by `id`. |
+| `user_list` | platform admin | Every user with their orgs and last activity. |
+| `user_update` | platform admin | `user_id` or `email`; `disabled`, `platform_admin`. Not yourself, and never the last enabled platform admin. |
+
+Signing in (passwords, passkeys, providers), sign-up, password resets,
+accepting an invitation and changing a way in stay in the browser, and
+superadmin tokens are minted on the host only; [API parity](parity.md)
+says why for each.
 
 ## Superadmins
 

@@ -115,7 +115,8 @@ from (`suggested_allow_from`), which the wizard prefills.
 `isb server rm NAME` forgets a server; it is refused while orgs are placed on
 it. The agent keeps running on the box until it is stopped there
 (`systemctl disable --now isb-agent`); a [dedicated VM](#dedicated-vms) is
-deleted with its server. `isb server rotate-cert NAME` issues the
+deleted with its server. `isb server rotate-cert NAME` (or **Rotate certificate** on the server in
+the web UI's Admin, Servers) issues the
 agent a new certificate and key over the current mTLS connection; the agent
 writes them and uses them for every new connection, and the control plane
 checks that it does.
@@ -320,7 +321,7 @@ server, so they hear about it only once it is back.
 | The control plane is down | Servers keep running their orgs (they reconcile, restart, serve their ingress, run jobs and backups); nobody can change anything, since every caller comes through the control plane. |
 | The agent restarts | Its event feed starts over; the control plane notices and follows from the start. |
 | The control plane's state directory is lost | The CA goes with it: restore it from backup (it is what every agent trusts). Without a backup, re-run `isb server add` on each box (it reissues the agent's certificate under a new CA) and recreate the placement. |
-| A certificate nears expiry | `isb server rotate-cert NAME`; `server_show` has `cert_not_after`. |
+| A certificate nears expiry | `isb server rotate-cert NAME`, or **Rotate certificate** in Admin, Servers; `server_show` has `cert_not_after`. |
 | The SSH key leaks | It was used for the bootstrap only: remove it from the box's `authorized_keys`; the control plane never needs it again. |
 
 ## Tools

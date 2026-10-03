@@ -192,8 +192,15 @@ either:
 
 Tokens can expire (`--expires 90d`, `"expires": "90d"`) or not. Each records
 when it was last used. Users list and revoke their own; an org's owners and
-admins list and revoke any token in it. An org token cannot mint a token for
-another org or a platform token.
+admins list and revoke any token in it.
+
+**A token cannot mint tokens.** New tokens come from a signed-in browser
+session, an Access or tailnet identity, or `isb token create` on the host;
+an API token, a workspace token and a superadmin token are all refused
+(`POST tokens` and the `token_create` tool alike). A token that could mint
+another would survive its own revocation through the copy, and bounding the
+copy's scopes or expiry would not change that: revoking a leaked token must
+end what it can do.
 
 ### Scopes
 
@@ -211,7 +218,8 @@ narrowing, checked in the same authorizer as roles, and never widen a role
 
 A token may hold several; a call passes if any allows it. A scoped token
 without `admin` cannot change accounts, tokens, invitations, members or SSH
-keys (every state-changing `/api/v1/auth/*` request is refused), and tokens
+keys (every state-changing `/api/v1/auth/*` request, and every account tool
+that changes something, is refused), and tokens
 whose scopes leave out `sandbox_exec` (`read`, `deploy`) get no terminal or
 SSH. Give scopes with `"scopes": ["deploy", "tool:app_*"]` on `POST tokens`,
 `isb token create --scope deploy --scope 'tool:app_*'`, or the web UI's

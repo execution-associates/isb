@@ -203,6 +203,13 @@ above (403) for a refused provider sign-in. "Signed in" means a session
 cookie or a bearer token. A token scoped short of `admin` (and a workspace
 token) cannot change accounts, tokens, keys, invitations or members.
 
+The same operations are [account tools](mcp-tools.md#accounts) for agents
+(`whoami`, `member_*`, `invitation_*`, `token_*`, `ssh_key_*`, `session_*`,
+`user_*`), with the same rules; the sign-in flows stay browser-only
+([API parity](parity.md)). Every endpoint below is in `GET
+/api/v1/openapi.json` with its body and answer schemas, generated from the
+router's own route table.
+
 | Method and path (`/api/v1/auth/...`) | Who | Body | Answer |
 |---|---|---|---|
 | `GET setup` | anyone | | `{"needed": bool}` |
@@ -216,7 +223,7 @@ token) cannot change accounts, tokens, keys, invitations or members.
 | `POST invitations/inspect` | anyone with the token | `{token}` | `{org, email, role, expires_at, account_exists}` |
 | `POST invitations/accept` | anyone with the token | `{token, name?, password?}` | `{user, membership, created}`, cookie set unless already signed in |
 | `GET tokens` | signed in | | `{tokens: [{id, name, user_id, org, created_at, last_used, expires_at, scopes}]}` |
-| `POST tokens` | signed in, with an account | `{name, org?, expires?, scopes?}` | `201 {token, info}`; `"superadmin": true` is always `403` |
+| `POST tokens` | signed in with a session, or an Access or tailnet identity, with an account; never with a token | `{name, org?, expires?, scopes?}` | `201 {token, info}`; `"superadmin": true` is always `403`; an API, workspace or superadmin token is `403` ([why](../concepts/access.md#api-tokens)) |
 | `DELETE tokens/ID` | its user, or the org's owners/admins | | `204` |
 | `GET ssh-keys` | signed in | | `{ssh_keys: [...]}`: id, name, type, fingerprint, last use |
 | `POST ssh-keys` | signed in, with an account | `{public_key, name?}` | `201 {ssh_key}` |

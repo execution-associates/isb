@@ -179,7 +179,8 @@ sandboxes and audit log). The token:
 
 - is **confined to its org**: it acts as no user, reaches no other org, no
   platform or host tool, and cannot use the identity endpoints
-  (`/api/v1/auth/*`: no members, invitations, tokens or keys);
+  (`/api/v1/auth/*`) or the [account tools](../reference/mcp-tools.md#accounts)
+  but `whoami`: no members, invitations, tokens, keys or sessions;
 - arrives inside as **`/run/isb/token`** (0400, owned by the workspace user)
   and, through `/etc/profile.d/isb.sh`, as **`$ISB_TOKEN`** in login shells,
   with **`$ISB_URL`**, **`$ISB_ORG`** and `$ISB_WORKSPACE`. The `isb` CLI
@@ -239,7 +240,8 @@ kept on the instance as `user.isb.expires_at` and `user.isb.idle_timeout`:
 - **an idle timeout**: the org's `sandbox_idle` (default 2 h), or the call's
   `idle_timeout`, or `none`. Idle means no exec or terminal through isb and
   under 2 % of a core of CPU since the daemon last saw it used (a daemon that
-  just started counts from its start).
+  just started counts from its start). Org admins change both defaults with
+  `workspace_settings`, or **Defaults** on the workspace's Sandboxes tab.
 
 `sandbox_extend` pushes the expiry out (`by`, default 24 h, from the later of
 now and the current expiry, never past 30 days from now) or changes the idle

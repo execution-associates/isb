@@ -2,7 +2,7 @@
 // (sandbox_list kind=sandbox), with who made each, its age, when it
 // expires, and its resources; extend, open a shell, delete.
 import { useQueryClient } from "@tanstack/react-query";
-import { Box, Clock, Loader2, MoreHorizontal, SquareTerminal, Trash2 } from "lucide-react";
+import { Box, Clock, Loader2, MoreHorizontal, Settings2, SquareTerminal, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
@@ -17,6 +17,7 @@ import { errorMessage } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 import { RowsSkeleton } from "@/pages/org-ui";
 import { type Sandbox, type WorkspaceSettings, useSandboxes, wsCall, wsKeys } from "./api";
+import { SandboxDefaultsDialog } from "./sandbox-defaults";
 import { expiresIn, expiringSoon, human, idleLabel, statusTone } from "./util";
 
 const EXTEND = ["4h", "24h", "7d"];
@@ -26,6 +27,7 @@ export function SandboxesTab({ org, settings, writer, admin }: { org: string; se
   const qc = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
   const [removing, setRemoving] = useState<Sandbox | null>(null);
+  const [defaults, setDefaults] = useState(false);
   const extend = async (s: Sandbox, by: string) => {
     setBusy(s.name);
     try {
@@ -45,6 +47,14 @@ export function SandboxesTab({ org, settings, writer, admin }: { org: string; se
         icon={<Box />}
         title="Sandboxes"
         count={q.data ? list.length : undefined}
+        action={
+          admin && (
+            <Button variant="outline" size="sm" onClick={() => setDefaults(true)}>
+              <Settings2 />
+              Defaults
+            </Button>
+          )
+        }
         description={
           <>
             Short-lived machines for builds, tests and experiments, made with <code className="font-mono text-xs">sandbox_create</code> (the workspace's agents use the org MCP). Each expires {settings.sandbox_expiry} after it is made unless extended, and is
@@ -135,6 +145,7 @@ export function SandboxesTab({ org, settings, writer, admin }: { org: string; se
           </ul>
         )}
       </Panel>
+      {admin && <SandboxDefaultsDialog key={`${settings.sandbox_expiry}/${settings.sandbox_idle}`} org={org} settings={settings} open={defaults} onOpenChange={setDefaults} />}
       <ConfirmDialog
         open={!!removing}
         onOpenChange={(o) => !o && setRemoving(null)}

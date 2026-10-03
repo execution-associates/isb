@@ -5126,7 +5126,9 @@ export interface operations {
                 content: {
                     "application/json": {
                         /** @description WebAuthn options, in the JSON form of PublicKeyCredential.parse*OptionsFromJSON(). */
-                        publicKey: Record<string, never>;
+                        publicKey: {
+                            [key: string]: unknown;
+                        };
                     };
                 };
             };
@@ -5152,7 +5154,9 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @description The browser's credential.toJSON(). */
-                    credential: Record<string, never>;
+                    credential: {
+                        [key: string]: unknown;
+                    };
                     name?: string;
                 };
             };
@@ -5195,7 +5199,9 @@ export interface operations {
                 content: {
                     "application/json": {
                         /** @description WebAuthn options, in the JSON form of PublicKeyCredential.parse*OptionsFromJSON(). */
-                        publicKey: Record<string, never>;
+                        publicKey: {
+                            [key: string]: unknown;
+                        };
                     };
                 };
             };
@@ -5221,7 +5227,9 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @description The browser's credential.toJSON(). */
-                    credential: Record<string, never>;
+                    credential: {
+                        [key: string]: unknown;
+                    };
                     name?: string;
                 };
             };

@@ -267,6 +267,19 @@ function Row({ k, children }: { k: string; children: ReactNode }) {
 function ServerSheet({ s, onOpenChange }: { s: ServerView | null; onOpenChange: (o: boolean) => void }) {
   const qc = useQueryClient();
   const [removing, setRemoving] = useState(false);
+  const [rotating, setRotating] = useState(false);
+  const rotate = async (name: string) => {
+    setRotating(true);
+    try {
+      await callTool("server_rotate_cert", { name });
+      toast.success(`${name} has a new certificate`, { description: "Its agent uses it for new connections; this control plane checked it does." });
+      await qc.invalidateQueries({ queryKey: SERVER_LIST_KEY });
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setRotating(false);
+    }
+  };
   const t = s ? healthTone(s.health.state) : null;
   const hb = s?.health.heartbeat;
   const r = s ? resources(s) : null;
@@ -343,6 +356,10 @@ function ServerSheet({ s, onOpenChange }: { s: ServerView | null; onOpenChange: 
                   <CopyIconButton value={s.fingerprint} label="Copy fingerprint" className="size-6" />
                 </span>
                 {s.cert_not_after && <span className="block text-xs text-muted-foreground">expires {dateTime(s.cert_not_after)}</span>}
+                <Button variant="outline" size="sm" className="mt-1.5 h-7" disabled={rotating} onClick={() => void rotate(s.name)}>
+                  <RotateCcw className={cn(rotating && "animate-spin")} />
+                  Rotate certificate
+                </Button>
               </Row>
               <Row k="Added">{dateTime(s.added_at)}</Row>
             </dl>

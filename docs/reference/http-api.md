@@ -27,7 +27,7 @@ calling REST, something following the event stream.
 | `POST /orgs/<org>/mcp` | MCP bound to one org: `org` is filled in, and any other value is refused |
 | `POST /api/v1/tools/<tool>`, `POST /orgs/<org>/api/v1/tools/<tool>` | REST: one tool call, the arguments as a JSON body |
 | `GET /api/v1/tools` | the tools this listener offers, with their schemas and annotations |
-| `GET /api/v1/openapi.json` | an OpenAPI document of the REST tools |
+| `GET /api/v1/openapi.json` | an OpenAPI 3.1 document of every route on this page ([below](#the-openapi-document)), without authentication |
 | `GET /api/v1/events` | server-sent events: deploys, rollouts, health and restarts in the caller's orgs |
 | `GET /api/v1/audit/stream` | server-sent events: new audit entries the caller may read |
 | `GET /api/v1/history/stream` | server-sent events: new history items the caller may read |
@@ -113,8 +113,27 @@ TEXT, "data": ...}` with a status from the code:
 | 504 | `request_timeout`, `operation_timeout`, `exec_timeout`, `not_ready` |
 | 500 | everything else |
 
-`GET /api/v1/openapi.json` describes these calls; the web UI's typed client
-is generated from it.
+## The OpenAPI document
+
+`GET /api/v1/openapi.json` is an OpenAPI 3.1 document of the whole HTTP
+surface, generated from what serves it rather than written by hand:
+
+- one `POST /api/v1/tools/<tool>` per tool the listener offers, from the
+  tool registry (so `--allow-tools`/`--deny-tools` shape it), tagged
+  `tools`;
+- the [workspace resource](#the-workspace-resource), from the table its
+  router dispatches by, each body the tool's schema (`workspace`);
+- the [identity endpoints](identity-api.md#endpoints), from the identity
+  router's route table, with request and answer schemas (`identity`);
+- MCP, the event, audit and history streams (`text/event-stream`), the
+  terminal and SSH websockets (`101`), webhooks, template logos and
+  `/healthz` (`surface`).
+
+Each operation says where agents get the same capability: `x-isb-tool`
+names the tool, and `x-isb-browser-only` says why there is none
+([API parity](parity.md)). The web UI's typed client is generated from the
+snapshot in `web/openapi.json`, and the tool calls and identity calls both
+go through it.
 
 ## Events
 

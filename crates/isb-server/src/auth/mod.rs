@@ -13,9 +13,8 @@
 //! - The HTTP endpoints are in [`http`]; the CLI uses this API directly on the
 //!   same file (SQLite in WAL mode handles the daemon and the CLI at once).
 //!
-//! External sign-in (OAuth/OIDC, [`oauth`]) attaches rows to
-//! `user_identities`; passkeys ([`webauthn`]) live in `passkeys`. Both are
-//! managed in [`external`].
+//! External sign-in ([`oauth`]) attaches rows to `user_identities`; passkeys
+//! ([`webauthn`]) live in `passkeys`; [`external`] manages both.
 
 pub mod cbor;
 pub mod db;
