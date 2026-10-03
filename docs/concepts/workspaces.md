@@ -29,12 +29,15 @@ workspace.
 isb workspace create [--image IMAGE] [--name N] [--user dev] [--cpus N] [--memory 8GiB]
                      [--root-size 30GiB] [--home-size 20GiB] [-e KEY=VALUE]...
                      [--secret NAME]... [--token-role viewer|member|admin] [--home-bind DIR]
+                     [--setup FILE]
 isb workspace show [NAME] [--json]          status, resources, sessions, token metadata, URL
 isb workspace ls [--json]
 isb workspace start|stop|restart [NAME] [--yes]
 isb workspace rebuild [NAME] [--image IMAGE] --yes
 isb workspace update [NAME] [--image I] [--cpus N] [--memory M] [--root-size S]
-                     [--home-size S] [--token-role R] [--yes]
+                     [--home-size S] [--token-role R] [--setup FILE | --no-setup] [--yes]
+isb workspace setup [NAME] [--run]           the first-boot script's state; run it again
+isb workspace image build|ls|logs|rm         workspace images from recipes (platform admins)
 isb workspace rm [NAME] [--keep-home] --yes
 isb workspace rotate-token [NAME]
 isb workspace settings [--max-workspaces N] [--sandbox-expiry 24h] [--sandbox-idle 2h|none]
@@ -54,11 +57,19 @@ terminal.
 ## The machine
 
 - An unprivileged container in the org's project, named after the workspace
-  (`workspace` unless `--name`), from any incus image (`dev-base`,
-  `images:ubuntu/24.04`) or the org's own `registry:APP:TAG`. Without
-  `--image` it is `dev-base` when the host has that image, else
-  `images:ubuntu/24.04`; a local image the host lacks is refused with the
-  ones it has. It starts with the host (`boot.autostart`).
+  (`workspace` unless `--name`), from any incus image (`isb-workspace`,
+  `dev-base`, `images:ubuntu/24.04`) or the org's own `registry:APP:TAG`.
+  Without `--image` it is `isb-workspace` (isb's default image, built from
+  its recipe: Claude Code, Codex, herdr, mise) when the host has it, then
+  `dev-base`, else `images:ubuntu/24.04`; a local image the host lacks is
+  refused with the ones it has. It starts with the host (`boot.autostart`).
+  [Workspace images](../guides/workspace-images.md) covers building images
+  from recipes.
+- **A first-boot script** (`--setup FILE`, optional) runs once as root on
+  the first start after a create or a rebuild, logged to the history, and
+  again on request (`isb workspace setup --run`): small per-org tweaks with
+  no image of their own ([First-boot
+  scripts](../guides/workspace-images.md#first-boot-scripts)).
 - Creating it in an org that does not exist is refused up front (`org X not
   found`), as every `workspace_*` and `sandbox_*` tool is. A create that
   fails (an image, the org's quota) leaves nothing behind: no instance,
@@ -74,7 +85,7 @@ terminal.
 - **Rebuild** replaces the machine with a fresh one from its image (or a new
   `--image`, which becomes the workspace's) and mounts the same home again:
   a damaged root is a replaced guest. Anything installed outside the home is
-  gone; the token stays.
+  gone; the token stays, and the first-boot script runs again.
 - **Resizing** (`cpus`, `memory`, root and home size) applies at once.
   `image` changes apply on the next rebuild; `env` and `secrets` (through
   `workspace_update`) are delivered again at once (new login shells see
@@ -144,6 +155,39 @@ isb --org acme workspace create --image dev-base --home-bind /srv/workspaces/box
 The folder's name need not match the org's. It is allowed in the org's
 project and kept as it is, and its files keep their owner as long as the
 workspace user's uid is the daemon's.
+
+## The web terminal
+
+The Workspace page's **Terminal** tab opens shells as the workspace user, in
+its home, over the daemon's terminal websocket. How long a shell lives
+depends on the image:
+
+- **With herdr in the workspace** (`isb-workspace` has it), each tab is a
+  **herdr session**: a tab in a herdr workspace labelled `isb web`, on the
+  workspace user's own herdr server (its default session, started detached
+  on first use with the login environment and the user's shell). A tab
+  attaches with `herdr terminal attach ID --takeover`; closing the page, a
+  reload or a dropped connection kills only that attach client, so the next
+  attach finds the same shell, scrollback included, and the page reconnects
+  on its own after a drop. Closing a tab asks whether to **detach** (the
+  shell keeps running and is offered to reattach) or **end** the session
+  (the herdr tab and every shell in it close). Renaming a tab renames the
+  herdr tab. The same tabs show in herdr itself, over SSH or `herdr machine
+  add` ([SSH and herdr](../guides/ssh.md)). One browser attaches to a
+  session at a time: a second takes it over.
+- **Without herdr**, a tab is a plain login shell that ends when its tab
+  closes or the page reloads, as on any other instance.
+
+The tab says which it is. herdr stays outside isb: isb only runs the herdr
+CLI in the workspace, as its user, when the image has it.
+
+| Tool | Who | Does |
+|---|---|---|
+| `workspace_terminals` | members | `mode` (`herdr` with its version, or `shell`; `null` while stopped) and the herdr sessions (`name`, `tab_id`, `panes`) |
+| `workspace_terminal_update` | members | `session` with `rename`, or `end: true` |
+
+The websocket names a session with `&session=NAME` ([The web
+terminal](../reference/http-api.md#the-web-terminal)).
 
 ## Confirmations and live sessions
 
@@ -263,14 +307,17 @@ and `sandbox_remove` of it are refused.
 
 | Tool | Who | Does |
 |---|---|---|
-| `workspace_get` | members | the workspace (or `null`) and the org's settings: definition, status, resources, home, live sessions, last activity, token metadata, `connect` (`url`, `mcp_url`), sandbox count; with none yet, `create`: the `images` it can be made from, the `default_image`, and the org's `quota` and usage |
+| `workspace_get` | members | the workspace (or `null`) and the org's settings: definition (with `setup` and `setup_state`), status, resources, home, live sessions, last activity, token metadata, `connect` (`url`, `mcp_url`), sandbox count; with none yet, `create`: the `images` it can be made from, the `default_image`, whether isb's default image exists here (`default_recipe`), and the org's `quota` and usage |
 | `workspace_list` | members | every workspace in the org (one, unless `max_workspaces` was raised) |
-| `workspace_create` | admins | `image` (default above), `name`, `user`, `cpus`, `memory`, `root_size`, `home_size`, `env`, `secrets`, `labels`, `token_role`; `home_bind` (superadmins: a host folder as the home) |
+| `workspace_create` | admins | `image` (default above), `name`, `user`, `cpus`, `memory`, `root_size`, `home_size`, `env`, `secrets`, `labels`, `token_role`, `setup` (the first-boot script); `home_bind` (superadmins: a host folder as the home) |
 | `workspace_update` | admins | any of those but `name`, `user`, `home_bind`; resizing needs `confirm` |
 | `workspace_start`, `workspace_stop`, `workspace_restart` | members | stop and restart need `confirm` |
 | `workspace_rebuild` | admins | `image`, `confirm` |
 | `workspace_delete` | admins | `keep_home`, `confirm` |
 | `workspace_token_rotate` | admins | a new token, delivered; the old one revoked |
+| `workspace_setup_run` | admins | run the first-boot script again: now when running, else on the next start |
+| `workspace_terminals`, `workspace_terminal_update` | members | the web terminal's herdr sessions ([above](#the-web-terminal)) |
+| `workspace_image_build`, `_logs`, `_list`, `_remove` | platform admins | images from recipes ([Workspace images](../guides/workspace-images.md)) |
 | `workspace_settings` | members read, admins change | `sandbox_expiry`, `sandbox_idle`; `max_workspaces`, `home_kind`, `home_pool` (platform admins) |
 | `sandbox_create` | members | takes `expires`, `idle_timeout` |
 | `sandbox_extend` | the creator, admins | `name`, `by`, `idle_timeout` |

@@ -41,9 +41,15 @@ use crate::server::http::{Handler, Peer, Request, Response, Shutdown};
 use crate::server::{Caller, Healthz, Listener, Registry, Tool};
 use crate::workspace::{self as ws, Settings, Store, TokenMeta, Workspace};
 
+mod bridge;
 mod create;
+mod herdr;
+mod image_tools;
 mod images;
+mod setup;
+use bridge::{bridge_handler, gateway};
 use create::{check_fields, check_size, token_role, workspace_create};
+pub(super) use herdr::{Herdr, attach_argv};
 
 /// The bridge listener's port when `--workspace-mcp-port` is not given.
 pub const DEFAULT_PORT: u16 = 8481;
@@ -724,6 +730,7 @@ chown "$u": "$h"
     /// thread of their own.
     pub fn start(self: &Arc<Self>, ctl: crate::stack::Controller, local: LocalOrg) {
         let me = self.clone();
+        self.setups_interrupted();
         let _ = std::thread::Builder::new()
             .name("isb-workspaces".into())
             .spawn(move || {
@@ -739,7 +746,7 @@ chown "$u": "$h"
             });
     }
 
-    fn upkeep(&self, local: &LocalOrg) {
+    fn upkeep(self: &Arc<Self>, local: &LocalOrg) {
         for org in self.store.orgs() {
             if !local(&org) {
                 continue;
@@ -766,6 +773,9 @@ chown "$u": "$h"
                     .unwrap_or_else(|e| e.into_inner())
                     .get(&k)
                     .is_some_and(|p| *p == pid);
+                if ws::setup_due(&w) {
+                    self.kick_setup(&org, &w.name);
+                }
                 if !done {
                     match self.deliver(&org, &w) {
                         Ok(()) => eprintln!(
@@ -898,69 +908,6 @@ fn unhex(s: &str) -> Option<Vec<u8>> {
         .step_by(2)
         .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
         .collect()
-}
-
-/// `10.64.3.1/24` -> the gateway and the subnet as (network, mask).
-fn gateway(cidr: &str) -> Option<(Ipv4Addr, (u32, u32))> {
-    let (ip, len) = cidr.split_once('/')?;
-    let ip: Ipv4Addr = ip.parse().ok()?;
-    let len: u32 = len.parse().ok()?;
-    if len > 32 {
-        return None;
-    }
-    let mask = if len == 0 { 0 } else { u32::MAX << (32 - len) };
-    Some((ip, (u32::from(ip) & mask, mask)))
-}
-
-/// What an org bridge's listener answers: the org's own subnet only, bearer
-/// tokens only (a workspace's or an org API token; no cookies, no
-/// superadmin credentials), `/orgs/<org>/...` only.
-fn bridge_handler(org: OrgId, (net, mask): (u32, u32), inner: Handler) -> Handler {
-    let prefix = format!("/orgs/{org}/");
-    Arc::new(move |r: &Request| {
-        let in_subnet = match &r.peer {
-            Peer::Tcp(a) => match a.ip() {
-                IpAddr::V4(ip) => u32::from(ip) & mask == net,
-                IpAddr::V6(_) => false,
-            },
-            Peer::Unix { .. } => false,
-        };
-        if !in_subnet {
-            return Response::json(
-                403,
-                &json!({"error": "forbidden", "message": format!("this listener serves org {org}'s own network only")}),
-            );
-        }
-        if r.path == "/healthz" {
-            return inner(r);
-        }
-        if !r.path.starts_with(&prefix) {
-            return Response::json(
-                404,
-                &json!({"error": "not_found", "message": format!("this listener serves {prefix}mcp and {prefix}api/v1/... only")}),
-            );
-        }
-        let bearer = r
-            .header("authorization")
-            .and_then(|a| a.trim().split_once(' '))
-            .filter(|(s, _)| s.eq_ignore_ascii_case("bearer"))
-            .map(|(_, t)| t.trim().to_string());
-        let ok = bearer.as_deref().is_some_and(|t| {
-            t.starts_with(TokenKind::Workspace.prefix()) || t.starts_with(TokenKind::Api.prefix())
-        });
-        if !ok {
-            return Response::json(
-                401,
-                &json!({"error": "unauthenticated", "message": "send the workspace's token as Authorization: Bearer (it is in $ISB_TOKEN and /run/isb/token)"}),
-            )
-            .header("WWW-Authenticate", "Bearer");
-        }
-        let mut clean = r.clone();
-        clean.headers.retain(|(k, _)| {
-            !k.eq_ignore_ascii_case("cookie") && !k.eq_ignore_ascii_case("cf-access-jwt-assertion")
-        });
-        inner(&clean)
-    })
 }
 
 // ---- the tools ----
@@ -1199,6 +1146,9 @@ struct UpdateArgs {
     labels: Option<BTreeMap<String, String>>,
     #[serde(default)]
     token_role: Option<Role>,
+    /// The first-boot script (`""` removes it).
+    #[serde(default)]
+    setup: Option<String>,
     #[serde(default)]
     confirm: bool,
 }
@@ -1337,6 +1287,13 @@ fn workspace_update(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         wsm.index(&org, &w);
         changed.push("token_role");
     }
+    if a.setup.is_some() {
+        w.setup = setup::check_setup(a.setup)?;
+        if w.setup.is_none() {
+            w.setup_state = None;
+        }
+        changed.push("setup (runs on the next rebuild, or with workspace_setup_run)");
+    }
     w.updated_at = now();
     wsm.store.put(&org, &w)?;
     if redeliver {
@@ -1437,7 +1394,15 @@ fn workspace_rebuild(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     let t = now();
     w.rebuilt_at = Some(t);
     w.updated_at = t;
+    w.setup_state = ws::setup_next(
+        w.setup.is_some(),
+        w.setup_state.as_ref(),
+        ws::SetupEvent::Built,
+        t,
+    )?;
     wsm.store.put(&org, &w)?;
+    drop(_g);
+    wsm.kick_setup(&org, &name);
     wsm.record(
         &org,
         "workspace.rebuilt",
@@ -1751,7 +1716,8 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
                 "secrets": {"type": "array", "items": {"type": "string"}, "description": "Org secrets delivered as /run/isb/secrets/NAME."},
                 "labels": {"type": "object", "additionalProperties": {"type": "string"}},
                 "token_role": {"type": "string", "enum": ["viewer", "member", "admin"], "description": "The workspace token's role in the org (default admin)."},
-                "home_bind": {"type": "string", "description": "Superadmins only: this host directory as the home (an existing box's, when migrating), instead of the default home."}
+                "home_bind": {"type": "string", "description": "Superadmins only: this host directory as the home (an existing box's, when migrating), instead of the default home."},
+                "setup": {"type": "string", "description": "A first-boot script, run once as root on the first start (and after each rebuild, or on request with workspace_setup_run), logged to the history. Not for secrets."}
             }),
             &[]
         ),
@@ -1774,6 +1740,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
                 "secrets": {"type": "array", "items": {"type": "string"}, "description": "Replaces the delivered secrets."},
                 "labels": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Replaces the labels."},
                 "token_role": {"type": "string", "enum": ["viewer", "member", "admin"]},
+                "setup": {"type": "string", "description": "Replaces the first-boot script (\"\" removes it); it runs on the next rebuild or with workspace_setup_run."},
                 "confirm": confirm_p()
             }),
             &[]
@@ -1852,83 +1819,45 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
         write,
         workspace_settings
     );
+    tool!(
+        "workspace_setup_run",
+        "Run the workspace's setup script",
+        "Run the workspace's first-boot setup script again, as root: now when the workspace is running, else on its next start. Its outcome and the tail of its output go to the history (workspace.setup). Org admins and above.",
+        obj(json!({"name": name()}), &[]),
+        write,
+        setup::workspace_setup_run
+    );
+    tool!(
+        "workspace_terminals",
+        "The workspace's terminal sessions",
+        "How the workspace's web terminal works and its live sessions: mode `herdr` when herdr is installed in the workspace (each tab is a herdr tab in the `isb web` workspace of the user's herdr server, so a reload or a dropped connection reattaches to the same shell; `sessions` lists them), else `shell` (plain shells that end with their tab). Org members and above.",
+        obj(json!({"name": name()}), &[]),
+        ro,
+        herdr::workspace_terminals
+    );
+    tool!(
+        "workspace_terminal_update",
+        "Rename or end a terminal session",
+        "A herdr-backed web terminal session: `rename` it (the herdr tab's label), or `end: true` to close it and every shell in it. Org members and above.",
+        obj(
+            json!({
+                "name": name(),
+                "session": {"type": "string", "description": "The session (its tab's name)."},
+                "rename": {"type": "string", "description": "Its new name."},
+                "end": {"type": "boolean", "description": "Close the session and its shells."}
+            }),
+            &["session"]
+        ),
+        write,
+        herdr::workspace_terminal_update
+    );
+    image_tools::register(r, d.clone())?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn req(peer: &str, path: &str, auth: Option<&str>) -> Request {
-        let mut headers = vec![("Host".to_string(), "10.1.2.1:8481".to_string())];
-        if let Some(a) = auth {
-            headers.push(("Authorization".into(), a.into()));
-        }
-        headers.push(("Cookie".into(), "isb_session=x".into()));
-        Request {
-            method: "POST".into(),
-            path: path.into(),
-            query: None,
-            headers,
-            body: vec![],
-            peer: Peer::Tcp(peer.parse().unwrap()),
-        }
-    }
-
-    #[test]
-    fn the_bridge_answers_its_subnet_its_org_and_bearer_tokens_only() {
-        let seen = Arc::new(Mutex::new(Vec::<Request>::new()));
-        let s = seen.clone();
-        let inner: Handler = Arc::new(move |r: &Request| {
-            s.lock().unwrap().push(r.clone());
-            Response::new(200)
-        });
-        let (_, net) = gateway("10.1.2.1/24").unwrap();
-        let h = bridge_handler(OrgId::new("acme").unwrap(), net, inner);
-        let tok = format!("Bearer isb_ws_{}", "a".repeat(43));
-        // Another subnet (another org's bridge, the host's LAN): refused.
-        assert_eq!(
-            h(&req("10.9.9.9:4000", "/orgs/acme/mcp", Some(&tok))).status,
-            403
-        );
-        // Another org's path: not served here.
-        assert_eq!(
-            h(&req("10.1.2.50:4000", "/orgs/beta/mcp", Some(&tok))).status,
-            404
-        );
-        assert_eq!(h(&req("10.1.2.50:4000", "/mcp", Some(&tok))).status, 404);
-        // No token, or a session or superadmin credential: refused.
-        assert_eq!(
-            h(&req("10.1.2.50:4000", "/orgs/acme/mcp", None)).status,
-            401
-        );
-        let sa = format!("Bearer isb_sa_{}", "a".repeat(43));
-        assert_eq!(
-            h(&req("10.1.2.50:4000", "/orgs/acme/mcp", Some(&sa))).status,
-            401
-        );
-        // The org's own instance with its token: through, cookies dropped.
-        assert_eq!(
-            h(&req("10.1.2.50:4000", "/orgs/acme/mcp", Some(&tok))).status,
-            200
-        );
-        let api = format!("Bearer isb_tok_{}", "b".repeat(43));
-        assert_eq!(
-            h(&req(
-                "10.1.2.50:4000",
-                "/orgs/acme/api/v1/tools/app_list",
-                Some(&api)
-            ))
-            .status,
-            200
-        );
-        let got = seen.lock().unwrap();
-        assert_eq!(got.len(), 2);
-        assert!(got.iter().all(|r| r.header("cookie").is_none()));
-        // Health needs nothing but the subnet.
-        drop(got);
-        assert_eq!(h(&req("10.1.2.7:1", "/healthz", None)).status, 200);
-    }
 
     #[test]
     fn the_instance_spec_has_the_home_the_size_and_the_labels() {

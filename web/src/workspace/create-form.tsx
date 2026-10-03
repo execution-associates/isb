@@ -13,7 +13,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { callTool, type OrgView } from "@/api/tools";
 import type { Role } from "@/api/auth";
 import { errorMessage } from "@/lib/messages";
+import { useMe } from "@/lib/session";
 import { type WorkspaceCreateOptions, type WorkspaceSettings, wsCall, wsKeys } from "./api";
+import { BuildDefaultImage } from "./image-build";
 import { envProblems, headroom, sizeProblem, TOKEN_ROLES } from "./util";
 
 /** Works on any host: what to fall back on when the daemon offers nothing. */
@@ -35,7 +37,8 @@ export function CreateWorkspace({
   const qc = useQueryClient();
   const images = options?.images ?? [{ image: REMOTE_DEFAULT, description: "", source: "remote" as const }];
   const info = useQuery({ queryKey: ["org", org], queryFn: () => callTool<OrgView & { server?: string }>("org_get", {}, org) });
-  const [f, setF] = useState({ image: options?.default_image ?? REMOTE_DEFAULT, name: "workspace", user: "dev", cpus: "", memory: "", root: "", home: "20GiB", env: "" });
+  const [f, setF] = useState({ image: options?.default_image ?? REMOTE_DEFAULT, name: "workspace", user: "dev", cpus: "", memory: "", root: "", home: "20GiB", env: "", setup: "" });
+  const me = useMe();
   const [custom, setCustom] = useState(false);
   const room = headroom(options?.quota);
   const cpuFree = room.find((r) => r.label === "CPUs")?.free;
@@ -58,6 +61,7 @@ export function CreateWorkspace({
     root: sizeProblem(f.root),
     home: f.home.trim() ? sizeProblem(f.home) : "The home needs a size.",
     env: [...env.errors, ...envProblems(env.map)].join("; ") || null,
+    setup: new TextEncoder().encode(f.setup).length > 64 * 1024 ? "At most 64 KiB." : null,
   };
   const bad = !f.image.trim() || Object.values(problems).some(Boolean);
 
@@ -72,6 +76,7 @@ export function CreateWorkspace({
       if (f.memory.trim()) args.memory = f.memory.trim();
       if (f.root.trim()) args.root_size = f.root.trim();
       if (Object.keys(env.map).length) args.env = env.map;
+      if (f.setup.trim()) args.setup = f.setup;
       await wsCall("workspace_create", args, org);
       toast.success(`${f.name} is running`);
       await qc.invalidateQueries({ queryKey: wsKeys.workspace(org) });
@@ -127,6 +132,8 @@ export function CreateWorkspace({
                   <Input id={id} aria-describedby={d} value={f.image} onChange={set("image")} placeholder={REMOTE_DEFAULT} required autoFocus />
                 ) : (
                   <Select
+                    // A list that grew (a newly built image) remounts it, so the picked one shows.
+                    key={images.map((i) => i.image).join(" ")}
                     value={f.image}
                     onValueChange={(v) => {
                       if (v === OTHER) {
@@ -186,6 +193,36 @@ export function CreateWorkspace({
               )}
             </Field>
           </div>
+          {options?.default_recipe && !options.default_recipe.exists && (
+            <BuildDefaultImage
+              image={options.default_recipe.image}
+              canBuild={!!me.data?.platform_admin}
+              done={async (name) => {
+                // The list first, so the picker has the new image to show.
+                await qc.invalidateQueries({ queryKey: wsKeys.workspace(org) });
+                setCustom(false);
+                setF((x) => ({ ...x, image: name }));
+              }}
+            />
+          )}
+          <Field
+            label="First-boot script"
+            hint="Optional. Runs once as root on the first start (and after each rebuild, or again from isb workspace setup --run), with its output in the History; for small per-org tweaks without a new image. Not for secrets."
+            error={problems.setup}
+          >
+            {(id, d) => (
+              <Textarea
+                id={id}
+                aria-describedby={d}
+                value={f.setup}
+                onChange={set("setup")}
+                rows={3}
+                spellCheck={false}
+                className="font-mono text-[13px]"
+                placeholder={"apt-get install -y postgresql-client\nsudo -u dev git clone https://github.com/acme/app /home/dev/app"}
+              />
+            )}
+          </Field>
           {room.length > 0 && (
             <div className={cpuFull ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>
               Org quota left: {room.map((r) => `${r.label} ${r.text}`).join(" · ")}.

@@ -139,8 +139,11 @@ every 15 s. See [The audit log](../operations/audit.md) and
 upgrades to a websocket bridged to a login shell (bash, else sh) in one of
 the app's running replicas (`slot`, or one in rotation), with a
 pseudo-terminal. With `?instance=NAME` instead of `app`, the shell is in
-that instance of the org (a workspace, a sandbox), as root. The web UI's
-Terminal tabs use it.
+that instance of the org (a workspace, as its user; a sandbox, as root).
+`&session=NAME` (percent-encoded, up to 40 characters) on the workspace
+attaches to that herdr session instead, made if new, which outlives the
+socket ([The web terminal](../concepts/workspaces.md#the-web-terminal)).
+The web UI's Terminal tabs use it.
 
 - **Who**: the caller signs in as for any tool and is admitted as if calling
   `sandbox_exec` in the org: its members, admins and owners (not viewers,

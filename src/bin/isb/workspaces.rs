@@ -10,6 +10,10 @@ use isb::Result;
 
 use super::{SHORT, call, print_json, table};
 
+#[path = "workspaces/images.rs"]
+mod images;
+pub use images::ImageCmd;
+
 /// Creating and rebuilding pull an image and start a machine.
 const LONG: Duration = Duration::from_secs(900);
 
@@ -19,8 +23,9 @@ pub enum WorkspaceCmd {
     /// Create the org's workspace: a container with a home volume and an
     /// org token delivered inside.
     Create {
-        /// Image: an incus alias (dev-base), images:ubuntu/24.04, registry:APP:TAG.
-        /// Default: dev-base when the host has it, else images:ubuntu/24.04.
+        /// Image: an incus alias (isb-workspace, dev-base), images:ubuntu/24.04,
+        /// registry:APP:TAG. Default: isb-workspace, then dev-base, when the
+        /// host has it, else images:ubuntu/24.04.
         #[arg(long)]
         image: Option<String>,
         /// Default: workspace.
@@ -50,6 +55,10 @@ pub enum WorkspaceCmd {
         /// Superadmins, for migrating a box: a host directory as the home.
         #[arg(long)]
         home_bind: Option<String>,
+        /// A first-boot script (a file, or - for stdin), run once as root
+        /// on the first start and after each rebuild.
+        #[arg(long, value_name = "FILE")]
+        setup: Option<String>,
     },
     /// The workspace: status, resources, sessions, token metadata, connect.
     #[command(alias = "get")]
@@ -104,8 +113,26 @@ pub enum WorkspaceCmd {
         home_size: Option<String>,
         #[arg(long)]
         token_role: Option<String>,
+        /// Replace the first-boot script (a file, or - for stdin).
+        #[arg(long, value_name = "FILE", conflicts_with = "no_setup")]
+        setup: Option<String>,
+        /// Remove the first-boot script.
+        #[arg(long)]
+        no_setup: bool,
         #[arg(long)]
         yes: bool,
+    },
+    /// The first-boot script's state; --run runs it again as root.
+    Setup {
+        name: Option<String>,
+        #[arg(long)]
+        run: bool,
+    },
+    /// Workspace images: build one from a recipe script, list, remove
+    /// (platform admins; docs/guides/workspace-images.md).
+    Image {
+        #[command(subcommand)]
+        cmd: ImageCmd,
     },
     /// Delete it and revoke its token; the home too unless --keep-home.
     #[command(alias = "delete")]
@@ -206,6 +233,54 @@ fn workspace_target(
     }
 }
 
+/// A file's text, or stdin's for `-`.
+fn read_file(path: &str) -> Result<String> {
+    if path == "-" {
+        let mut s = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut s)?;
+        return Ok(s);
+    }
+    std::fs::read_to_string(path).map_err(|e| isb::Error::Invalid(format!("{path}: {e}")))
+}
+
+/// `isb workspace setup`: the script's state, or `--run` it again.
+fn setup(
+    c: &dyn Fn(&str, Value, Duration) -> Result<Value>,
+    name: Option<String>,
+    run: bool,
+) -> Result<u8> {
+    let mut a = json!({});
+    opt(&mut a, "name", name);
+    if run {
+        let v = c("workspace_setup_run", a, SHORT)?;
+        println!("{}", v["message"].as_str().unwrap_or("requested"));
+        return Ok(0);
+    }
+    let v = c("workspace_get", a, SHORT)?;
+    let w = &v["workspace"];
+    let Some(script) = w["setup"].as_str() else {
+        println!("no setup script (isb workspace update --setup FILE)");
+        return Ok(0);
+    };
+    let st = &w["setup_state"];
+    println!(
+        "setup      {} ({} run(s)), {}{}",
+        st["status"].as_str().unwrap_or("not run"),
+        st["runs"].as_u64().unwrap_or(0),
+        ago(st["at"].as_u64()),
+        match (st["exit_code"].as_i64(), st["message"].as_str()) {
+            (Some(c), _) => format!(", exit {c}"),
+            (_, Some(m)) => format!(": {m}"),
+            _ => String::new(),
+        }
+    );
+    println!(
+        "script     {} bytes; its output is in the history (workspace.setup)",
+        script.len()
+    );
+    Ok(0)
+}
+
 fn with_org(org: &Option<String>, mut args: Value) -> Value {
     if let Some(o) = org {
         args["org"] = json!(o);
@@ -302,8 +377,14 @@ pub fn workspace(org: &Option<String>, cmd: WorkspaceCmd) -> Result<u8> {
             secrets,
             token_role,
             home_bind,
+            setup,
         } => {
             let mut a = json!({});
+            opt(
+                &mut a,
+                "setup",
+                setup.as_deref().map(read_file).transpose()?,
+            );
             opt(&mut a, "image", image);
             opt(&mut a, "name", name);
             opt(&mut a, "user", user);
@@ -402,9 +483,19 @@ pub fn workspace(org: &Option<String>, cmd: WorkspaceCmd) -> Result<u8> {
             root_size,
             home_size,
             token_role,
+            setup,
+            no_setup,
             yes,
         } => {
             let mut a = json!({"confirm": yes});
+            opt(
+                &mut a,
+                "setup",
+                setup.as_deref().map(read_file).transpose()?,
+            );
+            if no_setup {
+                a["setup"] = json!("");
+            }
             opt(&mut a, "name", name);
             opt(&mut a, "image", image);
             opt(&mut a, "cpus", cpus);
@@ -445,6 +536,8 @@ pub fn workspace(org: &Option<String>, cmd: WorkspaceCmd) -> Result<u8> {
             );
             Ok(0)
         }
+        WorkspaceCmd::Setup { name, run } => setup(&c, name, run),
+        WorkspaceCmd::Image { cmd } => images::image(cmd),
         WorkspaceCmd::RotateToken { name } => {
             let mut a = json!({});
             opt(&mut a, "name", name);

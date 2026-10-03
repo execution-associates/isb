@@ -4,19 +4,19 @@
 //! form to show before anything is submitted.
 
 use super::*;
+use crate::build::workspace_image::DEFAULT_NAME;
 use crate::sandbox::images::{self, LocalImage, REMOTE_DEFAULT};
 
-/// The image a workspace gets when the call names none: the local
-/// `dev-base` when this host has it, else a remote image every host can
-/// pull.
-pub(super) const PREFERRED_LOCAL: &str = "dev-base";
+/// The images a workspace gets when the call names none, in order: isb's
+/// default workspace image (built from its recipe) when this host has it,
+/// then `dev-base`, else a remote image every host can pull.
+pub(super) const PREFERRED_LOCAL: [&str; 2] = [DEFAULT_NAME, "dev-base"];
 
 pub(super) fn default_image(local: &[LocalImage]) -> &'static str {
-    if local.iter().any(|i| i.alias == PREFERRED_LOCAL) {
-        PREFERRED_LOCAL
-    } else {
-        REMOTE_DEFAULT
-    }
+    PREFERRED_LOCAL
+        .into_iter()
+        .find(|p| local.iter().any(|i| i.alias == *p))
+        .unwrap_or(REMOTE_DEFAULT)
 }
 
 /// [`default_image`] for the org's project (the remote default when its
@@ -58,7 +58,9 @@ pub(super) fn quota(state: &Value) -> Value {
     Value::Object(out)
 }
 
-/// What the create form offers: the images, the default, and the quota.
+/// What the create form offers: the images, the default, the quota, and
+/// whether isb's default workspace image exists here (the form offers to
+/// build it when it does not).
 pub(super) fn create_options(wsm: &Workspaces, org: &OrgId) -> Value {
     let oc = wsm.oc(org);
     let local = images::local(&oc).unwrap_or_default();
@@ -72,6 +74,10 @@ pub(super) fn create_options(wsm: &Workspaces, org: &OrgId) -> Value {
     json!({
         "images": choices(&local),
         "default_image": default_image(&local),
+        "default_recipe": {
+            "image": DEFAULT_NAME,
+            "exists": local.iter().any(|i| i.alias == DEFAULT_NAME),
+        },
         "quota": quota(&state),
     })
 }
@@ -88,7 +94,11 @@ mod tests {
     }
 
     #[test]
-    fn the_default_image_is_dev_base_only_where_it_exists() {
+    fn the_default_image_is_isbs_then_dev_base_only_where_they_exist() {
+        assert_eq!(
+            default_image(&[img("dev-base"), img("isb-workspace")]),
+            "isb-workspace"
+        );
         assert_eq!(default_image(&[img("alpine"), img("dev-base")]), "dev-base");
         assert_eq!(default_image(&[img("alpine")]), "images:ubuntu/24.04");
         assert_eq!(default_image(&[]), "images:ubuntu/24.04");

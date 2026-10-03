@@ -549,11 +549,36 @@ minime only runs binaries downloaded from our CI runs.
   `dev-base` where it exists, else `images:ubuntu/24.04`, and the create
   form picks from the host's images and shows quota headroom. **Verified**
   on titan with a scratch `isb serve`, before and after.
+- [x] (ws-images) W5 workspace images and terminal reattach:
+  `workspace_image_build`/`_logs`/`_list`/`_remove` and `isb workspace image
+  build|ls|logs|rm` (platform admins): a recipe script run as root in a
+  throwaway container in `isb-system`, published as a local image labelled
+  `isb.workspace-image=1` (only those can be replaced or removed), idempotent
+  per recipe and base, nothing left behind on failure; isb's default recipe
+  (`isb-workspace`: Ubuntu 24.04, dev uid 1000 with sudo, openssh-server,
+  mise with node/bun/uv system-wide, Claude Code, Codex, herdr, all under
+  /usr/local) is the default image where it exists, and the create form
+  offers to build it; a first-boot `setup` script per workspace (run once as
+  root after create/rebuild, state on the workspace, `workspace.setup` in
+  the history, `workspace_setup_run`); web terminal tabs as herdr sessions
+  when the workspace has herdr (`&session=NAME`, `workspace_terminals`,
+  `workspace_terminal_update`; detach or end on close; plain shells
+  otherwise). **Verified** on titan with a scratch `isb serve`: the default
+  image built in 83 s (632 MiB), rebuilt as up to date, `rm dev-base`
+  refused, a failing recipe left no container or image; a workspace from it
+  with a setup script (succeeded, marker and package present, history row
+  with output), claude 2.1.288, codex 0.160.0, herdr 0.9.3, mise, node, bun,
+  uv as `dev`; the web terminal in herdr mode survived a reload (same shell,
+  variable and scrollback), detach then reattach, end through the tool;
+  rebuild to dev-base re-ran the setup and switched the tab to plain shells;
+  the create form's Build button built the image with its log.
 - [ ] Workspace follow-ups: `isb host setup` on titan for port 8481 (not
   run: the rule is in the code); titan's `--workspace-home-root
   /srv/workspaces` and migrating clem with `home_bind`; a workspace on an org placed on a server
-  (the agent runs it and serves the bridge; untested); W3's terminal
-  reattach and ports; SSH to orgs placed on a server; Access credentials in
+  (the agent runs it and serves the bridge; untested); W3's ports;
+  workspace images on a server-placed org's server (the image tools build on
+  the control plane's host); a Setup panel on the workspace page (re-run,
+  edit; today the CLI and tools); SSH to orgs placed on a server; Access credentials in
   `isb ssh-proxy`.
 
 ## Release 1.0
@@ -561,7 +586,7 @@ minime only runs binaries downloaded from our CI runs.
 Finishing this workstream is isb **1.0.0** (Stephan, 2026-10-03), not another 0.x.
 
 - [ ] Land the in-flight branches on `platform` (default org always `isb-default`, the EA theme and wordmark) and the docs pass that follows.
-- [ ] Workspaces W5 (workspace images/templates) and W6 (the per-org Docker exception), or an explicit decision to ship 1.0 without them.
+- [ ] Workspaces W6 (the per-org Docker exception), or an explicit decision to ship 1.0 without it. W5 (recipe images, the default image, first-boot scripts) and herdr-backed terminal reattach are on `ws-images`.
 - [ ] Remote-server gaps: SSH and volume backups for orgs placed on a server; upgrading server agents and dedicated VMs.
 - [ ] Full CI green on `platform`, integration tests on titan, a fresh-host install test on a new hcloud box (README quick start as written).
 - [ ] PR `platform` → `main` with release notes (the user-visible changes since 0.7, and breaking changes: the default org, the crate split).

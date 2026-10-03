@@ -35,6 +35,8 @@ struct CreateArgs {
     token_role: Option<Role>,
     #[serde(default)]
     home_bind: Option<String>,
+    #[serde(default)]
+    setup: Option<String>,
 }
 
 pub(super) fn check_size(what: &str, s: &str) -> Result<()> {
@@ -108,6 +110,8 @@ fn checked(a: CreateArgs, c: &Caller) -> Result<Workspace> {
         return Err(Error::invalid("home_bind must be an absolute host path"));
     }
     let t = now();
+    let setup = super::setup::check_setup(a.setup)?;
+    let setup_state = ws::setup_next(setup.is_some(), None, ws::SetupEvent::Built, t)?;
     Ok(Workspace {
         name,
         id: random_hex(8),
@@ -128,6 +132,8 @@ fn checked(a: CreateArgs, c: &Caller) -> Result<Workspace> {
         updated_at: t,
         rebuilt_at: None,
         token: None,
+        setup,
+        setup_state,
     })
 }
 
@@ -302,6 +308,8 @@ pub(super) fn workspace_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value
         format!("workspace {name} created from {}", w.image),
         json!({"image": w.image, "token_role": role}),
     );
+    drop(_g);
+    wsm.kick_setup(&org, name);
     let mut v = view(d, &org, &w, false);
     v["log"] = json!(log);
     v["message"] = json!(format!(

@@ -163,11 +163,16 @@ what an event in its org touches.
 
 `/orgs/ORG/workspace[/TAB]`, over the `workspace_*` tools
 ([workspaces](../concepts/workspaces.md)). With no workspace yet, the page is
-the create form: image (suggestions `dev-base`, `images:ubuntu/24.04`),
-name, user, CPUs, memory, root size, home size, the token's role (viewer,
-member, admin; admin by default, with what each grants) and environment,
+the create form: image (the host's images with their descriptions,
+`isb-workspace` first when it is built, or another), name, user, CPUs,
+memory, root size, home size, the token's role (viewer, member, admin; admin
+by default, with what each grants), a first-boot script and environment,
 with the org's placement (where it runs, its project, network and limits)
-shown read-only. Members and viewers see the form read-only with why.
+shown read-only. When the host lacks isb's default image, the form says so
+and platform admins get **Build the default image**, which follows the
+build's log and picks the image when it is published ([Workspace
+images](../guides/workspace-images.md)). Members and viewers see the form
+read-only with why.
 
 The header shows the status, image, user, live sessions and sandbox count.
 Members get Start, Stop and Restart; admins also Rebuild (type the name) and
@@ -178,7 +183,7 @@ live sessions it would end, in the dialog; confirming calls again with
 
 | Tab | Shows |
 |---|---|
-| **Terminal** | Shells as tabs: **New** opens another as the workspace user in its home; tabs you are not looking at stay connected, and closing one ends its shell. A sandbox's **Shell** (Sandboxes tab) opens as its own tab, as root. Leaving or reloading the page ends its shells: there is no reattach. Not for viewers. |
+| **Terminal** | Shells as tabs: **New** opens another as the workspace user in its home; tabs you are not looking at stay connected. With herdr in the workspace each tab is a herdr session: a reload or a dropped connection reattaches to the same shell, and closing a tab asks whether to detach or end it; without herdr, closing a tab or leaving the page ends its shell. The tab says which ([The web terminal](../concepts/workspaces.md#the-web-terminal)). A sandbox's **Shell** (Sandboxes tab) opens as its own tab, as root. Not for viewers. |
 | **Connect** | The workspace's MCP credential: role, created, last used, path inside (`/run/isb/token`), id, audit actor `workspace`, and Rotate for admins (no token value is ever shown); the variables login shells get; MCP client snippets for use inside the workspace (`$ISB_URL/orgs/ORG/mcp`, `$ISB_TOKEN`); SSH and herdr: `isb key add`, `isb workspace ssh-config`, `ssh NAME.ORG.isb` and the `herdr machine add` line ([SSH](../guides/ssh.md)). |
 | **Resources** | CPU, memory, disk, address, last activity, sessions, a CPU sparkline; admins resize CPUs, memory and the root disk (confirmed). |
 | **Home** | The volume, pool and its driver, size, mount path (or the host folder); admins grow it (confirmed). For a volume home, the Volume panel: snapshots, backups and staged restores, with a warning on a pool where every snapshot is a full copy. |

@@ -48,6 +48,9 @@ every flag and field is in the [Reference](../reference/index.md).
   org; agents in a workspace and the sandboxes they make.
 - [SSH and herdr](ssh.md): plain `ssh`, `scp` and herdr into any instance of
   an org, with the keys on your isb account.
+- [Workspace images and recipes](workspace-images.md): build the images
+  workspaces start from, isb's default one (Claude Code, Codex, herdr,
+  mise), and first-boot scripts.
 - [Servers and dedicated VMs](servers.md): run orgs on other hosts, or in a VM
   of their own, from one control plane.
 
