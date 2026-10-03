@@ -22,7 +22,7 @@ import { relativeTime } from "@/lib/format";
 import { useMe } from "@/lib/session";
 import { cn } from "@/lib/utils";
 import { type App, appState, type Deployment, isGit, keys, serviceOf, type StackDetail, useApps, useLatestDeployments, useProjects, useStack } from "./api";
-import { AppStateBadge, ConfirmDialog, Crumbs, DeploymentBadge, EmptyState, LiveIndicator, QueryError, TabLinks } from "./components";
+import { AppStateBadge, ConfirmDialog, Crumbs, DeploymentBadge, EmptyState, QueryError, TabLinks } from "./components";
 import { useOrgLive } from "./live";
 import { NewAppDialog } from "./new-app-dialog";
 import { NewEnvironmentDialog } from "./project-dialogs";
@@ -35,7 +35,7 @@ export function ProjectPage() {
   const writer = canWrite(useMe().data!, org);
   const projects = useProjects(org);
   const apps = useApps(org);
-  const live = useOrgLive(org);
+  useOrgLive(org);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [newApp, setNewApp] = useState(false);
@@ -75,7 +75,6 @@ export function ProjectPage() {
         description={p.description || `Environments run as their own stacks; apps in one reach each other by name.`}
         actions={
           <>
-            <LiveIndicator state={live} />
             {writer && (
               <Button onClick={() => setNewApp(true)}>
                 <Plus />

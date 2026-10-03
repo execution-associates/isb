@@ -1,13 +1,15 @@
 // The Deployments tab: history, newest first, with rollback.
 import { ChevronRight, GitCommitHorizontal, History, Package, RotateCcw } from "lucide-react";
-import { useState } from "react";
-import { Link } from "react-router";
+import { useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { dateTime, relativeTime } from "@/lib/format";
 import { type App, currentOf, type Deployment, finished, useDeployments } from "./api";
-import { useDeploy } from "./use-deploy";
+import { isMine, queuedEvent } from "./follow";
+import { splitStack, useLiveEvents } from "./live";
+import { deploymentPath, useDeploy } from "./use-deploy";
 import { ConfirmDialog, DeploymentBadge, EmptyState, QueryError } from "./components";
 import { duration, imageName, shortDigest, shortSha } from "./util";
 
@@ -27,6 +29,16 @@ export function DeploymentsTab({ org, app }: { org: string; app: App }) {
   const current = currentOf(deps.data?.deployments, deps.data?.current ?? app.current_deployment);
   const list = deps.data?.deployments ?? [];
   const o = encodeURIComponent(org);
+  const navigate = useNavigate();
+  const since = useMemo(() => Date.now(), []);
+
+  // A deployment that starts while you look at the list (a webhook push, a
+  // teammate) opens at once, its log following.
+  useLiveEvents((e) => {
+    if (e.at < since || e.service !== app.name || splitStack(e.stack).org !== org) return;
+    const q = queuedEvent(e.message);
+    if (q && q.app === app.name && !isMine(org, q.app, q.id)) navigate(deploymentPath(org, q.app, q.id));
+  });
 
   if (deps.isLoading) return <Skeleton className="h-64" />;
   if (deps.error) return <QueryError error={deps.error} />;

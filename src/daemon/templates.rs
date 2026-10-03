@@ -296,9 +296,27 @@ impl Templates {
             Some(t) => crate::flex::parse_duration(t).map_err(Error::invalid)?,
             None => Duration::from_secs(1800),
         };
-        let (apps, org2, order) = (self.apps.clone(), org.clone(), plan.order.clone());
-        let run = move || deploy_in_order(&apps, &org2, &order, trigger, &by, timeout);
         out["instance"] = serde_json::to_value(&inst)?;
+        // Without `wait`, the first app's deploy is queued before answering,
+        // so the caller can open its live log at once.
+        let first = match (a.wait, plan.order.first()) {
+            (false, Some(name)) => {
+                match self
+                    .apps
+                    .deploy(org, name, trigger, &by, Some("template".into()))
+                {
+                    Ok(d) => {
+                        out["first_deployment"] = json!({"app": name, "id": d.id});
+                        Some(d.id)
+                    }
+                    // The background run tries again and logs why.
+                    Err(_) => None,
+                }
+            }
+            _ => None,
+        };
+        let (apps, org2, order) = (self.apps.clone(), org.clone(), plan.order.clone());
+        let run = move || deploy_in_order(&apps, &org2, &order, first, trigger, &by, timeout);
         if a.wait {
             let results = run();
             out["deployments"] = json!(results);
@@ -357,19 +375,25 @@ fn default_instance(id: &str) -> String {
 
 /// Deploy apps one after another, each waiting for the one before (so a
 /// database is up before the app that needs it). Stops at a failure.
+/// Deploy `order` one app after another, stopping at the first that does
+/// not finish done. `first` is the first app's deployment when the caller
+/// already queued it.
 fn deploy_in_order(
     apps: &Apps,
     org: &OrgId,
     order: &[String],
+    first: Option<u64>,
     trigger: Trigger,
     by: &str,
     timeout: Duration,
 ) -> Vec<Value> {
     let mut out = Vec::new();
-    for name in order {
-        let d = apps
-            .deploy(org, name, trigger, by, Some("template".into()))
-            .and_then(|d| apps.wait(org, name, d.id, timeout));
+    for (i, name) in order.iter().enumerate() {
+        let queued = match (i, first) {
+            (0, Some(id)) => apps.deployment(org, name, id),
+            _ => apps.deploy(org, name, trigger, by, Some("template".into())),
+        };
+        let d = queued.and_then(|d| apps.wait(org, name, d.id, timeout));
         match d {
             Ok(d) => {
                 let ok = d.status == Status::Done;
@@ -506,7 +530,7 @@ pub fn register(r: &mut Registry, t: Templates) -> Result<()> {
     tool!(
         "template_deploy",
         "Deploy a template",
-        "Deploy a template into a project environment as apps (made if missing): <name>-<app> per app (the main app just <name>), generated passwords and keys stored as org secrets tpl.<name>.<var>, then each app deployed in dependency order. dry_run=true returns the plan (apps, secrets by name, variables, URLs, notes) and changes nothing. Returns at once unless wait=true.",
+        "Deploy a template into a project environment as apps (made if missing): <name>-<app> per app (the main app just <name>), generated passwords and keys stored as org secrets tpl.<name>.<var>, then each app deployed in dependency order. dry_run=true returns the plan (apps, secrets by name, variables, URLs, notes) and changes nothing. Returns at once unless wait=true, with the first app's queued deployment as first_deployment {app, id} so its log can be followed from the first line.",
         obj(
             json!({
                 "template": {"type": "string", "description": "catalog/id, or a bare id."},

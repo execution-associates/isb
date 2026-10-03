@@ -1,61 +1,39 @@
 // Building blocks shared by the app pages.
-import { ChevronRight, CircleAlert, Loader2, Radio } from "lucide-react";
+import { ChevronRight, CircleAlert, Loader2 } from "lucide-react";
 import { Fragment, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 import type { StreamState } from "@/api/events";
 import { FormError } from "@/components/form";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge, StatusDot } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { type Crumb, setCrumbs } from "@/lib/crumbs";
 import { errorMessage } from "@/lib/messages";
+import { DEPLOYMENT_LABEL, DEPLOYMENT_TONE, inProgress, type Tone as StatusTone } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import type { AppState, DeploymentStatus } from "./api";
 
-const TONE = {
-  ok: "bg-success/12 text-success border-success/30",
-  warn: "bg-warning/12 text-warning border-warning/30",
-  bad: "bg-destructive/10 text-destructive border-destructive/30",
-  busy: "bg-sky-500/10 text-sky-600 border-sky-500/30 dark:text-sky-400",
-  idle: "bg-muted text-muted-foreground border-border",
-} as const;
-
-type Tone = keyof typeof TONE;
-
-const DOT: Record<Tone, string> = {
-  ok: "bg-success",
-  warn: "bg-warning",
-  bad: "bg-destructive",
-  busy: "bg-sky-500",
-  idle: "bg-muted-foreground/50",
-};
+// The app pages' tone names, mapped onto the shared vocabulary
+// (lib/status.ts) so every page colours status the same way.
+type Tone = "ok" | "warn" | "bad" | "busy" | "idle";
+const TONE_OF: Record<Tone, StatusTone> = { ok: "success", warn: "warning", bad: "danger", busy: "info", idle: "neutral" };
 
 export function ToneBadge({ tone, children, pulse, className }: { tone: Tone; children: ReactNode; pulse?: boolean; className?: string }) {
   return (
-    <Badge variant="outline" className={cn("gap-1.5 font-medium", TONE[tone], className)}>
-      <span className={cn("size-1.5 rounded-full", DOT[tone], pulse && "animate-pulse")} />
+    <StatusBadge tone={TONE_OF[tone]} pulse={pulse} className={className}>
       {children}
-    </Badge>
+    </StatusBadge>
   );
 }
 
-const DEPLOY_TONE: Record<DeploymentStatus, Tone> = {
-  queued: "idle",
-  building: "busy",
-  deploying: "busy",
-  done: "ok",
-  failed: "bad",
-  superseded: "idle",
-};
-
-export function DeploymentBadge({ status }: { status: DeploymentStatus }) {
-  const busy = status === "building" || status === "deploying" || status === "queued";
+export function DeploymentBadge({ status, className }: { status: DeploymentStatus; className?: string }) {
   return (
-    <ToneBadge tone={DEPLOY_TONE[status]} pulse={busy} className="capitalize">
-      {status}
-    </ToneBadge>
+    <StatusBadge tone={DEPLOYMENT_TONE[status]} pulse={inProgress(status)} className={className}>
+      {DEPLOYMENT_LABEL[status]}
+    </StatusBadge>
   );
 }
 
@@ -80,36 +58,51 @@ export function AppStateBadge({ state, className }: { state: AppState; className
 }
 
 export const appStateTone = (s: AppState): Tone => APP_STATE[s][0];
+export const appStateLabel = (s: AppState): string => APP_STATE[s][1];
 
-export function Dot({ tone, className, title }: { tone: Tone; className?: string; title?: string }) {
-  return <span title={title} className={cn("inline-block size-2 shrink-0 rounded-full", DOT[tone], className)} />;
+export function Dot({ tone, className, title, pulse }: { tone: Tone; className?: string; title?: string; pulse?: boolean }) {
+  return <StatusDot tone={TONE_OF[tone]} className={className} title={title} pulse={pulse} />;
 }
 
+/** The event stream's state: a quiet dot, not a button-sized chip. */
 export function LiveIndicator({ state }: { state: StreamState }) {
   const live = state === "live";
   return (
     <span
-      className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-xs text-muted-foreground"
+      className="inline-flex h-8 items-center gap-2 rounded-full px-2 text-xs font-medium text-muted-foreground"
       title={live ? "Receiving live updates" : "Connecting to live updates"}
     >
-      {live ? <Radio className="size-3.5 text-success" /> : <Loader2 className="size-3.5 animate-spin" />}
+      {live ? <StatusDot tone="success" pulse /> : <Loader2 className="size-3 animate-spin" />}
       {live ? "Live" : state === "reconnecting" ? "Reconnecting" : "Connecting"}
     </span>
   );
 }
 
-export function Crumbs({ items }: { items: { label: ReactNode; to?: string }[] }) {
+/** Declares the page's breadcrumb trail; the shell's top bar shows it. */
+export function Crumbs({ items }: { items: Crumb[] }) {
+  const key = JSON.stringify(items);
+  useEffect(() => {
+    setCrumbs(JSON.parse(key) as Crumb[]);
+    return () => setCrumbs(null);
+  }, [key]);
+  return null;
+}
+
+/** A breadcrumb trail, as the top bar draws it. */
+export function CrumbTrail({ items, className }: { items: Crumb[]; className?: string }) {
   return (
-    <nav aria-label="Breadcrumb" className="mb-3 flex min-w-0 flex-wrap items-center gap-1 text-sm text-muted-foreground">
+    <nav aria-label="Breadcrumb" className={cn("flex min-w-0 items-center gap-1 text-sm text-muted-foreground", className)}>
       {items.map((it, i) => (
         <Fragment key={i}>
-          {i > 0 && <ChevronRight className="size-3.5 shrink-0 opacity-60" />}
-          {it.to ? (
-            <Link to={it.to} className="truncate hover:text-foreground">
+          {i > 0 && <ChevronRight className="size-3.5 shrink-0 opacity-50" />}
+          {it.to && i < items.length - 1 ? (
+            <Link to={it.to} className="truncate rounded-sm transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none">
               {it.label}
             </Link>
           ) : (
-            <span className="truncate text-foreground">{it.label}</span>
+            <span className="truncate font-medium text-foreground" aria-current={i === items.length - 1 ? "page" : undefined}>
+              {it.label}
+            </span>
           )}
         </Fragment>
       ))}
@@ -135,15 +128,15 @@ export function Section({
 }) {
   return (
     <Card className={cn("gap-0 py-0", className)}>
-      <CardHeader className="flex flex-row items-start justify-between gap-4 px-5 pt-5 pb-4">
+      <CardHeader className="flex flex-col items-start justify-between gap-3 px-5 pt-5 pb-4 sm:flex-row">
         <div className="min-w-0 space-y-1">
-          <CardTitle className="text-base">{title}</CardTitle>
-          {description && <CardDescription>{description}</CardDescription>}
+          <CardTitle className="text-[15px] font-semibold tracking-tight">{title}</CardTitle>
+          {description && <CardDescription className="text-[13px] leading-relaxed">{description}</CardDescription>}
         </div>
-        {actions && <div className="flex shrink-0 gap-2">{actions}</div>}
+        {actions && <div className="flex shrink-0 flex-wrap gap-2">{actions}</div>}
       </CardHeader>
       <CardContent className="px-5 pb-5">{children}</CardContent>
-      {footer && <div className="flex flex-wrap items-center justify-end gap-2 border-t bg-muted/30 px-5 py-3">{footer}</div>}
+      {footer && <div className="flex flex-wrap items-center justify-end gap-2 rounded-b-xl border-t bg-muted/40 px-5 py-3">{footer}</div>}
     </Card>
   );
 }
@@ -153,22 +146,30 @@ export function EmptyState({
   title,
   children,
   action,
+  compact,
 }: {
   icon: typeof CircleAlert;
   title: string;
   children?: ReactNode;
   action?: ReactNode;
+  /** Less padding, for an empty list inside a card. */
+  compact?: boolean;
 }) {
   return (
-    <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
-      <div className="flex size-12 items-center justify-center rounded-full border bg-muted/50">
-        <Icon className="size-5 text-muted-foreground" />
+    <div className={cn("flex flex-col items-center text-center", compact ? "gap-2 px-6 py-8" : "gap-3 px-6 py-12")}>
+      <div
+        className={cn(
+          "flex items-center justify-center rounded-xl border bg-gradient-to-b from-muted/40 to-muted shadow-xs",
+          compact ? "size-9" : "size-11",
+        )}
+      >
+        <Icon className={cn("text-muted-foreground", compact ? "size-4" : "size-5")} />
       </div>
       <div className="space-y-1">
-        <p className="font-medium">{title}</p>
-        {children && <div className="mx-auto max-w-md text-sm text-muted-foreground">{children}</div>}
+        <p className="text-sm font-semibold">{title}</p>
+        {children && <div className="mx-auto max-w-md text-[13px] leading-relaxed text-muted-foreground">{children}</div>}
       </div>
-      {action}
+      {action && <div className="mt-1 flex flex-wrap justify-center gap-2">{action}</div>}
     </div>
   );
 }

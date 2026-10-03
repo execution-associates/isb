@@ -751,13 +751,27 @@ impl Apps {
 
     /// A deployment's log from byte `offset`: `(text, next offset, finished)`.
     pub fn log(&self, org: &OrgId, app: &str, id: u64, offset: u64) -> Result<(String, u64, bool)> {
+        let (text, next, d) = self.log_and_record(org, app, id, offset)?;
+        Ok((text, next, d.status.finished()))
+    }
+
+    /// [`Apps::log`] with the deployment record read just before the log,
+    /// so a client follows the text and the status in one call: a record
+    /// that says finished means the text holds every line.
+    pub fn log_and_record(
+        &self,
+        org: &OrgId,
+        app: &str,
+        id: u64,
+        offset: u64,
+    ) -> Result<(String, u64, Deployment)> {
         let d = self.deployment(org, app, id)?;
         let b = std::fs::read(self.log_path(org, app, id)).unwrap_or_default();
         let start = (offset as usize).min(b.len());
         Ok((
             String::from_utf8_lossy(&b[start..]).into_owned(),
             b.len() as u64,
-            d.status.finished(),
+            d,
         ))
     }
 
@@ -1631,6 +1645,12 @@ mod tests {
         assert!(d.image.is_some());
         let (log, _, done) = ap.log(&org, "web", 1, 0).unwrap();
         assert!(done && log.contains("image docker:traefik/whoami"), "{log}");
+        // The record comes with the text, so one call follows both.
+        let (rest, next, rec) = ap.log_and_record(&org, "web", 1, 4).unwrap();
+        assert_eq!((rec.id, rec.status), (1, Status::Failed));
+        assert_eq!(next as usize, log.len());
+        assert_eq!(rest, log[4..]);
+        assert!(rec.summary().get("rendered").is_none());
         let ds = ap.deployments(&org, "web").unwrap();
         assert_eq!(ds.len(), 1);
 

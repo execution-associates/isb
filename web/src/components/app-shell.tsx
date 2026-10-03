@@ -1,10 +1,16 @@
-import { Bell, Check, ChevronsUpDown, DatabaseBackup, FolderKanban, KeyRound, LayoutDashboard, LayoutTemplate, LogOut, Menu, Monitor, Moon, ScrollText, Settings, ShieldCheck, Sun, UserRound, Users } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { Check, ChevronsUpDown, LogOut, Menu, Monitor, Moon, Search, ShieldCheck, Sun, UserRound } from "lucide-react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router";
+import { toast } from "sonner";
 import type { Me } from "@/api/auth";
+import { isMine, queuedEvent } from "@/apps/follow";
+import { CrumbTrail } from "@/apps/components";
+import { splitStack, useLiveEvents } from "@/apps/live";
+import { deploymentPath } from "@/apps/use-deploy";
 import { Logo } from "@/components/brand";
+import { CommandPaletteProvider, SECTIONS, usePalette } from "@/components/command-palette";
+import { StatusDot } from "@/components/status";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -21,6 +27,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { crumbsFor, useCrumbs } from "@/lib/crumbs";
 import { initials } from "@/lib/format";
 import { setTheme, type Theme, useTheme } from "@/lib/theme";
 import { defaultOrg, roleIn, useMe, useSetupNeeded, useSignOut } from "@/lib/session";
@@ -51,7 +58,7 @@ export function Home() {
 
 function FatalError({ error }: { error: unknown }) {
   return (
-    <div className="flex min-h-svh items-center justify-center p-6 text-center">
+    <div className="flex min-h-svh items-center justify-center bg-background p-6 text-center">
       <div className="max-w-sm space-y-3">
         <Logo className="mx-auto" />
         <h1 className="text-lg font-semibold">Can't reach isb</h1>
@@ -66,13 +73,21 @@ function FatalError({ error }: { error: unknown }) {
 
 function ShellSkeleton() {
   return (
-    <div className="flex min-h-svh">
-      <div className="hidden w-64 border-r bg-sidebar p-4 md:block">
-        <Skeleton className="h-10" />
+    <div className="flex min-h-svh bg-sidebar">
+      <div className="hidden w-60 space-y-3 p-3 md:block">
+        <Skeleton className="h-8 w-24" />
+        <Skeleton className="h-11" />
+        <Skeleton className="h-8" />
+        <div className="space-y-1.5 pt-3">
+          {Array.from({ length: 7 }, (_, i) => (
+            <Skeleton key={i} className="h-7" />
+          ))}
+        </div>
       </div>
-      <div className="flex-1 space-y-4 p-8">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-32" />
+      <div className="m-2 flex-1 space-y-4 rounded-xl border bg-background p-8 md:ml-0">
+        <Skeleton className="h-7 w-48" />
+        <Skeleton className="h-4 w-80" />
+        <Skeleton className="h-40" />
       </div>
     </div>
   );
@@ -84,6 +99,21 @@ function useCurrentOrg(me: Me): string | null {
   return org ?? defaultOrg(me);
 }
 
+function OrgMark({ name, className }: { name: string; className?: string }) {
+  // A stable hue per org name, so orgs are told apart at a glance.
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return (
+    <span
+      className={cn("flex shrink-0 items-center justify-center rounded-md text-xs font-semibold text-white uppercase shadow-xs", className)}
+      style={{ background: `linear-gradient(135deg, oklch(0.62 0.13 ${h}), oklch(0.5 0.13 ${(h + 40) % 360}))` }}
+      aria-hidden
+    >
+      {name.slice(0, 1)}
+    </span>
+  );
+}
+
 function OrgSwitcher({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
   const current = useCurrentOrg(me);
   const navigate = useNavigate();
@@ -93,26 +123,20 @@ function OrgSwitcher({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
-          className="flex w-full items-center gap-3 rounded-lg border bg-background px-2.5 py-2 text-left text-sm shadow-xs transition-colors hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+          className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none data-[state=open]:bg-sidebar-accent"
           aria-label="Switch org"
         >
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-foreground text-sm font-semibold text-background uppercase">
-            {(current ?? "?").slice(0, 1)}
+          {current ? <OrgMark name={current} className="size-7" /> : <span className="size-7 rounded-md bg-muted" />}
+          <span className="min-w-0 flex-1 leading-tight">
+            <span className="block truncate text-[13px] font-semibold">{current ?? "No org"}</span>
+            <span className="block truncate text-[11px] text-muted-foreground capitalize">{current ? (roleIn(me, current) ?? "") : "Ask for an invitation"}</span>
           </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate font-medium">{current ?? "No org"}</span>
-            <span className="block truncate text-xs text-muted-foreground">
-              {current ? (roleIn(me, current) ?? "") : "Ask for an invitation"}
-            </span>
-          </span>
-          <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
+          <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-(--radix-dropdown-menu-trigger-width) min-w-56">
-        <DropdownMenuLabel className="text-xs text-muted-foreground">Orgs</DropdownMenuLabel>
-        {me.orgs.length === 0 && (
-          <DropdownMenuItem disabled>You aren't in any org yet</DropdownMenuItem>
-        )}
+        <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">Orgs</DropdownMenuLabel>
+        {me.orgs.length === 0 && <DropdownMenuItem disabled>You aren't in any org yet</DropdownMenuItem>}
         {me.orgs.map((o) => (
           <DropdownMenuItem
             key={o}
@@ -121,19 +145,31 @@ function OrgSwitcher({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
               onNavigate?.();
             }}
           >
-            <span className="flex size-6 items-center justify-center rounded border text-xs font-medium uppercase">
-              {o.slice(0, 1)}
-            </span>
+            <OrgMark name={o} className="size-5 text-[10px]" />
             <span className="flex-1 truncate">{o}</span>
             {o === current && <Check className="size-4" />}
           </DropdownMenuItem>
         ))}
+        {me.platform_admin && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => {
+                navigate("/admin/orgs");
+                onNavigate?.();
+              }}
+            >
+              <ShieldCheck />
+              Manage orgs
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
-function NavItem({ to, icon: Icon, children, onNavigate, end }: { to: string; icon: typeof Menu; children: ReactNode; onNavigate?: () => void; end?: boolean }) {
+function NavItem({ to, icon: Icon, children, onNavigate, end, shortcut }: { to: string; icon: typeof Menu; children: ReactNode; onNavigate?: () => void; end?: boolean; shortcut?: string }) {
   return (
     <NavLink
       to={to}
@@ -141,21 +177,30 @@ function NavItem({ to, icon: Icon, children, onNavigate, end }: { to: string; ic
       onClick={onNavigate}
       className={({ isActive }) =>
         cn(
-          "flex items-center gap-3 rounded-md px-2.5 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-          isActive && "bg-sidebar-accent text-sidebar-accent-foreground",
+          "group/nav relative flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+          isActive && "bg-sidebar-accent text-sidebar-accent-foreground shadow-xs",
         )
       }
     >
-      <Icon className="size-4" />
-      {children}
+      {({ isActive }) => (
+        <>
+          <Icon className={cn("size-4 shrink-0", isActive ? "text-brand" : "text-muted-foreground group-hover/nav:text-foreground")} />
+          <span className="flex-1 truncate">{children}</span>
+          {shortcut && (
+            <kbd className="hidden font-sans text-[10px] text-muted-foreground/70 opacity-0 transition-opacity group-hover/nav:opacity-100 md:inline">
+              G {shortcut.toUpperCase()}
+            </kbd>
+          )}
+        </>
+      )}
     </NavLink>
   );
 }
 
 function NavSection({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="grid gap-1">
-      <div className="truncate px-2.5 pb-1 text-xs font-medium text-muted-foreground/80">{label}</div>
+    <div className="grid gap-0.5">
+      <div className="truncate px-2.5 pt-1 pb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground/80 uppercase">{label}</div>
       {children}
     </div>
   );
@@ -172,28 +217,24 @@ function UserMenu({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
-          className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-sm transition-colors hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+          className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none data-[state=open]:bg-sidebar-accent"
           aria-label="Account menu"
         >
-          <Avatar className="size-8 rounded-md">
-            <AvatarFallback className="rounded-md text-xs">{initials(me.user.name, me.user.email)}</AvatarFallback>
+          <Avatar className="size-7 rounded-full">
+            <AvatarFallback className="rounded-full bg-gradient-to-br from-muted to-accent text-[11px] font-semibold">{initials(me.user.name, me.user.email)}</AvatarFallback>
           </Avatar>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate font-medium">{me.user.name || me.user.email.split("@")[0]}</span>
-            <span className="block truncate text-xs text-muted-foreground">{me.user.email}</span>
+          <span className="min-w-0 flex-1 leading-tight">
+            <span className="block truncate text-[13px] font-medium">{me.user.name || me.user.email.split("@")[0]}</span>
+            <span className="block truncate text-[11px] text-muted-foreground">{me.user.email}</span>
           </span>
-          <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
+          <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-(--radix-dropdown-menu-trigger-width) min-w-56">
         <DropdownMenuLabel className="font-normal">
           <div className="flex items-center gap-2">
-            <span className="truncate font-medium">{me.user.email}</span>
-            {me.platform_admin && (
-              <Badge variant="secondary" className="ml-auto shrink-0">
-                admin
-              </Badge>
-            )}
+            <span className="truncate text-xs text-muted-foreground">{me.user.email}</span>
+            {me.platform_admin && <span className="ml-auto shrink-0 rounded-full bg-brand/15 px-1.5 py-0.5 text-[10px] font-medium text-brand">admin</span>}
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
@@ -206,6 +247,17 @@ function UserMenu({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
           <UserRound />
           Account
         </DropdownMenuItem>
+        {me.platform_admin && (
+          <DropdownMenuItem
+            onSelect={() => {
+              navigate("/admin");
+              onNavigate?.();
+            }}
+          >
+            <ShieldCheck />
+            Platform
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
             <ThemeIcon className="size-4 text-muted-foreground" />
@@ -229,108 +281,184 @@ function UserMenu({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
   );
 }
 
+function SearchButton({ className }: { className?: string }) {
+  const open = usePalette();
+  const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+  return (
+    <button
+      onClick={() => open(true)}
+      className={cn(
+        "flex h-8 w-full items-center gap-2 rounded-md border bg-background px-2.5 text-[13px] text-muted-foreground shadow-xs transition-colors hover:border-foreground/15 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+        className,
+      )}
+      aria-label="Search and commands"
+    >
+      <Search className="size-3.5" />
+      <span className="flex-1 text-left">Search…</span>
+      <kbd className="rounded border bg-muted px-1 font-sans text-[10px] font-medium">{mac ? "⌘" : "Ctrl"} K</kbd>
+    </button>
+  );
+}
+
 function SidebarContent({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
   const org = useCurrentOrg(me);
+  const o = org ? encodeURIComponent(org) : "";
+  const known = !!org && me.orgs.includes(org);
+  const [main, manage] = [SECTIONS.slice(0, 5), SECTIONS.slice(5)];
   return (
-    <div className="flex h-full flex-col gap-4 p-3">
-      <Link to="/" onClick={onNavigate} className="flex items-center gap-2.5 px-2 pt-1 font-semibold tracking-tight">
-        <Logo className="size-7" />
-        <span className="text-lg">isb</span>
+    <div className="flex h-full flex-col gap-3 px-3 pt-3 pb-2">
+      <Link to="/" onClick={onNavigate} className="flex h-8 items-center gap-2 px-1.5 font-semibold tracking-tight" aria-label="isb home">
+        <Logo className="size-6" />
+        <span className="text-[15px]">isb</span>
       </Link>
       <OrgSwitcher me={me} onNavigate={onNavigate} />
-      <nav className="grid gap-4" aria-label="Main">
-        {org && me.orgs.includes(org) && (
-          <NavSection label={org}>
-            <NavItem to={`/orgs/${encodeURIComponent(org)}`} icon={LayoutDashboard} onNavigate={onNavigate} end>
-              Overview
-            </NavItem>
-            <NavItem to={`/orgs/${encodeURIComponent(org)}/projects`} icon={FolderKanban} onNavigate={onNavigate}>
-              Projects
-            </NavItem>
-            <NavItem to={`/orgs/${encodeURIComponent(org)}/templates`} icon={LayoutTemplate} onNavigate={onNavigate}>
-              Templates
-            </NavItem>
-            <NavItem to={`/orgs/${encodeURIComponent(org)}/backups`} icon={DatabaseBackup} onNavigate={onNavigate}>
-              Backups
-            </NavItem>
-            <NavItem to={`/orgs/${encodeURIComponent(org)}/notifications`} icon={Bell} onNavigate={onNavigate}>
-              Notifications
-            </NavItem>
-            <NavItem to={`/orgs/${encodeURIComponent(org)}/members`} icon={Users} onNavigate={onNavigate}>
-              Members
-            </NavItem>
-            <NavItem to={`/orgs/${encodeURIComponent(org)}/secrets`} icon={KeyRound} onNavigate={onNavigate}>
-              Secrets
-            </NavItem>
-            <NavItem to={`/orgs/${encodeURIComponent(org)}/settings`} icon={Settings} onNavigate={onNavigate}>
-              Settings
-            </NavItem>
-            <NavItem to={`/orgs/${encodeURIComponent(org)}/history`} icon={ScrollText} onNavigate={onNavigate}>
-              History
+      <SearchButton />
+      <nav className="-mx-1 grid flex-1 content-start gap-4 overflow-y-auto px-1 pt-1" aria-label="Main">
+        {known && (
+          <>
+            <NavSection label="Org">
+              {main.map((s) => (
+                <NavItem key={s.path} to={`/orgs/${o}${s.path}`} icon={s.icon} onNavigate={onNavigate} end={s.path === ""} shortcut={s.key}>
+                  {s.label}
+                </NavItem>
+              ))}
+            </NavSection>
+            <NavSection label="Manage">
+              {manage.map((s) => (
+                <NavItem key={s.path} to={`/orgs/${o}${s.path}`} icon={s.icon} onNavigate={onNavigate} shortcut={s.key}>
+                  {s.label}
+                </NavItem>
+              ))}
+            </NavSection>
+          </>
+        )}
+        {me.platform_admin && (
+          <NavSection label="Platform">
+            <NavItem to="/admin" icon={ShieldCheck} onNavigate={onNavigate}>
+              Orgs, users, server
             </NavItem>
           </NavSection>
         )}
-        <NavSection label="You">
-          {me.platform_admin && (
-            <NavItem to="/admin" icon={ShieldCheck} onNavigate={onNavigate}>
-              Platform
-            </NavItem>
-          )}
-          <NavItem to="/account" icon={UserRound} onNavigate={onNavigate}>
-            Account
-          </NavItem>
-        </NavSection>
       </nav>
-      <div className="mt-auto border-t pt-3">
+      <div className="border-t pt-2">
         <UserMenu me={me} onNavigate={onNavigate} />
       </div>
     </div>
   );
 }
 
+/** The top bar's trail: the page's own, or one made from the path. */
+function TopCrumbs() {
+  const declared = useCrumbs();
+  const { pathname } = useLocation();
+  const items = declared ?? crumbsFor(pathname);
+  return <CrumbTrail items={items} className="min-w-0 flex-1" />;
+}
+
+/**
+ * Deployments someone else started (a git push to the webhook, a teammate,
+ * an agent) while you are in their org: a toast that opens the live log.
+ */
+function DeployWatcher({ org }: { org: string | null }) {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  // The feed replays recent events on connect; only news counts.
+  const since = useMemo(() => Date.now(), []);
+  useLiveEvents((e) => {
+    if (!org || e.level === "log" || e.at < since || splitStack(e.stack).org !== org) return;
+    const q = queuedEvent(e.message);
+    if (!q || isMine(org, q.app, q.id)) return;
+    // Already watching that app's deployments: its page follows by itself.
+    if (pathname.startsWith(`/orgs/${encodeURIComponent(org)}/apps/${q.app}/deployments`)) return;
+    toast(`${q.app}: deployment #${q.id} started`, {
+      description: q.by.startsWith("webhook") ? `From a ${q.by.replace("webhook:", "")} push` : `By ${q.by}`,
+      action: { label: "Watch", onClick: () => navigate(deploymentPath(org, q.app, q.id)) },
+      duration: 8000,
+    });
+  });
+  return null;
+}
+
 export function AppShell({ me }: { me: Me }) {
   const [open, setOpen] = useState(false);
+  const org = useCurrentOrg(me);
+  const { pathname } = useLocation();
+  // A new page starts at the top (React Router keeps the old scroll).
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
   return (
-    <div className="min-h-svh bg-background md:grid md:grid-cols-[16rem_minmax(0,1fr)]">
-      <aside className="hidden border-r bg-sidebar md:block">
-        <div className="sticky top-0 h-svh">
-          <SidebarContent me={me} />
+    <CommandPaletteProvider me={me}>
+      <div className="min-h-svh bg-sidebar md:grid md:grid-cols-[15rem_minmax(0,1fr)]">
+        <aside className="hidden md:block">
+          <div className="sticky top-0 h-svh">
+            <SidebarContent me={me} />
+          </div>
+        </aside>
+        <Sheet open={open} onOpenChange={setOpen}>
+          <SheetContent side="left" className="w-72 bg-sidebar p-0">
+            <SheetTitle className="sr-only">Navigation</SheetTitle>
+            <SheetDescription className="sr-only">Orgs, pages and your account</SheetDescription>
+            <SidebarContent me={me} onNavigate={() => setOpen(false)} />
+          </SheetContent>
+        </Sheet>
+        <div className="flex min-h-svh min-w-0 flex-col bg-background md:my-2 md:mr-2 md:min-h-[calc(100svh-1rem)] md:rounded-xl md:border md:shadow-sm">
+          <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b bg-background/85 px-3 backdrop-blur-md supports-[backdrop-filter]:bg-background/70 md:rounded-t-xl md:px-6">
+            <Button variant="ghost" size="icon-sm" className="-ml-1 md:hidden" onClick={() => setOpen(true)} aria-label="Open navigation">
+              <Menu />
+            </Button>
+            <Link to="/" className="md:hidden" aria-label="isb home">
+              <Logo className="size-6" />
+            </Link>
+            <TopCrumbs />
+            <TopRight />
+          </header>
+          <main className="mx-auto w-full max-w-6xl flex-1 px-4 pt-6 pb-16 sm:px-6 lg:px-10 lg:pt-8">
+            <Outlet />
+          </main>
         </div>
-      </aside>
-      <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="left" className="w-72 bg-sidebar p-0">
-          <SheetTitle className="sr-only">Navigation</SheetTitle>
-          <SheetDescription className="sr-only">Orgs, pages and your account</SheetDescription>
-          <SidebarContent me={me} onNavigate={() => setOpen(false)} />
-        </SheetContent>
-      </Sheet>
-      <div className="flex min-w-0 flex-col">
-        <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur md:hidden">
-          <Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="Open navigation">
-            <Menu />
-          </Button>
-          <Link to="/" className="flex items-center gap-2 font-semibold">
-            <Logo className="size-6" />
-            isb
-          </Link>
-        </header>
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 lg:px-10 lg:py-10">
-          <Outlet />
-        </main>
       </div>
+      <DeployWatcher org={org && me.orgs.includes(org) ? org : null} />
+    </CommandPaletteProvider>
+  );
+}
+
+function TopRight() {
+  const open = usePalette();
+  const state = useLiveEvents(() => {});
+  const live = state === "live";
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+      <span
+        className="hidden items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-medium text-muted-foreground sm:inline-flex"
+        title={live ? "Receiving live updates" : "Connecting to live updates"}
+      >
+        <StatusDot tone={live ? "success" : "warning"} pulse={live} className="size-1.5" />
+        {live ? "Live" : state === "reconnecting" ? "Reconnecting" : "Connecting"}
+      </span>
+      <Button variant="ghost" size="icon-sm" className="md:hidden" onClick={() => open(true)} aria-label="Search and commands">
+        <Search />
+      </Button>
     </div>
   );
 }
 
-/** A page's title row. */
-export function PageHeader({ title, description, actions }: { title: ReactNode; description?: ReactNode; actions?: ReactNode }) {
+/**
+ * A page's title row: the title (with a badge or two), a one-line
+ * description, and the page's actions; on phones the actions wrap under
+ * the title, full width.
+ */
+export function PageHeader({ title, description, actions, icon }: { title: ReactNode; description?: ReactNode; actions?: ReactNode; icon?: ReactNode }) {
   return (
-    <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-      <div className="min-w-0 space-y-1">
-        <h1 className="flex flex-wrap items-center gap-2 text-2xl font-semibold tracking-tight">{title}</h1>
-        {description && <p className="text-sm text-muted-foreground">{description}</p>}
+    <div className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex min-w-0 items-start gap-3.5">
+        {icon}
+        <div className="min-w-0 space-y-1">
+          <h1 className="flex flex-wrap items-center gap-2.5 text-xl font-semibold tracking-tight sm:text-2xl">{title}</h1>
+          {description && <div className="max-w-2xl text-[13px] leading-relaxed text-muted-foreground sm:text-sm">{description}</div>}
+        </div>
       </div>
-      {actions && <div className="flex shrink-0 flex-wrap gap-2">{actions}</div>}
+      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
     </div>
   );
 }

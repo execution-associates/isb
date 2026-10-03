@@ -473,7 +473,7 @@ pub fn register(r: &mut Registry, apps: Apps) -> Result<()> {
     tool!(
         "app_deployment_log",
         "A deployment's log",
-        "A deployment's log (git, build and rollout lines) from byte `offset`. Returns the text, the offset to ask from next, and whether the deployment has finished: poll until done. The same lines stream on the events feed as level `log`.",
+        "A deployment's log (git, build and rollout lines) from byte `offset`. Returns the text, the offset to ask from next, whether the deployment has finished, and its record (status, image, commit, timings; read before the text, so a finished record means the text is complete): poll until done. The same lines stream on the events feed as level `log`.",
         obj(
             json!({
                 "name": {"type": "string"},
@@ -497,9 +497,14 @@ pub fn register(r: &mut Registry, apps: Apps) -> Result<()> {
             }
             let org = org_of(&a)?;
             let a: A = args(a)?;
-            let (log, next, done) = ap.log(&org, &a.name, a.deployment, a.offset)?;
-            let status = ap.deployment(&org, &a.name, a.deployment)?.status;
-            Ok(json!({"log": log, "offset": next, "finished": done, "status": status}))
+            let (log, next, d) = ap.log_and_record(&org, &a.name, a.deployment, a.offset)?;
+            Ok(json!({
+                "log": log,
+                "offset": next,
+                "finished": d.status.finished(),
+                "status": d.status,
+                "deployment": d.summary(),
+            }))
         }
     );
     tool!(

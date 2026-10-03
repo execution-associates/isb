@@ -10,7 +10,7 @@ import { canWrite } from "@/lib/admin";
 import { relativeTime } from "@/lib/format";
 import { useMe } from "@/lib/session";
 import { useProjects } from "./api";
-import { Dot, EmptyState, LiveIndicator, QueryError, ToneBadge } from "./components";
+import { Dot, EmptyState, QueryError, ToneBadge } from "./components";
 import { HEALTH_LABEL, HEALTH_TONE, projectHealth, stackHealth, useStackList } from "./health";
 import { useOrgLive } from "./live";
 import { NewProjectDialog } from "./project-dialogs";
@@ -19,7 +19,7 @@ export function ProjectsPage() {
   const { org = "" } = useParams();
   const projects = useProjects(org);
   const stacks = useStackList();
-  const live = useOrgLive(org);
+  useOrgLive(org);
   const [open, setOpen] = useState(false);
   const writer = canWrite(useMe().data!, org);
   const list = projects.data ?? [];
@@ -32,7 +32,6 @@ export function ProjectsPage() {
         description="Each project holds environments, and each environment runs its apps."
         actions={
           <>
-            <LiveIndicator state={live} />
             {writer && (
               <Button onClick={() => setOpen(true)}>
                 <Plus />

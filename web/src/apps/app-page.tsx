@@ -1,8 +1,8 @@
 // /orgs/:org/apps/:app/:tab: one app, with its header (state, Deploy, Stop)
 // and tabs. Deployment logs live under the Deployments tab.
 import { useQueryClient } from "@tanstack/react-query";
-import { Activity, Boxes, CalendarClock, Database, DatabaseBackup, GitPullRequest, Globe, History, Loader2, Play, Rocket, ScrollText, Settings2, SlidersHorizontal, Square, TerminalSquare, Variable } from "lucide-react";
-import { lazy, Suspense, useState } from "react";
+import { Activity, ArrowRight, ArrowUpRight, Boxes, CalendarClock, Database, DatabaseBackup, GitBranch, GitPullRequest, Globe, History, Loader2, Package, Play, Rocket, ScrollText, Server, Settings2, SlidersHorizontal, Square, TerminalSquare, Variable } from "lucide-react";
+import { lazy, Suspense, useEffect, useReducer, useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
@@ -13,20 +13,22 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { canWrite } from "@/lib/admin";
 import { errorMessage } from "@/lib/messages";
 import { useMe } from "@/lib/session";
-import { type App, appState, isGit, isNotFound, keys, serviceOf, useApp, useDeployments, useStack } from "./api";
+import { type App, appState, type Deployment, finished, isGit, isNotFound, keys, serviceOf, useApp, useDeployments, useStack } from "./api";
 import { AdvancedTab } from "./app-advanced";
 import { DomainsTab } from "./app-domains";
 import { EnvironmentTab } from "./app-environment";
 import { GeneralTab } from "./app-general";
 import { LogsTab } from "./app-logs";
 import { MonitoringTab } from "./app-monitoring";
-import { AppStateBadge, ConfirmDialog, Crumbs, EmptyState, LiveIndicator, QueryError, TabLinks } from "./components";
+import { AppStateBadge, ConfirmDialog, Crumbs, EmptyState, QueryError, TabLinks } from "./components";
 import { DeploymentPage } from "./deployment-page";
-import { DeploymentsTab } from "./deployments-tab";
-import { useOrgLive } from "./live";
+import { DeploymentsTab, elapsed } from "./deployments-tab";
+import { splitStack, useLiveEvents, useOrgLive } from "./live";
+import { deploymentLine, stripAnsi } from "./logstream";
 import { engineLabel, isDatabase } from "@/data/api";
-import { useDeploy } from "./use-deploy";
-import { imageName } from "./util";
+import { deploymentPath, useDeploy } from "./use-deploy";
+import { duration, imageName } from "./util";
+import { DEPLOYMENT_LABEL } from "@/lib/status";
 
 const TABS = [
   { id: "database", label: "Database", icon: Database },
@@ -66,16 +68,22 @@ export type TabId = (typeof TABS)[number]["id"];
 export function AppPage() {
   const { org = "", app: name = "", tab = "general", id } = useParams();
   const app = useApp(org, name);
-  const live = useOrgLive(org);
+  useOrgLive(org);
   const o = encodeURIComponent(org);
   // Viewers read: no terminal (the server refuses it to them anyway).
   const writer = canWrite(useMe().data!, org);
 
   if (app.isLoading) {
     return (
-      <div className="space-y-4">
-        <Skeleton className="h-6 w-60" />
-        <Skeleton className="h-10 w-80" />
+      <div className="space-y-6">
+        <div className="flex items-center gap-3.5">
+          <Skeleton className="size-11 rounded-xl" />
+          <div className="space-y-2">
+            <Skeleton className="h-6 w-44" />
+            <Skeleton className="h-4 w-72" />
+          </div>
+        </div>
+        <Skeleton className="h-9 w-full max-w-2xl" />
         <Skeleton className="h-64" />
       </div>
     );
@@ -112,7 +120,7 @@ export function AppPage() {
           { label: a.name },
         ]}
       />
-      <AppHeader org={org} app={a} live={<LiveIndicator state={live} />} writer={writer} />
+      <AppHeader org={org} app={a} writer={writer} viewing={active === "deployments" && id ? Number(id) : undefined} />
       <TabLinks active={active} tabs={tabs.map((t) => ({ ...t, to: `/orgs/${o}/apps/${a.name}/${t.id}` }))} />
       <Suspense fallback={<Skeleton className="h-64" />}>
         {active === "database" && <DatabaseTab org={org} app={a} />}
@@ -136,7 +144,7 @@ export function AppPage() {
   );
 }
 
-function AppHeader({ org, app, live, writer }: { org: string; app: App; live: React.ReactNode; writer: boolean }) {
+function AppHeader({ org, app, writer, viewing }: { org: string; app: App; writer: boolean; viewing?: number }) {
   const stack = useStack(org, app.stack);
   const deps = useDeployments(org, app.name, 5);
   const qc = useQueryClient();
@@ -148,10 +156,12 @@ function AppHeader({ org, app, live, writer }: { org: string; app: App; live: Re
   const state = appState(svc, latest);
   const db = (app.source as { database?: { engine: string; version?: string } }).database;
   const src = isGit(app.source)
-    ? `${app.source.git.url} @ ${app.source.git.ref}`
+    ? `${app.source.git.url.replace(/^https?:\/\//, "").replace(/\.git$/, "")} @ ${app.source.git.ref}`
     : db
       ? `${engineLabel(db.engine)} ${db.version ?? ""}`.trim()
       : imageName(app.source.image);
+  const url = (svc?.domains ?? []).map((d) => d.url).find(Boolean);
+  const SourceIcon = isGit(app.source) ? GitBranch : db ? Database : Package;
 
   const start = async () => {
     setStarting(true);
@@ -169,6 +179,11 @@ function AppHeader({ org, app, live, writer }: { org: string; app: App; live: Re
   return (
     <>
       <PageHeader
+        icon={
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border bg-gradient-to-b from-background to-muted shadow-xs">
+            {db ? <Database className="size-5 text-muted-foreground" /> : <Boxes className="size-5 text-muted-foreground" />}
+          </span>
+        }
         title={
           <>
             <span className="truncate">{app.name}</span>
@@ -176,38 +191,48 @@ function AppHeader({ org, app, live, writer }: { org: string; app: App; live: Re
           </>
         }
         description={
-          <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="truncate font-mono text-xs">{src}</span>
-            <span className="text-xs">
-              {svc ? `${svc.healthy}/${svc.replicas} healthy` : "not running"} · service <span className="font-mono">{app.service_name}</span>
+          <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
+            <span className="flex min-w-0 items-center gap-1.5">
+              <SourceIcon className="size-3.5 shrink-0" />
+              <span className="truncate font-mono text-xs">{src}</span>
             </span>
+            <span className="flex items-center gap-1.5">
+              <Server className="size-3.5 shrink-0" />
+              {svc ? `${svc.healthy}/${svc.replicas} healthy` : "not running"}
+            </span>
+            {url && (
+              <a href={url} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-1 font-medium text-foreground underline-offset-4 hover:underline">
+                <span className="truncate">{url.replace(/^https?:\/\//, "")}</span>
+                <ArrowUpRight className="size-3.5 shrink-0" />
+              </a>
+            )}
           </span>
         }
         actions={
-          <>
-            {live}
-            {!writer ? null : state === "stopped" ? (
-              <Button variant="outline" onClick={start} disabled={starting}>
-                {starting ? <Loader2 className="animate-spin" /> : <Play />}
-                Start
-              </Button>
-            ) : (
-              svc && (
-                <Button variant="outline" onClick={() => setStopOpen(true)}>
-                  <Square />
-                  Stop
+          writer && (
+            <>
+              {state === "stopped" ? (
+                <Button variant="outline" onClick={start} disabled={starting}>
+                  {starting ? <Loader2 className="animate-spin" /> : <Play />}
+                  Start
                 </Button>
-              )
-            )}
-            {writer && (
+              ) : (
+                svc && (
+                  <Button variant="outline" onClick={() => setStopOpen(true)}>
+                    <Square />
+                    Stop
+                  </Button>
+                )
+              )}
               <Button onClick={() => deploy.run().catch(() => {})} disabled={deploy.pending}>
                 {deploy.pending ? <Loader2 className="animate-spin" /> : <Rocket />}
                 {app.current_deployment ? "Redeploy" : "Deploy"}
               </Button>
-            )}
-          </>
+            </>
+          )
         }
       />
+      {latest && !finished(latest.status) && latest.id !== viewing && <ActiveDeployment org={org} app={app.name} d={latest} />}
       <ConfirmDialog
         open={stopOpen}
         onOpenChange={setStopOpen}
@@ -221,5 +246,41 @@ function AppHeader({ org, app, live, writer }: { org: string; app: App; live: Re
         }}
       />
     </>
+  );
+}
+
+/**
+ * A deployment in progress while you are on another tab (or it came from a
+ * webhook): its stage, clock and newest log line, one click from its log.
+ */
+function ActiveDeployment({ org, app, d }: { org: string; app: string; d: Deployment }) {
+  const [line, setLine] = useState("");
+  const [, tick] = useReducer((n: number) => n + 1, 0);
+  useLiveEvents((e) => {
+    if (e.service !== app || splitStack(e.stack).org !== org) return;
+    const l = deploymentLine(e.message, app, d.id);
+    if (l !== null) setLine(stripAnsi(l));
+  });
+  useEffect(() => {
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, []);
+  const ms = elapsed(d);
+  return (
+    <Link
+      to={deploymentPath(org, app, d.id)}
+      className="group mb-5 flex animate-fade-up items-center gap-3 rounded-xl border border-info/25 bg-info/[0.06] px-4 py-3 text-sm transition-colors hover:border-info/40 hover:bg-info/10"
+    >
+      <Loader2 className="size-4 shrink-0 animate-spin text-info" />
+      <span className="shrink-0 font-medium">
+        Deployment <span className="font-mono">#{d.id}</span> · {DEPLOYMENT_LABEL[d.status]}
+      </span>
+      <span className="hidden min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground sm:block">{line}</span>
+      <span className="ml-auto shrink-0 font-mono text-xs text-muted-foreground tabular-nums sm:ml-0">{ms !== null ? duration(ms) : ""}</span>
+      <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-info">
+        <span className="hidden sm:inline">View log</span>
+        <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
+      </span>
+    </Link>
   );
 }

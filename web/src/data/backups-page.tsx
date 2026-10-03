@@ -7,7 +7,7 @@ import { Link, useParams } from "react-router";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
 import { keys } from "@/apps/api";
-import { ConfirmDialog, EmptyState, LiveIndicator, QueryError, Section } from "@/apps/components";
+import { ConfirmDialog, EmptyState, QueryError, Section } from "@/apps/components";
 import { useOrgLive } from "@/apps/live";
 import { bytes } from "@/apps/util";
 import { PageHeader } from "@/components/app-shell";
@@ -23,7 +23,7 @@ import { RunBadge, RunLogDialog, RunsTable } from "./runs";
 
 export function BackupsPage() {
   const { org = "" } = useParams();
-  const live = useOrgLive(org);
+  useOrgLive(org);
   const dests = useDestinations(org);
   const backups = useBackups(org);
   const [restoring, setRestoring] = useState(false);
@@ -41,7 +41,6 @@ export function BackupsPage() {
         description="Where databases are backed up to, what runs when, and what was restored."
         actions={
           <>
-            <LiveIndicator state={live} />
             {canWrite && (
               <Button onClick={() => setAdd(true)}>
                 <Plus />

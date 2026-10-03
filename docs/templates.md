@@ -65,6 +65,9 @@ What happens:
 4. **Deploys** run one app after another in dependency order, each waiting
    for the one before to converge (a database is healthy before its app
    starts). A failure stops the rest; `isb app deployments NAME` has the log.
+   Without `wait`, the first app's deployment is queued before
+   `template_deploy` answers, and its id comes back as `first_deployment`
+   (`{app, id}`), so a client can follow its log from the first line.
 
 Nothing is created when anything is in the way (an app or secret of the same
 name, a variable that does not validate). A failure while creating removes
