@@ -464,13 +464,13 @@ minime only runs binaries downloaded from our CI runs.
   **Verify:** deploy to an org placed on the hcloud box from titan's UI.
 - [x] (8423ecc, f48d234, 39d4158, cabc357, bf41199) P5.3 Audit log and finer roles. **Verify:** actions appear in the log
   with the acting user or agent.
-- [x] P5.4 Placement in the web UI: a Servers page (health, resources, orgs,
+- [x] (2cdfda8, 7e6bff1; wizard verified on titan against a throwaway VM, 1.5 min) P5.4 Placement in the web UI: a Servers page (health, resources, orgs,
   detail, remove) with an Add server wizard that follows the bootstrap
   (`server_add` with `wait: false`, `server_provision_get`); placement and
   isolation in the New org dialog, the org list and org Settings.
   **Verify:** add a throwaway box through the wizard; create orgs on each
   placement from the UI.
-- [x] P5.5 Dedicated VMs: `org_create` with `placement: {vm: {...}}`
+- [x] (2cdfda8, 7e6bff1; verified on titan: whoami in vm-plvm, VM from the UI in ~4 min, deleted with its org) P5.5 Dedicated VMs: `org_create` with `placement: {vm: {...}}`
   (`isb org create NAME --vm`) makes an incus VM in `isb-system`, installs
   incus and the control plane's own isb through the incus API, registers it
   as server `vm-NAME` and places the org there; `delete_vm` removes it with
