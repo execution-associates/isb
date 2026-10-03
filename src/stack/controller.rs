@@ -1857,8 +1857,10 @@ impl Worker {
         } else {
             super::secrets::values(&self.inner.secrets, &def.org, &def.secrets, keys)?
         };
-        if !spec.secrets.is_empty() {
-            supervise::push_secrets(sb, spec, &values)?;
+        // An OCI app started before its files arrived: restart it once so
+        // it reads them (the next pass finds them in place).
+        if supervise::push_secrets(sb, spec, &values)? && oci {
+            supervise::restart_app(sb, &self.service, oci)?;
         }
         if spec.command.is_some() && !oci {
             let mut s = spec.clone();
