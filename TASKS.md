@@ -225,7 +225,7 @@ minime only runs binaries downloaded from our CI runs.
 
 ## Phase 3: web UI
 
-- [ ] P3.1 Scaffold: React + Vite + Tailwind + shadcn, bun build, embedded in
+- [~] (subagent p3.1) P3.1 Scaffold: React + Vite + Tailwind + shadcn, bun build, embedded in
   the binary, served by `isb serve`; auth pages (sign in with SSO, GitHub,
   Google, email/password, passkey; create account; lost password).
   **Verify:** sign-in flows in the browser.
