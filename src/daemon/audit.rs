@@ -336,14 +336,82 @@ pub fn register(r: &mut Registry, log: Arc<AuditLog>) -> Result<()> {
             "Walk the audit log's hash chain: ok, how many rows, the head (id and hash: keep a copy elsewhere to pin the log), and the first row that does not check out. Platform admins.",
             json!({"type": "object", "properties": {}, "additionalProperties": false}),
             move |_a: Value, _c: &Caller| -> Result<Value> {
-                let v = log.verify()?;
-                Ok(serde_json::to_value(v)?)
+                let a = log.verify()?;
+                let h = log.history_verify()?;
+                Ok(json!({"ok": a.ok && h.ok, "audit": a, "history": h}))
             },
         )
         .title("Verify the audit log")
         .annotations(json!({"readOnlyHint": true, "openWorldHint": false})),
     )?;
     Ok(())
+}
+
+/// What of the history a caller may read: platform admins and local
+/// callers everything; anyone else the orgs they belong to (any role),
+/// never host-level rows.
+pub fn history_visibility(c: &Caller, org: Option<&str>) -> Result<Visibility> {
+    match c {
+        Caller::Local { .. } => Ok(Visibility::All),
+        Caller::User { principal: p } if p.platform_admin => Ok(Visibility::All),
+        Caller::User { principal: p } => match org {
+            Some(o) => {
+                let o = crate::org::OrgId::new(o)?;
+                if p.role_in(&o).is_some() {
+                    Ok(Visibility::Orgs(vec![o.to_string()]))
+                } else {
+                    Err(Error::Forbidden(format!("no access to org {o}")))
+                }
+            }
+            None => Ok(Visibility::Orgs(
+                p.orgs.iter().map(|(o, _)| o.to_string()).collect(),
+            )),
+        },
+        _ => Err(Error::Forbidden("sign in to read the history".into())),
+    }
+}
+
+/// `history_query`.
+pub fn register_history(r: &mut Registry, log: Arc<AuditLog>) -> Result<()> {
+    r.register(
+        Tool::new(
+            "history_query",
+            "What happened, merged into one timeline: the stack controller's events (deploys, rollouts, health, restarts), incus lifecycle events in every project including changes made outside isb (instance-created/deleted, image-alias-deleted, ...) with who requested them, audit rows (tool calls, sign-ins), and markers for when isb was not watching (serve.started, serve.stopped, incus.gap). Newest first, or oldest first with ascending=true; page with `before` = the `next` you got. `object` finds everything about an instance, image, volume, stack, app or service (substring, or exact=true). correlate=true links incus instance events to the audit row that likely caused them (inferred, by time and name). Org members see their orgs; host-level rows (images, pools, other projects) are for platform admins; audit rows for org owners and admins.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "org": {"type": "string"},
+                    "platform": {"type": "boolean", "description": "Only host-level rows (platform admins)."},
+                    "object": {"type": "string"},
+                    "exact": {"type": "boolean"},
+                    "kind": {"type": "string", "description": "Glob on the kind or audit action: instance-*, deploy.*, secret_*."},
+                    "source": {"type": "string", "description": "audit, controller, incus, marker; comma-separated. Default all."},
+                    "actor": {"type": "string", "description": "Glob on who."},
+                    "since": {"type": "integer", "description": "Unix milliseconds, inclusive."},
+                    "until": {"type": "integer", "description": "Unix milliseconds, exclusive."},
+                    "before": {"type": "string", "description": "The `next` of the previous page."},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000},
+                    "ascending": {"type": "boolean"},
+                    "correlate": {"type": "boolean"}
+                },
+                "additionalProperties": false
+            }),
+            move |a: Value, c: &Caller| -> Result<Value> {
+                let q: crate::history::HistoryQuery = serde_json::from_value(a)
+                    .map_err(|e| Error::invalid(format!("bad arguments: {e}")))?;
+                let hvis = history_visibility(c, q.org.as_deref())?;
+                if q.platform && hvis != Visibility::All {
+                    return Err(Error::Forbidden(
+                        "host-level history is for platform admins".into(),
+                    ));
+                }
+                let avis = visibility(c, q.org.as_deref()).ok();
+                Ok(serde_json::to_value(log.timeline(&q, &hvis, avis.as_ref())?)?)
+            },
+        )
+        .title("History")
+        .annotations(json!({"readOnlyHint": true, "openWorldHint": false})),
+    )
 }
 
 fn param(req: &Request, key: &str) -> Option<String> {
@@ -358,6 +426,9 @@ fn param(req: &Request, key: &str) -> Option<String> {
 /// a session or a token.
 pub fn stream_route(log: Arc<AuditLog>, users: Arc<AuthStore>) -> crate::server::Routes {
     Arc::new(move |req: &Request| {
+        if req.path == "/api/v1/history/stream" {
+            return Some(history_stream(req, &log, &users));
+        }
         if req.path != "/api/v1/audit/stream" {
             return None;
         }
@@ -392,6 +463,7 @@ pub fn stream_route(log: Arc<AuditLog>, users: Arc<AuthStore>) -> crate::server:
             Some(a) => a,
             None => log.head().unwrap_or(0),
         };
+        let mut seen = log.generation();
         Some(Response::stream(
             200,
             "text/event-stream",
@@ -410,12 +482,97 @@ pub fn stream_route(log: Arc<AuditLog>, users: Arc<AuthStore>) -> crate::server:
                     }
                     w.flush()?;
                     if rows.len() < 200 {
-                        log.wait(after, Duration::from_secs(15));
+                        seen = log.wait_change(seen, Duration::from_secs(15));
                     }
                 }
             }),
         ))
     })
+}
+
+/// `GET /api/v1/history/stream?org=ORG&after=AUDIT.HISTORY`: new timeline
+/// items (`event: history`), only what the caller may read; the event id is
+/// the cursor to resume from.
+fn history_stream(req: &Request, log: &Arc<AuditLog>, users: &Arc<AuthStore>) -> Response {
+    use crate::history::Item;
+    if req.method != "GET" {
+        return Response::text(405, "method not allowed").header("Allow", "GET");
+    }
+    let err = |status: u16, code: &str, m: &str| {
+        Response::json(status, &json!({"error": code, "message": m}))
+    };
+    let Some(p) = users.principal_from_request(req) else {
+        return err(401, "unauthenticated", "sign in first");
+    };
+    let caller = Caller::User {
+        principal: Arc::new(p),
+    };
+    let org = param(req, "org").filter(|o| !o.is_empty());
+    let hvis = match history_visibility(&caller, org.as_deref()) {
+        Ok(v) => v,
+        Err(e) => return err(403, "forbidden", &e.to_string()),
+    };
+    let avis = visibility(&caller, org.as_deref()).ok();
+    let start = req
+        .header("last-event-id")
+        .map(String::from)
+        .or_else(|| param(req, "after"))
+        .and_then(|s| {
+            let (a, h) = s.split_once('.')?;
+            Some((a.parse::<i64>().ok()?, h.parse::<i64>().ok()?))
+        });
+    let (mut a_after, mut h_after) = match start {
+        Some(x) => x,
+        None => (log.head().unwrap_or(0), log.history_head().unwrap_or(0)),
+    };
+    let log = log.clone();
+    let mut seen = log.generation();
+    Response::stream(
+        200,
+        "text/event-stream",
+        Box::new(move |w: &mut dyn std::io::Write| {
+            loop {
+                let mut items: Vec<Item> = Vec::new();
+                let rows = log
+                    .history_after(h_after, &hvis, 200)
+                    .map_err(std::io::Error::other)?;
+                if let Some(l) = rows.last() {
+                    h_after = l.id;
+                }
+                items.extend(
+                    rows.into_iter()
+                        .filter(|r| org.is_none() || r.org == org)
+                        .map(Item::from_record),
+                );
+                if let Some(av) = &avis {
+                    let q = Query {
+                        org: org.clone(),
+                        after: Some(a_after),
+                        limit: Some(200),
+                        ..Default::default()
+                    };
+                    let rows = log.list(&q, av).map_err(std::io::Error::other)?;
+                    if let Some(l) = rows.last() {
+                        a_after = l.id;
+                    }
+                    items.extend(rows.into_iter().map(Item::from_audit));
+                }
+                items.sort_by_key(|i| i.time);
+                for it in &items {
+                    let data = serde_json::to_string(it).unwrap_or_default();
+                    write!(
+                        w,
+                        "id: {a_after}.{h_after}\nevent: history\ndata: {data}\n\n"
+                    )?;
+                }
+                if items.is_empty() {
+                    w.write_all(b": keepalive\n\n")?;
+                }
+                w.flush()?;
+                seen = log.wait_change(seen, Duration::from_secs(15));
+            }
+        }),
+    )
 }
 
 /// Records every delivery to `/api/v1/webhooks/<org>/<app>` (actor

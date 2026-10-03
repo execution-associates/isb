@@ -6,7 +6,9 @@ import { PageHeader } from "@/components/app-shell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { canWrite } from "@/lib/admin";
 import { relativeTime } from "@/lib/format";
+import { useMe } from "@/lib/session";
 import { useProjects } from "./api";
 import { Dot, EmptyState, LiveIndicator, QueryError, ToneBadge } from "./components";
 import { HEALTH_LABEL, HEALTH_TONE, projectHealth, stackHealth, useStackList } from "./health";
@@ -19,6 +21,7 @@ export function ProjectsPage() {
   const stacks = useStackList();
   const live = useOrgLive(org);
   const [open, setOpen] = useState(false);
+  const writer = canWrite(useMe().data!, org);
   const list = projects.data ?? [];
   const all = stacks.data?.stacks ?? [];
 
@@ -30,10 +33,12 @@ export function ProjectsPage() {
         actions={
           <>
             <LiveIndicator state={live} />
-            <Button onClick={() => setOpen(true)}>
-              <Plus />
-              New project
-            </Button>
+            {writer && (
+              <Button onClick={() => setOpen(true)}>
+                <Plus />
+                New project
+              </Button>
+            )}
           </>
         }
       />

@@ -584,6 +584,21 @@ impl Client {
         }
     }
 
+    /// Follow `/1.0/events?QUERY` (all projects when the query says so) as
+    /// a websocket. Reads time out every 5 s so a follower can check
+    /// whether to stop; a timeout is not an error.
+    pub fn events_websocket(&self, query: &str) -> Result<tungstenite::WebSocket<UnixStream>> {
+        let stream = self.connect(self.timeouts.request)?;
+        let url = format!("ws://incus/1.0/events?{query}");
+        let (ws, _resp) = tungstenite::client::client(url.as_str(), stream)
+            .map_err(|e| Error::WebSocket(format!("handshake for /1.0/events: {e}")))?;
+        ws.get_ref()
+            .set_read_timeout(Some(Duration::from_secs(5)))?;
+        ws.get_ref()
+            .set_write_timeout(Some(self.timeouts.request))?;
+        Ok(ws)
+    }
+
     /// Open one of an operation's websockets (exec stdin/stdout/stderr/control).
     pub(crate) fn websocket(
         &self,

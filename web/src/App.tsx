@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Link, Route, BrowserRouter, Routes } from "react-router";
+import { Link, Navigate, Route, BrowserRouter, Routes, useParams } from "react-router";
 import { ApiError } from "@/api/client";
 import { appRoutes } from "@/apps/routes";
 import { Home, RequireAuth } from "@/components/app-shell";
@@ -11,7 +11,7 @@ import { AccountPage } from "@/pages/account";
 import { InvitePage } from "@/pages/invite";
 import { LoginPage } from "@/pages/login";
 import { AdminPage } from "@/pages/admin";
-import { OrgAuditPage } from "@/pages/audit";
+import { OrgHistoryPage } from "@/pages/history";
 import { OrgPage } from "@/pages/org";
 import { MembersPage } from "@/pages/org-members";
 import { SecretsPage } from "@/pages/org-secrets";
@@ -29,6 +29,12 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+/** The Audit page became History, filtered to the audit log. */
+function AuditRedirect() {
+  const { org = "" } = useParams();
+  return <Navigate to={`/orgs/${encodeURIComponent(org)}/history?source=audit`} replace />;
+}
 
 function NotFound() {
   return (
@@ -59,7 +65,8 @@ export function App() {
               <Route path="/orgs/:org/members" element={<MembersPage />} />
               <Route path="/orgs/:org/secrets" element={<SecretsPage />} />
               <Route path="/orgs/:org/settings" element={<SettingsPage />} />
-              <Route path="/orgs/:org/audit" element={<OrgAuditPage />} />
+              <Route path="/orgs/:org/history" element={<OrgHistoryPage />} />
+              <Route path="/orgs/:org/audit" element={<AuditRedirect />} />
               <Route path="/admin" element={<AdminPage />} />
               <Route path="/admin/:tab" element={<AdminPage />} />
               <Route path="/account" element={<AccountPage />} />

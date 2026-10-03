@@ -133,7 +133,12 @@ isb token ls [--json] | revoke ID...
 isb audit ls [--org ORG | --platform] [--actor G] [--action G] [--target G] [--outcome ok|error|CODE]
              [--since 24h] [--until 1h] [-n 50] [--json]
 isb audit export [filters]                 every match as JSON lines, oldest first
-isb audit verify                           the hash chain; exit 1 when an entry does not check out
+isb audit verify                           both hash chains (audit, history); exit 1 when an entry does not check out
+
+# the history of isb serve: controller and incus events, audit rows, markers (docs/history.md)
+isb history NAME                           NAME's timeline (instance, image, alias, volume, stack, app), oldest first, with inferred causes
+isb history [--object N [--exact]] [--org ORG | --platform] [--source S,...] [--kind G] [--actor G]
+            [--since 24h] [--until 1h] [-n 50] [--json] [--export]
 
 # macOS: the Lima VM that runs incus and isb serve (docs/macos.md); NAME defaults to isb
 isb machine init [NAME] [--cpus 4] [--memory 4GiB] [--disk 10GiB] [--isb-binary PATH] [--timeout 20m]

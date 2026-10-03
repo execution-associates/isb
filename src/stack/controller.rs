@@ -172,6 +172,10 @@ pub struct Event {
     pub kind: Option<String>,
 }
 
+/// Hears every event as it is emitted. It must not block (the history
+/// queues and returns).
+pub type EventSink = Arc<dyn Fn(&Event) + Send + Sync>;
+
 /// Events kept for late readers.
 const EVENTS_KEPT: usize = 1000;
 
@@ -251,6 +255,8 @@ struct Inner {
     /// When driver-backed secrets are next checked for a new version.
     refresh: Mutex<super::secrets::RefreshSchedule>,
     observer: Option<Arc<dyn Observer>>,
+    /// Where each event also goes: the persistent history.
+    event_sink: Mutex<Option<EventSink>>,
     /// Where each sample also goes: the metrics history.
     metrics_sink: Mutex<Option<std::sync::mpsc::SyncSender<crate::metrics_history::Sample>>>,
 }
@@ -290,6 +296,10 @@ impl Inner {
         };
         if e.1.len() == EVENTS_KEPT {
             e.1.pop_front();
+        }
+        let sink = self.event_sink.lock().unwrap().clone();
+        if let Some(s) = sink {
+            s(&ev);
         }
         e.1.push_back(ev);
     }
@@ -342,6 +352,7 @@ impl Controller {
                 edit: Mutex::new(()),
                 refresh: Mutex::new(Default::default()),
                 observer,
+                event_sink: Mutex::new(None),
                 metrics_sink: Mutex::new(None),
             }),
         };
@@ -566,6 +577,17 @@ impl Controller {
             }
             std::thread::sleep(Duration::from_millis(250));
         }
+    }
+
+    /// Hand every event to `sink` too (the persistent history), starting
+    /// with the ones already kept, so none emitted before it was set is
+    /// missed and none is handed over twice.
+    pub fn set_event_sink(&self, sink: EventSink) {
+        let e = self.inner.events.lock().unwrap();
+        for ev in &e.1 {
+            sink(ev);
+        }
+        *self.inner.event_sink.lock().unwrap() = Some(sink);
     }
 
     /// Send every metrics sample to `tx` too (the metrics history).

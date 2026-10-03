@@ -80,6 +80,9 @@ pub struct ServeConfig {
     pub audit_retention: Duration,
     /// Record read-only tool calls too (secret reads always are).
     pub audit_all: bool,
+    /// How long, and how many, history rows are kept.
+    pub history_retention: Duration,
+    pub history_max_rows: i64,
 }
 
 /// The identity endpoints over `<state>/isb.db`, and the web UI. Provider
@@ -179,10 +182,15 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
             .map_err(|e| Error::invalid(format!("open {}: {e}", db.display())))?,
     );
     let audit_db = crate::audit::db_path(&cfg.state_dir);
-    let audit_log = Arc::new(crate::audit::AuditLog::open(
-        &audit_db,
-        cfg.audit_retention,
-    )?);
+    let audit_log = Arc::new(
+        crate::audit::AuditLog::open(&audit_db, cfg.audit_retention)?
+            .with_history_limits(cfg.history_retention, cfg.history_max_rows),
+    );
+    // The history: markers for the time nobody was watching and for this
+    // start, then incus' lifecycle events from now on.
+    let recorder = crate::history::Recorder::start(audit_log.clone());
+    let stop_history = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    history_start(&audit_log, &recorder, &client, &stop_history);
     eprintln!(
         "isb serve: audit log {} (kept {} days{})",
         audit_db.display(),
@@ -244,6 +252,9 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     });
     let notifier = crate::notify::Notifier::new(&cfg.state_dir, secrets.clone(), resolve)?;
     notifier.start(ctl.clone());
+    // Every controller event goes to the history (the ones already
+    // emitted at startup first).
+    ctl.set_event_sink(recorder.controller_sink());
     // Every metrics sample also goes to the history.
     let history = crate::metrics_history::History::new(&cfg.state_dir);
     ctl.set_metrics_sink(history.start());
@@ -314,6 +325,13 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         )
     });
     let r = crate::server::serve(listeners, registry, healthz);
+    stop_history.store(true, std::sync::atomic::Ordering::Relaxed);
+    recorder.record(crate::history::marker(
+        "serve.stopped",
+        "isb serve stopped: incus events from now on are not observed".into(),
+        json!({"version": env!("CARGO_PKG_VERSION")}),
+    ));
+    recorder.shutdown();
     notifier.shutdown();
     scheduler.shutdown();
     ctl.shutdown();
@@ -321,6 +339,54 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         m.shutdown();
     }
     r
+}
+
+/// Record the gap since the history last heard anything and this start,
+/// then follow incus' lifecycle events until `stop`.
+fn history_start(
+    log: &Arc<crate::audit::AuditLog>,
+    rec: &Arc<crate::history::Recorder>,
+    client: &Client,
+    stop: &Arc<std::sync::atomic::AtomicBool>,
+) {
+    use crate::history::{HistoryQuery, marker};
+    let now = crate::audit::now_ms();
+    let last = log
+        .history_list(
+            &HistoryQuery::default(),
+            &crate::audit::Visibility::All,
+            None,
+            None,
+            1,
+        )
+        .ok()
+        .and_then(|v| v.into_iter().next());
+    if let Some(l) = last {
+        let clean = l.kind == "serve.stopped";
+        let reason = if clean {
+            "isb serve was not running"
+        } else {
+            "isb serve was not running (it did not stop cleanly)"
+        };
+        rec.record(marker(
+            "incus.gap",
+            format!(
+                "incus events between {} and {} were not observed: {reason}",
+                crate::history::fmt_ms(l.time),
+                crate::history::fmt_ms(now),
+            ),
+            json!({"from": l.time, "to": now, "reason": reason}),
+        ));
+    }
+    rec.record(marker(
+        "serve.started",
+        format!("isb serve {} started", env!("CARGO_PKG_VERSION")),
+        json!({"version": env!("CARGO_PKG_VERSION"), "pid": std::process::id()}),
+    ));
+    let (c, r, s) = (client.clone(), rec.clone(), stop.clone());
+    let _ = std::thread::Builder::new()
+        .name("isb-incus-events".into())
+        .spawn(move || crate::history::watch_incus(c, r, s));
 }
 
 /// The external secret drivers, each reading its credentials from the org's
@@ -505,7 +571,10 @@ fn authorize_class(
                     "re-encrypting every org is for platform admins".into(),
                 ));
             }
-            if (CROSS_ORG_READS.contains(&tool) && scope.is_none()) || tool == "audit_list" {
+            if (CROSS_ORG_READS.contains(&tool) && scope.is_none())
+                || tool == "audit_list"
+                || tool == "history_query"
+            {
                 // They filter to what the caller may see themselves.
                 return Ok(args);
             }
@@ -1131,6 +1200,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
         d.apps.clone(),
     )?;
     audit::register(&mut r, d.audit.clone())?;
+    audit::register_history(&mut r, d.audit.clone())?;
     Ok(r)
 }
 

@@ -2,7 +2,6 @@ import { Check, ChevronsUpDown, FolderKanban, KeyRound, LayoutDashboard, LogOut,
 import { type ReactNode, useState } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import type { Me } from "@/api/auth";
-import { canAudit } from "@/lib/admin";
 import { Logo } from "@/components/brand";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -257,11 +256,9 @@ function SidebarContent({ me, onNavigate }: { me: Me; onNavigate?: () => void })
             <NavItem to={`/orgs/${encodeURIComponent(org)}/settings`} icon={Settings} onNavigate={onNavigate}>
               Settings
             </NavItem>
-            {canAudit(me, org) && (
-              <NavItem to={`/orgs/${encodeURIComponent(org)}/audit`} icon={ScrollText} onNavigate={onNavigate}>
-                Audit
-              </NavItem>
-            )}
+            <NavItem to={`/orgs/${encodeURIComponent(org)}/history`} icon={ScrollText} onNavigate={onNavigate}>
+              History
+            </NavItem>
           </NavSection>
         )}
         <NavSection label="You">
