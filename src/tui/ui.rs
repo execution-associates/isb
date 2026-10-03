@@ -1336,6 +1336,7 @@ mod tests {
             stacks: vec![
                 Stack {
                     name: "e2e".into(),
+                    org: "default".into(),
                     deployed_at: now_secs() - 130,
                     deployed_by: "local(uid 1000)".into(),
                     has_previous: true,
@@ -1424,6 +1425,7 @@ mod tests {
             sandboxes: vec![
                 Sandbox {
                     name: "build-box".into(),
+                    project: "default".into(),
                     status: "Running".into(),
                     kind: "container".into(),
                     image: "Ubuntu noble amd64".into(),

@@ -1180,6 +1180,7 @@ fn stack_controller() {
     .unwrap();
     let def = isb::stack::StackDef {
         name: stack.clone(),
+        org: isb::org::OrgId::default_org(),
         file: p.file,
         base_dir: state.path().to_path_buf(),
         secrets: Default::default(),
@@ -1243,4 +1244,66 @@ fn stack_controller() {
         .filter(|i| i.name.starts_with(&stack))
         .count();
     assert_eq!(left, 0);
+}
+
+/// Two orgs: each sees only its own instances, members of one org reach
+/// each other by name, and nothing in one org reaches the other.
+/// Needs `isb host setup` on a host with a default-deny firewall.
+#[test]
+fn orgs_isolate() {
+    if !enabled() {
+        return;
+    }
+    let base = Client::new();
+    let a = isb::org::OrgId::new(format!("isbtest-a{}", std::process::id() % 100000)).unwrap();
+    let b = isb::org::OrgId::new(format!("isbtest-b{}", std::process::id() % 100000)).unwrap();
+    struct Rm(Client, Vec<isb::org::OrgId>);
+    impl Drop for Rm {
+        fn drop(&mut self) {
+            for o in &self.1 {
+                let _ = isb::org::remove(&self.0, o, true, &mut |_| {});
+            }
+        }
+    }
+    let _rm = Rm(base.clone(), vec![a.clone(), b.clone()]);
+    let opts = isb::org::OrgOptions {
+        cpus: Some(4),
+        memory: Some("4GiB".into()),
+        ..Default::default()
+    };
+    isb::org::ensure(&base, &a, &opts, &mut |l| eprintln!("{l}")).unwrap();
+    isb::org::ensure(&base, &b, &opts, &mut |l| eprintln!("{l}")).unwrap();
+    let (ca, cb) = (isb::org::client(&base, &a), isb::org::client(&base, &b));
+    let mk = |c: &Client, n: &str| {
+        let spec =
+            SandboxSpec::new(n, image()).ready(vec![ReadyCheck::Running, ReadyCheck::DefaultRoute]);
+        Sandbox::create(c, &spec).unwrap()
+    };
+    let web = mk(&ca, "web");
+    let _db = mk(&ca, "db");
+    let other = mk(&cb, "other");
+    // Visibility: org b cannot see org a's instances.
+    assert!(Sandbox::get(&cb, "web").is_err());
+    assert_eq!(Sandbox::list(&ca).unwrap().len(), 2);
+    let ip = |sb: &Sandbox| {
+        let o = sb
+            .exec([
+                "sh",
+                "-c",
+                "ip -4 -o addr show eth0 | awk '{print $4}' | cut -d/ -f1",
+            ])
+            .unwrap();
+        o.stdout_text().trim().to_string()
+    };
+    let other_ip = ip(&other);
+    let ping =
+        |sb: &Sandbox, target: &str| sb.exec(["ping", "-c1", "-W2", target]).unwrap().success();
+    assert!(ping(&web, &format!("db.{a}.isb")), "same-org name");
+    assert!(!ping(&web, &other_ip), "cross-org reachable");
+    assert!(!ping(&other, &ip(&web)), "cross-org reachable (b to a)");
+    // A restricted org refuses what would reach the host.
+    let bad = SandboxSpec::new("bad", image()).privileged(true);
+    assert!(Sandbox::create(&ca, &bad).is_err());
+    let bind = SandboxSpec::new("bind", image()).volume("/hostetc", Volume::bind("/etc"));
+    assert!(Sandbox::create(&ca, &bind).is_err());
 }

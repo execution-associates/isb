@@ -252,8 +252,8 @@ impl App {
 
     fn item_name(&self, i: Item) -> String {
         match i {
-            Item::Stack(n) => format!("s:{}", self.ov.stacks[n].name),
-            Item::Sandbox(n) => format!("b:{}", self.ov.sandboxes[n].name),
+            Item::Stack(n) => format!("s:{}", self.ov.stacks[n].qualified()),
+            Item::Sandbox(n) => format!("b:{}", self.ov.sandboxes[n].qualified()),
         }
     }
 
@@ -264,12 +264,12 @@ impl App {
     /// Sidebar rows, filtered: stacks first, then sandboxes.
     pub fn items(&self) -> Vec<Item> {
         let mut v: Vec<Item> = (0..self.ov.stacks.len())
-            .filter(|i| self.matches(&self.ov.stacks[*i].name))
+            .filter(|i| self.matches(&self.ov.stacks[*i].qualified()))
             .map(Item::Stack)
             .collect();
         v.extend(
             (0..self.ov.sandboxes.len())
-                .filter(|i| self.matches(&self.ov.sandboxes[*i].name))
+                .filter(|i| self.matches(&self.ov.sandboxes[*i].qualified()))
                 .map(Item::Sandbox),
         );
         v
@@ -427,12 +427,12 @@ impl App {
     fn open_logs(&mut self) -> Effect {
         let target = if let (Some(st), Some(svc)) = (self.stack(), self.service()) {
             LogTarget::Service {
-                stack: st.name.clone(),
+                stack: st.qualified(),
                 service: svc.service.clone(),
             }
         } else if let Some(sb) = self.sandbox() {
             LogTarget::Sandbox {
-                name: sb.name.clone(),
+                name: sb.qualified(),
                 oci: sb.kind == "oci",
             }
         } else {
@@ -467,7 +467,13 @@ impl App {
                 0
             });
             return match r {
-                Some(r) => Effect::Shell(r.name.clone()),
+                Some(r) => Effect::Shell(format!(
+                    "{}{}",
+                    self.stack()
+                        .map(|s| super::model::org_prefix(&s.org))
+                        .unwrap_or_default(),
+                    r.name
+                )),
                 None => {
                     self.toast("warn", "no replica to open a shell in");
                     Effect::None
@@ -475,7 +481,7 @@ impl App {
             };
         }
         match self.sandbox() {
-            Some(sb) if sb.running() => Effect::Shell(sb.name.clone()),
+            Some(sb) if sb.running() => Effect::Shell(sb.qualified()),
             Some(sb) => {
                 let n = sb.name.clone();
                 self.toast("warn", format!("{n} is not running (t starts it)"));
@@ -489,7 +495,7 @@ impl App {
         let Some(sb) = self.sandbox() else {
             return Effect::None;
         };
-        let name = sb.name.clone();
+        let name = sb.qualified();
         Effect::Run(if sb.running() {
             Action::StopSandbox { name }
         } else {
@@ -505,7 +511,7 @@ impl App {
             title: format!("Scale {}/{}", st.name, svc.service),
             label: format!("replicas (now {})", svc.replicas),
             text: svc.replicas.to_string(),
-            stack: st.name.clone(),
+            stack: st.qualified(),
             service: svc.service.clone(),
         };
         if self.need_daemon() {
@@ -527,7 +533,7 @@ impl App {
                 ),
             ],
             action: Action::Redeploy {
-                stack: st.name.clone(),
+                stack: st.qualified(),
                 service: svc.service.clone(),
             },
             require: None,
@@ -553,7 +559,7 @@ impl App {
                 "the previous deployment rolls back in; b again undoes it".into(),
             )],
             action: Action::Rollback {
-                stack: st.name.clone(),
+                stack: st.qualified(),
             },
             require: None,
             typed: String::new(),
@@ -578,7 +584,7 @@ impl App {
                     ),
                 ],
                 action: Action::RemoveStack {
-                    stack: st.name.clone(),
+                    stack: st.qualified(),
                 },
                 require: Some(st.name.clone()),
                 typed: String::new(),
@@ -598,7 +604,7 @@ impl App {
                     ),
                 ],
                 action: Action::RemoveSandbox {
-                    name: sb.name.clone(),
+                    name: sb.qualified(),
                 },
                 require: Some(sb.name.clone()),
                 typed: String::new(),

@@ -31,6 +31,7 @@ pub struct Host {
 #[serde(default)]
 pub struct Stack {
     pub name: String,
+    pub org: String,
     pub deployed_at: u64,
     pub deployed_by: String,
     pub has_previous: bool,
@@ -149,9 +150,36 @@ pub struct Sandbox {
     pub labels: std::collections::BTreeMap<String, String>,
     pub image: String,
     pub created_at: String,
+    pub project: String,
+}
+
+/// An org's display prefix: nothing for the default org.
+pub fn org_prefix(org: &str) -> String {
+    if org.is_empty() || org == "default" {
+        String::new()
+    } else {
+        format!("{org}/")
+    }
+}
+
+impl Stack {
+    /// `org/name`, or `name` in the default org: how the daemon keys it.
+    pub fn qualified(&self) -> String {
+        format!("{}{}", org_prefix(&self.org), self.name)
+    }
 }
 
 impl Sandbox {
+    pub fn org(&self) -> String {
+        crate::org::OrgId::from_incus_project(&self.project)
+            .map(|o| o.to_string())
+            .unwrap_or_default()
+    }
+
+    pub fn qualified(&self) -> String {
+        format!("{}{}", org_prefix(&self.org()), self.name)
+    }
+
     pub fn running(&self) -> bool {
         self.status.eq_ignore_ascii_case("running")
     }
@@ -170,6 +198,7 @@ impl From<InstanceSample> for Sandbox {
             labels: i.labels,
             image: i.image,
             created_at: i.created_at,
+            project: i.project,
         }
     }
 }

@@ -1415,6 +1415,14 @@ const SHORT: Duration = Duration::from_secs(60);
 
 fn stack(ctx: &Ctx, cmd: StackCmd) -> Result<u8> {
     use serde_json::json;
+    // Every stack tool takes the org; the global --org picks it.
+    let org = ctx.global.org.clone();
+    let call = |tool: &str, mut args: serde_json::Value, timeout: Duration| {
+        if let Some(o) = &org {
+            args["org"] = json!(o);
+        }
+        call(tool, args, timeout)
+    };
     match cmd {
         StackCmd::Deploy {
             name,

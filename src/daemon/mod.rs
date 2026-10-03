@@ -112,8 +112,20 @@ fn args<T: DeserializeOwned>(v: Value) -> Result<T> {
     serde_json::from_value(v).map_err(|e| Error::invalid(format!("bad arguments: {e}")))
 }
 
-fn obj(props: Value, required: &[&str]) -> Value {
+fn obj(mut props: Value, required: &[&str]) -> Value {
+    // Every tool works within one org.
+    props["org"] =
+        json!({"type": "string", "description": "The org to act in (default: default)."});
     json!({"type": "object", "properties": props, "required": required, "additionalProperties": false})
+}
+
+/// A stack's qualified name from a tool's `org` and `name`.
+fn qname(org: &Option<String>, name: &str) -> Result<String> {
+    let org = match org {
+        Some(o) => crate::org::OrgId::new(o.clone())?,
+        None => crate::org::OrgId::default_org(),
+    };
+    Ok(crate::stack::qualified(&org, name))
 }
 
 fn caller_name(c: &Caller) -> String {
@@ -168,9 +180,11 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
         |d: &Daemon, _a: Value, c: &Caller| -> Result<Value> {
             let snap = d.ctl.snapshot();
             let stacks = d.ctl.list();
+            // Only isb's orgs: incus may hold other tools' projects too.
             let sandboxes: Vec<&crate::metrics::InstanceSample> = snap
                 .instances
                 .values()
+                .filter(|i| crate::org::OrgId::from_incus_project(&i.project).is_some())
                 .filter(|i| i.stack().is_none())
                 .filter(|i| {
                     c.is_trusted() || d.policy.any_instance || i.labels.contains_key(LABEL_OWNER)
@@ -238,9 +252,13 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             #[derive(Deserialize)]
             struct A {
                 name: String,
+                #[serde(default)]
+                org: Option<String>,
             }
             let a: A = args(a)?;
-            Ok(serde_json::to_value(d.ctl.status(&a.name)?)?)
+            Ok(serde_json::to_value(
+                d.ctl.status(&qname(&a.org, &a.name)?)?,
+            )?)
         }
     );
     tool!(
@@ -253,9 +271,11 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             #[derive(Deserialize)]
             struct A {
                 name: String,
+                #[serde(default)]
+                org: Option<String>,
             }
             let a: A = args(a)?;
-            let def = d.ctl.definition(&a.name)?;
+            let def = d.ctl.definition(&qname(&a.org, &a.name)?)?;
             Ok(json!({
                 "name": def.name,
                 "base_dir": def.base_dir,
@@ -284,13 +304,15 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             #[derive(Deserialize)]
             struct A {
                 name: String,
+                #[serde(default)]
+                org: Option<String>,
                 service: String,
                 slot: Option<u32>,
                 lines: Option<usize>,
             }
             let a: A = args(a)?;
             let logs = d.ctl.logs(
-                &a.name,
+                &qname(&a.org, &a.name)?,
                 &a.service,
                 a.slot,
                 a.lines.unwrap_or(200).min(5000),
@@ -315,11 +337,14 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             #[derive(Deserialize)]
             struct A {
                 name: String,
+                #[serde(default)]
+                org: Option<String>,
                 service: String,
                 replicas: u32,
             }
             let a: A = args(a)?;
-            d.ctl.scale(&a.name, &a.service, a.replicas)?;
+            d.ctl
+                .scale(&qname(&a.org, &a.name)?, &a.service, a.replicas)?;
             d.ctl.note(
                 "info",
                 &a.name,
@@ -346,10 +371,12 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             #[derive(Deserialize)]
             struct A {
                 name: String,
+                #[serde(default)]
+                org: Option<String>,
                 service: String,
             }
             let a: A = args(a)?;
-            d.ctl.redeploy(&a.name, &a.service)?;
+            d.ctl.redeploy(&qname(&a.org, &a.name)?, &a.service)?;
             d.ctl.note(
                 "info",
                 &a.name,
@@ -368,9 +395,11 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             #[derive(Deserialize)]
             struct A {
                 name: String,
+                #[serde(default)]
+                org: Option<String>,
             }
             let a: A = args(a)?;
-            let changes = d.ctl.rollback(&a.name)?;
+            let changes = d.ctl.rollback(&qname(&a.org, &a.name)?)?;
             d.ctl.note(
                 "info",
                 &a.name,
@@ -393,10 +422,16 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             struct A {
                 name: String,
                 #[serde(default)]
+                org: Option<String>,
+                #[serde(default)]
                 volumes: bool,
             }
             let a: A = args(a)?;
-            d.ctl.remove(&a.name, a.volumes, Duration::from_secs(300))?;
+            d.ctl.remove(
+                &qname(&a.org, &a.name)?,
+                a.volumes,
+                Duration::from_secs(300),
+            )?;
             Ok(json!({"ok": true}))
         }
     );
@@ -428,6 +463,8 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             struct A {
                 #[serde(default)]
                 labels: Vec<String>,
+                #[serde(default)]
+                org: Option<String>,
             }
             let a: A = args(a)?;
             let filters: Vec<_> = a
@@ -435,7 +472,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
                 .iter()
                 .map(|l| crate::sandbox::LabelFilter::parse(l))
                 .collect();
-            let all = Sandbox::list_with(&d.client, &filters)?;
+            let all = Sandbox::list_with(&d.oc(&a.org)?, &filters)?;
             let out: Vec<Value> = all
                 .into_iter()
                 .filter(|i| d.reachable(c, i))
@@ -480,16 +517,19 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             #[derive(Deserialize)]
             struct A {
                 name: String,
+                #[serde(default)]
+                org: Option<String>,
             }
             let a: A = args(a)?;
-            let info = d.reach(c, &a.name)?;
+            let oc = d.oc(&a.org)?;
+            let info = d.reach(c, &oc, &a.name)?;
             if info.config.contains_key("user.isb.stack") {
                 return Err(Error::invalid(format!(
                     "{} belongs to stack {}; scale or remove the stack instead",
                     a.name, info.config["user.isb.stack"]
                 )));
             }
-            Sandbox::remove(&d.client, &a.name, true)?;
+            Sandbox::remove(&oc, &a.name, true)?;
             Ok(json!({"ok": true}))
         }
     );
@@ -542,8 +582,17 @@ impl Daemon {
             || i.config.contains_key(&format!("user.{LABEL_OWNER}"))
     }
 
-    fn reach(&self, c: &Caller, name: &str) -> Result<SandboxInfo> {
-        let info = Sandbox::get(&self.client, name)?.info()?;
+    /// A client on the org a tool call names (default: the default org).
+    fn oc(&self, org: &Option<String>) -> Result<Client> {
+        let org = match org {
+            Some(o) => crate::org::OrgId::new(o.clone())?,
+            None => crate::org::OrgId::default_org(),
+        };
+        Ok(crate::org::client(&self.client, &org))
+    }
+
+    fn reach(&self, c: &Caller, oc: &Client, name: &str) -> Result<SandboxInfo> {
+        let info = Sandbox::get(oc, name)?.info()?;
         if !self.reachable(c, &info) {
             // Indistinguishable from absent, so a remote caller cannot map
             // the host's other instances.
@@ -564,6 +613,8 @@ impl Daemon {
 #[serde(deny_unknown_fields)]
 struct DeployArgs {
     name: String,
+    #[serde(default)]
+    org: Option<String>,
     /// YAML text (remote callers, and anything not pre-resolved).
     #[serde(default)]
     compose: Option<String>,
@@ -648,8 +699,13 @@ fn stack_deploy(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
             })?;
         values.insert(key.clone(), crate::rpc::b64_encode(v.as_bytes()));
     }
+    let org = match &a.org {
+        Some(o) => crate::org::OrgId::new(o.clone())?,
+        None => crate::org::OrgId::default_org(),
+    };
     let def = StackDef {
         name: a.name.clone(),
+        org: org.clone(),
         file,
         base_dir: base,
         secrets: values,
@@ -687,7 +743,7 @@ fn stack_deploy(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         Some(t) => crate::flex::parse_duration(t).map_err(Error::invalid)?,
         None => Duration::from_secs(600),
     };
-    let st = wait_settled(&d.ctl, &a.name, timeout)?;
+    let st = wait_settled(&d.ctl, &crate::stack::qualified(&org, &a.name), timeout)?;
     Ok(json!({"changes": changes, "status": st}))
 }
 
@@ -731,6 +787,8 @@ fn sandbox_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         spec: Value,
         #[serde(default)]
         wait_ready: Option<bool>,
+        #[serde(default)]
+        org: Option<String>,
     }
     let a: A = args(a)?;
     let mut spec = match serde_json::from_value::<SpecArg>(a.spec)
@@ -751,7 +809,7 @@ fn sandbox_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     };
     if !c.is_trusted() {
         d.policy.check_spec(&spec, &base)?;
-        if let Ok(sb) = Sandbox::get(&d.client, &name) {
+        if let Ok(sb) = Sandbox::get(&d.oc(&a.org)?, &name) {
             // Reconciling someone else's instance would be taking it over.
             if !d.reachable(c, &sb.info()?) {
                 return Err(Error::AlreadyExists(name));
@@ -766,7 +824,7 @@ fn sandbox_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     };
     let mut log: Vec<String> = Vec::new();
     let (sb, report) = Sandbox::connect_or_create_with_base(
-        &d.client,
+        &d.oc(&a.org)?,
         &spec,
         &Default::default(),
         &base,
@@ -792,6 +850,8 @@ fn sandbox_exec(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     #[derive(Deserialize)]
     struct A {
         name: String,
+        #[serde(default)]
+        org: Option<String>,
         argv: Vec<String>,
         cwd: Option<String>,
         user: Option<String>,
@@ -801,7 +861,8 @@ fn sandbox_exec(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         timeout: Option<String>,
     }
     let a: A = args(a)?;
-    d.reach(c, &a.name)?;
+    let oc = d.oc(&a.org)?;
+    d.reach(c, &oc, &a.name)?;
     let timeout = match &a.timeout {
         Some(t) => crate::flex::parse_duration(t).map_err(Error::invalid)?,
         None => Duration::from_secs(600),
@@ -813,7 +874,7 @@ fn sandbox_exec(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     if let Some(s) = a.stdin {
         opts.stdin = Stdin::Bytes(s.into_bytes());
     }
-    let sb = Sandbox::get(&d.client, &a.name)?;
+    let sb = Sandbox::get(&oc, &a.name)?;
     let out = match sb.exec_with(a.argv, opts) {
         Err(Error::ExecTimeout { .. }) => {
             return Err(Error::invalid(format!(

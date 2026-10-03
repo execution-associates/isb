@@ -146,6 +146,7 @@ const EVENTS_KEPT: usize = 1000;
 #[derive(Debug, Clone, Default)]
 pub struct Snapshot {
     pub host: crate::metrics::HostSample,
+    /// Keyed by `<project>/<name>`: names are unique per project only.
     pub instances: BTreeMap<String, crate::metrics::InstanceSample>,
     /// Unix milliseconds; 0 before the first sample.
     pub at: u64,
@@ -162,6 +163,7 @@ pub fn now_ms() -> u64 {
 #[derive(Debug, Clone, Serialize)]
 pub struct StackStatus {
     pub name: String,
+    pub org: String,
     pub deployed_at: u64,
     pub deployed_by: String,
     pub has_previous: bool,
@@ -273,7 +275,10 @@ impl Controller {
                         Ok((host, insts)) => {
                             *inner.snapshot.lock().unwrap() = Snapshot {
                                 host,
-                                instances: insts.into_iter().map(|i| (i.name.clone(), i)).collect(),
+                                instances: insts
+                                    .into_iter()
+                                    .map(|i| (format!("{}/{}", i.project, i.name), i))
+                                    .collect(),
                                 at: now_ms(),
                             };
                         }
@@ -354,7 +359,13 @@ impl Controller {
     /// itself happens in the background.
     pub fn deploy(&self, mut def: StackDef) -> Result<Vec<DeployChange>> {
         self.validate(&def)?;
-        let old = self.inner.stacks.lock().unwrap().get(&def.name).cloned();
+        let old = self
+            .inner
+            .stacks
+            .lock()
+            .unwrap()
+            .get(&def.qualified())
+            .cloned();
         if let Some(old) = &old {
             let mut prev = (**old).clone();
             prev.previous = None;
@@ -373,7 +384,7 @@ impl Controller {
     /// Hand a definition to the workers: update existing ones, start new
     /// ones, and tell those whose service is gone to clean up.
     fn apply(&self, def: Arc<StackDef>) {
-        let name = def.name.clone();
+        let name = def.qualified();
         self.inner
             .stacks
             .lock()
@@ -400,7 +411,7 @@ impl Controller {
                         stop: AtomicBool::new(false),
                     });
                     workers.insert(key, shared.clone());
-                    spawn_worker(self.inner.clone(), name.clone(), svc.clone(), shared);
+                    spawn_worker(self.inner.clone(), &def, svc.clone(), shared);
                 }
             }
         }
@@ -417,10 +428,10 @@ impl Controller {
     /// its named volumes too. Returns once the workers have cleaned up (or
     /// after `timeout`).
     pub fn remove(&self, name: &str, volumes: bool, timeout: Duration) -> Result<()> {
-        if self.inner.stacks.lock().unwrap().remove(name).is_none() {
+        let Some(def) = self.inner.stacks.lock().unwrap().remove(name) else {
             return Err(Error::NotFound(format!("stack {name}")));
-        }
-        self.inner.store.remove(name)?;
+        };
+        self.inner.store.remove(&def.org, &def.name)?;
         let ws: Vec<Arc<WorkerShared>> = self
             .inner
             .workers
@@ -541,7 +552,8 @@ impl Controller {
             .collect();
         let converged = services.iter().all(|s| s.state == "converged");
         Ok(StackStatus {
-            name: name.to_string(),
+            name: def.name.clone(),
+            org: def.org.to_string(),
             deployed_at: def.deployed_at,
             deployed_by: def.deployed_by.clone(),
             has_previous: def.previous.is_some(),
@@ -562,11 +574,12 @@ impl Controller {
         let spec = def.service(service)?;
         let oci = crate::plan::ImageSource::parse(&spec.image)?.is_oci();
         let mut out = BTreeMap::new();
-        for i in list_instances(&self.inner.client, name, Some(service))? {
+        let oc = crate::org::client(&self.inner.client, &def.org);
+        for i in list_instances(&oc, &def.name, Some(service))? {
             if slot.is_some_and(|s| s != i.slot) {
                 continue;
             }
-            let sb = Sandbox::get(&self.inner.client, &i.name)?;
+            let sb = Sandbox::get(&oc, &i.name)?;
             let text = supervise::logs(&sb, service, oci, lines)
                 .unwrap_or_else(|e| format!("(no logs: {e})"));
             out.insert(i.name, text);
@@ -818,7 +831,12 @@ struct InstRt {
 /// A service's worker.
 struct Worker {
     inner: Arc<Inner>,
+    /// The stack's own name: labels and instance names use it.
     stack: String,
+    /// `org/stack`: the controller's key, and how events name it.
+    q: String,
+    /// A client on the stack's org (its incus project).
+    oclient: Client,
     service: String,
     shared: Arc<WorkerShared>,
     rt: BTreeMap<String, InstRt>,
@@ -844,12 +862,16 @@ struct Worker {
     deps_met: bool,
 }
 
-fn spawn_worker(inner: Arc<Inner>, stack: String, service: String, shared: Arc<WorkerShared>) {
-    let name = format!("isb-{stack}-{service}");
+fn spawn_worker(inner: Arc<Inner>, def: &StackDef, service: String, shared: Arc<WorkerShared>) {
+    let (stack, q) = (def.name.clone(), def.qualified());
+    let oclient = crate::org::client(&inner.client, &def.org);
+    let name = format!("isb-{q}-{service}");
     let r = std::thread::Builder::new().name(name).spawn(move || {
         let mut w = Worker {
             inner,
             stack,
+            q,
+            oclient,
             service,
             shared,
             rt: BTreeMap::new(),
@@ -879,17 +901,17 @@ impl Worker {
     }
 
     fn event(&self, level: &str, instance: Option<&str>, msg: &str) {
-        eprintln!("isb serve: {}/{}: {msg}", self.stack, self.service);
+        eprintln!("isb serve: {}/{}: {msg}", self.q, self.service);
         self.inner
-            .emit(level, &self.stack, &self.service, instance, msg.to_string());
+            .emit(level, &self.q, &self.service, instance, msg.to_string());
     }
 
     fn client(&self) -> &Client {
-        &self.inner.client
+        &self.oclient
     }
 
     fn key(&self) -> (String, String) {
-        (self.stack.clone(), self.service.clone())
+        (self.q.clone(), self.service.clone())
     }
 
     fn run(&mut self) {
@@ -1266,7 +1288,7 @@ impl Worker {
                                 None,
                                 &format!("rollout of rev {rev} failed; rolling back"),
                             );
-                            if let Err(e) = ctl.rollback(&self.stack) {
+                            if let Err(e) = ctl.rollback(&self.q) {
                                 self.event("error", None, &format!("rollback failed: {e}"));
                             }
                             return Ok(false);
@@ -1310,7 +1332,7 @@ impl Worker {
     fn waiting_for(&self, spec: &SandboxSpec) -> Option<String> {
         let st = self.inner.status.lock().unwrap();
         for (dep, d) in &spec.depends_on {
-            let s = st.get(&(self.stack.clone(), dep.clone()));
+            let s = st.get(&(self.q.clone(), dep.clone()));
             let ok = match d.condition {
                 DependCondition::ServiceStarted => s.is_some_and(|s| s.running > 0),
                 DependCondition::ServiceHealthy => s.is_some_and(|s| s.healthy > 0),
@@ -1544,7 +1566,7 @@ impl Worker {
         let mut s = instance_spec(def, &self.service, spec, slot, rev)?;
         s.name = Some(name.clone());
         let d = crate::sandbox::resolve(self.client(), &s, &def.file.volumes, &def.base_dir)?;
-        let stack = self.stack.clone();
+        let stack = self.q.clone();
         let mut report = |m: &str| eprintln!("isb serve: {stack}: {m}");
         let created =
             crate::sandbox::ensure(self.client(), &d, EnsureOptions::default(), &mut report);
@@ -1690,7 +1712,7 @@ impl Worker {
         let want: BTreeMap<String, Published> = match published(spec) {
             Ok(ps) => ps
                 .into_iter()
-                .map(|p| (format!("{}/{}/{}", self.stack, self.service, p.listen), p))
+                .map(|p| (format!("{}/{}/{}", self.q, self.service, p.listen), p))
                 .collect(),
             Err(e) => {
                 self.message = Some(e.to_string());
@@ -1748,7 +1770,7 @@ impl Worker {
             .iter()
             .map(|i| {
                 let rt = self.rt.get(&i.name);
-                let m = snap.get(&i.name);
+                let m = snap.get(&format!("{}/{}", self.oclient.project_name(), i.name));
                 let health = match (probe, rt.and_then(|r| r.healthy)) {
                     (false, _) => "none",
                     (true, Some(true)) => "healthy",
@@ -1858,6 +1880,7 @@ mod tests {
     fn def(y: &str) -> StackDef {
         StackDef {
             name: "app".into(),
+            org: crate::org::OrgId::default_org(),
             file: serde_yaml_ng::from_str(y).unwrap(),
             base_dir: "/".into(),
             secrets: BTreeMap::new(),

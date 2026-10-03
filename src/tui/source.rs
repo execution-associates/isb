@@ -19,6 +19,21 @@ pub enum Source {
 
 const CALL: Duration = Duration::from_secs(30);
 
+/// `name` and `org` arguments for a qualified stack name (`org/name`).
+fn named(q: &str) -> Value {
+    match q.split_once('/') {
+        Some((org, name)) => json!({"org": org, "name": name}),
+        None => json!({"name": q}),
+    }
+}
+
+fn with(mut base: Value, extra: Value) -> Value {
+    for (k, v) in extra.as_object().into_iter().flatten() {
+        base[k] = v.clone();
+    }
+    base
+}
+
 impl Source {
     /// The daemon if it answers on `socket`, else incus directly.
     pub fn connect(socket: PathBuf) -> Source {
@@ -92,7 +107,10 @@ impl Source {
     pub fn scale(&self, stack: &str, service: &str, replicas: u32) -> Result<()> {
         self.call(
             "stack_scale",
-            json!({"name": stack, "service": service, "replicas": replicas}),
+            with(
+                named(stack),
+                json!({"service": service, "replicas": replicas}),
+            ),
             CALL,
         )
         .map(|_| ())
@@ -108,8 +126,7 @@ impl Source {
     }
 
     pub fn rollback(&self, stack: &str) -> Result<()> {
-        self.call("stack_rollback", json!({"name": stack}), CALL)
-            .map(|_| ())
+        self.call("stack_rollback", named(stack), CALL).map(|_| ())
     }
 
     pub fn remove_stack(&self, stack: &str) -> Result<()> {
@@ -130,7 +147,7 @@ impl Source {
     ) -> Result<Vec<(String, String)>> {
         let v = self.call(
             "stack_logs",
-            json!({"name": stack, "service": service, "lines": lines}),
+            with(named(stack), json!({"service": service, "lines": lines})),
             CALL,
         )?;
         Ok(v["logs"]

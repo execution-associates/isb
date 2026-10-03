@@ -69,8 +69,10 @@ minime only runs binaries downloaded from our CI runs.
   exclude it from backups). Warn without a break-glass recipient.
 - **macOS:** incus runs only on Linux, so isb on a Mac drives incus inside a
   Lima VM it manages (`isb machine init|start|stop|rm|status`, like
-  `podman machine`), with the socket forwarded and home directories shared.
-  The daemon can run on the Mac against that socket.
+  `podman machine`), with the socket forwarded and `$HOME` shared at the same
+  path. `isb serve` runs **inside the VM** (next to the bridges its balancer
+  reaches), with its socket and HTTP port forwarded to the Mac; `isb serve
+  install` on macOS is a LaunchAgent that keeps the machine running.
 - **One API, three surfaces.** Tools are defined once (the MCP registry); a
   REST/JSON API and SSE event stream are generated from the same registry;
   the web UI, TUI, CLI and agents all use it.
@@ -111,14 +113,14 @@ minime only runs binaries downloaded from our CI runs.
   optionalDependencies + `os`, `platformPackage()` in `src/binary.ts`, darwin
   rows in `sdk-typescript.yml`. bun.lock needs the packages published first
   (or regenerated). PyPI darwin wheels are in the workflow, untested until a tag.
-- [ ] P0.2 `isb machine`: Lima-backed incus VM on macOS (init with CPU/memory/
+- [~] (subagent p0.2) P0.2 `isb machine`: Lima-backed incus VM on macOS (init with CPU/memory/
   disk, start, stop, rm, status, ssh), incus installed from Zabbly, socket
   forwarded to `~/.isb/machine/<name>/incus.sock`, `$HOME` shared at the same
   path (so bind mounts work), default socket discovery uses it. Published
   ports reachable from the Mac's localhost. **Verify:** on minime, from
   nothing: `isb machine init && isb up` of the README example, port reachable
   from macOS; `isb tui` works.
-- [ ] P0.3 `isb serve` on macOS: launchd agent install (`isb serve install`
+- [~] (subagent p0.2) P0.3 `isb serve` on macOS: launchd agent install (`isb serve install`
   writes a LaunchAgent plist), balancer listening on the Mac, reaching
   replicas in the VM. **Verify:** a 2-replica stack on minime, curl from
   macOS spreads across both.
