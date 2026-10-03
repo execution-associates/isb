@@ -19,6 +19,7 @@
 //!   `<state>/setup-token` (0600) at startup while no user exists, so whoever
 //!   reaches the port first cannot claim the platform. `isb user create
 //!   --admin` on the host is the other way in.
+//! - **External sign-in and passkeys** are in [`external`].
 
 use std::net::IpAddr;
 use std::path::PathBuf;
@@ -27,7 +28,9 @@ use std::sync::{Arc, Mutex};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use super::oauth::{Provider, ProviderConfig};
 use super::secret::{self, TokenKind};
+use super::webauthn::RelyingParty;
 use super::{AuthError, AuthStore, LoginMeta, NewSession, Principal, PrincipalKind, Role};
 use crate::org::OrgId;
 use crate::server::http::{Peer, Request, Response};
@@ -67,6 +70,12 @@ pub struct ApiConfig {
     pub notifier: Option<Notifier>,
     /// Where the first-run setup token is written while setup is needed.
     pub setup_token_file: Option<PathBuf>,
+    /// External sign-in providers (they need `public_url` for their
+    /// callback URL).
+    pub providers: Vec<ProviderConfig>,
+    /// Let anyone with a verified email from a provider make an account.
+    /// Off: after the first admin, accounts come by invitation.
+    pub open_signup: bool,
 }
 
 impl std::fmt::Debug for ApiConfig {
@@ -75,6 +84,8 @@ impl std::fmt::Debug for ApiConfig {
             .field("public_url", &self.public_url)
             .field("notifier", &self.notifier.is_some())
             .field("setup_token_file", &self.setup_token_file)
+            .field("providers", &self.providers)
+            .field("open_signup", &self.open_signup)
             .finish()
     }
 }
@@ -87,6 +98,11 @@ pub struct AuthApi {
     setup: Mutex<Option<Vec<u8>>>,
     #[cfg(test)]
     setup_plain: Mutex<Option<String>>,
+    providers: Vec<Arc<Provider>>,
+    /// Passkeys' relying party, from `public_url`.
+    rp: Option<RelyingParty>,
+    flows: external::Pending<external::Flow>,
+    challenges: external::Pending<external::Challenge>,
 }
 
 impl std::fmt::Debug for AuthApi {
@@ -99,12 +115,55 @@ impl AuthApi {
     /// Build the endpoints. While no user exists, this mints the one-time
     /// setup token and writes it to `cfg.setup_token_file`.
     pub fn new(store: Arc<AuthStore>, cfg: ApiConfig) -> Result<AuthApi, AuthError> {
+        let public = cfg
+            .public_url
+            .as_deref()
+            .map(|u| u.trim().trim_end_matches('/').to_string())
+            .filter(|u| !u.is_empty());
+        let rp = match public.as_deref().map(RelyingParty::from_public_url) {
+            Some(Ok(rp)) => Some(rp),
+            Some(Err(e)) => {
+                eprintln!("isb serve: passkeys are off: {e}");
+                None
+            }
+            None => None,
+        };
+        let providers: Vec<Arc<Provider>> = match &public {
+            Some(_) => {
+                let st = store.clone();
+                let clock: super::Clock = Arc::new(move || st.now());
+                cfg.providers
+                    .iter()
+                    .map(|p| Arc::new(Provider::new(p.clone(), clock.clone())))
+                    .collect()
+            }
+            None => {
+                if !cfg.providers.is_empty() {
+                    eprintln!(
+                        "isb serve: sign-in with providers is off: it needs ISB_PUBLIC_URL for the callback URL"
+                    );
+                }
+                Vec::new()
+            }
+        };
+        for p in &providers {
+            eprintln!(
+                "isb serve: sign-in with {}: callback URL {}{PREFIX}oauth/{}/callback",
+                p.cfg.label,
+                public.as_deref().unwrap_or(""),
+                p.cfg.id
+            );
+        }
         let api = AuthApi {
             store,
             cfg,
             setup: Mutex::new(None),
             #[cfg(test)]
             setup_plain: Mutex::new(None),
+            providers,
+            rp,
+            flows: Default::default(),
+            challenges: Default::default(),
         };
         if api.store.setup_needed()? {
             let (token, hash) = secret::new_token(TokenKind::Setup)?;
@@ -190,6 +249,26 @@ impl AuthApi {
             ("POST", ["password"]) => self.with_principal(req, |p| self.password(req, p)),
             ("POST", ["password-reset", "request"]) => self.reset_request(req),
             ("POST", ["password-reset", "confirm"]) => self.reset_confirm(req),
+            ("GET", ["providers"]) => self.providers_list(),
+            ("GET", ["oauth", p, "start"]) => return self.oauth_start_get(req, p),
+            ("POST", ["oauth", p, "start"]) => self.oauth_start_post(req, p),
+            ("GET", ["oauth", p, "callback"]) => return self.oauth_callback(req, p),
+            ("GET", ["identities"]) => self.with_principal(req, |p| self.identities(p)),
+            ("DELETE", ["identities", id]) => {
+                self.with_principal(req, |p| self.delete_identity(p, id))
+            }
+            ("GET", ["passkeys"]) => self.with_principal(req, |p| self.passkeys(p)),
+            ("DELETE", ["passkeys", id]) => {
+                self.with_principal(req, |p| self.delete_passkey(p, id))
+            }
+            ("POST", ["passkeys", "register", "options"]) => {
+                self.with_principal(req, |p| self.passkey_register_options(p))
+            }
+            ("POST", ["passkeys", "register", "verify"]) => {
+                self.with_principal(req, |p| self.passkey_register_verify(req, p))
+            }
+            ("POST", ["passkeys", "login", "options"]) => self.passkey_login_options(req),
+            ("POST", ["passkeys", "login", "verify"]) => self.passkey_login_verify(req),
             (_, ["orgs", org, rest @ ..]) => {
                 let org = match OrgId::new(*org) {
                     Ok(o) => o,
@@ -845,6 +924,8 @@ fn auth_error(e: AuthError) -> Response {
         AuthError::NotFound(_) => (404, "not_found"),
         AuthError::Conflict(_) => (409, "conflict"),
         AuthError::Invalid(_) => (400, "invalid"),
+        AuthError::Refused { code, .. } => (403, *code),
+        AuthError::PasskeyRejected(_) => (401, "passkey_rejected"),
         AuthError::Internal(_) | AuthError::Db(_) => {
             eprintln!("isb serve: auth: {e}");
             return error_response(500, "internal", "internal error");
@@ -862,9 +943,12 @@ fn not_found_or_405(seg: &[&str]) -> Response {
         ["setup"] => "GET, POST",
         ["login" | "logout" | "invitations" | "password"] => "POST",
         ["invitations" | "password-reset", _] => "POST",
-        ["me" | "sessions"] => "GET",
+        ["me" | "sessions" | "providers" | "identities" | "passkeys"] => "GET",
         ["tokens"] => "GET, POST",
-        ["sessions" | "tokens", _] => "DELETE",
+        ["sessions" | "tokens" | "identities" | "passkeys", _] => "DELETE",
+        ["oauth", _, "start"] => "GET, POST",
+        ["oauth", _, "callback"] => "GET",
+        ["passkeys", "register" | "login", "options" | "verify"] => "POST",
         _ => return error_response(404, "not_found", "no such endpoint"),
     };
     error_response(405, "method_not_allowed", "method not allowed").header("Allow", allow)
@@ -879,6 +963,9 @@ fn org_405(seg: &[&str]) -> Response {
     };
     error_response(405, "method_not_allowed", "method not allowed").header("Allow", allow)
 }
+
+mod external;
+pub use external::{LOGIN_PAGE, OAUTH_COOKIE, safe_next};
 
 #[cfg(test)]
 mod tests;

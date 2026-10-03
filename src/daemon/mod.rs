@@ -58,12 +58,37 @@ pub struct ServeConfig {
     pub secrets_config: PathBuf,
     /// Session lifetimes and the rest of the identity store's settings.
     pub auth: AuthConfig,
-    /// Where users reach isb, for invitation and reset links.
+    /// Where users reach isb, for invitation and reset links, provider
+    /// callbacks and the passkey relying party.
     pub public_url: Option<String>,
+    /// External sign-in providers (GitHub, Google, generic OIDC).
+    pub oauth: crate::auth::oauth::OAuthSettings,
+    /// Accounts without an invitation, for verified provider emails.
+    pub open_signup: bool,
 }
 
-/// The identity endpoints over `<state>/isb.db`.
-fn auth_routes(cfg: &ServeConfig) -> Result<crate::server::Routes> {
+/// The identity endpoints over `<state>/isb.db`. Provider client secrets
+/// not in the environment are read from the default org's secrets.
+fn auth_routes(
+    cfg: &ServeConfig,
+    secrets: &Arc<crate::secrets::Secrets>,
+) -> Result<crate::server::Routes> {
+    use crate::auth::oauth::SecretFn;
+    let default_org = crate::org::OrgId::default_org();
+    let lookup = |name: &str| -> Option<SecretFn> {
+        secrets.inspect(&default_org, name).ok()?;
+        let (s, org, name) = (secrets.clone(), default_org.clone(), name.to_string());
+        Some(Arc::new(move || {
+            let (v, _) = s.get(&org, &name).map_err(|e| e.to_string())?;
+            String::from_utf8(v)
+                .map(|v| v.trim().to_string())
+                .map_err(|_| "the secret is not UTF-8".to_string())
+        }))
+    };
+    let (providers, notes) = cfg.oauth.providers(&lookup);
+    for n in notes {
+        eprintln!("isb serve: {n}");
+    }
     let path = crate::auth::db_path(&cfg.state_dir);
     let store = AuthStore::open_with(&path, cfg.auth.clone())
         .map_err(|e| Error::invalid(format!("open {}: {e}", path.display())))?;
@@ -73,6 +98,8 @@ fn auth_routes(cfg: &ServeConfig) -> Result<crate::server::Routes> {
             public_url: cfg.public_url.clone(),
             notifier: None,
             setup_token_file: Some(cfg.state_dir.join("setup-token")),
+            providers,
+            open_signup: cfg.open_signup,
         },
     )?;
     eprintln!("isb serve: identity store {}", path.display());
@@ -98,10 +125,11 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     for n in &opened.notes {
         eprintln!("isb serve: {n}");
     }
+    let secrets = Arc::new(opened.secrets);
     // The identity endpoints ride on the TCP listener; open the database
     // before anything starts, so a bad one fails startup cleanly.
     let auth = match &cfg.listen {
-        Some(_) => Some(auth_routes(&cfg)?),
+        Some(_) => Some(auth_routes(&cfg, &secrets)?),
         None => None,
     };
     let ctl = Controller::start(client.clone(), store, cfg.interval)?;
@@ -110,7 +138,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         ctl: ctl.clone(),
         policy: cfg.policy.clone(),
         state_dir: cfg.state_dir.clone(),
-        secrets: Arc::new(opened.secrets),
+        secrets,
     });
     let registry = registry(d.clone())?;
     let mut listeners = vec![Listener::unix(&cfg.socket)];

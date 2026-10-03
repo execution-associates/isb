@@ -13,13 +13,19 @@
 //! - The HTTP endpoints are in [`http`]; the CLI uses this API directly on the
 //!   same file (SQLite in WAL mode handles the daemon and the CLI at once).
 //!
-//! External sign-in (OAuth/OIDC) attaches rows to `user_identities`; passkeys
-//! will get their own table.
+//! External sign-in (OAuth/OIDC, [`oauth`]) attaches rows to
+//! `user_identities`; passkeys ([`webauthn`]) live in `passkeys`. Both are
+//! managed in [`external`].
 
+pub mod cbor;
 pub mod db;
+pub mod external;
 pub mod http;
 pub mod limit;
+pub mod oauth;
+pub mod oidc;
 pub mod secret;
+pub mod webauthn;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
@@ -53,6 +59,14 @@ pub enum AuthError {
     Invalid(String),
     #[error("{0}")]
     Internal(String),
+    /// An external sign-in that proved who the user is, but may not go on
+    /// (no verified email, no invitation, a disabled account). `code` is
+    /// stable, for the login page.
+    #[error("{message}")]
+    Refused { code: &'static str, message: String },
+    /// A passkey assertion or registration that did not verify.
+    #[error("passkey rejected: {0}")]
+    PasskeyRejected(String),
     #[error("identity database: {0}")]
     Db(#[from] rusqlite::Error),
 }
@@ -385,7 +399,7 @@ pub fn normalize_email(email: &str) -> AuthResult<String> {
     }
 }
 
-fn clean_name(name: &str) -> AuthResult<String> {
+pub(crate) fn clean_name(name: &str) -> AuthResult<String> {
     let n = name.trim();
     if n.chars().count() > 100 || n.chars().any(char::is_control) {
         return Err(AuthError::Invalid(
@@ -399,9 +413,9 @@ fn clip(s: Option<String>, n: usize) -> Option<String> {
     s.map(|s| s.chars().filter(|c| !c.is_control()).take(n).collect())
 }
 
-const USER_COLS: &str = "u.id, u.email, u.name, u.platform_admin, u.created_at, u.disabled, u.password_hash IS NOT NULL";
+pub(crate) const USER_COLS: &str = "u.id, u.email, u.name, u.platform_admin, u.created_at, u.disabled, u.password_hash IS NOT NULL";
 
-fn user_row(r: &Row, at: usize) -> rusqlite::Result<User> {
+pub(crate) fn user_row(r: &Row, at: usize) -> rusqlite::Result<User> {
     Ok(User {
         id: r.get(at)?,
         email: r.get(at + 1)?,
@@ -413,7 +427,7 @@ fn user_row(r: &Row, at: usize) -> rusqlite::Result<User> {
     })
 }
 
-fn org_col(r: &Row, i: usize) -> rusqlite::Result<OrgId> {
+pub(crate) fn org_col(r: &Row, i: usize) -> rusqlite::Result<OrgId> {
     let s: String = r.get(i)?;
     OrgId::new(s).map_err(|e| {
         rusqlite::Error::FromSqlConversionFailure(i, rusqlite::types::Type::Text, Box::new(e))
@@ -427,7 +441,7 @@ fn opt_org_col(r: &Row, i: usize) -> rusqlite::Result<Option<OrgId>> {
     }
 }
 
-fn role_col(r: &Row, i: usize) -> rusqlite::Result<Role> {
+pub(crate) fn role_col(r: &Row, i: usize) -> rusqlite::Result<Role> {
     let s: String = r.get(i)?;
     Role::parse(&s).map_err(|e| {
         rusqlite::Error::FromSqlConversionFailure(i, rusqlite::types::Type::Text, Box::new(e))
@@ -512,7 +526,7 @@ impl AuthStore {
         (self.clock)()
     }
 
-    fn db(&self) -> MutexGuard<'_, Connection> {
+    pub(crate) fn db(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock().unwrap_or_else(|e| e.into_inner())
     }
 
@@ -1504,7 +1518,7 @@ impl AuthStore {
     }
 }
 
-fn ensure_org_tx(conn: &Connection, org: &OrgId, now: i64) -> AuthResult<()> {
+pub(crate) fn ensure_org_tx(conn: &Connection, org: &OrgId, now: i64) -> AuthResult<()> {
     conn.execute(
         "INSERT INTO orgs (name, created_at) VALUES (?1, ?2) ON CONFLICT (name) DO NOTHING",
         params![org.as_str(), now],

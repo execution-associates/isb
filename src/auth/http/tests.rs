@@ -589,6 +589,7 @@ fn links_use_the_public_url() {
                     Ok(())
                 })),
                 setup_token_file: None,
+                ..Default::default()
             },
         )
         .unwrap(),
