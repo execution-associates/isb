@@ -8,9 +8,10 @@
 //! - An OCI image's process is the instance's init (`oci.entrypoint`), so
 //!   incus itself restarts it (`boot.autorestart`). Logs are the console log.
 //!
-//! Secrets are files under `/run/secrets`, a tmpfs in a systemd guest, so they
-//! are pushed again after every boot. A unit that uses secrets waits for
-//! `/run/isb/secrets-ready` before starting, so it never runs without them.
+//! Secrets are files under `/run/secrets`, a tmpfs in a systemd guest. A
+//! root-only copy is kept in `/var/lib/isb/secrets` with a script that puts
+//! them back, which the unit runs before every start: after a reboot the app
+//! has its secrets even when no isb is around to push them.
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -21,8 +22,9 @@ use crate::exec::{ExecOptions, ExecOutput};
 use crate::sandbox::Sandbox;
 use crate::spec::{RestartCondition, RestartMode, SandboxSpec};
 
-/// Marker written after the secrets, which a unit using them waits for.
-pub const SECRETS_READY: &str = "/run/isb/secrets-ready";
+/// The persisted copies of a guest's secrets, and the script restoring them.
+pub const SECRETS_STORE: &str = "/var/lib/isb/secrets";
+pub const SECRETS_RESTORE: &str = "/var/lib/isb/secrets/restore";
 
 /// The systemd unit for a service.
 pub fn unit_name(service: &str) -> String {
@@ -158,11 +160,8 @@ pub fn render(
     }
     u.push_str(&format!("EnvironmentFile={}\n", env_path(service)));
     if uses_secrets {
-        // Run as root (+) so it can see the marker whatever the user.
-        u.push_str(&format!(
-            "ExecStartPre=+/bin/sh -c 'until [ -e {SECRETS_READY} ]; do sleep 1; done'\n"
-        ));
-        u.push_str("TimeoutStartSec=infinity\n");
+        // As root (+), whatever the service's user: the store is root-only.
+        u.push_str(&format!("ExecStartPre=+/bin/sh {SECRETS_RESTORE}\n"));
     }
     u.push_str("ExecStart=");
     u.push_str(
@@ -233,6 +232,7 @@ pub fn install(
             "{name}: restart needs systemd in the guest to supervise command; this image has none (use an OCI image, or drop restart)"
         )));
     }
+    wait_for_systemd(sb, Duration::from_secs(120))?;
     let shell = match (&spec.user, spec.exec.login) {
         (Some(u), true) => crate::exec::resolve_user(client, name, u)?.shell,
         (None, true) => crate::exec::resolve_user(client, name, "root")?.shell,
@@ -246,16 +246,25 @@ pub fn install(
         Ok(client.read_file(name, path)?.as_deref() == Some(want.as_bytes()))
     };
     let changed = !same(&unit_path, &files.unit)? || !same(&env_file, &files.env)?;
+    let unit = unit_name(service);
     if changed {
         client.make_dir(name, "/etc/isb", 0, 0, 0o755)?;
         client.push_file(name, &env_file, files.env.as_bytes(), 0, 0, 0o600)?;
         client.push_file(name, &unit_path, files.unit.as_bytes(), 0, 0, 0o644)?;
+    }
+    // Also when unchanged: an earlier attempt may have written the files and
+    // failed before reloading.
+    let loaded = root_exec(
+        sb,
+        &["systemctl", "show", "--value", "-p", "NeedDaemonReload", &unit],
+        Duration::from_secs(30),
+    )?;
+    if changed || loaded.stdout_text().trim() != "no" {
         check(
             root_exec(sb, &["systemctl", "daemon-reload"], Duration::from_secs(60))?,
             "systemctl daemon-reload",
         )?;
     }
-    let unit = unit_name(service);
     check(
         root_exec(
             sb,
@@ -275,6 +284,33 @@ pub fn install(
         &format!("systemctl {verb} {unit}"),
     )?;
     Ok(changed)
+}
+
+/// A just-started guest has /run/systemd/system before systemd answers on
+/// its bus. Wait for boot to finish (`degraded` counts: one failed unit of
+/// the image's own is not ours to judge).
+fn wait_for_systemd(sb: &Sandbox, deadline: Duration) -> Result<()> {
+    let started = Instant::now();
+    loop {
+        let out = root_exec(
+            sb,
+            &["systemctl", "is-system-running", "--wait"],
+            Duration::from_secs(60),
+        )?;
+        let state = out.stdout_text().trim().to_string();
+        if matches!(state.as_str(), "running" | "degraded" | "maintenance") {
+            return Ok(());
+        }
+        if started.elapsed() >= deadline {
+            return Err(Error::NotReady {
+                sandbox: sb.name().to_string(),
+                check: "systemd".into(),
+                detail: format!("{state} {}", out.stderr_text().trim()),
+                waited: started.elapsed(),
+            });
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
 }
 
 /// Stop and disable a service's unit, if it is installed.
@@ -315,8 +351,9 @@ pub fn unit_state(sb: &Sandbox, service: &str) -> Result<String> {
     Ok(out.stdout_text().trim().to_string())
 }
 
-/// Write the service's secrets under `/run/secrets` (or their targets), then
-/// the ready marker. `values` maps a top-level secret key to its value.
+/// Write the service's secrets under `/run/secrets` (or their targets), and
+/// the persisted copies plus the script that restores them after a boot.
+/// `values` maps a top-level secret key to its value.
 pub fn push_secrets(
     sb: &Sandbox,
     spec: &SandboxSpec,
@@ -328,25 +365,32 @@ pub fn push_secrets(
     let client = sb.client();
     let name = sb.name();
     let (def_uid, def_gid) = numeric_user(spec.user.as_deref()).unwrap_or((0, 0));
-    for s in &spec.secrets {
-        let value = values
-            .get(&s.source)
-            .ok_or_else(|| Error::invalid(format!("{name}: no value for secret {:?}", s.source)))?;
+    make_dirs(client, name, "/var/lib/isb")?;
+    client.make_dir(name, SECRETS_STORE, 0, 0, 0o700)?;
+    let mut script = String::from("#!/bin/sh\n# Written by isb: puts the secrets back after a boot.\nset -e\n");
+    for (n, s) in spec.secrets.iter().enumerate() {
+        let value = values.get(&s.source).ok_or_else(|| {
+            Error::invalid(format!("{name}: no value for secret {:?}", s.source))
+        })?;
         let path = s.guest_path();
         let parent = path.rsplit_once('/').map(|(p, _)| p).unwrap_or("/");
         make_dirs(client, name, parent)?;
         let mode = s.file_mode().map_err(Error::invalid)?;
-        client.push_file(
-            name,
-            &path,
-            value,
-            s.uid.unwrap_or(def_uid),
-            s.gid.or(s.uid).unwrap_or(def_gid),
-            mode,
-        )?;
+        let (uid, gid) = (s.uid.unwrap_or(def_uid), s.gid.or(s.uid).unwrap_or(def_gid));
+        client.push_file(name, &path, value, uid, gid, mode)?;
+        let stored = format!("{SECRETS_STORE}/{n}");
+        client.push_file(name, &stored, value, 0, 0, 0o400)?;
+        script.push_str(&format!(
+            "install -D -m {mode:04o} -o {uid} -g {gid} {} {}\n",
+            sh_quote(&stored),
+            sh_quote(&path)
+        ));
     }
-    make_dirs(client, name, "/run/isb")?;
-    client.push_file(name, SECRETS_READY, b"", 0, 0, 0o600)
+    client.push_file(name, SECRETS_RESTORE, script.as_bytes(), 0, 0, 0o700)
+}
+
+fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 fn make_dirs(client: &Client, name: &str, path: &str) -> Result<()> {
@@ -533,7 +577,7 @@ mod tests {
             f.unit
                 .contains("StartLimitIntervalSec=60\nStartLimitBurst=3\n")
         );
-        assert!(f.unit.contains(SECRETS_READY));
+        assert!(f.unit.contains("ExecStartPre=+/bin/sh /var/lib/isb/secrets/restore\n"));
         assert!(!f.unit.contains("User="));
     }
 
