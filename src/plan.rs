@@ -42,6 +42,11 @@ pub struct HostFacts {
     /// The only directory incusd can see bind sources under, when it runs
     /// elsewhere: on macOS, the home directory shared with the `isb machine`.
     pub shared_root: Option<String>,
+    /// The org the sandbox goes in (from the client's incus project):
+    /// where `registry:` images resolve. `None` outside isb's projects.
+    pub org: Option<crate::org::OrgId>,
+    /// The local registry's `host:port`, when one is set up.
+    pub registry: Option<String>,
 }
 
 impl HostFacts {
@@ -144,6 +149,30 @@ pub struct ImageSource {
     pub server: Option<String>,
     pub protocol: Option<String>,
     pub alias: String,
+    /// A `registry:` image, not yet bound to an org and the local registry
+    /// ([`ImageSource::bind`]); `alias` is then `APP[:TAG][@DIGEST]`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub local_registry: bool,
+}
+
+/// Whether a registry host (`host[:port]`) is this machine's loopback,
+/// where only the local registry listens.
+fn is_loopback_host(hostport: &str) -> bool {
+    let host = if let Some(rest) = hostport.strip_prefix('[') {
+        rest.split(']').next().unwrap_or(rest)
+    } else {
+        hostport
+            .rsplit_once(':')
+            .map(|(h, _)| h)
+            .unwrap_or(hostport)
+    };
+    let host = host.to_ascii_lowercase();
+    host == "localhost"
+        || host.ends_with(".localhost")
+        || host == "0.0.0.0"
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback() || ip.is_unspecified())
 }
 
 /// OCI registries known by a short prefix: `docker:nginx:1.27`.
@@ -165,6 +194,18 @@ impl ImageSource {
                     server: Some(server.to_string()),
                     protocol: Some("oci".into()),
                     alias: oci_reference(alias, remote == "docker")?,
+                    local_registry: false,
+                });
+            }
+            if remote == "registry" {
+                // registry:app:tag, the org's own image in the local registry.
+                let r = crate::registry::ImageRef::parse(alias)?;
+                return Ok(ImageSource {
+                    spec: s.into(),
+                    server: None,
+                    protocol: Some("oci".into()),
+                    alias: r.render(),
+                    local_registry: true,
                 });
             }
             if remote == "oci" {
@@ -172,11 +213,20 @@ impl ImageSource {
                 let (host, path) = alias.split_once('/').ok_or_else(|| {
                     Error::invalid(format!("{s:?}: an oci: image is oci:REGISTRY/PATH[:TAG]"))
                 })?;
+                // The local registry is on loopback and holds every org's
+                // images: it is reached only as `registry:`, which stays in
+                // the org.
+                if is_loopback_host(host) {
+                    return Err(Error::invalid(format!(
+                        "{s:?}: a loopback registry is the local one; name its images as registry:APP:TAG"
+                    )));
+                }
                 return Ok(ImageSource {
                     spec: s.into(),
                     server: Some(format!("https://{host}")),
                     protocol: Some("oci".into()),
                     alias: oci_reference(path, false)?,
+                    local_registry: false,
                 });
             }
             let (server, protocol) = match remote {
@@ -198,6 +248,7 @@ impl ImageSource {
                 server: Some(server.into()),
                 protocol: Some(protocol.into()),
                 alias: alias.into(),
+                local_registry: false,
             });
         }
         Ok(ImageSource {
@@ -205,7 +256,33 @@ impl ImageSource {
             server: None,
             protocol: None,
             alias: s.into(),
+            local_registry: false,
         })
+    }
+
+    /// Bind a `registry:` image to `org`'s repository in the local registry
+    /// at `addr`. Anything else is returned as is.
+    pub fn bind(mut self, org: Option<&crate::org::OrgId>, addr: Option<&str>) -> Result<Self> {
+        if !self.local_registry {
+            return Ok(self);
+        }
+        let org = org.ok_or_else(|| {
+            Error::invalid(format!(
+                "{:?}: registry: images belong to an org; this project is not one",
+                self.spec
+            ))
+        })?;
+        let addr = addr.ok_or_else(|| {
+            Error::invalid(format!(
+                "{:?}: no local registry on this host (isb registry setup)",
+                self.spec
+            ))
+        })?;
+        let r = crate::registry::ImageRef::parse(&self.alias)?;
+        self.alias = r.pull_alias(org);
+        self.server = Some(format!("https://{addr}"));
+        self.local_registry = false;
+        Ok(self)
     }
 
     /// An OCI (docker) image: an application container whose process is the
@@ -493,8 +570,9 @@ pub fn resolve(
         .clone()
         .ok_or_else(|| Error::invalid("sandbox name is required"))?;
     validate_instance_name(&name)?;
-    let image =
-        ImageSource::parse(&spec.image).map_err(|e| Error::invalid(format!("{name}: {e}")))?;
+    let image = ImageSource::parse(&spec.image)
+        .and_then(|i| i.bind(host.org.as_ref(), host.registry.as_deref()))
+        .map_err(|e| Error::invalid(format!("{name}: {e}")))?;
     let pool = host.pick_pool(spec.storage.as_deref())?;
     let vm = spec.instance_type == InstanceType::VirtualMachine;
     let oci = image.is_oci();
@@ -1428,6 +1506,8 @@ mod tests {
             path_map: None,
             initial_copy: false,
             shared_root: None,
+            org: None,
+            registry: None,
         }
     }
 

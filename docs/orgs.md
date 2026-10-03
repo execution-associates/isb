@@ -15,7 +15,14 @@ isb org rm NAME [--force]
 sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run]
 ```
 
-`isb org create` on an existing org updates it to the flags given.
+`isb org create` on an existing org updates it to the flags given. `system`
+is not an org name: the incus project `isb-system` holds isb's own services
+(the local registry).
+
+An org's builds ([builds.md](builds.md)) run in its own project too, as
+ordinary unprivileged containers (or VMs for untrusted source) that count
+against its quota, and its images are the registry repositories `<org>/*`,
+which only its own stacks and sandboxes can name.
 
 ## What an org is in incus
 
@@ -106,8 +113,10 @@ bridges. `sudo isb host setup` once lets every org bridge (`isbbr+`) through:
 
 ufw's routed default-deny then keeps org bridges apart from each other and
 from the host's other networks. It also creates the service-name directory
-(below). `--dry-run` prints all of it instead; without root, it prints it and
-exits 1.
+(below) and, once `isb registry setup` has made the local registry, installs
+its CA at `/etc/containers/certs.d/127.0.0.1:5480/ca.crt` so incus pulls from
+it ([builds.md](builds.md#the-registry)). `--dry-run` prints all of it
+instead; without root, it prints it and exits 1.
 
 ## Service names
 

@@ -232,7 +232,14 @@ Or an OCI (docker) image, pulled from a registry:
 | `docker:` | `https://docker.io` | `docker:nginx:1.27` (Docker Hub's `library/` and `:latest` are filled in) |
 | `ghcr:` | `https://ghcr.io` | `ghcr:org/app:v2` |
 | `quay:` | `https://quay.io` | `quay:org/app` |
-| `oci:` | `https://REGISTRY` | `oci:registry.example.com/team/app:1.0` |
+| `oci:` | `https://REGISTRY` | `oci:registry.example.com/team/app:1.0` (not a loopback registry) |
+| `registry:` | the host's local registry, in this org | `registry:web:v1`, `registry:web@sha256:...` |
+
+`registry:APP[:TAG][@sha256:DIGEST]` is an image the org built
+([builds.md](builds.md)): always the repository `<org>/APP` of the org the
+sandbox or stack is in, so another org's images cannot be named. A stack
+resolves its tags to digests when it is deployed, so a moved tag is an update
+and a rollback runs the old digest.
 
 An OCI image runs as an application container: its process is the instance's
 init, its stdout and stderr are the console log (`isb logs`), and it stops when

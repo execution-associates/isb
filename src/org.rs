@@ -17,6 +17,8 @@ use crate::error::{Error, Result};
 pub struct OrgId(String);
 
 pub const DEFAULT_ORG: &str = "default";
+/// Not an org: `isb-system` is [`crate::registry::PROJECT`].
+const RESERVED_SYSTEM: &str = "system";
 
 impl OrgId {
     pub fn new(s: impl Into<String>) -> Result<OrgId> {
@@ -27,7 +29,11 @@ impl OrgId {
             && !s.ends_with('-')
             && s.chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-        if ok {
+        if s == RESERVED_SYSTEM {
+            Err(Error::invalid(
+                "org name \"system\" is reserved: incus project isb-system holds isb's own services",
+            ))
+        } else if ok {
             Ok(OrgId(s))
         } else {
             Err(Error::invalid(format!(
@@ -896,6 +902,8 @@ mod tests {
         assert!(OrgId::new("Ocai").is_err());
         assert!(OrgId::new("a-").is_err());
         assert!(OrgId::new("x".repeat(32)).is_err());
+        assert!(OrgId::new("system").is_err());
+        assert_eq!(OrgId::from_incus_project(crate::registry::PROJECT), None);
         let o = OrgId::new("ocai").unwrap();
         assert_eq!(o.incus_project(), "isb-ocai");
         assert_eq!(OrgId::default_org().incus_project(), "default");

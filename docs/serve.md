@@ -191,6 +191,11 @@ directly.
 | `sandbox_exec` | Run argv in a sandbox: exit code, stdout, stderr (each capped at 256 KiB, keeping the end), optional stdin text and timeout (default 10m). |
 | `sandbox_remove` | Delete a sandbox (not a stack replica). |
 | `secret_create`, `secret_set`, `secret_get`, `secret_list`, `secret_inspect`, `secret_delete`, `secret_refresh`, `secret_reencrypt`, `secret_recipients`, `secret_resolve` | An org's secret store; values base64. `secret_set` and `secret_refresh` roll the stacks using the secret. `secret_resolve` (local callers only) is how `isb up` reads store-backed secrets. See [secrets.md](secrets.md). Remote callers reach every org's secrets, values included, unless `--deny-tools 'secret_*'`. |
+| `build_run` | Start a build of a host directory (`app`, `context`, `builder`, `dockerfile`, `target`, `args`, `tag`, `untrusted`, `timeout`) into the org's registry repository; returns an id. Remote callers: `context` under a `--bind-root`. See [builds.md](builds.md). |
+| `build_logs` | A build's state and log lines from `since`, waiting up to 30 s for more; `image` and `digest` when it succeeded. |
+| `build_list` | The org's recent builds. |
+| `registry_list` | The org's images in the local registry: apps, tags, digests, push times. |
+| `registry_gc` | Registry retention (platform admins): keep the newest `keep` tags per app and whatever deployed stacks run or would roll back to. |
 | `server_status` | Versions, and the balancer's routes with live counters. |
 | `overview` | Everything a dashboard shows in one call: host CPU and memory with history, every stack in detail, sandboxes with their CPU and memory, the latest event number. |
 | `events` | The event feed (deploys, rollouts, health changes, restarts, failures) after a `since` cursor, optionally waiting up to 30 s for one. |

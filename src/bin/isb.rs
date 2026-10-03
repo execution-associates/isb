@@ -241,6 +241,13 @@ enum Cmd {
     /// Manage an org's secrets on the `isb serve` daemon (docs/secrets.md).
     #[command(subcommand)]
     Secret(SecretCmd),
+    /// Build a source directory into an image in the org's local registry,
+    /// in a fresh sandbox, through `isb serve` (docs/builds.md).
+    Build(BuildArgs),
+    /// The local OCI registry builds push to and stacks pull from
+    /// (docs/builds.md).
+    #[command(subcommand)]
+    Registry(RegistryCmd),
     /// A live dashboard of stacks and sandboxes (`isb serve`'s view; with no
     /// daemon, sandboxes only).
     Tui,
@@ -540,6 +547,73 @@ enum MachineCmd {
         name: String,
         #[arg(last = true)]
         command: Vec<String>,
+    },
+}
+
+#[derive(Args)]
+struct BuildArgs {
+    /// The source directory.
+    dir: PathBuf,
+    /// The app: names the image (`<org>/<app>`) and its build cache.
+    #[arg(long)]
+    app: String,
+    /// railpack (default), nixpacks or dockerfile (default when --dockerfile is given).
+    #[arg(long)]
+    builder: Option<String>,
+    /// Dockerfile path, relative to the directory.
+    #[arg(long)]
+    dockerfile: Option<String>,
+    /// Dockerfile stage to build.
+    #[arg(long)]
+    target: Option<String>,
+    /// Build argument KEY=VALUE (repeatable).
+    #[arg(long = "arg")]
+    args: Vec<String>,
+    /// Tag to push (default latest).
+    #[arg(long)]
+    tag: Option<String>,
+    /// Build from this subdirectory.
+    #[arg(long)]
+    subdir: Option<String>,
+    /// Build in a VM (its own kernel), for code you do not trust.
+    #[arg(long)]
+    untrusted: bool,
+    /// Longest the build may take (default 30m).
+    #[arg(long)]
+    timeout: Option<String>,
+    /// Start the build and print its id without following it.
+    #[arg(short, long)]
+    detach: bool,
+}
+
+#[derive(Subcommand)]
+enum RegistryCmd {
+    /// Create the local registry (or bring it in line): an OCI container in
+    /// the isb-system project, reachable only on 127.0.0.1, with TLS from an
+    /// isb CA kept in the state directory. Then run `sudo isb host setup`.
+    Setup {
+        /// Port on 127.0.0.1.
+        #[arg(long, default_value_t = isb::registry::DEFAULT_PORT)]
+        port: u16,
+        /// Issue a new certificate.
+        #[arg(long)]
+        renew: bool,
+        /// The daemon's state directory (holds the CA).
+        #[arg(long, env = "ISB_SERVE_STATE_DIR")]
+        state_dir: Option<PathBuf>,
+    },
+    /// The org's images: apps, tags, digests.
+    Ls {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete old images: keep the newest N tags per app and anything a
+    /// deployed stack (or its rollback) uses. Platform admins.
+    Gc {
+        #[arg(long, default_value_t = isb::registry::DEFAULT_KEEP)]
+        keep: usize,
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -996,6 +1070,8 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         }) => host_setup(uplink, user, dry_run),
         Cmd::Machine(m) => machine(ctx, m),
         Cmd::Secret(s) => secret(ctx, s),
+        Cmd::Build(a) => build_cmd(ctx, a),
+        Cmd::Registry(r) => registry_cmd(ctx, r),
         Cmd::Tui => {
             isb::tui::run(ctx.client(None), isb::server::default_socket_path())?;
             Ok(0)
@@ -2108,6 +2184,147 @@ fn fmt_time(secs: u64) -> String {
     )
 }
 
+fn build_cmd(ctx: &Ctx, a: BuildArgs) -> Result<u8> {
+    use serde_json::json;
+    let org = ctx
+        .global
+        .org
+        .clone()
+        .unwrap_or_else(|| isb::org::DEFAULT_ORG.to_string());
+    let dir = std::fs::canonicalize(&a.dir)
+        .map_err(|e| Error::Invalid(format!("{}: {e}", a.dir.display())))?;
+    let mut args = json!({"org": org, "app": a.app, "context": dir, "untrusted": a.untrusted});
+    for (k, v) in [
+        ("builder", a.builder),
+        ("dockerfile", a.dockerfile),
+        ("target", a.target),
+        ("tag", a.tag),
+        ("subdir", a.subdir),
+        ("timeout", a.timeout),
+    ] {
+        if let Some(v) = v {
+            args[k] = json!(v);
+        }
+    }
+    let mut bargs = BTreeMap::new();
+    for kv in a.args {
+        let (k, v) = kv
+            .split_once('=')
+            .ok_or_else(|| Error::Invalid(format!("--arg {kv:?}: expected KEY=VALUE")))?;
+        bargs.insert(k.to_string(), v.to_string());
+    }
+    args["args"] = json!(bargs);
+    let started = call("build_run", args, SHORT)?;
+    let id = started["id"].as_str().unwrap_or_default().to_string();
+    if a.detach {
+        println!("{id}");
+        return Ok(0);
+    }
+    eprintln!("build {id}");
+    let mut since = 0u64;
+    loop {
+        let r = call(
+            "build_logs",
+            json!({"org": org, "id": id, "since": since, "wait": 20}),
+            SHORT,
+        )?;
+        for l in r["lines"].as_array().into_iter().flatten() {
+            if !ctx.global.quiet {
+                eprintln!("{}", l.as_str().unwrap_or_default());
+            }
+        }
+        since = r["next"].as_u64().unwrap_or(since);
+        match r["state"].as_str() {
+            Some("succeeded") => {
+                println!("{}", r["image"].as_str().unwrap_or_default());
+                return Ok(0);
+            }
+            Some("failed") => {
+                eprintln!(
+                    "isb: build failed: {}",
+                    r["error"].as_str().unwrap_or("see the log")
+                );
+                return Ok(1);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn registry_cmd(ctx: &Ctx, cmd: RegistryCmd) -> Result<u8> {
+    use serde_json::json;
+    let org = ctx
+        .global
+        .org
+        .clone()
+        .unwrap_or_else(|| isb::org::DEFAULT_ORG.to_string());
+    match cmd {
+        RegistryCmd::Setup {
+            port,
+            renew,
+            state_dir,
+        } => {
+            let state = state_dir.unwrap_or_else(isb::daemon::default_state_dir);
+            let mut rep = ctx.report();
+            let info =
+                isb::registry::setup(&ctx.client(Some("default")), &state, port, renew, &mut rep)?;
+            println!("local registry at {}", info.url());
+            let ca = isb::registry::host_ca_path(&info.addr);
+            let installed = std::fs::read_to_string(&ca).ok();
+            if installed.as_deref() != Some(info.ca_pem.as_str()) {
+                println!(
+                    "incus does not trust it yet: run `sudo isb host setup` (installs {})",
+                    ca.display()
+                );
+            }
+            println!("restart isb serve to have it push there");
+            Ok(0)
+        }
+        RegistryCmd::Ls { json } => {
+            let r = call("registry_list", json!({"org": org}), SHORT)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&r)?);
+                return Ok(0);
+            }
+            println!("{:<24} {:<20} {:<20} PUSHED", "APP", "TAG", "DIGEST");
+            for repo in r["repositories"].as_array().into_iter().flatten() {
+                for t in repo["tags"].as_array().into_iter().flatten() {
+                    let at = t["pushed_at"].as_u64().unwrap_or(0);
+                    println!(
+                        "{:<24} {:<20} {:<20} {}",
+                        repo["app"].as_str().unwrap_or_default(),
+                        t["tag"].as_str().unwrap_or_default(),
+                        isb::registry::oci::short(t["digest"].as_str().unwrap_or_default()),
+                        if at == 0 {
+                            "-".to_string()
+                        } else {
+                            format!("{}s ago", isb::stack::now_secs().saturating_sub(at))
+                        }
+                    );
+                }
+            }
+            Ok(0)
+        }
+        RegistryCmd::Gc { keep, dry_run } => {
+            let r = call(
+                "registry_gc",
+                json!({"keep": keep, "dry_run": dry_run}),
+                Duration::from_secs(3600),
+            )?;
+            for l in r["log"].as_array().into_iter().flatten() {
+                eprintln!("{}", l.as_str().unwrap_or_default());
+            }
+            println!(
+                "{} {} manifest(s), kept {} tag(s)",
+                if dry_run { "would delete" } else { "deleted" },
+                r["deleted"].as_array().map(Vec::len).unwrap_or(0),
+                r["kept"]
+            );
+            Ok(0)
+        }
+    }
+}
+
 fn secret(ctx: &Ctx, cmd: SecretCmd) -> Result<u8> {
     // The global --org picks the org; an explicit one matters for --all.
     let org_given = ctx.global.org.is_some();
@@ -2575,6 +2792,17 @@ fn host_setup(uplink: Option<String>, user: Option<String>, dry_run: bool) -> Re
         .ok()
         .is_some_and(|o| String::from_utf8_lossy(&o.stdout).contains("Status: active"));
     let rules = host_rules(&uplink);
+    // The local registry's CA, where the skopeo inside incusd looks for it.
+    let registry = isb::registry::info(&Client::new()).unwrap_or_else(|e| {
+        eprintln!("isb: cannot read the local registry's settings: {e}");
+        None
+    });
+    let ca_path = registry
+        .as_ref()
+        .map(|i| (isb::registry::host_ca_path(&i.addr), i.ca_pem.clone()));
+    let ca_current = ca_path
+        .as_ref()
+        .is_some_and(|(p, pem)| std::fs::read_to_string(p).ok().as_deref() == Some(pem.as_str()));
     if dry_run || !rustix::process::geteuid().is_root() {
         if !dry_run {
             eprintln!(
@@ -2583,6 +2811,28 @@ fn host_setup(uplink: Option<String>, user: Option<String>, dry_run: bool) -> Re
         }
         println!("# the directory service names are published in:");
         println!("{}", dns_cmd.join(" "));
+        match &ca_path {
+            Some((p, _)) if ca_current => {
+                println!("# the local registry's CA is installed at {}", p.display());
+            }
+            Some((p, _)) => {
+                println!(
+                    "# trust the local registry (its CA, from incus project {}):",
+                    isb::registry::PROJECT
+                );
+                println!(
+                    "install -d -m 0755 {}",
+                    p.parent().expect("has a parent").display()
+                );
+                println!(
+                    "incus project get {} user.isb.registry.ca > {} && chmod 0644 {}",
+                    isb::registry::PROJECT,
+                    p.display(),
+                    p.display()
+                );
+            }
+            None => println!("# no local registry yet (isb registry setup); its CA comes later"),
+        }
         println!("# in {BEFORE_RULES_PATH}, before the first -A ufw-before-input line:");
         print!("{BEFORE_RULES}");
         for r in &rules {
@@ -2612,6 +2862,20 @@ fn host_setup(uplink: Option<String>, user: Option<String>, dry_run: bool) -> Re
         "{}: service names for org stacks, written by {user}",
         isb::discovery::root().display()
     );
+    if let Some((p, pem)) = &ca_path {
+        if !ca_current {
+            use std::os::unix::fs::PermissionsExt;
+            let dir = p.parent().expect("has a parent");
+            std::fs::create_dir_all(dir)?;
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o755))?;
+            std::fs::write(p, pem)?;
+            std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o644))?;
+            println!(
+                "{}: the local registry's CA (incus pulls trust it)",
+                p.display()
+            );
+        }
+    }
     if !ufw_active {
         println!("no active ufw: incus' own firewall rules already let org bridges through");
         return Ok(0);

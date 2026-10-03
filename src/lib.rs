@@ -47,6 +47,7 @@ pub mod machine;
 pub mod metrics;
 pub mod org;
 pub mod plan;
+pub mod registry;
 pub mod rpc;
 pub mod sandbox;
 pub mod secrets;

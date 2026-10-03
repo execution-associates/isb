@@ -462,6 +462,7 @@ mod tests {
             base_dir: "/".into(),
             secrets: BTreeMap::new(),
             force: BTreeMap::new(),
+            images: BTreeMap::new(),
             deployed_at: 0,
             deployed_by: String::new(),
             previous: None,

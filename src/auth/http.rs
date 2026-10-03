@@ -19,7 +19,7 @@
 //!   `<state>/setup-token` (0600) at startup while no user exists, so whoever
 //!   reaches the port first cannot claim the platform. `isb user create
 //!   --admin` on the host is the other way in.
-//! - **External sign-in and passkeys** are in [`external`].
+//! - **External sign-in and passkeys** are in `external`.
 
 use std::net::IpAddr;
 use std::path::PathBuf;
