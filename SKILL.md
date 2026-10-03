@@ -134,6 +134,8 @@ Field reference: `docs/spec.md` in the repo, or `isb schema` for the JSON Schema
   no downtime). `isb stack ps NAME`, `logs`, `scale NAME svc=N`, `rollback`,
   `redeploy NAME svc` (new instances for a moved tag), `rm [--volumes]`.
   Apps keep running when the daemon stops; only published ports pause.
+  `isb tui` is a live dashboard of all of it (it needs a terminal: an agent
+  should use `isb stack ps` or the tools instead).
 - **Remote agents** reach the same operations as MCP tools (`stack_deploy`,
   `stack_status`, `sandbox_create`, `sandbox_exec`, ...) at the daemon's `/mcp`,
   behind Cloudflare Access. Remote callers are refused privileged containers,

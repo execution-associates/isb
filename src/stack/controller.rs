@@ -53,6 +53,10 @@ pub struct InstanceStatus {
     pub restarts: u32,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub last_probe: String,
+    /// Percent of one core; none until two samples were taken.
+    pub cpu_pct: Option<f32>,
+    pub cpu_history: Vec<f32>,
+    pub mem_bytes: Option<u64>,
 }
 
 /// A published port served by the balancer.
@@ -63,6 +67,10 @@ pub struct PortStatus {
     pub backends: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Connections accepted since the daemon started, and per second lately.
+    pub accepted: u64,
+    pub active: usize,
+    pub rate_history: Vec<f32>,
 }
 
 /// One service of a stack, as `stack_status` reports it.
@@ -80,8 +88,74 @@ pub struct ServiceStatus {
     pub message: Option<String>,
     pub instances: Vec<InstanceStatus>,
     pub ports: Vec<PortStatus>,
+    /// The rollout in progress, slot by slot.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rollout: Option<RolloutStatus>,
     /// Unix seconds of the last completed reconcile pass.
     pub checked_at: u64,
+}
+
+/// A rollout in progress.
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct RolloutStatus {
+    pub to_rev: String,
+    /// `stop-first` or `start-first`.
+    pub order: String,
+    pub parallelism: usize,
+    pub done: usize,
+    pub total: usize,
+    /// Unix seconds.
+    pub started_at: u64,
+    pub slots: Vec<SlotRollout>,
+}
+
+/// One slot's handover: the instance going away and the one replacing it.
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct SlotRollout {
+    pub slot: u32,
+    pub old: Option<String>,
+    pub old_rev: Option<String>,
+    /// `serving`, `draining`, `retired`, or `none`.
+    pub old_state: String,
+    pub new: Option<String>,
+    /// `waiting`, `creating`, `probing`, `monitoring`, `serving`, `failed`.
+    pub new_state: String,
+}
+
+/// Something that happened, for the event feed.
+#[derive(Debug, Clone, Serialize)]
+pub struct Event {
+    /// Increases by one per event; pass the last one seen as `since`.
+    pub seq: u64,
+    /// Unix milliseconds.
+    pub at: u64,
+    /// `info`, `warn` or `error`.
+    pub level: String,
+    pub stack: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub service: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instance: Option<String>,
+    pub message: String,
+}
+
+/// Events kept for late readers.
+const EVENTS_KEPT: usize = 1000;
+
+/// The latest host and instance sample.
+#[derive(Debug, Clone, Default)]
+pub struct Snapshot {
+    pub host: crate::metrics::HostSample,
+    pub instances: BTreeMap<String, crate::metrics::InstanceSample>,
+    /// Unix milliseconds; 0 before the first sample.
+    pub at: u64,
+}
+
+pub fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// A stack, as `stack_status` and `stack_list` report it.
@@ -132,7 +206,39 @@ struct Inner {
     /// Deployed stacks, by name.
     stacks: Mutex<BTreeMap<String, Arc<StackDef>>>,
     status: Mutex<BTreeMap<(String, String), ServiceStatus>>,
+    events: Mutex<(u64, VecDeque<Event>)>,
+    snapshot: Mutex<Snapshot>,
 }
+
+impl Inner {
+    fn emit(
+        &self,
+        level: &str,
+        stack: &str,
+        service: &str,
+        instance: Option<&str>,
+        message: String,
+    ) {
+        let mut e = self.events.lock().unwrap();
+        e.0 += 1;
+        let ev = Event {
+            seq: e.0,
+            at: now_ms(),
+            level: level.into(),
+            stack: stack.into(),
+            service: service.into(),
+            instance: instance.map(String::from),
+            message,
+        };
+        if e.1.len() == EVENTS_KEPT {
+            e.1.pop_front();
+        }
+        e.1.push_back(ev);
+    }
+}
+
+/// How often the metrics sampler runs.
+const SAMPLE_EVERY: Duration = Duration::from_secs(2);
 
 /// The daemon's stack controller.
 #[derive(Clone)]
@@ -152,8 +258,31 @@ impl Controller {
                 workers: Mutex::new(BTreeMap::new()),
                 stacks: Mutex::new(BTreeMap::new()),
                 status: Mutex::new(BTreeMap::new()),
+                events: Mutex::new((0, VecDeque::new())),
+                snapshot: Mutex::new(Snapshot::default()),
             }),
         };
+        // A weak handle, so the sampler ends with the controller.
+        let weak = Arc::downgrade(&c.inner);
+        let _ = std::thread::Builder::new()
+            .name("isb-metrics".into())
+            .spawn(move || {
+                let mut sampler = crate::metrics::Sampler::new();
+                while let Some(inner) = weak.upgrade() {
+                    match sampler.sample(&inner.client) {
+                        Ok((host, insts)) => {
+                            *inner.snapshot.lock().unwrap() = Snapshot {
+                                host,
+                                instances: insts.into_iter().map(|i| (i.name.clone(), i)).collect(),
+                                at: now_ms(),
+                            };
+                        }
+                        Err(e) => eprintln!("isb serve: metrics: {e}"),
+                    }
+                    drop(inner);
+                    std::thread::sleep(SAMPLE_EVERY);
+                }
+            });
         for def in c.inner.store.load_all()? {
             eprintln!("isb serve: resuming stack {}", def.name);
             c.apply(Arc::new(def));
@@ -163,6 +292,44 @@ impl Controller {
 
     pub fn balancer(&self) -> &Balancer {
         &self.inner.balancer
+    }
+
+    /// Events after `since` (0: all kept), oldest first, at most `limit`.
+    pub fn events(&self, since: u64, limit: usize) -> (u64, Vec<Event>) {
+        let e = self.inner.events.lock().unwrap();
+        let out: Vec<Event> = e.1.iter().filter(|x| x.seq > since).cloned().collect();
+        let skip = out.len().saturating_sub(limit);
+        (e.0, out.into_iter().skip(skip).collect())
+    }
+
+    /// Wait up to `timeout` for an event after `since`.
+    pub fn wait_events(&self, since: u64, limit: usize, timeout: Duration) -> (u64, Vec<Event>) {
+        let started = Instant::now();
+        loop {
+            let r = self.events(since, limit);
+            if !r.1.is_empty() || started.elapsed() >= timeout {
+                return r;
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+    }
+
+    /// The latest metrics sample.
+    pub fn snapshot(&self) -> Snapshot {
+        self.inner.snapshot.lock().unwrap().clone()
+    }
+
+    /// Record an event from outside a worker (a deploy, a removal).
+    pub fn note(&self, level: &str, stack: &str, message: String) {
+        eprintln!("isb serve: {stack}: {message}");
+        self.inner.emit(level, stack, "", None, message);
+    }
+
+    /// What deploying `def` would change, without deploying it.
+    pub fn plan(&self, def: &StackDef) -> Result<Vec<DeployChange>> {
+        self.validate(def)?;
+        let old = self.inner.stacks.lock().unwrap().get(&def.name).cloned();
+        diff(old.as_deref(), def)
     }
 
     pub fn client(&self) -> &Client {
@@ -666,6 +833,12 @@ struct Worker {
     template: Option<(String, Desired)>,
     state: String,
     message: Option<String>,
+    last_error: Option<String>,
+    /// The instances as last listed, kept current through a rollout.
+    insts: Vec<Inst>,
+    rollout: Option<RolloutStatus>,
+    /// Per route: accepted count at the last status, when, and conn/s history.
+    rates: BTreeMap<String, (u64, Instant, VecDeque<f32>)>,
     /// `depends_on` was met once: from then on the service is reconciled
     /// whatever its dependencies do.
     deps_met: bool,
@@ -687,6 +860,10 @@ fn spawn_worker(inner: Arc<Inner>, stack: String, service: String, shared: Arc<W
             template: None,
             state: "starting".into(),
             message: None,
+            last_error: None,
+            insts: Vec::new(),
+            rollout: None,
+            rates: BTreeMap::new(),
             deps_met: false,
         };
         w.run();
@@ -698,7 +875,13 @@ fn spawn_worker(inner: Arc<Inner>, stack: String, service: String, shared: Arc<W
 
 impl Worker {
     fn log(&self, msg: &str) {
+        self.event("info", None, msg);
+    }
+
+    fn event(&self, level: &str, instance: Option<&str>, msg: &str) {
         eprintln!("isb serve: {}/{}: {msg}", self.stack, self.service);
+        self.inner
+            .emit(level, &self.stack, &self.service, instance, msg.to_string());
     }
 
     fn client(&self) -> &Client {
@@ -734,9 +917,19 @@ impl Worker {
             if let Err(e) = self.pass(&def) {
                 self.state = "failing".into();
                 self.message = Some(e.to_string());
-                self.log(&format!("{e}"));
-                self.publish_status(&def, &[]);
+                // Once per distinct error, not once per pass.
+                if self.last_error.as_deref() != Some(&e.to_string()) {
+                    self.event("error", None, &e.to_string());
+                    self.last_error = Some(e.to_string());
+                }
+                self.publish_status(&def);
+                let slot = self.shared.slot.lock().unwrap();
+                if Arc::ptr_eq(&slot.def, &def) && !slot.remove {
+                    let _ = self.shared.wake.wait_timeout(slot, self.inner.interval);
+                }
+                continue;
             }
+            self.last_error = None;
             let slot = self.shared.slot.lock().unwrap();
             if Arc::ptr_eq(&slot.def, &def) && !slot.remove {
                 let _ = self.shared.wake.wait_timeout(slot, self.inner.interval);
@@ -821,7 +1014,7 @@ impl Worker {
             if let Some(msg) = self.waiting_for(&spec) {
                 self.state = "waiting".into();
                 self.message = Some(msg);
-                self.publish_status(def, &[]);
+                self.publish_status(def);
                 return Ok(());
             }
             self.deps_met = true;
@@ -848,6 +1041,7 @@ impl Worker {
             self.retire(&i.name)?;
         }
         insts.retain(|i| i.slot >= 1 && i.slot <= replicas);
+        self.insts = insts.clone();
 
         // Keep what exists running, set up and healthy.
         for i in &insts {
@@ -879,7 +1073,7 @@ impl Worker {
             }
         }
         self.sync_routes();
-        self.publish_status(def, &insts);
+        self.publish_status(def);
 
         // Roll out: slots without a current instance.
         let mut pending: Vec<(u32, Option<String>)> = Vec::new();
@@ -904,13 +1098,13 @@ impl Worker {
             } else if self.message.is_none() {
                 self.message = Some("some replicas are not healthy".into());
             }
-            self.publish_status(def, &insts);
+            self.publish_status(def);
             return Ok(());
         }
         if self.paused.as_ref().is_some_and(|(r, _)| *r == rev) {
             self.state = "paused".into();
             self.message = self.paused.as_ref().map(|(_, m)| m.clone());
-            self.publish_status(def, &insts);
+            self.publish_status(def);
             return Ok(());
         }
         if let Some((at, wait)) = self.create_backoff {
@@ -920,7 +1114,7 @@ impl Worker {
         }
         self.state = "updating".into();
         self.message = None;
-        self.publish_status(def, &insts);
+        self.publish_status(def);
 
         let uc: UpdateConfig = spec
             .deploy
@@ -946,29 +1140,103 @@ impl Worker {
             .map_err(Error::invalid)?
             .unwrap_or(Duration::from_secs(5));
         let order = uc.order.unwrap_or_default();
+        let order_name = match order {
+            UpdateOrder::StopFirst => "stop-first",
+            UpdateOrder::StartFirst => "start-first",
+        };
+        self.rollout = Some(RolloutStatus {
+            to_rev: rev.clone(),
+            order: order_name.into(),
+            parallelism: parallel,
+            done: 0,
+            total: pending.len(),
+            started_at: now_secs(),
+            slots: pending
+                .iter()
+                .map(|(slot, old)| SlotRollout {
+                    slot: *slot,
+                    old: old.clone(),
+                    old_rev: old
+                        .as_ref()
+                        .and_then(|o| insts.iter().find(|i| i.name == *o))
+                        .map(|i| i.rev.clone()),
+                    old_state: if old.is_some() { "serving" } else { "none" }.into(),
+                    new: None,
+                    new_state: "waiting".into(),
+                })
+                .collect(),
+        });
+        let rollout_started = Instant::now();
+        self.log(&format!(
+            "rolling out rev {rev} to {} slot(s), {order_name}",
+            pending.len()
+        ));
+        self.publish_status(def);
+        let r = self.roll(
+            def,
+            &spec,
+            &rev,
+            &pending,
+            parallel,
+            delay,
+            monitor,
+            order,
+            oci,
+            probe.as_ref(),
+            &uc,
+        );
+        let rollout = self.rollout.take();
+        if let (Ok(true), Some(ro)) = (&r, rollout) {
+            self.log(&format!(
+                "rollout of rev {rev} complete: {}/{} slot(s) in {:.0?}",
+                ro.done,
+                ro.total,
+                rollout_started.elapsed()
+            ));
+        }
+        self.publish_status(def);
+        r.map(|_| ())
+    }
 
+    /// Replace the pending slots in batches. Ok(true) when every slot made
+    /// it, Ok(false) when the rollout stopped (paused, rolled back, retrying).
+    #[allow(clippy::too_many_arguments)]
+    fn roll(
+        &mut self,
+        def: &Arc<StackDef>,
+        spec: &SandboxSpec,
+        rev: &String,
+        pending: &[(u32, Option<String>)],
+        parallel: usize,
+        delay: Duration,
+        monitor: Duration,
+        order: UpdateOrder,
+        oci: bool,
+        probe: Option<&HealthProbe>,
+        uc: &UpdateConfig,
+    ) -> Result<bool> {
         for (n, batch) in pending.chunks(parallel).enumerate() {
             if n > 0 && !delay.is_zero() {
                 std::thread::sleep(delay);
             }
             if self.superseded(def) {
-                return Ok(());
+                return Ok(false);
             }
             for (slot, old) in batch {
                 let r = self.replace(
                     def,
-                    &spec,
-                    &rev,
+                    spec,
+                    rev,
                     *slot,
                     old.as_deref(),
                     order,
                     oci,
-                    probe.as_ref(),
+                    probe,
                     monitor,
                 );
                 if let Err(e) = r {
                     let msg = format!("slot {slot}: {e}");
-                    self.log(&msg);
+                    self.event("error", None, &msg);
                     if old.is_none() {
                         // Nothing to protect: keep trying, slower each time.
                         let wait = self
@@ -978,30 +1246,64 @@ impl Worker {
                         self.create_backoff = Some((Instant::now(), wait));
                         self.state = "failing".into();
                         self.message = Some(format!("{msg}; retrying in {wait:?}"));
-                        self.publish_status(def, &[]);
-                        return Ok(());
+                        self.publish_status(def);
+                        return Ok(false);
                     }
                     match uc.failure_action.unwrap_or_default() {
                         FailureAction::Continue => continue,
                         FailureAction::Pause => {
+                            self.event("warn", None, &format!("rollout of rev {rev} paused"));
                             self.paused = Some((rev.clone(), format!("rollout paused: {msg}")));
-                            return Ok(());
+                            return Ok(false);
                         }
                         FailureAction::Rollback => {
                             self.paused = Some((rev.clone(), format!("rolled back: {msg}")));
                             let ctl = Controller {
                                 inner: self.inner.clone(),
                             };
+                            self.event(
+                                "warn",
+                                None,
+                                &format!("rollout of rev {rev} failed; rolling back"),
+                            );
                             if let Err(e) = ctl.rollback(&self.stack) {
-                                self.log(&format!("rollback failed: {e}"));
+                                self.event("error", None, &format!("rollback failed: {e}"));
                             }
-                            return Ok(());
+                            return Ok(false);
                         }
                     }
                 }
             }
         }
-        Ok(())
+        Ok(true)
+    }
+
+    /// Update one slot of the rollout display, and publish it.
+    fn slot_state(
+        &mut self,
+        def: &StackDef,
+        slot: u32,
+        old_state: Option<&str>,
+        new: Option<&str>,
+        new_state: Option<&str>,
+    ) {
+        if let Some(ro) = &mut self.rollout {
+            if let Some(s) = ro.slots.iter_mut().find(|s| s.slot == slot) {
+                if let Some(o) = old_state {
+                    s.old_state = o.into();
+                }
+                if let Some(n) = new {
+                    s.new = Some(n.into());
+                }
+                if let Some(n) = new_state {
+                    s.new_state = n.into();
+                    if n == "serving" {
+                        ro.done += 1;
+                    }
+                }
+            }
+        }
+        self.publish_status(def);
     }
 
     /// Unmet `depends_on`, as a message.
@@ -1050,7 +1352,11 @@ impl Worker {
                 self.message = Some(format!("{}: restart limit reached", i.name));
                 return Ok(());
             }
-            self.log(&format!("{} is {}; starting it", i.name, i.status));
+            self.event(
+                "warn",
+                Some(&i.name),
+                &format!("{} is {}; starting it", i.name, i.status),
+            );
             self.count_restart(&i.name);
             if let Err(e) = sb.start() {
                 self.log(&format!("cannot start {}: {e}", i.name));
@@ -1135,15 +1441,19 @@ impl Worker {
                 self.retire(&i.name)?;
                 return Ok(());
             }
-            self.log(&format!(
-                "{} is unhealthy ({}); restarting its app",
-                i.name,
-                self.rt[&i.name]
-                    .last_probe
-                    .lines()
-                    .last()
-                    .unwrap_or("probe failed")
-            ));
+            self.event(
+                "warn",
+                Some(&i.name),
+                &format!(
+                    "{} is unhealthy ({}); restarting its app",
+                    i.name,
+                    self.rt[&i.name]
+                        .last_probe
+                        .lines()
+                        .last()
+                        .unwrap_or("probe failed")
+                ),
+            );
             self.count_restart(&i.name);
             let rt = self.rt.get_mut(&i.name).unwrap();
             rt.unhealthy_restarts += 1;
@@ -1224,10 +1534,13 @@ impl Worker {
     ) -> Result<()> {
         if let (Some(o), UpdateOrder::StopFirst) = (old, order) {
             self.log(&format!("slot {slot}: replacing {o} (stop-first)"));
+            self.slot_state(def, slot, Some("draining"), None, None);
             self.retire(o)?;
+            self.slot_state(def, slot, Some("retired"), None, None);
         }
         let name = instance_name(&self.stack, &self.service, slot, &new_id())?;
         self.log(&format!("slot {slot}: creating {name} (rev {rev})"));
+        self.slot_state(def, slot, None, Some(&name), Some("creating"));
         let mut s = instance_spec(def, &self.service, spec, slot, rev)?;
         s.name = Some(name.clone());
         let d = crate::sandbox::resolve(self.client(), &s, &def.file.volumes, &def.base_dir)?;
@@ -1242,17 +1555,27 @@ impl Worker {
                 rev: rev.to_string(),
                 status: "Running".into(),
             };
+            self.insts.push(inst.clone());
+            self.slot_state(def, slot, None, None, Some("probing"));
             self.wait_serving(def, &inst, spec, oci, probe, monitor)
         });
         if let Err(e) = result {
-            self.log(&format!("{name} did not come up: {e}"));
+            self.event(
+                "error",
+                Some(&name),
+                &format!("{name} did not come up: {e}"),
+            );
+            self.slot_state(def, slot, None, None, Some("failed"));
             let _ = self.retire(&name);
             return Err(e);
         }
         if let (Some(o), UpdateOrder::StartFirst) = (old, order) {
             self.log(&format!("slot {slot}: {name} is serving; retiring {o}"));
+            self.slot_state(def, slot, Some("draining"), None, None);
             self.retire(o)?;
+            self.slot_state(def, slot, Some("retired"), None, None);
         }
+        self.slot_state(def, slot, None, None, Some("serving"));
         Ok(())
     }
 
@@ -1313,6 +1636,7 @@ impl Worker {
             );
         }
         self.sync_routes();
+        self.slot_state(def, i.slot, None, None, Some("monitoring"));
         let watch = Instant::now();
         while watch.elapsed() < monitor {
             std::thread::sleep(Duration::from_secs(1).min(monitor));
@@ -1346,6 +1670,7 @@ impl Worker {
             let _ = sb.stop(false, Duration::from_secs(10));
         }
         self.rt.remove(name);
+        self.insts.retain(|i| i.name != name);
         match Sandbox::remove(self.client(), name, true) {
             Err(e) if !e.is_not_found() => Err(e),
             _ => Ok(()),
@@ -1411,16 +1736,19 @@ impl Worker {
         self.route_errors = errors;
     }
 
-    fn publish_status(&self, def: &StackDef, insts: &[Inst]) {
+    fn publish_status(&mut self, def: &StackDef) {
         let Ok(spec) = def.service(&self.service) else {
             return;
         };
         let rev = def.revision(&self.service).unwrap_or_default();
         let probe = matches!(spec.health_probe(), Ok(Some(_)));
-        let instances: Vec<InstanceStatus> = insts
+        let snap = self.inner.snapshot.lock().unwrap().instances.clone();
+        let instances: Vec<InstanceStatus> = self
+            .insts
             .iter()
             .map(|i| {
                 let rt = self.rt.get(&i.name);
+                let m = snap.get(&i.name);
                 let health = match (probe, rt.and_then(|r| r.healthy)) {
                     (false, _) => "none",
                     (true, Some(true)) => "healthy",
@@ -1431,30 +1759,65 @@ impl Worker {
                     name: i.name.clone(),
                     slot: i.slot,
                     rev: i.rev.clone(),
-                    status: i.status.clone(),
+                    status: m
+                        .map(|m| m.status.clone())
+                        .unwrap_or_else(|| i.status.clone()),
                     health: health.into(),
                     ip: rt.and_then(|r| r.ip).map(|ip| ip.to_string()),
                     in_rotation: rt.is_some_and(|r| r.in_rotation),
                     restarts: rt.map(|r| r.restarts.len() as u32).unwrap_or(0),
                     last_probe: rt.map(|r| r.last_probe.clone()).unwrap_or_default(),
+                    cpu_pct: m.and_then(|m| m.cpu_pct),
+                    cpu_history: m.map(|m| m.cpu_history.clone()).unwrap_or_default(),
+                    mem_bytes: m.and_then(|m| m.mem_bytes),
                 }
             })
             .collect();
+        let mut instances = instances;
+        instances.sort_by(|a, b| (a.slot, &a.name).cmp(&(b.slot, &b.name)));
         let routes = self.inner.balancer.routes();
-        let ports = self
-            .routes
-            .iter()
-            .map(|(k, p)| PortStatus {
+        let now = Instant::now();
+        let mut ports = Vec::new();
+        for (k, p) in &self.routes {
+            let r = routes.iter().find(|r| r.key == *k);
+            let accepted = r.map(|r| r.accepted).unwrap_or(0);
+            let e = self
+                .rates
+                .entry(k.clone())
+                .or_insert_with(|| (accepted, now, VecDeque::new()));
+            let dt = now.duration_since(e.1).as_secs_f32();
+            // Only sample on a reconcile-sized step, so a burst of status
+            // updates during a rollout does not flatten the curve.
+            if dt >= 1.0 {
+                let rate = accepted.saturating_sub(e.0) as f32 / dt;
+                if e.2.len() == crate::metrics::HISTORY {
+                    e.2.pop_front();
+                }
+                e.2.push_back(rate);
+                e.0 = accepted;
+                e.1 = now;
+            }
+            ports.push(PortStatus {
                 listen: p.listen.to_string(),
                 target: p.target,
-                backends: routes
-                    .iter()
-                    .find(|r| r.key == *k)
+                backends: r
                     .map(|r| r.backends.iter().map(|b| b.addr.to_string()).collect())
                     .unwrap_or_default(),
                 error: self.route_errors.get(k).cloned(),
-            })
-            .collect();
+                accepted,
+                active: r
+                    .map(|r| {
+                        r.backends
+                            .iter()
+                            .chain(r.draining.iter())
+                            .map(|b| b.active)
+                            .sum()
+                    })
+                    .unwrap_or(0),
+                rate_history: e.2.iter().copied().collect(),
+            });
+        }
+        self.rates.retain(|k, _| self.routes.contains_key(k));
         let running = instances
             .iter()
             .filter(|i| i.status.eq_ignore_ascii_case("running"))
@@ -1471,6 +1834,7 @@ impl Worker {
             message: self.message.clone(),
             instances,
             ports,
+            rollout: self.rollout.clone(),
             checked_at: now_secs(),
         };
         self.inner.status.lock().unwrap().insert(self.key(), st);

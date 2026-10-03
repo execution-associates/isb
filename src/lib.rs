@@ -40,6 +40,7 @@ pub mod foreground;
 pub mod idmap;
 pub mod interp;
 pub mod lock;
+pub mod metrics;
 pub mod plan;
 pub mod rpc;
 pub mod sandbox;
@@ -48,6 +49,7 @@ pub mod shorthand;
 pub mod spec;
 pub mod stack;
 pub mod supervise;
+pub mod tui;
 pub mod volume;
 
 pub use client::{Client, Timeouts};
