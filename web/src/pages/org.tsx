@@ -5,6 +5,7 @@ import { Navigate, useParams } from "react-router";
 import { toast } from "sonner";
 import { auth, type Role } from "@/api/auth";
 import { useEvents } from "@/api/events";
+import { OrgAppsOverview } from "@/apps/dashboard";
 import { callTool, type StackEvent, type StackList, type StackStatus } from "@/api/tools";
 import { PageHeader } from "@/components/app-shell";
 import { CopyField, Field, FormError, SubmitButton } from "@/components/form";
@@ -140,6 +141,8 @@ export function OrgPage() {
         <Stat label="Services" value={stacks.isLoading ? "–" : services.length} icon={Boxes} />
         <Stat label="Healthy replicas" value={stacks.isLoading ? "–" : `${healthy}/${replicas}`} icon={Activity} />
       </div>
+
+      <OrgAppsOverview org={org} />
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
         <Card className="gap-0 overflow-hidden py-0">

@@ -1,4 +1,4 @@
-import { Check, ChevronsUpDown, LayoutDashboard, LogOut, Menu, Monitor, Moon, Sun, UserRound } from "lucide-react";
+import { Check, ChevronsUpDown, FolderKanban, LayoutDashboard, LogOut, Menu, Monitor, Moon, Sun, UserRound } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import type { Me } from "@/api/auth";
@@ -231,6 +231,11 @@ function SidebarContent({ me, onNavigate }: { me: Me; onNavigate?: () => void })
         {org && (
           <NavItem to={`/orgs/${encodeURIComponent(org)}`} icon={LayoutDashboard} onNavigate={onNavigate} end>
             Overview
+          </NavItem>
+        )}
+        {org && (
+          <NavItem to={`/orgs/${encodeURIComponent(org)}/projects`} icon={FolderKanban} onNavigate={onNavigate}>
+            Projects
           </NavItem>
         )}
         <NavItem to="/account" icon={UserRound} onNavigate={onNavigate}>

@@ -686,7 +686,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
                 .scale(&qname(&a.org, &a.name)?, &a.service, a.replicas)?;
             d.ctl.note(
                 "info",
-                &a.name,
+                &qname(&a.org, &a.name)?,
                 format!(
                     "{} scaled to {} by {}",
                     a.service,
@@ -718,7 +718,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             d.ctl.redeploy(&qname(&a.org, &a.name)?, &a.service)?;
             d.ctl.note(
                 "info",
-                &a.name,
+                &qname(&a.org, &a.name)?,
                 format!("{} redeployed by {}", a.service, caller_name(_c)),
             );
             Ok(json!({"ok": true}))
@@ -741,7 +741,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             let changes = d.ctl.rollback(&qname(&a.org, &a.name)?)?;
             d.ctl.note(
                 "info",
-                &a.name,
+                &qname(&a.org, &a.name)?,
                 format!("rolled back by {}", caller_name(_c)),
             );
             Ok(json!({"changes": changes}))
@@ -1128,7 +1128,7 @@ fn stack_deploy(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         .collect();
     d.ctl.note(
         "info",
-        &a.name,
+        &crate::stack::qualified(&org, &a.name),
         format!(
             "deployed by {who}: {}",
             if summary.is_empty() {
