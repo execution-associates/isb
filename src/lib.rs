@@ -43,6 +43,7 @@ pub mod rpc;
 pub mod sandbox;
 pub mod shorthand;
 pub mod spec;
+pub mod supervise;
 pub mod volume;
 
 pub use client::{Client, Timeouts};

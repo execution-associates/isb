@@ -27,6 +27,10 @@ pub struct Project {
     /// Directory of the first file: relative bind paths resolve against it.
     pub base_dir: PathBuf,
     pub files: Vec<PathBuf>,
+    /// Explicit variables and the env files' values, kept so that secrets
+    /// with `environment:` resolve the way `${VAR}` did.
+    pub vars: BTreeMap<String, String>,
+    pub dotenv: BTreeMap<String, String>,
 }
 
 impl Project {
@@ -46,15 +50,41 @@ impl Project {
         })
     }
 
-    /// Service names in order, or the given subset (validated).
+    /// Service names in dependency order, or the given subset (validated)
+    /// plus what it depends on, as `docker compose up web` also starts web's
+    /// dependencies.
     pub fn select(&self, services: &[String]) -> Result<Vec<String>> {
+        let order = dependency_order(&self.file).map_err(Error::invalid)?;
         if services.is_empty() {
-            return Ok(self.file.services.keys().cloned().collect());
+            return Ok(order);
         }
+        let mut want: Vec<String> = Vec::new();
+        let mut stack: Vec<String> = Vec::new();
+        for s in services {
+            self.service(s)?;
+            stack.push(s.clone());
+        }
+        while let Some(s) = stack.pop() {
+            if want.contains(&s) {
+                continue;
+            }
+            stack.extend(self.file.services[&s].depends_on.keys().cloned());
+            want.push(s);
+        }
+        Ok(order.into_iter().filter(|s| want.contains(s)).collect())
+    }
+
+    /// Exactly the given services (all when empty), validated, in dependency
+    /// order. For commands that should not pull in dependencies (`down`, `ps`).
+    pub fn select_exact(&self, services: &[String]) -> Result<Vec<String>> {
         for s in services {
             self.service(s)?;
         }
-        Ok(services.to_vec())
+        let order = dependency_order(&self.file).map_err(Error::invalid)?;
+        Ok(order
+            .into_iter()
+            .filter(|s| services.is_empty() || services.contains(s))
+            .collect())
     }
 
     pub fn files_display(&self) -> String {
@@ -63,6 +93,21 @@ impl Project {
             .map(|p| p.display().to_string())
             .collect::<Vec<_>>()
             .join(", ")
+    }
+
+    /// A variable as interpolation sees it: explicit vars, then the
+    /// environment, then the env files.
+    pub fn lookup(&self, k: &str) -> Option<String> {
+        self.vars
+            .get(k)
+            .cloned()
+            .or_else(|| std::env::var(k).ok())
+            .or_else(|| self.dotenv.get(k).cloned())
+    }
+
+    /// The values of the secrets the selected services use.
+    pub fn secret_values(&self) -> Result<BTreeMap<String, Vec<u8>>> {
+        crate::supervise::resolve_secret_values(&self.file, &self.base_dir, &|k| self.lookup(k))
     }
 
     /// The resolved project as YAML (what `isb config` prints).
@@ -146,6 +191,7 @@ pub fn load(opts: &LoadOptions) -> Result<Project> {
         }
     }
     let vars = opts.vars.clone();
+    let dotenv_kept = dotenv.clone();
     let lookup = move |k: &str| {
         vars.get(k)
             .cloned()
@@ -160,7 +206,10 @@ pub fn load(opts: &LoadOptions) -> Result<Project> {
         })?;
         docs.push((f.clone(), text));
     }
-    load_docs(&docs, &base, opts.project_name.as_deref(), &lookup)
+    let mut p = load_docs(&docs, &base, opts.project_name.as_deref(), &lookup)?;
+    p.vars = opts.vars.clone();
+    p.dotenv = dotenv_kept;
+    Ok(p)
 }
 
 /// Load from in-memory documents. `base` anchors relative paths and names the
@@ -237,13 +286,121 @@ pub fn load_docs(
             }
         }
     }
+    validate_services(&mut file).map_err(|message| Error::Parse {
+        path: files
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(" + "),
+        message,
+    })?;
     file.name = Some(name.clone());
     Ok(Project {
         name,
         file,
         base_dir: base.to_path_buf(),
         files,
+        vars: BTreeMap::new(),
+        dotenv: BTreeMap::new(),
     })
+}
+
+/// Checks across services, and folding `deploy.resources.limits` into `cpus`
+/// and `mem_limit`.
+fn validate_services(file: &mut crate::spec::ComposeFile) -> std::result::Result<(), String> {
+    for (key, def) in &file.secrets {
+        if def.file.is_some() == def.environment.is_some() {
+            return Err(format!(
+                "secret {key:?} needs exactly one of file or environment"
+            ));
+        }
+    }
+    let names: Vec<String> = file.services.keys().cloned().collect();
+    for (service, spec) in file.services.iter_mut() {
+        for dep in spec.depends_on.keys() {
+            if !names.contains(dep) {
+                return Err(format!(
+                    "service {service:?} depends on {dep:?}, which is not a service here"
+                ));
+            }
+            if dep == service {
+                return Err(format!("service {service:?} depends on itself"));
+            }
+        }
+        for s in &spec.secrets {
+            if !file.secrets.contains_key(&s.source) {
+                return Err(format!(
+                    "service {service:?} uses secret {:?}, which is not declared under top-level secrets",
+                    s.source
+                ));
+            }
+            s.file_mode().map_err(|e| format!("service {service:?}: {e}"))?;
+        }
+        if let Some(h) = &spec.healthcheck {
+            h.probe().map_err(|e| format!("service {service:?}: {e}"))?;
+        }
+        if let Some(d) = &spec.deploy {
+            if d.mode.as_deref().is_some_and(|m| m != "replicated") {
+                return Err(format!(
+                    "service {service:?}: deploy.mode {:?} is not supported (only replicated)",
+                    d.mode.as_deref().unwrap_or_default()
+                ));
+            }
+            if let Some(l) = d.resources.as_ref().and_then(|r| r.limits.clone()) {
+                if let Some(c) = l.cpus {
+                    if spec.cpus.is_some() || spec.cpuset.is_some() {
+                        return Err(format!(
+                            "service {service:?}: set cpus or deploy.resources.limits.cpus, not both"
+                        ));
+                    }
+                    spec.cpus = Some(c.trim().trim_end_matches(".0").to_string());
+                }
+                if let Some(m) = l.memory {
+                    if spec.memory.is_some() {
+                        return Err(format!(
+                            "service {service:?}: set mem_limit or deploy.resources.limits.memory, not both"
+                        ));
+                    }
+                    spec.memory = Some(m);
+                }
+            }
+        }
+    }
+    dependency_order(file).map(|_| ())
+}
+
+/// Service names with every service after the ones it depends on (ties in
+/// name order). A cycle is an error.
+pub fn dependency_order(file: &crate::spec::ComposeFile) -> std::result::Result<Vec<String>, String> {
+    let mut order: Vec<String> = Vec::new();
+    let mut remaining: Vec<&String> = file.services.keys().collect();
+    while !remaining.is_empty() {
+        let ready: Vec<&String> = remaining
+            .iter()
+            .copied()
+            .filter(|s| {
+                file.services[*s]
+                    .depends_on
+                    .keys()
+                    .all(|d| order.contains(d) || !file.services.contains_key(d))
+            })
+            .collect();
+        if ready.is_empty() {
+            return Err(format!(
+                "depends_on has a cycle among: {}",
+                remaining
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        for s in ready {
+            order.push(s.clone());
+            remaining.retain(|r| *r != s);
+        }
+    }
+    Ok(order)
 }
 
 /// A client for the project's incus project (`incus_project:` in the file),
@@ -272,6 +429,11 @@ pub fn up(
 
 /// [`up`], also returning a handle on each sandbox (with its exec defaults),
 /// for running its `command`.
+///
+/// Services come up in dependency order. After each is ready its secrets are
+/// written and, when it is long-running (`restart`), its command is installed
+/// as a supervised unit. A dependency with `condition: service_healthy` is
+/// probed until healthy before its dependents are touched.
 pub fn up_handles(
     client: &crate::Client,
     project: &Project,
@@ -280,21 +442,95 @@ pub fn up_handles(
     report: &mut dyn FnMut(&str),
 ) -> Result<Vec<(String, crate::ApplyReport, crate::Sandbox)>> {
     let c = client_for(client, project);
+    let selected = project.select(services)?;
+    let healthy_needed: std::collections::BTreeSet<&String> = selected
+        .iter()
+        .flat_map(|s| project.file.services[s].depends_on.iter())
+        .filter(|(_, d)| d.condition == crate::spec::DependCondition::ServiceHealthy)
+        .map(|(k, _)| k)
+        .collect();
+    for dep in &healthy_needed {
+        let spec = &project.file.services[*dep];
+        if spec.health_probe().map_err(Error::invalid)?.is_none() {
+            return Err(Error::invalid(format!(
+                "a service depends on {dep:?} being healthy, but {dep:?} has no healthcheck"
+            )));
+        }
+        let oci = crate::plan::ImageSource::parse(&spec.image)?.is_oci();
+        if spec.command.is_some() && !spec.long_running() && !oci {
+            return Err(Error::invalid(format!(
+                "a service depends on {dep:?} being healthy, but its command only runs once every service is up; set restart on {dep:?} so isb supervises it"
+            )));
+        }
+    }
+    let secret_values = if selected
+        .iter()
+        .any(|s| !project.file.services[s].secrets.is_empty())
+    {
+        project.secret_values()?
+    } else {
+        BTreeMap::new()
+    };
     let mut out = Vec::new();
-    for s in project.select(services)? {
-        let d = crate::sandbox::resolve(
-            &c,
-            project.service(&s)?,
-            &project.file.volumes,
-            &project.base_dir,
-        )?;
+    for s in selected {
+        let spec = project.service(&s)?;
+        let d = crate::sandbox::resolve(&c, spec, &project.file.volumes, &project.base_dir)?;
         let r = crate::sandbox::ensure(&c, &d, opts, report)?;
         if r.applied.iter().all(|a| !a.is_change()) {
             report(&format!("{}: up to date", d.name));
         }
-        out.push((s, r, crate::Sandbox::from_desired(&c, &d)));
+        let sb = crate::Sandbox::from_desired(&c, &d);
+        if !spec.secrets.is_empty() {
+            crate::supervise::push_secrets(&sb, spec, &secret_values)?;
+        }
+        if spec.long_running() && spec.command.is_some() && !d.image.is_oci() {
+            if crate::supervise::install(&sb, &s, spec, !spec.secrets.is_empty())? {
+                report(&format!(
+                    "{}: supervising command as {}",
+                    d.name,
+                    crate::supervise::unit_name(&s)
+                ));
+            }
+        }
+        if healthy_needed.contains(&s) {
+            wait_healthy(&sb, &s, spec, report)?;
+        }
+        out.push((s, r, sb));
     }
     Ok(out)
+}
+
+/// Probe a service until it passes, within its start period plus `retries`
+/// intervals (at least a minute).
+pub fn wait_healthy(
+    sb: &crate::Sandbox,
+    service: &str,
+    spec: &crate::SandboxSpec,
+    report: &mut dyn FnMut(&str),
+) -> Result<()> {
+    let Some(check) = spec.health_probe().map_err(Error::invalid)? else {
+        return Ok(());
+    };
+    let deadline = (check.start_period + check.interval * check.retries)
+        .max(std::time::Duration::from_secs(60));
+    let started = std::time::Instant::now();
+    report(&format!("{}: waiting for {service} to be healthy", sb.name()));
+    loop {
+        let p = crate::supervise::probe(sb, &check);
+        if p.ok {
+            report(&format!("{}: healthy", sb.name()));
+            return Ok(());
+        }
+        if started.elapsed() >= deadline {
+            return Err(Error::NotReady {
+                sandbox: sb.name().to_string(),
+                check: "healthcheck".into(),
+                detail: p.output,
+                waited: started.elapsed(),
+            });
+        }
+        std::thread::sleep(check.start_interval.min(check.interval));
+    }
 }
 
 /// `isb plan`: what `up` would change, per selected service.
@@ -329,7 +565,8 @@ pub fn down(
     report: &mut dyn FnMut(&str),
 ) -> Result<()> {
     let c = client_for(client, project);
-    for s in project.select(services)? {
+    // Dependents first, the reverse of the order `up` brings them up in.
+    for s in project.select_exact(services)?.into_iter().rev() {
         let name = project.service(&s)?.name.clone().unwrap_or_default();
         match crate::Sandbox::remove(&c, &name, true) {
             Ok(()) => report(&format!("{name}: deleted")),
@@ -430,7 +667,6 @@ const DOCKER_ONLY_TOP: &[(&str, &str)] = &[
         "networking comes from incus profiles (incus_profiles)",
     ),
     ("configs", "bind-mount the file instead"),
-    ("secrets", "pass secrets per command with isb exec -e"),
     ("include", "pass several files with -f"),
     ("sandboxes", "services are under services:"),
     ("project", "the incus project is incus_project:"),
@@ -441,12 +677,7 @@ const DOCKER_ONLY_SERVICE: &[(&str, &str)] = &[
         "build",
         "isb runs incus images: build one and name it in image",
     ),
-    ("depends_on", "isb has no service dependencies"),
-    ("healthcheck", "use ready, isb's one-shot readiness checks"),
-    ("entrypoint", "use command"),
     ("env_file", "list the variables under environment"),
-    ("restart", "sandboxes keep running until stopped"),
-    ("deploy", "use cpus, cpuset and mem_limit"),
     (
         "profiles",
         "docker's service profiles are not supported; incus profiles are incus_profiles",
@@ -464,7 +695,6 @@ const DOCKER_ONLY_SERVICE: &[(&str, &str)] = &[
     ("devices", "use raw_devices"),
     ("gpus", "use raw_devices, e.g. {gpu: {type: gpu}}"),
     ("sysctls", "use raw_config with linux.sysctl.* keys"),
-    ("secrets", "pass secrets per command with isb exec -e"),
     ("working_directory", "the key is working_dir"),
     ("env", "the key is environment"),
     ("memory", "the key is mem_limit"),
@@ -796,8 +1026,8 @@ mod tests {
         let hint = |doc: &str| load_with(&[doc], &[]).unwrap_err().to_string();
         let e = hint("services:\n  web: {image: x, build: .}\n");
         assert!(e.contains("`build`") && e.contains("image"), "{e}");
-        let e = hint("services:\n  web: {image: x, healthcheck: {}}\n");
-        assert!(e.contains("ready"), "{e}");
+        let e = hint("services:\n  web: {image: x, env_file: a.env}\n");
+        assert!(e.contains("environment"), "{e}");
         let e = hint("services:\n  web: {image: x, profiles: [dev]}\n");
         assert!(e.contains("incus_profiles"), "{e}");
         let e = hint("networks: {}\nservices: {}\n");

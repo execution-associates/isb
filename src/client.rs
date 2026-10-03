@@ -161,6 +161,29 @@ impl Client {
         if_match: Option<&str>,
         timeout: Duration,
     ) -> Result<RawResponse> {
+        let payload = match body {
+            Some(v) => serde_json::to_vec(v)?,
+            None => Vec::new(),
+        };
+        let mut headers: Vec<(&str, String)> = Vec::new();
+        if body.is_some() {
+            headers.push(("Content-Type", "application/json".into()));
+        }
+        if let Some(etag) = if_match {
+            headers.push(("If-Match", etag.to_string()));
+        }
+        self.raw_bytes(method, path, &payload, &headers, timeout)
+    }
+
+    /// [`Client::raw`] with an arbitrary body and headers (the file API).
+    fn raw_bytes(
+        &self,
+        method: &str,
+        path: &str,
+        payload: &[u8],
+        extra_headers: &[(&str, String)],
+        timeout: Duration,
+    ) -> Result<RawResponse> {
         let path = self.with_project(path);
         let started = Instant::now();
         let to_err = |e: std::io::Error| -> Error {
@@ -178,23 +201,16 @@ impl Client {
             }
         };
         let mut stream = self.connect(timeout)?;
-        let payload = match body {
-            Some(v) => serde_json::to_vec(v)?,
-            None => Vec::new(),
-        };
         let mut head = format!(
             "{method} {path} HTTP/1.1\r\nHost: incus\r\nUser-Agent: isb/{}\r\nConnection: close\r\n",
             env!("CARGO_PKG_VERSION")
         );
-        if body.is_some() {
-            head.push_str("Content-Type: application/json\r\n");
-        }
-        if let Some(etag) = if_match {
-            head.push_str(&format!("If-Match: {etag}\r\n"));
+        for (k, v) in extra_headers {
+            head.push_str(&format!("{k}: {v}\r\n"));
         }
         head.push_str(&format!("Content-Length: {}\r\n\r\n", payload.len()));
         stream.write_all(head.as_bytes()).map_err(to_err)?;
-        stream.write_all(&payload).map_err(to_err)?;
+        stream.write_all(payload).map_err(to_err)?;
         stream.flush().map_err(to_err)?;
 
         let mut buf = Vec::with_capacity(8192);
@@ -430,6 +446,113 @@ impl Client {
     pub fn cancel_operation(&self, operation: &str) -> Result<()> {
         self.request("DELETE", operation, None, self.timeouts.request)?;
         Ok(())
+    }
+
+    /// Write a file into an instance (running or stopped), replacing it.
+    /// Parent directories must exist; see [`Client::make_dir`].
+    pub fn push_file(
+        &self,
+        instance: &str,
+        path: &str,
+        data: &[u8],
+        uid: u32,
+        gid: u32,
+        mode: u32,
+    ) -> Result<()> {
+        self.file_request(instance, path, data, uid, gid, mode, "file")
+    }
+
+    /// Create a directory in an instance; an existing one is left as is.
+    pub fn make_dir(&self, instance: &str, path: &str, uid: u32, gid: u32, mode: u32) -> Result<()> {
+        match self.file_request(instance, path, &[], uid, gid, mode, "directory") {
+            Err(Error::Api { status, ref message, .. })
+                if status == 409 || message.to_ascii_lowercase().contains("exist") =>
+            {
+                Ok(())
+            }
+            r => r,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn file_request(
+        &self,
+        instance: &str,
+        path: &str,
+        data: &[u8],
+        uid: u32,
+        gid: u32,
+        mode: u32,
+        kind: &str,
+    ) -> Result<()> {
+        let url = format!(
+            "/1.0/instances/{}/files?path={}",
+            encode_segment(instance),
+            encode_query(path)
+        );
+        let headers = [
+            ("Content-Type", "application/octet-stream".to_string()),
+            ("X-Incus-uid", uid.to_string()),
+            ("X-Incus-gid", gid.to_string()),
+            ("X-Incus-mode", format!("{mode:04o}")),
+            ("X-Incus-type", kind.to_string()),
+            ("X-Incus-write", "overwrite".to_string()),
+        ];
+        let r = self.raw_bytes("POST", &url, data, &headers, self.timeouts.request)?;
+        if r.status >= 400 {
+            let message = serde_json::from_slice::<Envelope>(&r.body)
+                .map(|e| e.error)
+                .ok()
+                .filter(|e| !e.is_empty())
+                .unwrap_or_else(|| format!("HTTP {}", r.status));
+            return Err(Error::Api {
+                method: "POST".into(),
+                path: url,
+                status: r.status,
+                message,
+            });
+        }
+        Ok(())
+    }
+
+    /// An instance's console log as incus keeps it (an OCI app's output).
+    pub fn console_log(&self, instance: &str) -> Result<Vec<u8>> {
+        let url = format!("/1.0/instances/{}/console", encode_segment(instance));
+        let r = self.raw_bytes("GET", &url, &[], &[], self.timeouts.request)?;
+        match r.status {
+            200 => Ok(r.body),
+            404 => Ok(Vec::new()),
+            status => Err(Error::Api {
+                method: "GET".into(),
+                path: url,
+                status,
+                message: serde_json::from_slice::<Envelope>(&r.body)
+                    .map(|e| e.error)
+                    .unwrap_or_default(),
+            }),
+        }
+    }
+
+    /// Read a file from an instance; `None` if it does not exist.
+    pub fn read_file(&self, instance: &str, path: &str) -> Result<Option<Vec<u8>>> {
+        let url = format!(
+            "/1.0/instances/{}/files?path={}",
+            encode_segment(instance),
+            encode_query(path)
+        );
+        let r = self.raw_bytes("GET", &url, &[], &[], self.timeouts.request)?;
+        match r.status {
+            200 => Ok(Some(r.body)),
+            404 => Ok(None),
+            status => Err(Error::Api {
+                method: "GET".into(),
+                path: url,
+                status,
+                message: serde_json::from_slice::<Envelope>(&r.body)
+                    .map(|e| e.error)
+                    .unwrap_or_default(),
+            }),
+        }
     }
 
     /// Open one of an operation's websockets (exec stdin/stdout/stderr/control).

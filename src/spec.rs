@@ -34,6 +34,25 @@ pub struct ComposeFile {
     /// Sandboxes, keyed by service name.
     #[serde(default)]
     pub services: BTreeMap<String, SandboxSpec>,
+
+    /// Secrets services can mount as files under `/run/secrets`. Values are
+    /// read when the file is deployed and never stored in instance config.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub secrets: BTreeMap<String, SecretDef>,
+}
+
+/// Where a secret's value comes from. Exactly one source.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SecretDef {
+    /// A host file holding the value (relative to the compose file).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+
+    /// An environment variable of whoever deploys the file (`isb up`, or the
+    /// client calling `isb stack deploy`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
 }
 
 /// A named custom storage volume.
@@ -289,6 +308,50 @@ pub struct SandboxSpec {
     )]
     #[schemars(with = "Option<flex::Command>")]
     pub command: Option<Vec<String>>,
+
+    /// OCI images only: the entrypoint, run with `command` as its arguments.
+    /// On an OCI image `command` alone replaces the whole command line,
+    /// including the image's own entrypoint.
+    #[serde(
+        default,
+        deserialize_with = "flex::opt_command",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "Option<flex::Command>")]
+    pub entrypoint: Option<Vec<String>>,
+
+    /// `no` (default), `always`, `on-failure` or `unless-stopped`. Anything but
+    /// `no` makes the service long-running: the instance starts with the host
+    /// (`boot.autostart`), and `command` is supervised inside the guest (a
+    /// systemd unit, or the instance itself for an OCI image) instead of being
+    /// held open by `isb up`, so it survives isb exiting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restart: Option<RestartMode>,
+
+    /// A recurring health test, as in docker compose. `isb stack deploy`
+    /// routes traffic only to healthy replicas and replaces unhealthy ones;
+    /// `depends_on` can wait for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub healthcheck: Option<Healthcheck>,
+
+    /// Services to bring up first: a list, or a map to `{condition:
+    /// service_started | service_healthy}`.
+    #[serde(
+        default,
+        deserialize_with = "depends_on",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    #[schemars(with = "DependsOnRepr")]
+    pub depends_on: BTreeMap<String, Dependency>,
+
+    /// Replicas, rolling updates and restart policy for `isb stack deploy`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deploy: Option<Deploy>,
+
+    /// Secrets (top-level `secrets:`) to write under `/run/secrets` in the
+    /// guest: names, or `{source, target, uid, gid, mode}`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secrets: Vec<SecretRef>,
 
     /// Extra instance config keys, set verbatim (escape hatch).
     #[serde(
@@ -986,6 +1049,494 @@ pub struct ExecDefaults {
 impl ExecDefaults {
     pub fn is_empty(&self) -> bool {
         self == &ExecDefaults::default()
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Long-running services: restart, healthcheck, depends_on, deploy, secrets.
+// ----------------------------------------------------------------------------
+
+/// docker's `restart:`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum RestartMode {
+    #[default]
+    No,
+    Always,
+    OnFailure,
+    UnlessStopped,
+}
+
+// By hand so that YAML 1.1 habits (`restart: no` read as false) still work.
+impl<'de> Deserialize<'de> for RestartMode {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let s = flex::Scalar::deserialize(d)?.into_string();
+        Ok(match s.as_str() {
+            "no" | "false" | "" => RestartMode::No,
+            "always" => RestartMode::Always,
+            "on-failure" => RestartMode::OnFailure,
+            "unless-stopped" => RestartMode::UnlessStopped,
+            other => {
+                return Err(D::Error::custom(format!(
+                    "unknown restart {other:?} (no, always, on-failure, unless-stopped)"
+                )));
+            }
+        })
+    }
+}
+
+impl RestartMode {
+    pub fn is_long_running(&self) -> bool {
+        *self != RestartMode::No
+    }
+}
+
+/// docker compose's `healthcheck:`. Durations are strings (`30s`, `1m30s`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Healthcheck {
+    /// `[CMD, argv...]`, `[CMD-SHELL, "a shell line"]`, a plain string (a shell
+    /// line), or `[NONE]`. Runs in the guest as the service's `user`.
+    #[serde(
+        default,
+        deserialize_with = "health_test",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    #[schemars(with = "Option<flex::Command>")]
+    pub test: Vec<String>,
+
+    /// Time between checks. Default `30s`.
+    #[serde(
+        default,
+        deserialize_with = "flex::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "Option<flex::IntOrString>")]
+    pub interval: Option<String>,
+
+    /// One check's deadline. Default `30s`.
+    #[serde(
+        default,
+        deserialize_with = "flex::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "Option<flex::IntOrString>")]
+    pub timeout: Option<String>,
+
+    /// Consecutive failures before unhealthy. Default 3.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retries: Option<u32>,
+
+    /// Grace after a start during which failures do not count. Default `0s`.
+    #[serde(
+        default,
+        deserialize_with = "flex::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "Option<flex::IntOrString>")]
+    pub start_period: Option<String>,
+
+    /// Time between checks during `start_period`. Default `5s`.
+    #[serde(
+        default,
+        deserialize_with = "flex::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "Option<flex::IntOrString>")]
+    pub start_interval: Option<String>,
+
+    /// Turn off a healthcheck set in another file.
+    #[serde(
+        default,
+        deserialize_with = "flex::bool",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    #[schemars(with = "flex::BoolOrString")]
+    pub disable: bool,
+}
+
+fn health_test<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    match flex::Command::deserialize(d)? {
+        flex::Command::String(s) => Ok(vec!["CMD-SHELL".into(), s]),
+        flex::Command::Argv(v) => Ok(v.into_iter().map(flex::Scalar::into_string).collect()),
+    }
+}
+
+/// A healthcheck resolved to argv and durations.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HealthProbe {
+    pub argv: Vec<String>,
+    pub interval: std::time::Duration,
+    pub timeout: std::time::Duration,
+    pub retries: u32,
+    pub start_period: std::time::Duration,
+    pub start_interval: std::time::Duration,
+}
+
+impl Healthcheck {
+    /// The probe to run, or `None` when disabled or `[NONE]`.
+    pub fn probe(&self) -> Result<Option<HealthProbe>, String> {
+        if self.disable {
+            return Ok(None);
+        }
+        let argv = match self.test.split_first() {
+            None => return Err("healthcheck needs a test".into()),
+            Some((k, _)) if k == "NONE" => return Ok(None),
+            Some((k, rest)) if k == "CMD" => rest.to_vec(),
+            Some((k, rest)) if k == "CMD-SHELL" => {
+                if rest.len() != 1 {
+                    return Err("CMD-SHELL takes exactly one shell line".into());
+                }
+                vec!["/bin/sh".into(), "-c".into(), rest[0].clone()]
+            }
+            Some((k, _)) => {
+                return Err(format!(
+                    "healthcheck test must start with CMD, CMD-SHELL or NONE, not {k:?} (a plain string is a shell line)"
+                ));
+            }
+        };
+        if argv.is_empty() {
+            return Err("healthcheck test has no command".into());
+        }
+        let dur = |v: &Option<String>, default: u64| -> Result<std::time::Duration, String> {
+            match v {
+                Some(s) => flex::parse_duration(s),
+                None => Ok(std::time::Duration::from_secs(default)),
+            }
+        };
+        Ok(Some(HealthProbe {
+            argv,
+            interval: dur(&self.interval, 30)?,
+            timeout: dur(&self.timeout, 30)?,
+            retries: self.retries.unwrap_or(3).max(1),
+            start_period: dur(&self.start_period, 0)?,
+            start_interval: dur(&self.start_interval, 5)?,
+        }))
+    }
+}
+
+/// What a dependency must reach before its dependents start.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DependCondition {
+    #[default]
+    ServiceStarted,
+    ServiceHealthy,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Dependency {
+    #[serde(default)]
+    pub condition: DependCondition,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(untagged)]
+#[allow(dead_code)]
+enum DependsOnRepr {
+    List(Vec<String>),
+    Map(BTreeMap<String, Dependency>),
+}
+
+fn depends_on<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<BTreeMap<String, Dependency>, D::Error> {
+    Ok(match DependsOnRepr::deserialize(d)? {
+        DependsOnRepr::List(l) => l
+            .into_iter()
+            .map(|s| (s, Dependency::default()))
+            .collect(),
+        DependsOnRepr::Map(m) => m,
+    })
+}
+
+/// docker's `deploy:`, for `isb stack deploy`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Deploy {
+    /// Only `replicated`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+
+    /// Number of instances. Default 1. `isb up` handles at most 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replicas: Option<u32>,
+
+    /// How a changed service is rolled out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_config: Option<UpdateConfig>,
+
+    /// How a rollback is rolled out. Default: like `update_config`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rollback_config: Option<UpdateConfig>,
+
+    /// When the daemon restarts an instance whose app failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restart_policy: Option<RestartPolicy>,
+
+    /// `limits.cpus` (whole CPUs) and `limits.memory`: the same as `cpus` and
+    /// `mem_limit`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resources: Option<Resources>,
+
+    /// Labels for the service's instances, merged over `labels`.
+    #[serde(
+        default,
+        deserialize_with = "flex::string_map_or_list",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    #[schemars(with = "flex::MapOrList")]
+    pub labels: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum UpdateOrder {
+    /// Stop the old instance, then start its replacement (docker's default;
+    /// safe for a service that owns a volume).
+    #[default]
+    StopFirst,
+    /// Start the replacement and wait for it to be healthy before removing
+    /// the old one: no gap in service.
+    StartFirst,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureAction {
+    /// Stop rolling out and leave the service as it is.
+    #[default]
+    Pause,
+    /// Roll back to the previous deployment.
+    Rollback,
+    /// Carry on with the next batch.
+    Continue,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateConfig {
+    /// Instances replaced at a time. Default 1; 0 means all at once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parallelism: Option<u32>,
+
+    /// Wait between batches. Default `0s`.
+    #[serde(
+        default,
+        deserialize_with = "flex::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "Option<flex::IntOrString>")]
+    pub delay: Option<String>,
+
+    /// `pause` (default), `rollback` or `continue`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_action: Option<FailureAction>,
+
+    /// How long a new instance must stay healthy to count as a success.
+    /// Default `5s`.
+    #[serde(
+        default,
+        deserialize_with = "flex::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "Option<flex::IntOrString>")]
+    pub monitor: Option<String>,
+
+    /// `stop-first` (default) or `start-first`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<UpdateOrder>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum RestartCondition {
+    None,
+    OnFailure,
+    #[default]
+    Any,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RestartPolicy {
+    /// `none`, `on-failure` or `any` (default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub condition: Option<RestartCondition>,
+
+    /// Wait before restarting. Default `5s`.
+    #[serde(
+        default,
+        deserialize_with = "flex::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "Option<flex::IntOrString>")]
+    pub delay: Option<String>,
+
+    /// Give up after this many restarts within `window`. Default: never.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_attempts: Option<u32>,
+
+    /// The window `max_attempts` counts in. Default: forever.
+    #[serde(
+        default,
+        deserialize_with = "flex::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "Option<flex::IntOrString>")]
+    pub window: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Resources {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<ResourceLimits>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResourceLimits {
+    #[serde(
+        default,
+        deserialize_with = "flex::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "Option<flex::IntOrString>")]
+    pub cpus: Option<String>,
+
+    #[serde(
+        default,
+        deserialize_with = "flex::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "Option<flex::IntOrString>")]
+    pub memory: Option<String>,
+}
+
+/// A service's use of a secret.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SecretRef {
+    /// The top-level secret's key.
+    pub source: String,
+    /// File name under `/run/secrets`, or an absolute path. Default: `source`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    /// Owner in the guest: a uid. Default: the service's numeric `user`, else 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gid: Option<u32>,
+    /// Octal mode, e.g. `0400` (default) or `"0440"`.
+    #[serde(
+        default,
+        deserialize_with = "flex::opt_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "Option<flex::IntOrString>")]
+    pub mode: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum SecretRefRepr {
+    Name(String),
+    Long {
+        source: String,
+        #[serde(default)]
+        target: Option<String>,
+        #[serde(default)]
+        uid: Option<flex::Scalar>,
+        #[serde(default)]
+        gid: Option<flex::Scalar>,
+        #[serde(default)]
+        mode: Option<flex::Scalar>,
+    },
+}
+
+impl<'de> Deserialize<'de> for SecretRef {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let id = |v: Option<flex::Scalar>, what: &str| -> Result<Option<u32>, D::Error> {
+            v.map(|s| {
+                let s = s.into_string();
+                s.trim()
+                    .parse()
+                    .map_err(|_| D::Error::custom(format!("secret {what} must be a number, got {s:?}")))
+            })
+            .transpose()
+        };
+        match SecretRefRepr::deserialize(d).map_err(|_| {
+            D::Error::custom("expected a secret name or {source, target, uid, gid, mode}")
+        })? {
+            SecretRefRepr::Name(source) => Ok(SecretRef {
+                source,
+                ..Default::default()
+            }),
+            SecretRefRepr::Long {
+                source,
+                target,
+                uid,
+                gid,
+                mode,
+            } => Ok(SecretRef {
+                source,
+                target,
+                uid: id(uid, "uid")?,
+                gid: id(gid, "gid")?,
+                // YAML reads an unquoted 0400 as the number 400; both mean octal.
+                mode: mode.map(flex::Scalar::into_string),
+            }),
+        }
+    }
+}
+
+impl SecretRef {
+    /// Absolute guest path of the file.
+    pub fn guest_path(&self) -> String {
+        let t = self.target.as_deref().unwrap_or(&self.source);
+        if t.starts_with('/') {
+            t.to_string()
+        } else {
+            format!("/run/secrets/{t}")
+        }
+    }
+
+    /// File mode, octal. Default 0400.
+    pub fn file_mode(&self) -> Result<u32, String> {
+        match &self.mode {
+            None => Ok(0o400),
+            Some(m) => u32::from_str_radix(m.trim().trim_start_matches("0o"), 8)
+                .ok()
+                .filter(|m| *m <= 0o7777)
+                .ok_or_else(|| format!("secret mode {m:?} is not an octal mode like 0400")),
+        }
+    }
+}
+
+impl SandboxSpec {
+    /// `restart` is set to something that keeps the service running.
+    pub fn long_running(&self) -> bool {
+        self.restart.is_some_and(|r| r.is_long_running())
+    }
+
+    /// `deploy.replicas`, default 1.
+    pub fn replicas(&self) -> u32 {
+        self.deploy
+            .as_ref()
+            .and_then(|d| d.replicas)
+            .unwrap_or(1)
+    }
+
+    /// The health probe, if any.
+    pub fn health_probe(&self) -> Result<Option<HealthProbe>, String> {
+        match &self.healthcheck {
+            None => Ok(None),
+            Some(h) => h.probe(),
+        }
     }
 }
 

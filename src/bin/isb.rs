@@ -735,7 +735,7 @@ fn ps(ctx: &Ctx, services: Vec<String>, json: bool) -> Result<u8> {
                 .into_iter()
                 .map(|i| (i.name.clone(), i))
                 .collect();
-            for s in p.select(&services)? {
+            for s in p.select_exact(&services)? {
                 let name = p.service(&s)?.name.clone().unwrap_or_default();
                 let status = all
                     .get(&name)
@@ -1036,8 +1036,17 @@ fn up(ctx: &Ctx, services: Vec<String>, flags: UpFlags) -> Result<u8> {
     let held = ups
         .into_iter()
         .map(|(s, _, sandbox)| {
+            use isb::foreground::Run;
+            let spec = p.service(&s)?;
+            let oci = isb::plan::ImageSource::parse(&spec.image)?.is_oci();
+            let run = match &spec.command {
+                _ if oci => Run::Console,
+                Some(_) if spec.long_running() => Run::Follow(isb::supervise::follow_argv(&s)),
+                Some(argv) => Run::Command(argv.clone()),
+                None => Run::Hold,
+            };
             Ok(isb::foreground::Service {
-                command: p.service(&s)?.command.clone(),
+                run,
                 name: s,
                 sandbox,
             })

@@ -23,8 +23,22 @@ pub struct Service {
     /// Service name, used as the log prefix.
     pub name: String,
     pub sandbox: Sandbox,
-    /// Its `command`; `None` holds the sandbox until something else ends the run.
-    pub command: Option<Vec<String>>,
+    pub run: Run,
+}
+
+/// What a held service runs or shows.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Run {
+    /// Nothing: held until something else ends the run.
+    Hold,
+    /// Its `command`, run with the sandbox's exec defaults. The run is over
+    /// when every command has exited.
+    Command(Vec<String>),
+    /// Follow a log with this argv, as root: a supervised app's journal. It
+    /// never ends the run by exiting.
+    Follow(Vec<String>),
+    /// Follow the console log: an OCI app's output.
+    Console,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -90,22 +104,38 @@ pub fn run(services: &[Service], opts: Options, report: &mut dyn FnMut(&str)) ->
     }
 
     let mut running = 0usize;
+    let mut followed = 0usize;
     for (i, svc) in services.iter().enumerate() {
-        let Some(argv) = &svc.command else { continue };
-        let stream = match svc
-            .sandbox
-            .exec_stream(argv.clone(), ExecOptions::default())
-        {
+        let prefix = opts.log_prefix.then(|| format!("{} | ", svc.name));
+        let (argv, eopts) = match &svc.run {
+            Run::Hold => continue,
+            Run::Console => {
+                followed += 1;
+                follow_console(svc.sandbox.clone(), prefix, tx.clone());
+                continue;
+            }
+            Run::Follow(argv) => (argv, ExecOptions::default().user("root").cwd("/")),
+            Run::Command(argv) => (argv, ExecOptions::default()),
+        };
+        let counts = matches!(svc.run, Run::Command(_));
+        let stream = match svc.sandbox.exec_stream(argv.clone(), eopts) {
             Ok(s) => s,
-            Err(e) => {
+            Err(e) if counts => {
                 report(&format!("{}: command failed to start: {e}", svc.name));
                 let _ = tx.send(Msg::Exited(i, Err(e)));
                 running += 1;
                 continue;
             }
+            Err(e) => {
+                report(&format!("{}: cannot follow its log: {e}", svc.name));
+                continue;
+            }
         };
-        running += 1;
-        let prefix = opts.log_prefix.then(|| format!("{} | ", svc.name));
+        if counts {
+            running += 1;
+        } else {
+            followed += 1;
+        }
         let tx = tx.clone();
         std::thread::spawn(move || {
             let mut out = LineWriter::new(prefix.clone());
@@ -124,16 +154,21 @@ pub fn run(services: &[Service], opts: Options, report: &mut dyn FnMut(&str)) ->
             }
             let _ = out.finish(&mut io::stdout().lock());
             let _ = err.finish(&mut io::stderr().lock());
-            let _ = tx.send(Msg::Exited(i, stream.wait()));
+            let r = stream.wait();
+            if counts {
+                let _ = tx.send(Msg::Exited(i, r));
+            }
         });
     }
 
     if running == 0 {
         let names: Vec<&str> = services.iter().map(|s| s.name.as_str()).collect();
-        report(&format!(
-            "{}: up; Ctrl-C stops (no command, so nothing else will)",
-            names.join(", ")
-        ));
+        let why = if followed > 0 {
+            "supervised, so only Ctrl-C ends this"
+        } else {
+            "no command, so nothing else will"
+        };
+        report(&format!("{}: up; Ctrl-C stops ({why})", names.join(", ")));
     }
 
     let mut first_failure: Option<i32> = None;
@@ -205,6 +240,33 @@ pub fn run(services: &[Service], opts: Options, report: &mut dyn FnMut(&str)) ->
     }
     sig_handle.close();
     Ok(code)
+}
+
+/// Poll an instance's console log and print what is new. incus offers no
+/// streaming read of it; a log that shrank (the instance restarted) is printed
+/// from its start.
+fn follow_console(sb: Sandbox, prefix: Option<String>, tx: mpsc::Sender<Msg>) {
+    std::thread::spawn(move || {
+        let mut out = LineWriter::new(prefix);
+        // Skip what was logged before this run, like `journalctl -n 0`.
+        let mut seen = sb.client().console_log(sb.name()).map(|b| b.len()).unwrap_or(0);
+        loop {
+            std::thread::sleep(Duration::from_secs(1));
+            let Ok(log) = sb.client().console_log(sb.name()) else {
+                continue;
+            };
+            if log.len() < seen {
+                seen = 0;
+            }
+            if log.len() > seen {
+                if out.write(&mut io::stdout().lock(), &log[seen..]).is_err() {
+                    let _ = tx.send(Msg::OutputClosed);
+                    return;
+                }
+                seen = log.len();
+            }
+        }
+    });
 }
 
 /// Writes output with a prefix at the start of every line.
