@@ -1449,8 +1449,13 @@ fn read_store_secrets(ctx: &Ctx, p: &mut Project) -> Result<()> {
     } else {
         let config =
             isb::secrets::SecretsConfig::load(&isb::secrets::SecretsConfig::default_path())?;
+        // The daemon's state dir, as `isb serve` picks it.
+        let state = std::env::var_os("ISB_SERVE_STATE_DIR")
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(isb::daemon::default_state_dir);
         let secrets = isb::secrets::Secrets::open_existing(
-            &isb::daemon::default_state_dir(),
+            &state,
             &isb::secrets::KeySources::from_env(),
             &config,
         )
