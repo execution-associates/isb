@@ -289,6 +289,8 @@ filled in.
 - [docs/cli.md](docs/cli.md): every command and flag
 - [docs/stacks.md](docs/stacks.md): long-running stacks: replicas, health, rollouts
 - [docs/serve.md](docs/serve.md): the `isb serve` daemon and its MCP server behind Cloudflare Access
+- [docs/secrets.md](docs/secrets.md): per-org secrets: the age-encrypted store, break-glass recipients, `isb secret`
+- [docs/auth.md](docs/auth.md): users, roles, sessions, invitations and API tokens for `isb serve`
 - [docs/tui.md](docs/tui.md): `isb tui`, the live dashboard
 - [docs/macos.md](docs/macos.md): isb on a Mac, with `isb machine`
 - [docs/rpc.md](docs/rpc.md): the protocol the SDKs speak, for other languages

@@ -25,6 +25,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
+use crate::org::OrgId;
 use crate::spec::{ComposeFile, SandboxSpec};
 
 pub use controller::Controller;
@@ -39,6 +40,9 @@ pub const LABEL_REV: &str = "isb.rev";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StackDef {
     pub name: String,
+    /// The org the stack runs in (its incus project).
+    #[serde(default = "OrgId::default_org")]
+    pub org: OrgId,
     /// The resolved compose file.
     pub file: ComposeFile,
     /// Where relative bind paths resolve.
@@ -60,7 +64,29 @@ pub struct StackDef {
     pub previous: Option<Box<StackDef>>,
 }
 
+/// A stack's name qualified by its org: `web` in the default org,
+/// `alpha/web` in org `alpha`. The controller keys everything by it.
+pub fn qualified(org: &OrgId, name: &str) -> String {
+    if org.is_default() {
+        name.to_string()
+    } else {
+        format!("{org}/{name}")
+    }
+}
+
+/// The org and name of a qualified stack name.
+pub fn split_qualified(q: &str) -> Result<(OrgId, String)> {
+    match q.split_once('/') {
+        Some((o, n)) => Ok((OrgId::new(o)?, n.to_string())),
+        None => Ok((OrgId::default_org(), q.to_string())),
+    }
+}
+
 impl StackDef {
+    pub fn qualified(&self) -> String {
+        qualified(&self.org, &self.name)
+    }
+
     pub fn secret_values(&self) -> Result<BTreeMap<String, Vec<u8>>> {
         self.secrets
             .iter()
@@ -106,6 +132,24 @@ impl StackDef {
         }
         h.write(&self.force.get(service).copied().unwrap_or(0).to_le_bytes());
         Ok(format!("{:08x}", h.finish() as u32))
+    }
+
+    /// Names of the org's stored secrets (top-level `external: true`) that
+    /// the stack's services use: what `isb secret rm` must not pull out
+    /// from under it.
+    pub fn store_secrets(&self) -> std::collections::BTreeSet<String> {
+        self.file
+            .services
+            .values()
+            .flat_map(|s| s.secrets.iter())
+            .filter_map(|r| {
+                self.file
+                    .secrets
+                    .get(&r.source)
+                    .and_then(|d| d.store_name(&r.source))
+                    .map(String::from)
+            })
+            .collect()
     }
 
     pub fn service(&self, service: &str) -> Result<&SandboxSpec> {
@@ -209,23 +253,43 @@ impl Store {
         &self.dir
     }
 
-    fn path(&self, name: &str) -> PathBuf {
-        self.dir.join("stacks").join(format!("{name}.json"))
+    fn path(&self, org: &OrgId, name: &str) -> PathBuf {
+        self.stacks_dir(org).join(format!("{name}.json"))
+    }
+
+    /// Default-org stacks stay where they always were, under `stacks/`.
+    fn stacks_dir(&self, org: &OrgId) -> PathBuf {
+        if org.is_default() {
+            self.dir.join("stacks")
+        } else {
+            org.dir(&self.dir).join("stacks")
+        }
     }
 
     pub fn load_all(&self) -> Result<Vec<StackDef>> {
+        let mut dirs = vec![self.dir.join("stacks")];
+        if let Ok(rd) = std::fs::read_dir(self.dir.join("orgs")) {
+            for e in rd.flatten() {
+                dirs.push(e.path().join("stacks"));
+            }
+        }
         let mut out = Vec::new();
-        for e in std::fs::read_dir(self.dir.join("stacks"))? {
-            let p = e?.path();
-            if p.extension().is_some_and(|x| x == "json") {
-                let text = std::fs::read_to_string(&p)?;
-                match serde_json::from_str::<StackDef>(&text) {
-                    Ok(d) => out.push(d),
-                    Err(e) => eprintln!("isb serve: skipping {}: {e}", p.display()),
+        for d in dirs {
+            let Ok(rd) = std::fs::read_dir(&d) else {
+                continue;
+            };
+            for e in rd {
+                let p = e?.path();
+                if p.extension().is_some_and(|x| x == "json") {
+                    let text = std::fs::read_to_string(&p)?;
+                    match serde_json::from_str::<StackDef>(&text) {
+                        Ok(d) => out.push(d),
+                        Err(e) => eprintln!("isb serve: skipping {}: {e}", p.display()),
+                    }
                 }
             }
         }
-        out.sort_by(|a, b| a.name.cmp(&b.name));
+        out.sort_by_key(|d| d.qualified());
         Ok(out)
     }
 
@@ -234,7 +298,10 @@ impl Store {
     pub fn save(&self, def: &StackDef) -> Result<()> {
         use std::io::Write;
         use std::os::unix::fs::OpenOptionsExt;
-        let path = self.path(&def.name);
+        let dir = self.stacks_dir(&def.org);
+        std::fs::create_dir_all(&dir)?;
+        set_mode(&dir, 0o700)?;
+        let path = self.path(&def.org, &def.name);
         let tmp = path.with_extension("json.tmp");
         let mut f = std::fs::OpenOptions::new()
             .write(true)
@@ -248,8 +315,8 @@ impl Store {
         Ok(())
     }
 
-    pub fn remove(&self, name: &str) -> Result<()> {
-        match std::fs::remove_file(self.path(name)) {
+    pub fn remove(&self, org: &OrgId, name: &str) -> Result<()> {
+        match std::fs::remove_file(self.path(org, name)) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
             _ => Ok(()),
         }
@@ -276,6 +343,7 @@ mod tests {
     fn def(y: &str) -> StackDef {
         StackDef {
             name: "app".into(),
+            org: OrgId::default_org(),
             file: serde_yaml_ng::from_str(y).unwrap(),
             base_dir: "/".into(),
             secrets: BTreeMap::new(),
@@ -311,6 +379,22 @@ mod tests {
     }
 
     #[test]
+    fn store_secrets_are_the_used_external_ones() {
+        let d = def(concat!(
+            "secrets:\n",
+            "  a: {external: true}\n",
+            "  b: {external: true, name: db.password}\n",
+            "  c: {environment: C}\n",
+            "  unused: {external: true}\n",
+            "services:\n",
+            "  web: {image: x, secrets: [a, c]}\n",
+            "  db: {image: x, secrets: [{source: b, target: pw}]}\n",
+        ));
+        let s: Vec<String> = d.store_secrets().into_iter().collect();
+        assert_eq!(s, ["a", "db.password"]);
+    }
+
+    #[test]
     fn names() {
         assert_eq!(
             instance_name("app", "web", 2, "ab12").unwrap(),
@@ -337,7 +421,17 @@ mod tests {
             .permissions()
             .mode();
         assert_eq!(mode & 0o777, 0o600);
-        s.remove("app").unwrap();
+        let mut other = d.clone();
+        other.org = OrgId::new("alpha").unwrap();
+        s.save(&other).unwrap();
+        assert!(dir.path().join("orgs/alpha/stacks/app.json").is_file());
+        let all = s.load_all().unwrap();
+        assert_eq!(
+            all.iter().map(|d| d.qualified()).collect::<Vec<_>>(),
+            vec!["alpha/app", "app"]
+        );
+        s.remove(&OrgId::default_org(), "app").unwrap();
+        s.remove(&other.org, "app").unwrap();
         assert!(s.load_all().unwrap().is_empty());
     }
 }

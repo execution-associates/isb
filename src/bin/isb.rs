@@ -238,9 +238,102 @@ enum Cmd {
     /// macOS: the Lima VM that runs incus and isb serve for isb.
     #[command(subcommand)]
     Machine(MachineCmd),
+    /// Manage an org's secrets on the `isb serve` daemon (docs/secrets.md).
+    #[command(subcommand)]
+    Secret(SecretCmd),
     /// A live dashboard of stacks and sandboxes (`isb serve`'s view; with no
     /// daemon, sandboxes only).
     Tui,
+    /// Users of `isb serve` (its identity store, `<state>/isb.db`).
+    #[command(subcommand)]
+    User(UserCmd),
+    /// Invite someone to an org: prints the invitation token, shown once
+    /// (and its link when ISB_PUBLIC_URL is set).
+    Invite {
+        org: String,
+        email: String,
+        /// owner, admin or member.
+        #[arg(long, default_value = "member")]
+        role: String,
+        #[command(flatten)]
+        db: AuthDb,
+    },
+    /// API tokens for `isb serve`.
+    #[command(subcommand)]
+    Token(TokenCmd),
+}
+
+/// The identity store the user/invite/token commands open directly.
+#[derive(Args, Clone)]
+struct AuthDb {
+    /// `isb serve`'s state directory (holds isb.db).
+    #[arg(long, env = "ISB_SERVE_STATE_DIR")]
+    state_dir: Option<PathBuf>,
+}
+
+#[derive(Subcommand)]
+enum UserCmd {
+    /// Create a user. Prompts for the password on a terminal; otherwise reads
+    /// it from the first line of stdin. The first user is always a platform
+    /// admin and owner of the default org.
+    Create {
+        email: String,
+        /// Make the user a platform admin (spans every org).
+        #[arg(long)]
+        admin: bool,
+        /// Display name.
+        #[arg(long, default_value = "")]
+        name: String,
+        #[command(flatten)]
+        db: AuthDb,
+    },
+    /// List users and their org memberships.
+    Ls {
+        #[arg(long)]
+        json: bool,
+        #[command(flatten)]
+        db: AuthDb,
+    },
+    /// Set a user's password (prompted, or stdin) and end their sessions.
+    Passwd {
+        email: String,
+        #[command(flatten)]
+        db: AuthDb,
+    },
+}
+
+#[derive(Subcommand)]
+enum TokenCmd {
+    /// Create an API token and print it, once.
+    Create {
+        name: String,
+        /// Confine the token to this org (required unless the user is a
+        /// platform admin).
+        #[arg(long)]
+        org: Option<String>,
+        /// Lifetime, e.g. 90d (default: never expires).
+        #[arg(long, value_parser = dur)]
+        expires: Option<Duration>,
+        /// Whose token (default: the only platform admin).
+        #[arg(long)]
+        user: Option<String>,
+        #[command(flatten)]
+        db: AuthDb,
+    },
+    /// List API tokens (metadata only; tokens are never shown again).
+    Ls {
+        #[arg(long)]
+        json: bool,
+        #[command(flatten)]
+        db: AuthDb,
+    },
+    /// Revoke API tokens by id.
+    Revoke {
+        #[arg(required = true)]
+        ids: Vec<i64>,
+        #[command(flatten)]
+        db: AuthDb,
+    },
 }
 
 #[derive(Args)]
@@ -290,6 +383,16 @@ struct ServeArgs {
     /// Let remote callers reach every instance, not only managed ones.
     #[arg(long, env = "ISB_SERVE_ANY_INSTANCE")]
     any_instance: bool,
+    /// Where users reach isb (https://isb.example.com), for invitation and
+    /// password-reset links.
+    #[arg(long, env = "ISB_PUBLIC_URL")]
+    public_url: Option<String>,
+    /// A browser session ends this long after sign-in.
+    #[arg(long, env = "ISB_SESSION_MAX_AGE", value_parser = dur, default_value = "30d")]
+    session_max_age: Duration,
+    /// A browser session ends after this long unused.
+    #[arg(long, env = "ISB_SESSION_IDLE", value_parser = dur, default_value = "7d")]
+    session_idle: Duration,
 }
 
 #[derive(Subcommand)]
@@ -480,6 +583,63 @@ enum StackCmd {
     },
     /// The compose file a stack runs, as deployed.
     Config { name: String },
+}
+
+#[derive(Subcommand)]
+enum SecretCmd {
+    /// Create a secret from FILE, or stdin if FILE is - or omitted (fails if
+    /// it exists).
+    Create {
+        name: String,
+        file: Option<PathBuf>,
+        /// Where it is stored.
+        #[arg(long, default_value = "local")]
+        driver: String,
+        /// A label, k=v (repeatable).
+        #[arg(short, long = "label")]
+        labels: Vec<String>,
+    },
+    /// Give a secret a new value (a new version) from FILE or stdin; creates
+    /// it if missing.
+    Set { name: String, file: Option<PathBuf> },
+    /// Write a secret's value to stdout, as is.
+    Get { name: String },
+    /// List secrets (metadata only).
+    #[command(alias = "list")]
+    Ls {
+        #[arg(long)]
+        json: bool,
+    },
+    /// A secret's metadata (never its value).
+    Inspect {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete secrets (refused while a deployed stack uses one).
+    #[command(alias = "remove")]
+    Rm {
+        #[arg(required = true)]
+        names: Vec<String>,
+    },
+    /// Encrypt FILE (or stdin) for a compose file's `age:` field, to the
+    /// daemon's recipients, or to --recipient keys without a daemon.
+    Encrypt {
+        file: Option<PathBuf>,
+        /// An age (age1...) or SSH public key (repeatable).
+        #[arg(short, long = "recipient")]
+        recipients: Vec<String>,
+    },
+    /// Re-encrypt stored values to the current recipients (after changing
+    /// ~/.config/isb/secrets.toml and restarting the daemon).
+    Reencrypt {
+        /// Every org.
+        #[arg(long, conflicts_with = "org")]
+        all: bool,
+    },
+    /// Re-read an externally stored secret from its source now (a no-op for
+    /// local secrets).
+    Refresh { name: String },
 }
 
 #[derive(Args)]
@@ -796,10 +956,19 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         Cmd::Org(o) => org(ctx, o),
         Cmd::Host(HostCmd::Setup { uplink, dry_run }) => host_setup(uplink, dry_run),
         Cmd::Machine(m) => machine(ctx, m),
+        Cmd::Secret(s) => secret(ctx, s),
         Cmd::Tui => {
             isb::tui::run(ctx.client(None), isb::server::default_socket_path())?;
             Ok(0)
         }
+        Cmd::User(c) => user_cmd(c),
+        Cmd::Invite {
+            org,
+            email,
+            role,
+            db,
+        } => invite_cmd(&org, &email, &role, &db),
+        Cmd::Token(c) => token_cmd(c),
         Cmd::Create(a) => create(ctx, a),
         Cmd::Start { names } => {
             let c = ctx.client(None);
@@ -1585,6 +1754,14 @@ fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
         },
         state_dir: a.state_dir.unwrap_or_else(isb::daemon::default_state_dir),
         interval: a.interval,
+        keys: isb::secrets::KeySources::from_env(),
+        secrets_config: isb::secrets::SecretsConfig::default_path(),
+        auth: isb::auth::AuthConfig {
+            session_max_age: a.session_max_age,
+            session_idle: a.session_idle,
+            ..Default::default()
+        },
+        public_url: a.public_url.filter(|u| !u.is_empty()),
     };
     isb::daemon::serve(ctx.client(None), cfg)?;
     Ok(0)
@@ -1613,6 +1790,14 @@ const SHORT: Duration = Duration::from_secs(60);
 
 fn stack(ctx: &Ctx, cmd: StackCmd) -> Result<u8> {
     use serde_json::json;
+    // Every stack tool takes the org; the global --org picks it.
+    let org = ctx.global.org.clone();
+    let call = |tool: &str, mut args: serde_json::Value, timeout: Duration| {
+        if let Some(o) = &org {
+            args["org"] = json!(o);
+        }
+        call(tool, args, timeout)
+    };
     match cmd {
         StackCmd::Deploy {
             name,
@@ -1760,6 +1945,204 @@ fn stack(ctx: &Ctx, cmd: StackCmd) -> Result<u8> {
     }
 }
 
+/// A secret's value from a file, or from stdin for `-` or none. Never argv,
+/// which other users can read in /proc and which lands in shell history.
+fn read_value(file: Option<&std::path::Path>) -> Result<Vec<u8>> {
+    use std::io::{IsTerminal, Read};
+    let v = match file {
+        Some(p) if p != std::path::Path::new("-") => std::fs::read(p)
+            .map_err(|e| Error::Invalid(format!("cannot read {}: {e}", p.display())))?,
+        _ => {
+            let stdin = std::io::stdin();
+            if stdin.is_terminal() {
+                eprintln!("reading the value from stdin; end it with Ctrl-D");
+            }
+            let mut b = Vec::new();
+            stdin.lock().read_to_end(&mut b)?;
+            b
+        }
+    };
+    if v.is_empty() {
+        return Err(Error::Invalid("the value is empty".into()));
+    }
+    Ok(v)
+}
+
+/// `YYYY-MM-DD HH:MM:SSZ` from unix seconds.
+fn fmt_time(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    // Howard Hinnant's civil_from_days.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!(
+        "{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
+}
+
+fn secret(ctx: &Ctx, cmd: SecretCmd) -> Result<u8> {
+    // The global --org picks the org; an explicit one matters for --all.
+    let org_given = ctx.global.org.is_some();
+    let org = ctx
+        .global
+        .org
+        .clone()
+        .unwrap_or_else(|| isb::org::DEFAULT_ORG.to_string());
+    use serde_json::json;
+    use std::io::Write;
+    let b64 = isb::rpc::b64_encode;
+    match cmd {
+        SecretCmd::Create {
+            name,
+            file,
+            driver,
+            labels,
+        } => {
+            let mut l = BTreeMap::new();
+            for kv in labels {
+                let (k, v) = kv
+                    .split_once('=')
+                    .ok_or_else(|| Error::Invalid(format!("label {kv:?}: expected k=v")))?;
+                l.insert(k.to_string(), v.to_string());
+            }
+            let v = read_value(file.as_deref())?;
+            let m = call(
+                "secret_create",
+                json!({"org": org, "name": name, "value": b64(&v), "driver": driver, "labels": l}),
+                SHORT,
+            )?;
+            eprintln!("created {name} (version {})", m["version"]);
+        }
+        SecretCmd::Set { name, file } => {
+            let v = read_value(file.as_deref())?;
+            let m = call(
+                "secret_set",
+                json!({"org": org, "name": name, "value": b64(&v)}),
+                SHORT,
+            )?;
+            eprintln!("{name}: version {}", m["version"]);
+        }
+        SecretCmd::Get { name } => {
+            let r = call("secret_get", json!({"org": org, "name": name}), SHORT)?;
+            let v = isb::rpc::b64_decode(r["value"].as_str().unwrap_or_default())?;
+            let mut out = std::io::stdout().lock();
+            out.write_all(&v)?;
+            out.flush()?;
+        }
+        SecretCmd::Ls { json } => {
+            let r = call("secret_list", json!({"org": org}), SHORT)?;
+            if json {
+                print_json(&r["secrets"]);
+                return Ok(0);
+            }
+            let mut rows = vec![vec![
+                "NAME".into(),
+                "DRIVER".into(),
+                "VERSION".into(),
+                "UPDATED".into(),
+                "LABELS".into(),
+            ]];
+            for s in r["secrets"].as_array().into_iter().flatten() {
+                let labels: Vec<String> = s["labels"]
+                    .as_object()
+                    .into_iter()
+                    .flatten()
+                    .map(|(k, v)| format!("{k}={}", v.as_str().unwrap_or("")))
+                    .collect();
+                rows.push(vec![
+                    s["name"].as_str().unwrap_or("").into(),
+                    s["driver"].as_str().unwrap_or("").into(),
+                    s["version"].to_string(),
+                    fmt_time(s["updated_at"].as_u64().unwrap_or(0)),
+                    labels.join(","),
+                ]);
+            }
+            table(rows);
+        }
+        SecretCmd::Inspect { name, json } => {
+            let m = call("secret_inspect", json!({"org": org, "name": name}), SHORT)?;
+            if json {
+                print_json(&m);
+                return Ok(0);
+            }
+            for k in ["org", "name", "driver", "version"] {
+                let v = &m[k];
+                println!(
+                    "{k:<8} {}",
+                    v.as_str().map(String::from).unwrap_or(v.to_string())
+                );
+            }
+            println!(
+                "created  {}",
+                fmt_time(m["created_at"].as_u64().unwrap_or(0))
+            );
+            println!(
+                "updated  {}",
+                fmt_time(m["updated_at"].as_u64().unwrap_or(0))
+            );
+            for (k, v) in m["labels"].as_object().into_iter().flatten() {
+                println!("label    {k}={}", v.as_str().unwrap_or(""));
+            }
+        }
+        SecretCmd::Rm { names } => {
+            for name in names {
+                call("secret_delete", json!({"org": org, "name": name}), SHORT)?;
+            }
+        }
+        SecretCmd::Encrypt { file, recipients } => {
+            let recipients = if recipients.is_empty() {
+                let r = call("secret_recipients", json!({"org": org}), SHORT)?;
+                r["recipients"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            } else {
+                recipients
+            };
+            let rs = recipients
+                .iter()
+                .map(|r| isb::secrets::Recipient::parse(r))
+                .collect::<Result<Vec<_>>>()?;
+            // Encrypted here: the value never reaches the daemon.
+            let v = read_value(file.as_deref())?;
+            print!("{}", isb::secrets::encrypt_inline(&v, &rs)?);
+        }
+        SecretCmd::Reencrypt { all } => {
+            if all && org_given {
+                return Err(Error::Invalid("pass --all or --org, not both".into()));
+            }
+            let a = if all {
+                json!({"all": true})
+            } else {
+                json!({"org": org})
+            };
+            let r = call("secret_reencrypt", a, Duration::from_secs(600))?;
+            eprintln!(
+                "re-encrypted {} value(s) to {} recipient(s)",
+                r["reencrypted"],
+                r["recipients"].as_array().map(Vec::len).unwrap_or(0)
+            );
+        }
+        SecretCmd::Refresh { name } => {
+            let m = call("secret_refresh", json!({"org": org, "name": name}), SHORT)?;
+            eprintln!("{name}: version {}", m["version"]);
+        }
+    }
+    Ok(0)
+}
+
 fn print_stack(st: &serde_json::Value) {
     let mut rows = vec![vec![
         "SERVICE".into(),
@@ -1857,6 +2240,12 @@ fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
                 },
                 &mut rep,
             )?;
+            // The identity store keeps the org list memberships hang off.
+            open_auth(&AuthDb {
+                state_dir: std::env::var_os("ISB_SERVE_STATE_DIR").map(PathBuf::from),
+            })?
+            .ensure_org(&info.name)
+            .map_err(|e| Error::Invalid(e.to_string()))?;
             println!(
                 "{} (project {}, network {} {})",
                 info.name,
@@ -1930,7 +2319,14 @@ fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
             Ok(0)
         }
         OrgCmd::Rm { name, force } => {
-            org::remove(&c, &OrgId::new(name)?, force, &mut rep)?;
+            let id = OrgId::new(name)?;
+            org::remove(&c, &id, force, &mut rep)?;
+            // Memberships, invitations and tokens for it go with it.
+            open_auth(&AuthDb {
+                state_dir: std::env::var_os("ISB_SERVE_STATE_DIR").map(PathBuf::from),
+            })?
+            .delete_org(&id)
+            .map_err(|e| Error::Invalid(e.to_string()))?;
             Ok(0)
         }
     }
@@ -2059,14 +2455,347 @@ fn default_route_iface() -> Option<String> {
         .map(|f| f[0].to_string())
 }
 
+// ---- identity: users, invitations, tokens ----
+//
+// These open `<state>/isb.db` directly rather than calling the daemon: the
+// first admin has to exist before anyone can authenticate to the daemon, they
+// work while it is down, and the file is the daemon's own (same uid, 0600).
+// SQLite in WAL mode lets the daemon and the CLI use it at once, and the
+// daemon reads sessions and tokens per request, so changes apply immediately.
+
+fn open_auth(db: &AuthDb) -> Result<isb::auth::AuthStore> {
+    let dir = db
+        .state_dir
+        .clone()
+        .unwrap_or_else(isb::daemon::default_state_dir);
+    let path = isb::auth::db_path(&dir);
+    isb::auth::AuthStore::open(&path)
+        .map_err(|e| Error::Invalid(format!("open {}: {e}", path.display())))
+}
+
+/// A password from the terminal (asked twice, not echoed) or, when stdin is
+/// not a terminal, its first line. Never from argv, where it would show up
+/// in `ps` and shell history.
+fn read_password(prompt: &str) -> Result<String> {
+    use std::io::BufRead;
+    let stdin = std::io::stdin();
+    if !rustix::termios::isatty(&stdin) {
+        let mut line = String::new();
+        stdin.lock().read_line(&mut line)?;
+        let pw = line.trim_end_matches(['\n', '\r']).to_string();
+        if pw.is_empty() {
+            return Err(Error::Invalid("no password on stdin".into()));
+        }
+        return Ok(pw);
+    }
+    let ask = |p: &str| -> Result<String> {
+        eprint!("{p}");
+        let saved = rustix::termios::tcgetattr(&stdin).map_err(std::io::Error::from)?;
+        let mut quiet = saved.clone();
+        quiet.local_modes -= rustix::termios::LocalModes::ECHO;
+        rustix::termios::tcsetattr(&stdin, rustix::termios::OptionalActions::Now, &quiet)
+            .map_err(std::io::Error::from)?;
+        let mut line = String::new();
+        let r = stdin.lock().read_line(&mut line);
+        let _ = rustix::termios::tcsetattr(&stdin, rustix::termios::OptionalActions::Now, &saved);
+        eprintln!();
+        r?;
+        Ok(line.trim_end_matches(['\n', '\r']).to_string())
+    };
+    let pw = ask(prompt)?;
+    if ask("again: ")? != pw {
+        return Err(Error::Invalid("the passwords differ".into()));
+    }
+    Ok(pw)
+}
+
+fn user_cmd(c: UserCmd) -> Result<u8> {
+    match c {
+        UserCmd::Create {
+            email,
+            admin,
+            name,
+            db,
+        } => {
+            let store = open_auth(&db)?;
+            let first = store.setup_needed()?;
+            let pw = read_password(&format!("password for {email}: "))?;
+            let u = if first {
+                store.create_first_admin(&email, &name, &pw)?
+            } else {
+                store.create_user(&email, &name, Some(&pw), admin)?
+            };
+            println!(
+                "created user {} (id {}){}",
+                u.email,
+                u.id,
+                if first {
+                    ": platform admin, owner of org default"
+                } else if u.platform_admin {
+                    ": platform admin"
+                } else {
+                    ""
+                }
+            );
+            Ok(0)
+        }
+        UserCmd::Ls { json, db } => {
+            let store = open_auth(&db)?;
+            let mut out = Vec::new();
+            for u in store.list_users()? {
+                let m = store.memberships(u.id)?;
+                out.push((u, m));
+            }
+            if json {
+                let v: Vec<serde_json::Value> = out
+                    .iter()
+                    .map(|(u, m)| serde_json::json!({"user": u, "memberships": m}))
+                    .collect();
+                print_json(&v);
+                return Ok(0);
+            }
+            let mut rows = vec![vec![
+                "ID".into(),
+                "EMAIL".into(),
+                "NAME".into(),
+                "FLAGS".into(),
+                "ORGS".into(),
+            ]];
+            for (u, m) in out {
+                let mut flags = Vec::new();
+                if u.platform_admin {
+                    flags.push("platform-admin");
+                }
+                if u.disabled {
+                    flags.push("disabled");
+                }
+                if !u.has_password {
+                    flags.push("no-password");
+                }
+                rows.push(vec![
+                    u.id.to_string(),
+                    u.email,
+                    u.name,
+                    flags.join(","),
+                    m.iter()
+                        .map(|m| format!("{}:{}", m.org, m.role))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                ]);
+            }
+            table(rows);
+            Ok(0)
+        }
+        UserCmd::Passwd { email, db } => {
+            let store = open_auth(&db)?;
+            let u = store
+                .user_by_email(&email)?
+                .ok_or_else(|| Error::NotFound(format!("user {email}")))?;
+            let pw = read_password(&format!("new password for {}: ", u.email))?;
+            store.set_password(u.id, &pw)?;
+            println!("password set for {}; their sessions have ended", u.email);
+            Ok(0)
+        }
+    }
+}
+
+fn invite_cmd(org: &str, email: &str, role: &str, db: &AuthDb) -> Result<u8> {
+    let store = open_auth(db)?;
+    let org = isb::org::OrgId::new(org)?;
+    let role = isb::auth::Role::parse(role)?;
+    let n = store.create_invitation(None, &org, email, role)?;
+    let days = (n.invitation.expires_at - n.invitation.created_at) / 86400;
+    eprintln!(
+        "invited {} to org {org} as {role}; valid for {days} days, shown once:",
+        n.invitation.email
+    );
+    match std::env::var("ISB_PUBLIC_URL")
+        .ok()
+        .filter(|u| !u.is_empty())
+    {
+        Some(u) => println!("{}/invite#{}", u.trim_end_matches('/'), n.token),
+        None => println!("{}", n.token),
+    }
+    Ok(0)
+}
+
+fn token_cmd(c: TokenCmd) -> Result<u8> {
+    match c {
+        TokenCmd::Create {
+            name,
+            org,
+            expires,
+            user,
+            db,
+        } => {
+            let store = open_auth(&db)?;
+            let u = match user {
+                Some(e) => store
+                    .user_by_email(&e)?
+                    .ok_or_else(|| Error::NotFound(format!("user {e}")))?,
+                None => {
+                    let admins: Vec<_> = store
+                        .list_users()?
+                        .into_iter()
+                        .filter(|u| u.platform_admin && !u.disabled)
+                        .collect();
+                    match <[_; 1]>::try_from(admins) {
+                        Ok([u]) => u,
+                        Err(v) => {
+                            return Err(Error::Invalid(format!(
+                                "{} platform admins: say whose token with --user EMAIL",
+                                v.len()
+                            )));
+                        }
+                    }
+                }
+            };
+            let org = org.map(isb::org::OrgId::new).transpose()?;
+            let t = store.create_api_token(u.id, org.as_ref(), &name, expires)?;
+            eprintln!(
+                "token {} ({}) for {}{}{}; shown once:",
+                t.info.id,
+                t.info.name,
+                u.email,
+                t.info
+                    .org
+                    .as_ref()
+                    .map(|o| format!(", org {o}"))
+                    .unwrap_or_else(|| ", all orgs (platform)".into()),
+                match t.info.expires_at {
+                    Some(e) => format!(", expires in {} days", (e - t.info.created_at) / 86400),
+                    None => ", never expires".into(),
+                }
+            );
+            println!("{}", t.token);
+            Ok(0)
+        }
+        TokenCmd::Ls { json, db } => {
+            let store = open_auth(&db)?;
+            let tokens = store.list_all_api_tokens()?;
+            if json {
+                print_json(&tokens);
+                return Ok(0);
+            }
+            let emails: BTreeMap<i64, String> = store
+                .list_users()?
+                .into_iter()
+                .map(|u| (u.id, u.email))
+                .collect();
+            let when = |t: Option<i64>| {
+                t.map(|t| fmt_time(t.max(0) as u64))
+                    .unwrap_or_else(|| "-".into())
+            };
+            let mut rows = vec![vec![
+                "ID".into(),
+                "NAME".into(),
+                "USER".into(),
+                "ORG".into(),
+                "CREATED".into(),
+                "LAST USED".into(),
+                "EXPIRES".into(),
+            ]];
+            for t in tokens {
+                rows.push(vec![
+                    t.id.to_string(),
+                    t.name,
+                    emails.get(&t.user_id).cloned().unwrap_or_default(),
+                    t.org.map(|o| o.to_string()).unwrap_or_else(|| "*".into()),
+                    fmt_time((t.created_at).max(0) as u64),
+                    when(t.last_used),
+                    when(t.expires_at),
+                ]);
+            }
+            table(rows);
+            Ok(0)
+        }
+        TokenCmd::Revoke { ids, db } => {
+            let store = open_auth(&db)?;
+            let mut code = 0;
+            for id in ids {
+                if store.revoke_api_token(id)? {
+                    println!("revoked token {id}");
+                } else {
+                    eprintln!("isb: token {id} not found");
+                    code = 1;
+                }
+            }
+            Ok(code)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use clap::CommandFactory;
 
     #[test]
+    fn auth_commands_parse() {
+        let c = Cli::try_parse_from([
+            "isb",
+            "token",
+            "create",
+            "ci",
+            "--org",
+            "ocai",
+            "--expires",
+            "90d",
+        ])
+        .unwrap();
+        match c.cmd {
+            Cmd::Token(TokenCmd::Create { org, expires, .. }) => {
+                assert_eq!(org.as_deref(), Some("ocai"));
+                assert_eq!(expires, Some(Duration::from_secs(90 * 86400)));
+            }
+            _ => panic!("wrong command"),
+        }
+        let c = Cli::try_parse_from(["isb", "invite", "ocai", "a@x.io"]).unwrap();
+        assert!(matches!(c.cmd, Cmd::Invite { ref role, .. } if role == "member"));
+        // No way to pass a password on the command line.
+        assert!(
+            Cli::try_parse_from(["isb", "user", "create", "a@x.io", "--password", "x"]).is_err()
+        );
+        assert_eq!(fmt_time(1_800_000_000), "2027-01-15 08:00:00Z");
+    }
+
+    #[test]
     fn cli_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn secret_commands_parse() {
+        let c = Cli::try_parse_from([
+            "isb", "secret", "create", "db", "-", "--label", "a=b", "--org", "ocai",
+        ])
+        .unwrap();
+        match c.cmd {
+            Cmd::Secret(SecretCmd::Create {
+                name,
+                file,
+                driver,
+                labels,
+            }) => {
+                assert_eq!((name.as_str(), driver.as_str()), ("db", "local"));
+                assert_eq!(file, Some(PathBuf::from("-")));
+                assert_eq!(labels, vec!["a=b".to_string()]);
+                assert_eq!(c.global.org.as_deref(), Some("ocai"));
+            }
+            _ => unreachable!(),
+        }
+        let ls = Cli::try_parse_from(["isb", "secret", "ls"]).unwrap();
+        assert!(ls.global.org.is_none());
+        assert!(Cli::try_parse_from(["isb", "secret", "reencrypt", "--all"]).is_ok());
+        // A value is never an argument.
+        assert!(Cli::try_parse_from(["isb", "secret", "set", "db", "file", "extra"]).is_err());
+    }
+
+    #[test]
+    fn times_format() {
+        assert_eq!(fmt_time(0), "1970-01-01 00:00:00Z");
+        assert_eq!(fmt_time(1_791_000_000), "2026-10-03 04:00:00Z");
+        assert_eq!(fmt_time(951_825_600), "2000-02-29 12:00:00Z");
     }
 
     #[test]

@@ -2,6 +2,11 @@
 // Field names are exactly those of the compose YAML (docs/spec.md).
 
 /**
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "BoolOrString".
+ */
+export type BoolOrString = boolean | string;
+/**
  * A command: argv, or a string split the way a shell splits words.
  *
  * This interface was referenced by `ComposeFile`'s JSON-Schema
@@ -62,11 +67,6 @@ export type FailureAction = "pause" | "rollback" | "continue";
  * via the `definition` "UpdateOrder".
  */
 export type UpdateOrder = "stop-first" | "start-first";
-/**
- * This interface was referenced by `ComposeFile`'s JSON-Schema
- * via the `definition` "BoolOrString".
- */
-export type BoolOrString = boolean | string;
 /**
  * idmap handling.
  *
@@ -202,14 +202,29 @@ export interface ComposeFile {
  */
 export interface SecretDef {
   /**
+   * The value, age-encrypted to the daemon's recipients (`isb secret
+   * encrypt`): ASCII-armored, or base64 of the binary format.
+   */
+  age?: string | null;
+  /**
+   * Read through this secrets driver, from `name`.
+   */
+  driver?: string | null;
+  /**
    * An environment variable of whoever deploys the file (`isb up`, or the
    * client calling `isb stack deploy`).
    */
   environment?: string | null;
+  external?: BoolOrString;
   /**
    * A host file holding the value (relative to the compose file).
    */
   file?: string | null;
+  /**
+   * With `external`: the store's name for it. With `driver`: the
+   * driver's reference (a 1Password `op://` path, say).
+   */
+  name?: string | null;
 }
 /**
  * Everything about one sandbox: a compose service.

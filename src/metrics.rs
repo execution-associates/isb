@@ -45,6 +45,8 @@ pub struct InstanceSample {
     pub labels: BTreeMap<String, String>,
     pub image: String,
     pub created_at: String,
+    /// The incus project; with isb's orgs, `isb-<org>` (or `default`).
+    pub project: String,
 }
 
 impl InstanceSample {
@@ -81,21 +83,28 @@ impl Sampler {
     /// Take one sample of the host and of every instance in the client's
     /// project.
     pub fn sample(&mut self, client: &Client) -> Result<(HostSample, Vec<InstanceSample>)> {
-        let v = client.get("/1.0/instances?recursion=2")?;
+        // Every project, so one sample covers every org.
+        let v = client.get("/1.0/instances?recursion=2&all-projects=true")?;
         let now = Instant::now();
         let mut out = Vec::new();
         for i in v.as_array().into_iter().flatten() {
             out.push(self.instance(i, now));
         }
-        out.sort_by(|a, b| a.name.cmp(&b.name));
-        let names: Vec<&String> = out.iter().map(|i| &i.name).collect();
-        self.cpu.retain(|k, _| names.contains(&k));
-        self.hist.retain(|k, _| names.contains(&k));
+        out.sort_by(|a, b| (&a.project, &a.name).cmp(&(&b.project, &b.name)));
+        let keys: Vec<String> = out
+            .iter()
+            .map(|i| format!("{}/{}", i.project, i.name))
+            .collect();
+        self.cpu.retain(|k, _| keys.contains(k));
+        self.hist.retain(|k, _| keys.contains(k));
         Ok((self.host(), out))
     }
 
     fn instance(&mut self, i: &Value, now: Instant) -> InstanceSample {
+        let project = i["project"].as_str().unwrap_or("default").to_string();
+        // Names are unique per project only: key by both.
         let name = i["name"].as_str().unwrap_or_default().to_string();
+        let key = format!("{project}/{name}");
         let config = i["config"].as_object();
         let cfg = |k: &str| {
             config
@@ -124,7 +133,7 @@ impl Sampler {
         let state = &i["state"];
         let running = status.eq_ignore_ascii_case("running");
         let usage = state["cpu"]["usage"].as_u64().filter(|_| running);
-        let cpu_pct = match (usage, self.cpu.get(&name)) {
+        let cpu_pct = match (usage, self.cpu.get(&key)) {
             (Some(u), Some((prev, at))) if u >= *prev => {
                 let wall = now.duration_since(*at).as_nanos() as f64;
                 (wall > 0.0).then(|| ((u - prev) as f64 / wall * 100.0) as f32)
@@ -133,13 +142,13 @@ impl Sampler {
         };
         match usage {
             Some(u) => {
-                self.cpu.insert(name.clone(), (u, now));
+                self.cpu.insert(key.clone(), (u, now));
             }
             None => {
-                self.cpu.remove(&name);
+                self.cpu.remove(&key);
             }
         }
-        let h = self.hist.entry(name.clone()).or_default();
+        let h = self.hist.entry(key.clone()).or_default();
         if running {
             push(h, cpu_pct.unwrap_or(0.0));
         } else {
@@ -160,6 +169,7 @@ impl Sampler {
             labels,
             image,
             created_at: i["created_at"].as_str().unwrap_or_default().to_string(),
+            project,
         }
     }
 

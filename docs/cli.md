@@ -37,7 +37,24 @@ isb stack deploy [NAME] [-d] [--timeout D]
 isb stack ls | ps NAME | logs NAME SERVICE | config NAME
 isb stack scale NAME SERVICE=N... | redeploy NAME SERVICE | rollback NAME
 isb stack rm NAME [--volumes]
+
+# secrets, per org, on the isb serve daemon (docs/secrets.md); all take --org ORG
+isb secret create NAME [FILE|-] [--driver D] [-l k=v]   value from FILE or stdin, never argv
+isb secret set NAME [FILE|-]               a new version
+isb secret get NAME                        the raw value, to stdout
+isb secret ls [--json] | inspect NAME [--json]   metadata only
+isb secret rm NAME...                      refused while a deployed stack uses it
+isb secret encrypt [FILE|-] [-r RECIPIENT]...   armored age for a compose `age:` field
+isb secret reencrypt [--all]               to the current recipients
+isb secret refresh NAME                    re-read from an external driver
 isb tui                                    live dashboard (docs/tui.md)
+
+# identity for isb serve, on <state>/isb.db directly (docs/auth.md)
+isb user create EMAIL [--admin] [--name N]  password from the terminal, or stdin's first line
+isb user ls [--json] | passwd EMAIL
+isb invite ORG EMAIL [--role member]       prints the invitation token (or link), once
+isb token create NAME [--org ORG] [--expires 90d] [--user EMAIL]   prints the token, once
+isb token ls [--json] | revoke ID...
 
 # macOS: the Lima VM that runs incus and isb serve (docs/macos.md); NAME defaults to isb
 isb machine init [NAME] [--cpus 4] [--memory 4GiB] [--disk 10GiB] [--isb-binary PATH] [--timeout 20m]

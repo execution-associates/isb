@@ -7,9 +7,11 @@
 //!   and Cloudflare Access, held to [`policy::RemotePolicy`].
 //!
 //! The tools manage stacks (long-running, replicated, load-balanced
-//! services) and plain sandboxes (an isolated machine for an agent).
+//! services), plain sandboxes (an isolated machine for an agent), and each
+//! org's secrets ([`crate::secrets`]).
 
 pub mod policy;
+pub mod secrets;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -20,6 +22,9 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
+use crate::auth::AuthConfig;
+use crate::auth::AuthStore;
+use crate::auth::http::{ApiConfig, AuthApi};
 use crate::client::Client;
 use crate::error::{Error, Result};
 use crate::exec::{ExecOptions, Stdin};
@@ -47,6 +52,29 @@ pub struct ServeConfig {
     pub policy: RemotePolicy,
     pub state_dir: PathBuf,
     pub interval: Duration,
+    /// Where the secrets key is looked for (and generated).
+    pub keys: crate::secrets::KeySources,
+    /// `~/.config/isb/secrets.toml`: break-glass recipients.
+    pub secrets_config: PathBuf,
+    /// Session lifetimes and the rest of the identity store's settings.
+    pub auth: AuthConfig,
+    /// Where users reach isb, for invitation and reset links.
+    pub public_url: Option<String>,
+}
+
+/// The identity endpoints over `<state>/isb.db`.
+fn auth_routes(cfg: &ServeConfig, store: Arc<AuthStore>) -> Result<crate::server::Routes> {
+    let path = crate::auth::db_path(&cfg.state_dir);
+    let api = AuthApi::new(
+        store,
+        ApiConfig {
+            public_url: cfg.public_url.clone(),
+            notifier: None,
+            setup_token_file: Some(cfg.state_dir.join("setup-token")),
+        },
+    )?;
+    eprintln!("isb serve: identity store {}", path.display());
+    Ok(Arc::new(api).router())
 }
 
 struct Daemon {
@@ -54,6 +82,7 @@ struct Daemon {
     ctl: Controller,
     policy: RemotePolicy,
     state_dir: PathBuf,
+    secrets: Arc<crate::secrets::Secrets>,
 }
 
 /// Run the daemon until SIGINT/SIGTERM. Apps keep running when it stops.
@@ -62,32 +91,45 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         .server_info()
         .map_err(|e| Error::invalid(format!("isb serve needs incusd: {e}")))?;
     let store = Store::open(&cfg.state_dir)?;
+    let secrets_config = crate::secrets::SecretsConfig::load(&cfg.secrets_config)?;
+    let opened = crate::secrets::Secrets::open(&cfg.state_dir, &cfg.keys, &secrets_config)?;
+    for n in &opened.notes {
+        eprintln!("isb serve: {n}");
+    }
+    // Open the identity store before anything starts, so a bad one fails
+    // startup cleanly. Its endpoints ride on the TCP listener.
+    let db = crate::auth::db_path(&cfg.state_dir);
+    let users = Arc::new(
+        AuthStore::open_with(&db, cfg.auth.clone())
+            .map_err(|e| Error::invalid(format!("open {}: {e}", db.display())))?,
+    );
+    let auth = match &cfg.listen {
+        Some(_) => Some(auth_routes(&cfg, users.clone())?),
+        None => None,
+    };
     let ctl = Controller::start(client.clone(), store, cfg.interval)?;
     let d = Arc::new(Daemon {
         client,
         ctl: ctl.clone(),
         policy: cfg.policy.clone(),
         state_dir: cfg.state_dir.clone(),
+        secrets: Arc::new(with_external_drivers(opened.secrets, &cfg.state_dir)?),
     });
     let registry = registry(d.clone())?;
-    let mut listeners = vec![Listener::unix(&cfg.socket)];
+    let hooks = hooks(d.clone(), users.clone(), cfg.allow_unauthenticated);
+    let mut listeners = vec![Listener::unix(&cfg.socket).hooks(hooks.clone())];
     if let Some(addr) = &cfg.listen {
-        let l = Listener::tcp(addr.clone());
-        listeners.push(match (&cfg.access, cfg.allow_unauthenticated) {
-            (Some((team, aud)), _) => l
-                .access(AccessValidator::new(team, aud)?)
-                .policy(cfg.remote_tools.clone()),
-            (None, true) => l
-                .allow_unauthenticated(true)
-                .policy(cfg.remote_tools.clone()),
-            (None, false) => {
-                // Health answers so the unit can be checked; no tool does.
-                eprintln!(
-                    "isb serve: remote MCP is off until CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD are set; {addr} serves /healthz only"
-                );
-                l.allow_unauthenticated(true)
-                    .policy(ToolPolicy::from_lists("", "*"))
-            }
+        let mut l = Listener::tcp(addr.clone())
+            .policy(cfg.remote_tools.clone())
+            .hooks(hooks);
+        if let Some(r) = auth {
+            l = l.routes(r);
+        }
+        listeners.push(match &cfg.access {
+            Some((team, aud)) => l.access(AccessValidator::new(team, aud)?),
+            // Callers sign in with an API token or a session; the authorizer
+            // refuses anonymous ones unless --allow-unauthenticated.
+            None => l.allow_unauthenticated(true),
         });
     }
     let hd = d.clone();
@@ -108,12 +150,191 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     r
 }
 
+/// The external secret drivers, each reading its credentials from the org's
+/// own `local` secrets.
+fn with_external_drivers(
+    secrets: crate::secrets::Secrets,
+    state_dir: &std::path::Path,
+) -> Result<crate::secrets::Secrets> {
+    use crate::secrets::{Driver, local::LocalDriver, onepassword};
+    let local = Arc::new(LocalDriver::new(state_dir, secrets.keyring().clone()));
+    let token: onepassword::TokenSource =
+        Arc::new(move |org| match local.get(org, onepassword::TOKEN_SECRET) {
+            Ok((v, _)) => Ok(Some(
+                String::from_utf8(v)
+                    .map_err(|_| Error::invalid("the 1Password token is not text"))?
+                    .trim()
+                    .to_string(),
+            )),
+            Err(e) if e.is_not_found() => Ok(None),
+            Err(e) => Err(e),
+        });
+    secrets.with_driver(Arc::new(onepassword::OnePasswordDriver::new(token)))
+}
+
+/// Tools that reach across orgs: platform admins only.
+const PLATFORM_TOOLS: &[&str] = &["server_status"];
+
+/// Read-only tools that span orgs: any signed-in user, filtered to their
+/// orgs by the tool itself.
+const CROSS_ORG_READS: &[&str] = &["overview", "events", "stack_list"];
+
+/// The org a tool call names (`org`, default `default`).
+fn arg_org(args: &Value) -> Result<crate::org::OrgId> {
+    match args.get("org").and_then(Value::as_str) {
+        Some(o) => crate::org::OrgId::new(o),
+        None => Ok(crate::org::OrgId::default_org()),
+    }
+}
+
+/// The orgs a caller may see, or `None` for all of them.
+fn visible_orgs(c: &Caller) -> Option<Vec<crate::org::OrgId>> {
+    match c.principal() {
+        Some(p) if !p.platform_admin => Some(p.orgs.iter().map(|(o, _)| o.clone()).collect()),
+        _ => None,
+    }
+}
+
+/// Authentication and authorization for every listener.
+fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate::server::Hooks {
+    use crate::server::Authenticated;
+    let u = users.clone();
+    let authn: crate::server::mcp::Authn = Arc::new(move |req, id| {
+        if req.header("authorization").is_some()
+            || req
+                .header("cookie")
+                .is_some_and(|c| c.contains("isb_session="))
+        {
+            return match u.principal_from_request(req) {
+                Some(p) => Authenticated::User(Arc::new(p)),
+                None => Authenticated::Refused,
+            };
+        }
+        // Access vouches for the email; the isb account decides the orgs.
+        if let Some(email) = id.and_then(|i| i.email.as_deref()) {
+            if let Ok(Some(p)) = u.principal_for_email(email) {
+                return Authenticated::User(Arc::new(p));
+            }
+        }
+        Authenticated::None
+    });
+    let authorize: crate::server::mcp::Authorize = Arc::new(move |c, tool, mut args, scope| {
+        if let Some(org) = scope {
+            match args.get("org").and_then(Value::as_str) {
+                Some(o) if o != org.as_str() => {
+                    return Err(Error::Forbidden(format!(
+                        "this endpoint acts in org {org}, not {o}"
+                    )));
+                }
+                _ => args["org"] = json!(org.as_str()),
+            }
+        }
+        match c {
+            Caller::Local { .. } => Ok(args),
+            Caller::Unauthenticated { .. } if allow_anonymous => Ok(args),
+            Caller::Unauthenticated { .. } => Err(Error::Forbidden(
+                "sign in: send an API token as Authorization: Bearer (isb token create)".into(),
+            )),
+            Caller::Access(id) => Err(Error::Forbidden(format!(
+                "{} has no isb account; ask an org admin to invite you",
+                id.name()
+            ))),
+            Caller::User { principal: p } => {
+                if PLATFORM_TOOLS.contains(&tool.name.as_str()) && !p.platform_admin {
+                    return Err(Error::Forbidden(format!(
+                        "{} is for platform admins",
+                        tool.name
+                    )));
+                }
+                if tool.name == "secret_reencrypt"
+                    && args.get("all").and_then(Value::as_bool) == Some(true)
+                    && !p.platform_admin
+                {
+                    return Err(Error::Forbidden(
+                        "re-encrypting every org is for platform admins".into(),
+                    ));
+                }
+                if CROSS_ORG_READS.contains(&tool.name.as_str()) && scope.is_none() {
+                    return Ok(args);
+                }
+                let org = arg_org(&args)?;
+                if p.platform_admin || p.role_in(&org).is_some() {
+                    Ok(args)
+                } else {
+                    Err(Error::Forbidden(format!("no access to org {org}")))
+                }
+            }
+        }
+    });
+    let events: crate::server::mcp::Events = Arc::new(move |c, since| {
+        if let (Caller::Unauthenticated { .. }, false) = (c, allow_anonymous) {
+            return Err(Error::Forbidden("sign in to follow events".into()));
+        }
+        if let Caller::Access(id) = c {
+            return Err(Error::Forbidden(format!(
+                "{} has no isb account",
+                id.name()
+            )));
+        }
+        let orgs = visible_orgs(c);
+        let ctl = d.ctl.clone();
+        Ok(Box::new(move |w: &mut dyn std::io::Write| {
+            let mut since = since;
+            loop {
+                let (seq, evs) = ctl.wait_events(since, 200, Duration::from_secs(15));
+                let mut wrote = false;
+                for e in evs {
+                    if !event_visible(&orgs, &e.stack) {
+                        continue;
+                    }
+                    let data = serde_json::to_string(&e).unwrap_or_default();
+                    write!(w, "id: {}\nevent: {}\ndata: {data}\n\n", e.seq, e.level)?;
+                    wrote = true;
+                }
+                if !wrote {
+                    // Keeps proxies from closing an idle stream.
+                    w.write_all(b": keepalive\n\n")?;
+                }
+                w.flush()?;
+                since = seq.max(since);
+            }
+        }))
+    });
+    crate::server::Hooks {
+        authn: Some(authn),
+        authorize: Some(authorize),
+        events: Some(events),
+    }
+}
+
+/// Events name their stack `org/stack` (or just `stack` in the default org).
+fn event_visible(orgs: &Option<Vec<crate::org::OrgId>>, stack: &str) -> bool {
+    let Some(orgs) = orgs else { return true };
+    let org = stack
+        .split_once('/')
+        .map(|(o, _)| o)
+        .unwrap_or(crate::org::DEFAULT_ORG);
+    orgs.iter().any(|o| o.as_str() == org)
+}
+
 fn args<T: DeserializeOwned>(v: Value) -> Result<T> {
     serde_json::from_value(v).map_err(|e| Error::invalid(format!("bad arguments: {e}")))
 }
 
-fn obj(props: Value, required: &[&str]) -> Value {
+fn obj(mut props: Value, required: &[&str]) -> Value {
+    // Every tool works within one org.
+    props["org"] =
+        json!({"type": "string", "description": "The org to act in (default: default)."});
     json!({"type": "object", "properties": props, "required": required, "additionalProperties": false})
+}
+
+/// A stack's qualified name from a tool's `org` and `name`.
+fn qname(org: &Option<String>, name: &str) -> Result<String> {
+    let org = match org {
+        Some(o) => crate::org::OrgId::new(o.clone())?,
+        None => crate::org::OrgId::default_org(),
+    };
+    Ok(crate::stack::qualified(&org, name))
 }
 
 fn caller_name(c: &Caller) -> String {
@@ -167,13 +388,26 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
         ro,
         |d: &Daemon, _a: Value, c: &Caller| -> Result<Value> {
             let snap = d.ctl.snapshot();
-            let stacks = d.ctl.list();
+            let orgs = visible_orgs(c);
+            let sees = |org: &str| {
+                orgs.as_ref()
+                    .is_none_or(|v| v.iter().any(|o| o.as_str() == org))
+            };
+            let stacks: Vec<_> = d.ctl.list().into_iter().filter(|s| sees(&s.org)).collect();
+            // Only isb's orgs: incus may hold other tools' projects too.
             let sandboxes: Vec<&crate::metrics::InstanceSample> = snap
                 .instances
                 .values()
+                .filter(|i| {
+                    crate::org::OrgId::from_incus_project(&i.project)
+                        .is_some_and(|o| sees(o.as_str()))
+                })
                 .filter(|i| i.stack().is_none())
                 .filter(|i| {
-                    c.is_trusted() || d.policy.any_instance || i.labels.contains_key(LABEL_OWNER)
+                    c.is_trusted()
+                        || c.principal().is_some()
+                        || d.policy.any_instance
+                        || i.labels.contains_key(LABEL_OWNER)
                 })
                 .collect();
             let (seq, _) = d.ctl.events(u64::MAX, 0);
@@ -200,7 +434,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             &[]
         ),
         ro,
-        |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
+        |d: &Daemon, a: Value, c: &Caller| -> Result<Value> {
             #[derive(Deserialize)]
             struct A {
                 #[serde(default)]
@@ -208,6 +442,9 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
                 limit: Option<usize>,
                 #[serde(default)]
                 wait: u64,
+                #[serde(default)]
+                #[allow(dead_code)]
+                org: Option<String>,
             }
             let a: A = args(a)?;
             let (seq, events) = d.ctl.wait_events(
@@ -215,6 +452,11 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
                 a.limit.unwrap_or(200).min(1000),
                 Duration::from_secs(a.wait.min(30)),
             );
+            let orgs = visible_orgs(c);
+            let events: Vec<_> = events
+                .into_iter()
+                .filter(|e| event_visible(&orgs, &e.stack))
+                .collect();
             Ok(json!({"seq": seq, "events": events}))
         }
     );
@@ -224,8 +466,18 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
         "List deployed stacks with each service's replica, health and rollout state.",
         obj(json!({}), &[]),
         ro,
-        |d: &Daemon, _a: Value, _c: &Caller| -> Result<Value> {
-            Ok(json!({"stacks": d.ctl.list()}))
+        |d: &Daemon, _a: Value, c: &Caller| -> Result<Value> {
+            let orgs = visible_orgs(c);
+            let stacks: Vec<_> = d
+                .ctl
+                .list()
+                .into_iter()
+                .filter(|s| {
+                    orgs.as_ref()
+                        .is_none_or(|v| v.iter().any(|o| o.as_str() == s.org))
+                })
+                .collect();
+            Ok(json!({"stacks": stacks}))
         }
     );
     tool!(
@@ -238,9 +490,13 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             #[derive(Deserialize)]
             struct A {
                 name: String,
+                #[serde(default)]
+                org: Option<String>,
             }
             let a: A = args(a)?;
-            Ok(serde_json::to_value(d.ctl.status(&a.name)?)?)
+            Ok(serde_json::to_value(
+                d.ctl.status(&qname(&a.org, &a.name)?)?,
+            )?)
         }
     );
     tool!(
@@ -253,9 +509,11 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             #[derive(Deserialize)]
             struct A {
                 name: String,
+                #[serde(default)]
+                org: Option<String>,
             }
             let a: A = args(a)?;
-            let def = d.ctl.definition(&a.name)?;
+            let def = d.ctl.definition(&qname(&a.org, &a.name)?)?;
             Ok(json!({
                 "name": def.name,
                 "base_dir": def.base_dir,
@@ -284,13 +542,15 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             #[derive(Deserialize)]
             struct A {
                 name: String,
+                #[serde(default)]
+                org: Option<String>,
                 service: String,
                 slot: Option<u32>,
                 lines: Option<usize>,
             }
             let a: A = args(a)?;
             let logs = d.ctl.logs(
-                &a.name,
+                &qname(&a.org, &a.name)?,
                 &a.service,
                 a.slot,
                 a.lines.unwrap_or(200).min(5000),
@@ -315,11 +575,14 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             #[derive(Deserialize)]
             struct A {
                 name: String,
+                #[serde(default)]
+                org: Option<String>,
                 service: String,
                 replicas: u32,
             }
             let a: A = args(a)?;
-            d.ctl.scale(&a.name, &a.service, a.replicas)?;
+            d.ctl
+                .scale(&qname(&a.org, &a.name)?, &a.service, a.replicas)?;
             d.ctl.note(
                 "info",
                 &a.name,
@@ -346,10 +609,12 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             #[derive(Deserialize)]
             struct A {
                 name: String,
+                #[serde(default)]
+                org: Option<String>,
                 service: String,
             }
             let a: A = args(a)?;
-            d.ctl.redeploy(&a.name, &a.service)?;
+            d.ctl.redeploy(&qname(&a.org, &a.name)?, &a.service)?;
             d.ctl.note(
                 "info",
                 &a.name,
@@ -368,9 +633,11 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             #[derive(Deserialize)]
             struct A {
                 name: String,
+                #[serde(default)]
+                org: Option<String>,
             }
             let a: A = args(a)?;
-            let changes = d.ctl.rollback(&a.name)?;
+            let changes = d.ctl.rollback(&qname(&a.org, &a.name)?)?;
             d.ctl.note(
                 "info",
                 &a.name,
@@ -393,10 +660,16 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             struct A {
                 name: String,
                 #[serde(default)]
+                org: Option<String>,
+                #[serde(default)]
                 volumes: bool,
             }
             let a: A = args(a)?;
-            d.ctl.remove(&a.name, a.volumes, Duration::from_secs(300))?;
+            d.ctl.remove(
+                &qname(&a.org, &a.name)?,
+                a.volumes,
+                Duration::from_secs(300),
+            )?;
             Ok(json!({"ok": true}))
         }
     );
@@ -414,6 +687,15 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
         write,
         sandbox_create
     );
+    let ctl = d.ctl.clone();
+    let in_use: secrets::InUse = Arc::new(move |org: &crate::org::OrgId, name: &str| {
+        ctl.definitions()
+            .iter()
+            .filter(|def| def.org == *org && def.store_secrets().contains(name))
+            .map(|def| def.name.clone())
+            .collect()
+    });
+    secrets::register(&mut r, d.secrets.clone(), in_use)?;
     tool!(
         "sandbox_list",
         "List sandboxes",
@@ -428,6 +710,8 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             struct A {
                 #[serde(default)]
                 labels: Vec<String>,
+                #[serde(default)]
+                org: Option<String>,
             }
             let a: A = args(a)?;
             let filters: Vec<_> = a
@@ -435,7 +719,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
                 .iter()
                 .map(|l| crate::sandbox::LabelFilter::parse(l))
                 .collect();
-            let all = Sandbox::list_with(&d.client, &filters)?;
+            let all = Sandbox::list_with(&d.oc(&a.org)?, &filters)?;
             let out: Vec<Value> = all
                 .into_iter()
                 .filter(|i| d.reachable(c, i))
@@ -480,16 +764,19 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             #[derive(Deserialize)]
             struct A {
                 name: String,
+                #[serde(default)]
+                org: Option<String>,
             }
             let a: A = args(a)?;
-            let info = d.reach(c, &a.name)?;
+            let oc = d.oc(&a.org)?;
+            let info = d.reach(c, &oc, &a.name)?;
             if info.config.contains_key("user.isb.stack") {
                 return Err(Error::invalid(format!(
                     "{} belongs to stack {}; scale or remove the stack instead",
                     a.name, info.config["user.isb.stack"]
                 )));
             }
-            Sandbox::remove(&d.client, &a.name, true)?;
+            Sandbox::remove(&oc, &a.name, true)?;
             Ok(json!({"ok": true}))
         }
     );
@@ -530,20 +817,33 @@ stacks (long-running services from a docker-compose-style file, with replicas, h
 rolling updates and a load balancer: stack_deploy, then stack_status) and sandboxes \
 (an isolated machine to run code in: sandbox_create, sandbox_exec, sandbox_remove). \
 Images: local incus aliases (dev-base), images:debian/12, or OCI images (docker:nginx:1.27, ghcr:org/app:tag). \
-Deploys return immediately; poll stack_status, or pass wait=true.";
+Deploys return immediately; poll stack_status, or pass wait=true. \
+Each org also has a secret store (secret_create, secret_set, secret_list; values are base64).";
 
 impl Daemon {
     /// May this caller touch this instance? Local callers: always. Remote:
     /// only what isb serve manages, unless the operator allowed any.
     fn reachable(&self, c: &Caller, i: &SandboxInfo) -> bool {
+        // A signed-in user reaches everything in an org they belong to (the
+        // authorizer already checked the org): the org is the boundary.
         c.is_trusted()
+            || c.principal().is_some()
             || self.policy.any_instance
             || i.config.contains_key("user.isb.stack")
             || i.config.contains_key(&format!("user.{LABEL_OWNER}"))
     }
 
-    fn reach(&self, c: &Caller, name: &str) -> Result<SandboxInfo> {
-        let info = Sandbox::get(&self.client, name)?.info()?;
+    /// A client on the org a tool call names (default: the default org).
+    fn oc(&self, org: &Option<String>) -> Result<Client> {
+        let org = match org {
+            Some(o) => crate::org::OrgId::new(o.clone())?,
+            None => crate::org::OrgId::default_org(),
+        };
+        Ok(crate::org::client(&self.client, &org))
+    }
+
+    fn reach(&self, c: &Caller, oc: &Client, name: &str) -> Result<SandboxInfo> {
+        let info = Sandbox::get(oc, name)?.info()?;
         if !self.reachable(c, &info) {
             // Indistinguishable from absent, so a remote caller cannot map
             // the host's other instances.
@@ -564,6 +864,8 @@ impl Daemon {
 #[serde(deny_unknown_fields)]
 struct DeployArgs {
     name: String,
+    #[serde(default)]
+    org: Option<String>,
     /// YAML text (remote callers, and anything not pre-resolved).
     #[serde(default)]
     compose: Option<String>,
@@ -634,6 +936,14 @@ fn stack_deploy(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
                 "secret {key:?} is not declared under top-level secrets"
             ))
         })?;
+        // P1.9/P1.10: resolve external, age and driver secrets from the
+        // org's store and the daemon's key, by name and version.
+        if def.file.is_none() && def.environment.is_none() {
+            return Err(Error::invalid(format!(
+                "secret {key:?}: stack_deploy does not deliver {} secrets; use an environment: or file: source",
+                def.source_kind()
+            )));
+        }
         let v = a
             .secrets
             .get(key)
@@ -648,8 +958,13 @@ fn stack_deploy(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
             })?;
         values.insert(key.clone(), crate::rpc::b64_encode(v.as_bytes()));
     }
+    let org = match &a.org {
+        Some(o) => crate::org::OrgId::new(o.clone())?,
+        None => crate::org::OrgId::default_org(),
+    };
     let def = StackDef {
         name: a.name.clone(),
+        org: org.clone(),
         file,
         base_dir: base,
         secrets: values,
@@ -687,7 +1002,7 @@ fn stack_deploy(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         Some(t) => crate::flex::parse_duration(t).map_err(Error::invalid)?,
         None => Duration::from_secs(600),
     };
-    let st = wait_settled(&d.ctl, &a.name, timeout)?;
+    let st = wait_settled(&d.ctl, &crate::stack::qualified(&org, &a.name), timeout)?;
     Ok(json!({"changes": changes, "status": st}))
 }
 
@@ -731,6 +1046,8 @@ fn sandbox_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         spec: Value,
         #[serde(default)]
         wait_ready: Option<bool>,
+        #[serde(default)]
+        org: Option<String>,
     }
     let a: A = args(a)?;
     let mut spec = match serde_json::from_value::<SpecArg>(a.spec)
@@ -751,7 +1068,7 @@ fn sandbox_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     };
     if !c.is_trusted() {
         d.policy.check_spec(&spec, &base)?;
-        if let Ok(sb) = Sandbox::get(&d.client, &name) {
+        if let Ok(sb) = Sandbox::get(&d.oc(&a.org)?, &name) {
             // Reconciling someone else's instance would be taking it over.
             if !d.reachable(c, &sb.info()?) {
                 return Err(Error::AlreadyExists(name));
@@ -766,7 +1083,7 @@ fn sandbox_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     };
     let mut log: Vec<String> = Vec::new();
     let (sb, report) = Sandbox::connect_or_create_with_base(
-        &d.client,
+        &d.oc(&a.org)?,
         &spec,
         &Default::default(),
         &base,
@@ -792,6 +1109,8 @@ fn sandbox_exec(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     #[derive(Deserialize)]
     struct A {
         name: String,
+        #[serde(default)]
+        org: Option<String>,
         argv: Vec<String>,
         cwd: Option<String>,
         user: Option<String>,
@@ -801,7 +1120,8 @@ fn sandbox_exec(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         timeout: Option<String>,
     }
     let a: A = args(a)?;
-    d.reach(c, &a.name)?;
+    let oc = d.oc(&a.org)?;
+    d.reach(c, &oc, &a.name)?;
     let timeout = match &a.timeout {
         Some(t) => crate::flex::parse_duration(t).map_err(Error::invalid)?,
         None => Duration::from_secs(600),
@@ -813,7 +1133,7 @@ fn sandbox_exec(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     if let Some(s) = a.stdin {
         opts.stdin = Stdin::Bytes(s.into_bytes());
     }
-    let sb = Sandbox::get(&d.client, &a.name)?;
+    let sb = Sandbox::get(&oc, &a.name)?;
     let out = match sb.exec_with(a.argv, opts) {
         Err(Error::ExecTimeout { .. }) => {
             return Err(Error::invalid(format!(

@@ -39,6 +39,17 @@ enum Msg {
     Plan(std::result::Result<(String, serde_json::Value, Vec<Change>), String>),
 }
 
+/// A client on a qualified sandbox's org, and its bare name.
+fn sandbox_client(client: &Client, q: &str) -> Result<(Client, String)> {
+    match q.split_once('/') {
+        Some((org, name)) => Ok((
+            crate::org::client(client, &crate::org::OrgId::new(org)?),
+            name.to_string(),
+        )),
+        None => Ok((client.clone(), q.to_string())),
+    }
+}
+
 /// Run the dashboard until the user quits.
 pub fn run(client: Client, socket: PathBuf) -> Result<()> {
     let source = Source::connect(socket.clone());
@@ -205,11 +216,15 @@ fn run_action(app: &mut App, a: Action, client: &Client, socket: &Path, tx: &Sen
             Action::Rollback { stack } => src.rollback(&stack),
             Action::RemoveStack { stack } => src.remove_stack(&stack),
             Action::Deploy { args, .. } => src.deploy(args, true).map(|_| ()),
-            Action::StartSandbox { name } => Sandbox::get(&client, &name).and_then(|s| s.start()),
-            Action::StopSandbox { name } => {
-                Sandbox::get(&client, &name).and_then(|s| s.stop(false, Duration::from_secs(30)))
+            Action::StartSandbox { name } => sandbox_client(&client, &name)
+                .and_then(|(c, n)| Sandbox::get(&c, &n))
+                .and_then(|s| s.start()),
+            Action::StopSandbox { name } => sandbox_client(&client, &name)
+                .and_then(|(c, n)| Sandbox::get(&c, &n))
+                .and_then(|s| s.stop(false, Duration::from_secs(30))),
+            Action::RemoveSandbox { name } => {
+                sandbox_client(&client, &name).and_then(|(c, n)| Sandbox::remove(&c, &n, true))
             }
-            Action::RemoveSandbox { name } => Sandbox::remove(&client, &name, true),
         };
         let _ = tx.send(Msg::Done(what, r.map_err(|e| e.to_string())));
     });
@@ -238,7 +253,9 @@ fn fetch_logs(app: &App, t: LogTarget, client: &Client, socket: &Path, tx: &Send
 }
 
 /// A sandbox's console log (OCI) or its whole journal.
-fn sandbox_logs(client: &Client, name: &str, oci: bool) -> Result<Vec<LogLine>> {
+fn sandbox_logs(client: &Client, q: &str, oci: bool) -> Result<Vec<LogLine>> {
+    let (oc, name) = sandbox_client(client, q)?;
+    let (client, name) = (&oc, name.as_str());
     let text = if oci {
         String::from_utf8_lossy(&client.console_log(name)?).into_owned()
     } else {
@@ -265,19 +282,21 @@ fn sandbox_logs(client: &Client, name: &str, oci: bool) -> Result<Vec<LogLine>> 
 fn shell(terminal: &mut DefaultTerminal, client: &Client, name: &str) -> Result<()> {
     ratatui::restore();
     println!("\x1b[2m── shell in {name} · exit to return to isb ──\x1b[0m");
-    let r = Sandbox::get(client, name).and_then(|sb| {
-        sb.attach(
-            [
-                "sh",
-                "-c",
-                "if command -v bash >/dev/null 2>&1; then exec bash -l; else exec sh -l; fi",
-            ],
-            ExecOptions::default()
-                .tty(true)
-                .user("root")
-                .stdin(crate::exec::Stdin::Inherit),
-        )
-    });
+    let r = sandbox_client(client, name)
+        .and_then(|(c, n)| Sandbox::get(&c, &n))
+        .and_then(|sb| {
+            sb.attach(
+                [
+                    "sh",
+                    "-c",
+                    "if command -v bash >/dev/null 2>&1; then exec bash -l; else exec sh -l; fi",
+                ],
+                ExecOptions::default()
+                    .tty(true)
+                    .user("root")
+                    .stdin(crate::exec::Stdin::Inherit),
+            )
+        });
     if let Err(e) = &r {
         eprintln!("isb: {e}");
         std::thread::sleep(Duration::from_secs(2));

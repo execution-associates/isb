@@ -181,8 +181,13 @@ client running `isb stack deploy`. Exactly one source:
 |---|---|
 | `file` | A host file holding the value, relative to the compose file. |
 | `environment` | An environment variable (or `--env-file` / `.env` entry) holding it. |
+| `external` | `true`: the org's secret store on `isb serve`, under `name` (default: the key). |
+| `age` | The value, age-encrypted to the daemon's recipients (`isb secret encrypt`). |
+| `driver` | A secrets driver; `name` is the driver's reference. |
 
-A secret no service uses is never read. Values never reach instance config;
+`name` goes with `external` or `driver` only. `external`, `age` and `driver`
+are accepted and validated, but `isb up` and `isb stack deploy` do not deliver
+them yet; see [secrets.md](secrets.md). A secret no service uses is never read. Values never reach instance config;
 see the service's `secrets`.
 
 ```yaml

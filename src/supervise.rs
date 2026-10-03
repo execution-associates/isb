@@ -448,7 +448,12 @@ pub fn resolve_secret_values(
                 })?
                 .into_bytes()
         } else {
-            unreachable!("validated at load")
+            // external, age, driver: the daemon's store and key hold these
+            // (P1.9/P1.10 wire them into stack deploys).
+            return Err(Error::invalid(format!(
+                "secret {key:?}: {} secrets are not resolved by `isb up` or by the client running `isb stack deploy`",
+                def.source_kind()
+            )));
         };
         out.insert(key.clone(), v);
     }

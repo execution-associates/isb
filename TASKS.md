@@ -69,8 +69,10 @@ minime only runs binaries downloaded from our CI runs.
   exclude it from backups). Warn without a break-glass recipient.
 - **macOS:** incus runs only on Linux, so isb on a Mac drives incus inside a
   Lima VM it manages (`isb machine init|start|stop|rm|status`, like
-  `podman machine`), with the socket forwarded and home directories shared.
-  The daemon can run on the Mac against that socket.
+  `podman machine`), with the socket forwarded and `$HOME` shared at the same
+  path. `isb serve` runs **inside the VM** (next to the bridges its balancer
+  reaches), with its socket and HTTP port forwarded to the Mac; `isb serve
+  install` on macOS is a LaunchAgent that keeps the machine running.
 - **One API, three surfaces.** Tools are defined once (the MCP registry); a
   REST/JSON API and SSE event stream are generated from the same registry;
   the web UI, TUI, CLI and agents all use it.
@@ -111,14 +113,14 @@ minime only runs binaries downloaded from our CI runs.
   optionalDependencies + `os`, `platformPackage()` in `src/binary.ts`, darwin
   rows in `sdk-typescript.yml`. bun.lock needs the packages published first
   (or regenerated). PyPI darwin wheels are in the workflow, untested until a tag.
-- [ ] P0.2 `isb machine`: Lima-backed incus VM on macOS (init with CPU/memory/
+- [~] (subagent p0.2) P0.2 `isb machine`: Lima-backed incus VM on macOS (init with CPU/memory/
   disk, start, stop, rm, status, ssh), incus installed from Zabbly, socket
   forwarded to `~/.isb/machine/<name>/incus.sock`, `$HOME` shared at the same
   path (so bind mounts work), default socket discovery uses it. Published
   ports reachable from the Mac's localhost. **Verify:** on minime, from
   nothing: `isb machine init && isb up` of the README example, port reachable
   from macOS; `isb tui` works.
-- [ ] P0.3 `isb serve` on macOS: launchd agent install (`isb serve install`
+- [~] (subagent p0.2) P0.3 `isb serve` on macOS: launchd agent install (`isb serve install`
   writes a LaunchAgent plist), balancer listening on the Mac, reaching
   replicas in the VM. **Verify:** a 2-replica stack on minime, curl from
   macOS spreads across both.
@@ -126,52 +128,53 @@ minime only runs binaries downloaded from our CI runs.
 ## Phase 1: foundation
 
 ### Orgs
-- [~] (orchestrator) P1.1 Org model: `isb org create|ls|rm|show`, an org = incus project
+- [x] (orgs commits on platform) P1.1 Org model: `isb org create|ls|rm|show`, an org = incus project
   `isb-<org>` created restricted (no privileged, managed disks only,
   limits from the org's quota), per-org network (bridge) and default ACLs.
   Every command, tool and the daemon take `--org` (default: a `default`
   org mapped to the incus `default` project for backwards compatibility).
   Stacks and sandboxes live inside their org. **Verify:** two orgs, a stack
   in each, neither can see or reach the other (exec, list, network).
-- [ ] P1.2 Per-org network policy: allow within the org, deny across orgs and
-  to private ranges by default, named exceptions in the org config.
+- [~] (orchestrator) P1.2 Per-org network policy: allow within the org, deny across orgs and
+  to private ranges by default (done with P1.1: the org ACL), named exceptions
+  in the org config (todo).
   **Verify:** curl across orgs fails, within succeeds, egress to internet ok.
-- [ ] P1.3 Service discovery: stable names per service inside an org
+- [~] (subagent p1.3) P1.3 Service discovery: stable names per service inside an org
   (`<service>.<stack>.isb` or similar), resolving to the instance (1 replica)
   or an org-local balancer address (replicas). **Verify:** an app reaches its
   postgres by name through a rolling replacement of the postgres.
 
 ### Identity and API
-- [~] (subagent p1.4) P1.4 Users and sessions: built-in store (SQLite in the state dir),
+- [x] (0f5b645) P1.4 Users and sessions: built-in store (SQLite in the state dir),
   argon2id passwords, sessions with secure cookies, first-run admin setup,
   invitations, roles (platform admin; org admin/member), API tokens (hashed,
   org-scoped). **Verify:** unit tests + login over HTTP.
-- [ ] P1.5 OAuth/OIDC: GitHub, Google, generic OIDC (discovery, PKCE),
+- [~] (subagent p1.5) P1.5 OAuth/OIDC: GitHub, Google, generic OIDC (discovery, PKCE),
   account linking by verified email. **Verify:** GitHub login end to end in a
   browser against the hcloud box.
-- [ ] P1.6 Passkeys (WebAuthn): register and sign in. **Verify:** browser on
+- [~] (subagent p1.5) P1.6 Passkeys (WebAuthn): register and sign in. **Verify:** browser on
   minime (Touch ID or a virtual authenticator via CDP).
-- [ ] P1.7 REST + SSE API generated from the tool registry: `/api/v1/<tool>`,
+- [x] (platform) P1.7 REST + SSE API generated from the tool registry: `/api/v1/<tool>`,
   OpenAPI document, `/api/v1/events` SSE, auth by session or token; MCP keeps
   working; per-org MCP endpoint `/orgs/<org>/mcp` bound to the caller's org.
   Cloudflare Access identities map to users. **Verify:** the same call via
   MCP, REST and CLI; an org token cannot touch another org.
 
 ### Secrets
-- [~] (subagent p1.8) P1.8 age store + driver trait + `isb secret create|set|get|ls|inspect|rm|
+- [x] (a10c6fc, 1ee402b) P1.8 age store + driver trait + `isb secret create|set|get|ls|inspect|rm|
   encrypt|reencrypt|refresh`, per org; daemon key lookup and generation;
   break-glass recipients. **Verify:** unit tests; reencrypt round trip with a
   second recipient.
-- [ ] P1.9 Stacks reference secrets by name+version; revision uses versions;
+- [~] (subagent p1.9) P1.9 Stacks reference secrets by name+version; revision uses versions;
   migrate existing stack state (base64 values) into the local store on daemon
   start. **Verify:** existing e2e stack survives the upgrade; a `secret set`
   rolls the dependent service.
-- [ ] P1.10 Inline `age:` secrets in compose, `{secret: name}` env delivery
+- [~] (subagent p1.9) P1.10 Inline `age:` secrets in compose, `{secret: name}` env delivery
   (unit env file; OCI incus config), external-driver refresh polling.
   **Verify:** integration test for each delivery path.
-- [ ] P1.11 `onepassword` driver (via `op` service account token stored as a
+- [x] (platform) P1.11 `onepassword` driver (via `op` service account token stored as a
   local secret, or titan's broker). **Verify:** against a titan vault.
-- [ ] P1.12 Secret tools on MCP/REST (`secret_list|get|set|delete`), org-scoped;
+- [~] (subagent p1.9) P1.12 Secret tools on MCP/REST (`secret_list|get|set|delete`), org-scoped;
   `isb serve install` creates the systemd credential (Linux) / keychain-backed
   file (macOS). **Verify:** an org agent rotates a secret over MCP and the
   service rolls.
@@ -244,6 +247,11 @@ minime only runs binaries downloaded from our CI runs.
 
 ## Log
 
+- 2026-10-03: P1.1 done (orgs isolate, verified by integration test
+  orgs_isolate); P1.4 identity and P1.8 secrets store merged. Notes from
+  them: remote callers can use every secret tool across orgs until P1.7;
+  reset tokens go to the journal when no mailer is set; a setup token in
+  `<state>/setup-token` guards first-run setup.
 - 2026-10-03: P1.1 core landed (org create/ls/show/rm, --org, host setup);
   stacks and the daemon are not org-aware yet (next).
 

@@ -589,6 +589,7 @@ pub fn error_json(e: &Error) -> Value {
         Error::NotFound(_) => ("not_found", Value::Null),
         Error::AlreadyExists(_) => ("already_exists", Value::Null),
         Error::Invalid(_) => ("invalid", Value::Null),
+        Error::Forbidden(_) => ("forbidden", Value::Null),
         Error::Interpolation(_) => ("interpolation", Value::Null),
         Error::Parse { path, .. } => ("parse", json!({"path": path})),
         Error::WebSocket(_) => ("websocket", Value::Null),

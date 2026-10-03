@@ -76,11 +76,28 @@ impl Request {
     }
 }
 
-#[derive(Debug, Clone)]
+/// Writes a streamed body (server-sent events) until it returns; the
+/// connection closes after it, which is what delimits the body.
+pub type StreamFn = Box<dyn FnOnce(&mut dyn Write) -> std::io::Result<()> + Send>;
+
+#[derive(Clone)]
 pub struct Response {
     pub status: u16,
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
+    /// When set, written after the headers in place of `body`.
+    pub stream: Option<Arc<std::sync::Mutex<Option<StreamFn>>>>,
+}
+
+impl std::fmt::Debug for Response {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Response")
+            .field("status", &self.status)
+            .field("headers", &self.headers)
+            .field("body", &self.body.len())
+            .field("stream", &self.stream.is_some())
+            .finish()
+    }
 }
 
 impl Response {
@@ -89,7 +106,16 @@ impl Response {
             status,
             headers: Vec::new(),
             body: Vec::new(),
+            stream: None,
         }
+    }
+
+    /// A streamed response: `f` writes the body and the connection closes
+    /// when it returns.
+    pub fn stream(status: u16, content_type: &str, f: StreamFn) -> Self {
+        let mut r = Response::new(status).header("Content-Type", content_type);
+        r.stream = Some(Arc::new(std::sync::Mutex::new(Some(f))));
+        r
     }
 
     pub fn json(status: u16, v: &Value) -> Self {
@@ -626,6 +652,20 @@ pub(crate) fn write_response<W: Write>(w: &mut W, r: &Response) -> std::io::Resu
             continue;
         }
         head.push_str(&format!("{k}: {v}\r\n"));
+    }
+    if let Some(stream) = &r.stream {
+        // No length: the body runs until the connection closes.
+        head.push_str("Cache-Control: no-store\r\nConnection: close\r\n\r\n");
+        w.write_all(head.as_bytes())?;
+        w.flush()?;
+        let f = stream.lock().unwrap().take();
+        return match f {
+            Some(f) => {
+                f(w)?;
+                w.flush()
+            }
+            None => Ok(()),
+        };
     }
     head.push_str(&format!(
         "Content-Length: {}\r\nConnection: close\r\n\r\n",

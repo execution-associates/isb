@@ -752,7 +752,12 @@ mod tests {
     fn remove_route_stops_listening_and_keeps_connections() {
         let a = echo("a");
         let lb = Balancer::new();
-        let at = lb.set_route("web", any(), vec![a]).unwrap();
+        // Its own loopback address: once the route closes, a parallel test
+        // may take the same port number on 127.0.0.1, which would turn the
+        // refused connect below into someone else's listener.
+        let at = lb
+            .set_route("web", "127.0.0.2:0".parse().unwrap(), vec![a])
+            .unwrap();
         let (mut s, _) = open(at);
         lb.remove_route("web");
         let err = TcpStream::connect(at).unwrap_err();
