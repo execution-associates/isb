@@ -283,8 +283,9 @@ minime only runs binaries downloaded from our CI runs.
   `isb serve` at start when missing (`org::ensure_default`); incus' own
   `default` project is never an org and holds only plain `isb create` /
   `isb up` sandboxes. Default-org stacks found with instances in incus'
-  `default` project get a startup warning, nothing more (remove and
-  redeploy them).
+  `default` project get a startup warning, nothing more: the controller
+  recreates them in `isb-default` with new volumes and leaves the old
+  instances and volumes in `default` for the operator to delete.
 - **Service names need dnsmasq to reach the DNS root**: a root daemon (or
   agent) keeps state in `/var/lib/isb` (0700) around `/var/lib/isb/dns`, so
   names never resolved there; `isb serve` now makes those dirs 0711.

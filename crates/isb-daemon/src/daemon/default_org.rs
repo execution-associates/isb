@@ -4,8 +4,9 @@ use super::*;
 
 /// Create the default org (`isb-default`) if it is missing, and warn about
 /// default-org stacks whose instances are still in incus' own `default`
-/// project, which is no org: the controller looks for them in
-/// `isb-default` and will not find them there.
+/// project, which is no org: the controller recreates them in
+/// `isb-default` with new volumes and leaves the old instances where they
+/// are.
 pub(super) fn ensure(client: &Client, store: &Store) {
     match crate::org::ensure_default(client, &mut |l| eprintln!("isb serve: default org: {l}")) {
         Ok(true) => eprintln!(
@@ -25,7 +26,7 @@ pub(super) fn ensure(client: &Client, store: &Store) {
     let stray = stray_default_stacks(client, &stacks);
     if !stray.is_empty() {
         eprintln!(
-            "isb serve: WARNING: default-org stack(s) {} have instances in incus' default project, which is not an org; the default org is {} (remove and redeploy them)",
+            "isb serve: WARNING: default-org stack(s) {} have instances in incus' default project, which is not an org: they run afresh in {} (new volumes), and the old instances and volumes there are left for you to move or delete",
             stray.join(", "),
             crate::org::DEFAULT_ORG_PROJECT
         );
