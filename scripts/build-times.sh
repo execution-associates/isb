@@ -21,7 +21,7 @@ cd "$(dirname "$0")/.."
 
 # The first path that exists, so the script survives files moving.
 first() { for p in "$@"; do [ -f "$p" ] && { echo "$p"; return; }; done; echo "none of: $*" >&2; exit 1; }
-LEAF=${LEAF:-$(first crates/isb-tui/src/ui.rs src/tui/ui.rs)}
+LEAF=${LEAF:-$(first crates/isb-tui/src/tui/ui.rs src/tui/ui.rs)}
 HUB=${HUB:-$(first crates/isb-core/src/org.rs src/org.rs)}
 RUNS=${RUNS:-3}
 MUSL=${MUSL:-x86_64-unknown-linux-musl}

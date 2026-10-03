@@ -6,6 +6,34 @@ starts in can reach. The incus socket is root-equivalent, so the integration
 tests are compiled in the sandbox (`cargo test --no-run`) and run on the host
 (see the README).
 
+## Layout
+
+isb is a cargo workspace. The `isb` package at the root is the CLI
+(`src/bin/isb.rs` and `src/bin/isb/`) and the library everyone depends on,
+which re-exports the internal crates' modules under their original paths
+(`isb::spec`, `isb::daemon`, ...). The internal crates, in build order:
+
+| crate | modules |
+|---|---|
+| `crates/isb-core` | the incus client, spec, plan, sandbox, compose, stack, org, registry, ingress, secrets, rpc, machine, metrics, `serve_client` (the CLI's client for `isb serve`) |
+| `crates/isb-server` | auth, audit, history, server, servers, web (its `build.rs` embeds `web/dist`) |
+| `crates/isb-apps` | app, build, jobs, backup, s3, template, notify |
+| `crates/isb-tui` | tui |
+| `crates/isb-daemon` | daemon |
+
+`isb-server`, `isb-apps` and `isb-tui` depend only on `isb-core`, so they
+compile in parallel; `isb-daemon` needs all but the TUI. An edit recompiles
+its own crate and the crates above it, so a change to the TUI or the CLI
+never re-checks the other 90k lines. Each internal crate's root imports the
+modules of the crates below it (`use isb_core::*;`), so `crate::org::OrgId`
+means the same in every crate. An item one crate needs from a lower one is
+`#[doc(hidden)] pub`, which keeps it out of `isb`'s documented API.
+
+The internal crates are published with `isb` and share its version
+(`[workspace.package]`, and the `=` versions in `[workspace.dependencies]`).
+`cargo package` and `cargo publish --workspace` handle them in dependency
+order.
+
 ## The checks
 
 ```sh
@@ -13,15 +41,17 @@ scripts/check.sh           # ratchet, fmt, clippy -D warnings, unit tests
 scripts/check.sh --quick   # the same without the tests
 ```
 
-CI runs the same steps (`.github/workflows/ci.yml` and `build-health.yml`).
+Plain `cargo test`, `cargo clippy`, `cargo doc` and `cargo build` cover the
+whole workspace (`default-members`). CI runs the same steps
+(`.github/workflows/ci.yml` and `build-health.yml`).
 
 ## The legibility ratchet
 
 New code may not be harder to read than the rule, and old code may get
 better but never worse.
 
-- **Clippy thresholds** (`clippy.toml`, lints enabled in `Cargo.toml`
-  `[lints.clippy]`, denied in CI):
+- **Clippy thresholds** (`clippy.toml`, lints enabled for every crate in the
+  root `Cargo.toml`'s `[workspace.lints.clippy]`, denied in CI):
 
   | lint | limit |
   |---|---|
@@ -56,8 +86,13 @@ musl build, after a one-line edit in a leaf module and in a widely used one.
 ```sh
 scripts/build-times.sh                 # check build test clippy
 scripts/build-times.sh release         # minutes per cell
-RUNS=3 scripts/build-times.sh check    # best of three
+RUNS=1 scripts/build-times.sh check    # one run per cell (default: best of 3)
 ```
+
+Debug builds keep line tables only (backtraces have file:line; set `debug =
+true` in `[profile.dev]` locally to step through code) and dependencies carry
+no debuginfo. The linker is the toolchain's default: on x86_64 Linux that is
+rust-lld since Rust 1.90, and mold measured no faster here.
 
 To see where a full build spends its time, `cargo build --timings` writes
 `target/cargo-timings/cargo-timing.html` (CI's `build timings` job uploads

@@ -160,7 +160,7 @@ $ isb app deploy api
 The daemon fetches the repository on the host into
 `<state>/sources/<app>/` (`<state>/orgs/<org>/sources/<app>/` outside the
 default org), checks out the exact commit the ref names, records its SHA and
-subject, and calls the builder ([`isb::build`](../src/build/mod.rs)) with the
+subject, and calls the builder ([`isb::build`](../crates/isb-apps/src/build/mod.rs)) with the
 checkout, the `subdir`, the builder and its args, and the SHA as the tag. The
 build runs in a fresh sandbox in the org, never on the host.
 

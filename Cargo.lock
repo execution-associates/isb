@@ -1332,19 +1332,54 @@ name = "isb"
 version = "0.7.0"
 dependencies = [
  "age",
- "argon2",
- "base64 0.23.1",
  "clap",
+ "isb-apps",
+ "isb-core",
+ "isb-daemon",
+ "isb-server",
+ "isb-tui",
+ "rustix 1.1.5",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "tempfile",
+]
+
+[[package]]
+name = "isb-apps"
+version = "0.7.0"
+dependencies = [
+ "age",
+ "base64 0.23.1",
  "flate2",
  "httparse",
+ "isb-core",
  "libc",
- "ratatui",
+ "rcgen",
+ "ring",
+ "rustls",
+ "ruzstd",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "tempfile",
+ "toml 1.1.6+spec-1.1.0",
+ "ureq",
+ "webpki-roots",
+]
+
+[[package]]
+name = "isb-core"
+version = "0.7.0"
+dependencies = [
+ "age",
+ "base64 0.23.1",
+ "httparse",
+ "libc",
  "rcgen",
  "ring",
  "rusqlite",
  "rustix 1.1.5",
- "rustls",
- "ruzstd",
  "schemars",
  "serde",
  "serde_json",
@@ -1356,7 +1391,58 @@ dependencies = [
  "toml 1.1.6+spec-1.1.0",
  "tungstenite",
  "ureq",
- "webpki-roots",
+]
+
+[[package]]
+name = "isb-daemon"
+version = "0.7.0"
+dependencies = [
+ "age",
+ "isb-apps",
+ "isb-core",
+ "isb-server",
+ "libc",
+ "rustls",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "tempfile",
+]
+
+[[package]]
+name = "isb-server"
+version = "0.7.0"
+dependencies = [
+ "argon2",
+ "base64 0.23.1",
+ "httparse",
+ "isb-core",
+ "libc",
+ "rcgen",
+ "ring",
+ "rusqlite",
+ "rustix 1.1.5",
+ "rustls",
+ "serde",
+ "serde_json",
+ "signal-hook 0.4.4",
+ "tempfile",
+ "thiserror 2.0.21",
+ "time",
+ "tungstenite",
+ "ureq",
+]
+
+[[package]]
+name = "isb-tui"
+version = "0.7.0"
+dependencies = [
+ "isb-core",
+ "libc",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

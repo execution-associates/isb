@@ -112,7 +112,7 @@ minime only runs binaries downloaded from our CI runs.
   Accepted for now; an opt-out per org is the fallback.
 - **Phase 2 contracts** (so P2.1/P2.5, P2.2/P2.3 and P2.4 can run in
   parallel):
-  - `isb::build::{Builder, BuildRequest, BuiltImage, run}` (src/build/mod.rs)
+  - `isb::build::{Builder, BuildRequest, BuiltImage, run}` (crates/isb-apps/src/build/mod.rs)
     is the one call the app layer makes to turn a checkout into an image.
     Its owner may add fields, never rename these.
   - A compose service takes `domains:` (list of `{host, path?, port,

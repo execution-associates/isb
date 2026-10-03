@@ -197,7 +197,7 @@ on top.
 Gitea (Postgres), n8n, Ghost (MySQL), Umami (Postgres), Vaultwarden, MinIO,
 Postgres with Adminer, and whoami (for checking routing). They are written
 for isb from each project's own documented images and settings, and compiled
-into the binary (`src/template/builtin/`).
+into the binary (`crates/isb-apps/src/template/builtin/`).
 
 **Added catalogs** are a platform setting (`template_catalog_add`,
 `isb template catalog add`; platform admins), kept in

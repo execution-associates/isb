@@ -29,54 +29,26 @@
 //! YAML, and [`plan`] turns a spec plus the instance's actual state into the
 //! minimal set of changes. A device that is already correct is never touched.
 
-pub mod app;
-pub mod audit;
-pub mod auth;
-pub mod backup;
-pub mod balance;
-pub mod build;
-pub mod client;
-pub mod compose;
-pub mod cron;
-pub mod daemon;
-pub mod discovery;
-pub mod error;
-pub mod exec;
-mod flex;
-pub mod foreground;
-pub mod history;
-pub mod idmap;
-pub mod ingress;
-pub mod interp;
-pub mod jobs;
-pub mod lock;
-pub mod machine;
-pub mod metrics;
-pub mod metrics_history;
-pub mod notify;
-pub mod org;
-pub mod plan;
-pub mod registry;
-pub mod rpc;
-pub mod s3;
-pub mod sandbox;
-pub mod secrets;
-pub mod server;
-pub mod servers;
-pub mod shorthand;
-pub mod spec;
-pub mod stack;
-pub mod supervise;
-pub mod template;
-pub mod tui;
-pub mod volume;
-pub mod web;
+#[doc(inline)]
+pub use isb_apps::{app, backup, build, jobs, notify, s3, template};
+#[doc(inline)]
+pub use isb_core::{
+    balance, client, compose, cron, discovery, error, exec, foreground, idmap, ingress, interp,
+    lock, machine, metrics, metrics_history, org, plan, registry, rpc, sandbox, secrets, shorthand,
+    spec, stack, supervise, volume,
+};
+#[doc(inline)]
+pub use isb_daemon::daemon;
+#[doc(inline)]
+pub use isb_server::{audit, auth, history, server, servers, web};
+#[doc(inline)]
+pub use isb_tui::tui;
 
 pub use client::{Client, Timeouts};
 pub use compose::{LoadOptions, Project};
 pub use error::{Error, Result};
 pub use exec::{ExecController, ExecEvent, ExecOptions, ExecOutput, ExecStream, Stdin};
-pub use flex::parse_duration;
+pub use isb_core::flex::parse_duration;
 pub use plan::{Action, DiffOptions, SandboxPlan};
 pub use sandbox::{ApplyReport, EnsureOptions, LabelFilter, Sandbox, SandboxInfo};
 pub use spec::{

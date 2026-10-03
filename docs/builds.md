@@ -127,10 +127,10 @@ nothing changed between the two runs):
 
 The tools come from one image, `isb-builder/<hash>` (`isb-builder-vm/<hash>`
 for VMs), made the first time a build needs it from the recipe in
-`src/build/builder-image.sh` (Ubuntu 24.04 plus the tools below, each download
-checked against a pinned SHA-256). It is prepared in the `isb-system` project,
-never in an org (an org could otherwise tamper with the image every org builds
-with), and shared by every org through the host's images. A changed recipe is
+`crates/isb-apps/src/build/builder-image.sh` (Ubuntu 24.04 plus the tools
+below, each download checked against a pinned SHA-256). It is prepared in
+the `isb-system` project, never in an org (an org could otherwise tamper with
+the image every org builds with), and shared by every org through the host's images. A changed recipe is
 a new hash, so the next build prepares a new image; old ones can be deleted
 with `incus image delete`.
 

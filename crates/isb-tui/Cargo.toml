@@ -1,0 +1,24 @@
+[package]
+name = "isb-tui"
+description = "isb tui, the live dashboard. Use the `isb` crate."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+isb-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ratatui.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

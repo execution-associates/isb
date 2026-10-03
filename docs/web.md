@@ -263,7 +263,7 @@ what an event in its org touches.
   create the bucket), tested when added and on **Test**; every schedule in
   the org; the restore history.
 - **Schedules** (backups and jobs) are cron as the daemon reads it
-  (`web/src/lib/cron.ts` mirrors `src/cron.rs`, with its tests): presets,
+  (`web/src/lib/cron.ts` mirrors `crates/isb-core/src/cron.rs`, with its tests): presets,
   the schedule in words, the next three runs in UTC or the given offset, and
   the parser's own errors before saving.
 - **Notifications** section: each channel with its destination (secret
@@ -356,10 +356,10 @@ names its rule and says why after `--`:
 
 CI runs `bun run lint`, `bun run test` and `bun run build`.
 
-`cargo build` embeds `web/dist` in the binary: `build.rs` writes a table of
-`include_bytes!` for every file in it, so the binary reads nothing from disk
-at runtime, a request path can never reach the filesystem, and the static
-musl build gains no dependency. The UI is optional at build time:
+`cargo build` embeds `web/dist` in the binary: `crates/isb-server/build.rs`
+writes a table of `include_bytes!` for every file in it, so the binary reads
+nothing from disk at runtime, a request path can never reach the filesystem,
+and the static musl build gains no dependency. The UI is optional at build time:
 
 - **Without `web/dist`**, the table holds a one-page placeholder that says the
   UI was not built (the API and MCP work as usual), and the daemon logs that
