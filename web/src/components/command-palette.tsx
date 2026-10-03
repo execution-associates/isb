@@ -4,6 +4,7 @@
 // public API (project_list, app_list) and respects the caller's role.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Activity,
   Bell,
   Boxes,
   Building2,
@@ -61,6 +62,7 @@ export const SECTIONS: { path: string; label: string; icon: LucideIcon; key: str
   { path: "/workspace", label: "Workspace", icon: SquareTerminal, key: "w", keywords: ["machine", "box", "terminal", "sandboxes", "home"] },
   { path: "/templates", label: "Templates", icon: LayoutTemplate, key: "t" },
   { path: "/backups", label: "Backups", icon: DatabaseBackup, key: "b" },
+  { path: "/uptime", label: "Uptime", icon: Activity, key: "u", keywords: ["monitors", "monitoring", "status", "down", "incidents", "heartbeat"] },
   { path: "/notifications", label: "Notifications", icon: Bell, key: "n" },
   { path: "/members", label: "Members", icon: Users, key: "m" },
   { path: "/agents", label: "MCP", icon: Plug, key: "a", keywords: ["agents", "connect", "claude", "codex", "cursor", "token"] },

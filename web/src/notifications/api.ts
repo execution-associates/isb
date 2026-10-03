@@ -112,6 +112,23 @@ export const EVENT_GROUPS: { subject: string; label: string; kinds: { kind: stri
     ],
   },
   {
+    subject: "monitor",
+    label: "Uptime",
+    kinds: [
+      { kind: "monitor.down", label: "Down" },
+      { kind: "monitor.up", label: "Up" },
+      { kind: "monitor.cert_expiring", label: "Cert expiring" },
+    ],
+  },
+  {
+    subject: "server",
+    label: "Servers",
+    kinds: [
+      { kind: "server.unreachable", label: "Unreachable" },
+      { kind: "server.recovered", label: "Recovered" },
+    ],
+  },
+  {
     subject: "preview",
     label: "Previews",
     kinds: [

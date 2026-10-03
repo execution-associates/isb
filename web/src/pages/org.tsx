@@ -8,6 +8,7 @@ import { InviteDialog } from "@/components/invite-dialog";
 import { Button } from "@/components/ui/button";
 import { canWrite } from "@/lib/admin";
 import { canManage, rememberOrg, roleIn, useMe } from "@/lib/session";
+import { DownMonitorsBanner } from "@/uptime/cards";
 import { WorkspaceCard } from "@/workspace/workspace-card";
 
 /** Events name their stack `org/stack`, or just `stack` in the default org. */
@@ -64,6 +65,7 @@ export function OrgPage() {
           </>
         }
       />
+      <DownMonitorsBanner org={org} />
       <WorkspaceCard org={org} admin={canManage(me, org)} />
       <OrgDashboard org={org} />
       <InviteDialog org={org} open={inviteOpen} onOpenChange={setInviteOpen} />

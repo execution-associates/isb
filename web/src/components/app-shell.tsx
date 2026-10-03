@@ -330,7 +330,7 @@ function SidebarContent({ me, onNavigate }: { me: Me; onNavigate?: () => void })
   const org = useCurrentOrg(me);
   const o = org ? encodeURIComponent(org) : "";
   const known = !!org && me.orgs.includes(org);
-  const [main, manage] = [SECTIONS.slice(0, 6), SECTIONS.slice(6)];
+  const [main, manage] = [SECTIONS.slice(0, 7), SECTIONS.slice(7)];
   return (
     <div className="flex h-full flex-col gap-3 px-3 pt-3 pb-2">
       <Link

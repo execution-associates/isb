@@ -1,5 +1,5 @@
 // The org sections for day-2 features, as routes for App.tsx (inside
-// RequireAuth): templates, backups, volumes and notifications, each loaded on first
+// RequireAuth): templates, backups, volumes, uptime and notifications, each loaded on first
 // visit. Databases, jobs, previews and monitoring are app tabs
 // (apps/app-page.tsx).
 import { lazy, type ReactNode, Suspense } from "react";
@@ -11,6 +11,8 @@ const TemplatePage = lazy(() => import("@/templates/template-page").then((m) => 
 const BackupsPage = lazy(() => import("@/data/backups-page").then((m) => ({ default: m.BackupsPage })));
 const VolumesPage = lazy(() => import("@/volumes/volumes-page").then((m) => ({ default: m.VolumesPage })));
 const VolumePage = lazy(() => import("@/volumes/volumes-page").then((m) => ({ default: m.VolumePage })));
+const UptimePage = lazy(() => import("@/uptime/uptime-page").then((m) => ({ default: m.UptimePage })));
+const MonitorPage = lazy(() => import("@/uptime/monitor-page").then((m) => ({ default: m.MonitorPage })));
 const NotificationsPage = lazy(() => import("@/notifications/notifications-page").then((m) => ({ default: m.NotificationsPage })));
 
 /** While a page's code loads: its header and a card, not one grey slab. */
@@ -39,6 +41,8 @@ export function day2Routes() {
       <Route path="/orgs/:org/backups" element={page(<BackupsPage />)} />
       <Route path="/orgs/:org/volumes" element={page(<VolumesPage />)} />
       <Route path="/orgs/:org/volumes/:name" element={page(<VolumePage />)} />
+      <Route path="/orgs/:org/uptime" element={page(<UptimePage />)} />
+      <Route path="/orgs/:org/uptime/:name" element={page(<MonitorPage />)} />
       <Route path="/orgs/:org/notifications" element={page(<NotificationsPage />)} />
     </>
   );

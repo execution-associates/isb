@@ -1,4 +1,4 @@
-// The Monitoring tab: the app's metrics history (metrics_query, kept a
+// The Monitoring tab: the app's uptime monitors (uptime/cards.tsx), its metrics history (metrics_query, kept a
 // month: docs/operations/metrics.md) for CPU, memory, network and disk, per replica or
 // summed, over 1 hour to 30 days; and each replica's state now.
 import { Activity, ArrowDownToLine, ArrowUpFromLine, Cpu, HardDriveDownload, HardDriveUpload, HeartPulse, MemoryStick, RotateCw } from "lucide-react";
@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { TONE_TEXT, type Tone } from "@/lib/status";
 import { cn } from "@/lib/utils";
+import { AppUptimeCard } from "@/uptime/cards";
 import { type App, type InstanceDetail, serviceOf, useStack } from "./api";
 import { EmptyState, QueryError } from "./components";
 import { MetricChart, SERIES } from "./metric-chart";
@@ -43,6 +44,7 @@ export function MonitoringTab({ org, app }: { org: string; app: App }) {
 
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
+      <AppUptimeCard org={org} app={app} />
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <Stat loading={loading} icon={Cpu} label="CPU now" value={svc ? percent(cpuNow) : "–"} hint="All replicas; 100% is one core" />
         <Stat loading={loading} icon={MemoryStick} label="Memory now" value={svc ? bytes(memNow) : "–"} hint={memLimit ? `Limit ${bytes(memLimit)} each` : "No limit set"} />
