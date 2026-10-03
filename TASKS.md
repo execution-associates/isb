@@ -201,9 +201,9 @@ minime only runs binaries downloaded from our CI runs.
   with `br_netfilter` (titan: k3s, Docker): ufw's routed default-deny
   dropped all but ICMP between an org's instances. Fixed 2026-10-03
   (4c297ae); `orgs_isolate` now checks TCP, not only ping.
-- **`dev-base` is gone from titan** (image alias and its source container),
-  found 2026-10-03; cause unknown. lasso and isb's tests default to it.
-  Agents since build sandboxes from `images:ubuntu/24.04` + mise.
+- **`dev-base` is built by lasso's `scripts/dev-base.sh`** (Ubuntu 24.04,
+  `dev` uid 1000, mise: node, go, bun, uv); `--force` rebuilds it. The
+  stopped `dev-base` container is its source.
 - **Databases** (P4.1) are apps with a `database` source; credentials are
   org secrets `db.<n>.*` that outlive the database (the engine reads them
   only when its data directory is first made). Dumps run inside the
