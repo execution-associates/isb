@@ -284,10 +284,11 @@ and owners.
 | Tool | Does |
 |---|---|
 | `server_add` | Bootstrap a box over SSH (`name`, `ssh`, `ssh_port`, `key` (a path, local CLI only) or `ssh_key` (the key itself), `address`, `agent_port`, `allow_from`, `isb_binary`, `version`, `self_binary`, `public_ingress`); `wait: false` answers at once. |
-| `server_list` | Servers with health and orgs; servers being added (`provisions`); `dedicated_vm` (whether this host can run dedicated VMs); `suggested_allow_from`. |
+| `server_list` | Servers with health, orgs and `version` (build, protocol, skew against this control plane, upgradable, last upgrade); servers being added (`provisions`); `dedicated_vm` (whether this host can run dedicated VMs); `suggested_allow_from`. |
 | `server_show` | One server: address, how it was added, certificate fingerprint and expiry, health, orgs. |
 | `server_remove` | Forget a server (refused while it holds orgs; a dedicated VM is deleted with it). |
 | `server_rotate_cert` | Issue its agent a new certificate. |
+| `server_upgrade` | Replace a server's agent (`name`, or `all: true`) with this control plane's build, a release (`version`) or a binary on this host (`isb_binary`, local CLI only); waits for the new build, and the box rolls back if it does not answer. |
 | `server_provision_get` | Follow a server (or a dedicated VM, `vm-<org>`) being added: steps, log, state, error. |
 
 A call for an org placed on a server is judged on the control plane, then

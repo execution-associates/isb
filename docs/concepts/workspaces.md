@@ -276,8 +276,11 @@ That is `$ISB_URL`.
   differ from the ingress's tunnel port (8480).
 
 For an org placed on a server, the server's agent runs the workspace, keeps
-its token and serves the listener on that server's bridge; the control plane
-forwards the `workspace_*` tools like any org call.
+its token and serves the listener on that server's bridge, which takes the
+workspace's token only (org API tokens live on the control plane); the
+control plane forwards the `workspace_*` tools, the terminal and SSH like
+any org call, and the agent reaps the org's sandboxes
+([Servers](../guides/servers.md)).
 
 A `default` org that is incus' own `default` project (no org network) has no
 workspace: create one in an org of its own.

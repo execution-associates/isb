@@ -180,6 +180,7 @@ fi
 cp -p "$bin" "$bin.prev" || {{ rm -f "$tmp"; result failed "could not keep the previous binary"; exit 1; }}
 mv -f "$tmp" "$bin"
 result restarting "installed; waiting for the control plane to confirm"
+systemctl reset-failed {unit} 2>/dev/null
 systemctl restart {unit}
 i=0
 while [ "$i" -lt {window} ]; do
@@ -192,6 +193,8 @@ while [ "$i" -lt {window} ]; do
   i=$((i + 1))
 done
 cp -p "$bin.prev" "$bin.rollback" && mv -f "$bin.rollback" "$bin"
+# A binary that keeps exiting may have hit the unit's start limit.
+systemctl reset-failed {unit} 2>/dev/null
 systemctl restart {unit}
 result rolled_back "the new agent was not confirmed within {window} s: the previous binary is back"
 exit 1
@@ -386,7 +389,16 @@ impl Servers {
             Some(v) => stage_vm(client, v, &bin, &sha)?,
             None => stage_mtls(&c, &bin, &sha)?,
         }
-        let now = come_back(&c, &sha).map_err(|e| rollback_error(&c, name, &sha, e))?;
+        let now = match come_back(&c, &sha) {
+            Ok(hb) => hb,
+            Err(why) => {
+                let (e, seen) = rollback_error(&c, name, &sha, why);
+                if let Some(hb) = seen {
+                    self.observe(name, hb);
+                }
+                return Err(e);
+            }
+        };
         c.internal(
             "POST",
             "/internal/v1/upgrade/confirm",
@@ -445,12 +457,17 @@ impl Servers {
                 let _ = st.save();
             }
         }
+        self.observe(name, hb.clone());
+    }
+
+    /// A heartbeat seen outside the health thread.
+    fn observe(&self, name: &str, hb: Value) {
         self.health
             .lock()
             .unwrap()
             .entry(name.to_string())
             .or_default()
-            .observe(Ok(hb.clone()), now_secs());
+            .observe(Ok(hb), now_secs());
     }
 }
 
@@ -560,8 +577,9 @@ fn come_back(c: &AgentClient, sha: &str) -> std::result::Result<Value, String> {
 }
 
 /// The error for an agent that did not come back: wait to see the box's
-/// helper restore the previous binary, and say so.
-fn rollback_error(c: &AgentClient, name: &str, sha: &str, why: String) -> Error {
+/// helper restore the previous binary, and say so; with the heartbeat that
+/// showed it.
+fn rollback_error(c: &AgentClient, name: &str, sha: &str, why: String) -> (Error, Option<Value>) {
     let started = Instant::now();
     let mut rolled = None;
     if !why.contains("refused it") {
@@ -576,7 +594,7 @@ fn rollback_error(c: &AgentClient, name: &str, sha: &str, why: String) -> Error 
             std::thread::sleep(Duration::from_secs(3));
         }
     }
-    let message = match rolled {
+    let message = match &rolled {
         Some(hb) => format!(
             "{why}; the server restored its previous binary and answers again (isb {}, build {})",
             hb["isb"].as_str().unwrap_or("?"),
@@ -587,10 +605,11 @@ fn rollback_error(c: &AgentClient, name: &str, sha: &str, why: String) -> Error 
             "{why}; its upgrade helper restores the previous binary {CONFIRM_WINDOW_S}s after the restart: check `isb server show {name}`"
         ),
     };
-    Error::OperationFailed {
+    let e = Error::OperationFailed {
         step: format!("upgrade server {name}"),
         message,
-    }
+    };
+    (e, rolled)
 }
 
 fn short(b: &str) -> &str {

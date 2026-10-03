@@ -39,6 +39,27 @@ export function healthTone(state: ServerView["health"]["state"]): { tone: Tone; 
   }
 }
 
+/** The first characters of a build hash, enough to tell builds apart. */
+export function shortBuild(b: string | null | undefined): string {
+  return b ? b.slice(0, 12) : "";
+}
+
+/** How a server's isb compares with this control plane's, in words. */
+export function versionSkew(v: ServerView["version"]): { tone: Tone; label: string; text: string } | null {
+  if (!v || v.isb == null) return null;
+  const cp = `isb ${v.control_plane.isb} (build ${shortBuild(v.control_plane.build)})`;
+  if (!v.compatible) {
+    return {
+      tone: "danger",
+      label: "Incompatible",
+      text: `Speaks agent protocol ${v.protocol ?? "?"}; this control plane speaks ${v.control_plane.protocol}. Calls for its orgs are refused until one of them is upgraded.`,
+    };
+  }
+  if (!v.skew) return { tone: "success", label: "Current", text: `The same build as this control plane, ${cp}.` };
+  const ssh = v.ssh ? "" : " SSH to its orgs needs the upgrade.";
+  return { tone: "warning", label: "Differs", text: `This control plane runs ${cp}.${ssh}` };
+}
+
 export const STEP_TONE: Record<StepState, Tone> = { pending: "muted", running: "info", done: "success", failed: "danger" };
 
 /** Used over total as a percentage (0-100), or null when either is unknown. */

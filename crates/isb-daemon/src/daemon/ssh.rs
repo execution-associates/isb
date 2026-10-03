@@ -542,7 +542,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
                 }
                 let a: A = args(a)?;
                 let oc = dd.oc(&a.org)?;
-                dd.reach(c, &oc, &a.name)?;
+                let info = dd.reach(c, &oc, &a.name)?;
                 let mut keys = Vec::new();
                 for p in HOST_KEYS {
                     // A read the instance controls: kept only if it parses.
@@ -556,11 +556,24 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
                         keys.push(json!({"key": k.line(), "fingerprint": k.fingerprint()}));
                     }
                 }
-                let user = oc
-                    .read_file(&a.name, "/etc/passwd")?
-                    .filter(|b| b.len() <= 1 << 20)
-                    .and_then(|b| first_user(&String::from_utf8_lossy(&b)))
-                    .unwrap_or_else(|| "root".into());
+                // A workspace logs in as its own user, whatever uid the
+                // image gave it.
+                let own = info
+                    .config
+                    .get(crate::workspace::KEY_WORKSPACE)
+                    .and_then(|w| {
+                        let org = crate::org::OrgId::new(a.org.as_deref().unwrap_or("default")).ok()?;
+                        dd.workspaces_def(&org, w).ok()
+                    })
+                    .map(|w| w.user);
+                let user = match own {
+                    Some(u) => u,
+                    None => oc
+                        .read_file(&a.name, "/etc/passwd")?
+                        .filter(|b| b.len() <= 1 << 20)
+                        .and_then(|b| first_user(&String::from_utf8_lossy(&b)))
+                        .unwrap_or_else(|| "root".into()),
+                };
                 Ok(json!({"name": a.name, "keys": keys, "user": user}))
             },
         )

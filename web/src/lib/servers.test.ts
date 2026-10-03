@@ -11,7 +11,36 @@ import {
   placementArgs,
   placementLabel,
   serverNameProblem,
+  shortBuild,
+  versionSkew,
 } from "@/lib/servers";
+
+describe("version skew", () => {
+  const cp = { isb: "1.0.0", build: "b".repeat(64), protocol: 2 };
+  const v = (isb: string | null, build: string | null, more: Partial<NonNullable<Parameters<typeof versionSkew>[0]>> = {}) => ({
+    isb,
+    build,
+    protocol: 2,
+    control_plane: cp,
+    skew: build !== cp.build || isb !== cp.isb,
+    compatible: true,
+    ssh: true,
+    upgradable: true,
+    last_upgrade: null,
+    ...more,
+  });
+  it("says whether a server runs this control plane's build", () => {
+    expect(versionSkew(undefined)).toBeNull();
+    expect(versionSkew(v(null, null))).toBeNull();
+    expect(versionSkew(v("1.0.0", cp.build))?.label).toBe("Current");
+    const d = versionSkew(v("1.0.0", "a".repeat(64)));
+    expect(d?.tone).toBe("warning");
+    expect(d?.text).toContain(`build ${"b".repeat(12)}`);
+    expect(versionSkew(v("0.7.0", null, { protocol: 1, ssh: false }))?.text).toMatch(/SSH .* needs the upgrade/);
+    expect(versionSkew(v("9.0.0", "c", { protocol: 3, compatible: false }))?.label).toBe("Incompatible");
+    expect(shortBuild("0123456789abcdef")).toBe("0123456789ab");
+  });
+});
 
 describe("placement words", () => {
   it("names where an org runs and how isolated it is", () => {

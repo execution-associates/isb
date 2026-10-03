@@ -79,23 +79,33 @@ release, but deletes everything in the VM.
 
 ## Servers and dedicated VMs
 
-A control plane installs isb on each server once, when the server is added
-([Servers](../guides/servers.md#adding-a-server)): by default this version's
-release, checked against its `SHA256SUMS`, at `/usr/local/bin/isb`, run by
-`isb-agent.service`. A dedicated VM gets a copy of the control plane's own
-executable when it is created. Neither is upgraded when the control plane is,
-and `isb server add` refuses a name that is already recorded, so it does not
-reinstall an existing server.
-
-`isb server ls` shows each server's isb version from its heartbeat. To upgrade
-an agent, replace the binary on the box and restart the agent:
+Upgrade the control plane first, then its servers:
 
 ```sh
-# on the server (or, for a dedicated VM: incus exec --project isb-system vm-ORG -- ...)
+isb server ls                 # ISB says "(differs)" for a server on another build
+isb server upgrade --all      # each to the control plane's own build, one after another
+```
+
+`isb server upgrade` (the Servers page's **Upgrade** button) sends the
+control plane's binary over the agent's mTLS connection (a dedicated VM:
+through incus), and a root helper on the box installs it, restarts the
+agent and puts the old binary back unless the new agent answers within two
+minutes ([Upgrading servers](../guides/servers.md#upgrading-servers)). While an
+agent restarts, its orgs' workloads keep running and calls for them fail
+with "reach server NAME"; the control plane follows the agent's new event
+feed from the start once it answers again. A control plane refuses to
+forward to an agent that speaks a newer protocol than it does, so upgrade
+the control plane before its servers.
+
+A server added by an isb without `server_upgrade` has no helper (a dedicated
+VM gets one with its first upgrade). Replace its binary by hand once:
+
+```sh
+# on the server
 sudo install -m 0755 ./isb /usr/local/bin/isb
 sudo systemctl restart isb-agent
 ```
 
-While an agent restarts, its orgs' workloads keep running and calls for them
-fail with "reach server NAME"; the control plane follows the agent's new event
-feed from the start once it answers again.
+Only the bootstrap installs the helper on a server added over SSH, so such a
+server is upgraded by hand until it is added again (`isb server rm` once no
+org is placed on it, then `isb server add`).

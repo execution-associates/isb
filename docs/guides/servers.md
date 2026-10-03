@@ -74,7 +74,8 @@ user with passwordless sudo. Over SSH it:
 5. writes the agent's TLS material to `/etc/isb-agent/` (owned by `isb`,
    0700; key 0600) and the unit `isb-agent.service`, which runs
    `isb serve --agent --agent-listen 0.0.0.0:7443 --agent-tls /etc/isb-agent
-   --state-dir /var/lib/isb/state`, and starts it;
+   --state-dir /var/lib/isb/state`, and starts it, with the upgrade helper
+   ([Upgrading servers](#upgrading-servers));
 6. waits for the agent's heartbeat over mTLS and checks it presents the
    certificate just issued.
 
@@ -138,9 +139,10 @@ placed ([Moving an org](../concepts/placement.md#moving-an-org)).
 
 From then on every org-scoped call for that org goes to its server, on every
 surface: MCP (`/mcp` and `/orgs/<org>/mcp`), REST, the CLI over the control
-plane's socket, the web terminal's websocket (bridged through to the agent's)
+plane's socket, the web terminal's and SSH websockets (bridged
+through to the agent's; [SSH to an org on a server](#ssh-to-an-org-on-a-server))
 and app webhooks (forwarded as they came; the agent checks the signature,
-since it holds the app's secret). SSH is not forwarded ([SSH](ssh.md#limits)).
+since it holds the app's secret).
 The control plane authenticates the caller, runs its authorizer (roles, token
 scopes, org scope) and writes its audit row first; the agent then judges the
 asserted caller again, in the org the call was sent for:
@@ -174,9 +176,114 @@ too), template catalogs, `registry_gc`, `notification_settings`,
 
 For an org on a server, the server's agent also runs the org's
 [workspace](../concepts/workspaces.md), keeps its token and serves the bridge
-listener on that server's bridge; the control plane forwards the
-`workspace_*` tools like any org call. The reaper there leaves such orgs'
-sandboxes to the agent.
+listener on that server's bridge (port 8481; `isb host setup`, run by the
+bootstrap, opens it to the org bridges in the box's firewall); the control
+plane forwards the `workspace_*` tools like any org call. The bridge
+listener there takes the workspace's own token only: org API tokens live in
+the control plane's identity store, so a workspace reaches isb through its
+token, and people and agents outside reach it through the control plane.
+The agent reaps the org's expired and idle sandboxes; the control plane's
+reaper leaves them alone.
+
+Volume [snapshots, backups and staged restores](volumes.md) run on the agent
+too, with the org's backup destinations and their keys (org secrets) kept
+there. The destination must be reachable from the server: an S3 store on the
+control plane's loopback is not.
+
+## SSH to an org on a server
+
+`isb ssh-proxy` (and so `ssh`, `scp`, editors and herdr) works for instances
+of an org on a server exactly as for a local one ([SSH](ssh.md)). The
+control plane admits the websocket, writes `ssh.open`, reads the caller's
+SSH public keys from its identity store at that moment, and opens the same
+websocket on the agent with the caller asserted and the keys in a header
+(`X-Isb-Ssh-Keys`, base64url JSON). The agent checks the org as for any
+forwarded call, parses each key again (options refused), writes them for
+`sshd -i` in the instance as it does locally, and tells the control plane
+which key sshd accepted (a text frame the client never sees).
+
+The grant is checked on the control plane, where the account lives: every
+15 seconds, as for a local session (key removed, account disabled, token
+revoked or expired, sign-in ended, membership dropped or demoted to
+viewer). A failed check ends the bridge with the reason, and closing the
+bridge ends the agent's sshd. Both sides keep audit rows: the control
+plane's `ssh.open` and `ssh.close` (guest user, key fingerprint, duration),
+and the agent's own. An agent older than protocol 2 (below) refuses SSH:
+"server NAME runs isb ... (agent protocol 1); this needs protocol 2:
+upgrade it with `isb server upgrade NAME`".
+
+## Upgrading servers
+
+```sh
+isb server upgrade hel-1                     # to this control plane's own build
+isb server upgrade --all
+isb server upgrade hel-1 --isb-version 1.0.1 # a release, checked against its SHA256SUMS
+isb server upgrade hel-1 --isb-binary ./isb  # a Linux build on this host
+```
+
+`server_upgrade` (`name` or `all: true`, `version`, `isb_binary` for the
+local CLI only; platform admins) replaces a server's agent and waits until it
+answers with the new build:
+
+1. It reads the agent's heartbeat (it must answer) for its architecture and
+   the build it runs (`build`: the SHA-256 of its binary), and picks the
+   binary: by default the control plane's own executable, checked to be a
+   Linux build for that architecture. The same build already running is
+   left alone.
+2. It hands the binary over. **A server added over SSH** gets it over the
+   agent's mTLS connection, in 3 MiB chunks (`/internal/v1/upgrade/chunk`),
+   then `/internal/v1/upgrade/apply` with its SHA-256: the agent checks size,
+   hash and architecture and stages it as `<state>/upgrade/isb.new`. **A
+   dedicated VM** gets it through the incus API (file push, then exec), as
+   at creation, which also installs the helper below on a VM made before it
+   existed.
+3. On the box, the root helper (`isb-agent-upgrade.path` watches for the
+   staged request and starts `isb-agent-upgrade.service`, which runs
+   `/usr/local/lib/isb/agent-upgrade`) copies the binary out of the agent's
+   directory, checks the SHA-256 again on its copy, runs `isb --version` with
+   it as the `isb` user, keeps the old binary as `/usr/local/bin/isb.prev`,
+   replaces `/usr/local/bin/isb` atomically and restarts `isb-agent`.
+4. The control plane waits (up to 100 s) for the heartbeat with the new
+   build, then confirms it (`/internal/v1/upgrade/confirm`). Without that
+   confirmation within 120 s of the restart, the helper puts `isb.prev` back
+   and restarts the agent again; the control plane waits to see that and says
+   so ("... the server restored its previous binary and answers again").
+
+Each takes seconds plus the agent's restart; calls for the server's orgs
+fail meanwhile ("reach server NAME") and its workloads keep running. The
+helper's last run is in the heartbeat (`upgrade.last`: `restarting`,
+`done`, `failed`, `rolled_back`) and on the Servers page.
+
+Why this way: the bootstrap's SSH key is used once and never kept, and
+keeping one would make the control plane hold a standing root credential for
+every box. The mTLS connection already carries every call the control plane
+makes; only the control plane's client certificate opens it, and the upgrade
+routes take only the control plane's own assertion. The agent's user is in
+`incus-admin`, which is root-equivalent on the box, so a control plane that
+can drive the agent could already act as root there; replacing the binary
+gives it nothing new. What the upgrade adds is integrity and a way back: the
+hash is checked by the agent and again by root on its own copy, the binary
+must run before it is installed, and the box (not the control plane, which
+cannot reach an agent that did not come back) restores the previous binary.
+
+### Version skew
+
+`server_list` and `server_show` answer `version`: the agent's `isb`,
+`build` and `protocol`, the control plane's, `skew` (another version or
+build), `compatible`, `ssh` (SSH forwarding needs protocol 2),
+`upgradable` (a dedicated VM, or a server with the helper) and
+`last_upgrade`. `isb server ls` marks a different build `(differs)`; the
+Servers page shows a badge and, in the server's details, its build next to
+the control plane's with an **Upgrade** button.
+
+The agent protocol is how the two sides talk (1: the first; 2: SSH
+forwarding, the upgrade routes, and `protocol`, `build` and `arch` in the
+heartbeat). The control plane forwards calls to agents speaking protocol 1
+or 2 and refuses a newer one with "server NAME runs isb ... (agent protocol
+N), newer than this control plane understands (protocol 2): upgrade the
+control plane". A server added before the helper existed (by an isb without
+`server_upgrade`) has no upgrade routes: replace its binary by hand once
+([Upgrading isb](../operations/upgrades.md#servers-and-dedicated-vms)).
 
 ## mTLS
 
@@ -271,8 +378,9 @@ What it costs and what it means:
   (`--ingress cloudflare-tunnel`, outbound only; [Domains](domains.md#cloudflare-tunnel-provider)).
   Its published ports and the load balancer are the VM's own, reached from
   inside it.
-- Its isb is the control plane's build, copied at creation; it is not
-  upgraded with the control plane.
+- Its isb is the control plane's build, copied at creation;
+  `isb server upgrade vm-ORG` brings it to the control plane's current build
+  ([Upgrading servers](#upgrading-servers)).
 
 ## Secrets
 
@@ -289,6 +397,7 @@ written on the control plane. Add a break-glass recipient on each server
 |---|---|
 | `servers/pki/`: the CA and its client certificate | `ca.crt`, `tls.crt`, `tls.key` (0600) |
 | `servers/servers.json`: name, address, port, `user@host`, certificate fingerprint and expiry, isb version, firewall sources, and for a dedicated VM its org, project, instance and size | `state/agent/orgs.json`: the orgs placed on it |
+| | `state/upgrade/`: an upgrade being staged and the helper's last result; `/usr/local/bin/isb.prev`, the binary before the last upgrade; the helper (`/usr/local/lib/isb/agent-upgrade`, `isb-agent-upgrade.path` and `.service`) |
 | `servers/placement.json`: org to server | everything about those orgs: stacks, apps, deployments, secrets (its own age key), builds, registry, metrics, notifications, jobs, backups, its own audit log |
 | `servers/known_hosts`: the boxes' SSH host keys | |
 | the identity store (members, invitations, tokens of every org) and the audit log of every call | no users: an internal identity file only for its org bookkeeping |
@@ -300,7 +409,8 @@ with the rest of its state: the CA is what every agent trusts.
 ## Health
 
 Every 10 s the control plane asks each agent for its heartbeat
-(`GET /internal/v1/heartbeat`): isb and incus versions, CPU, load, memory,
+(`GET /internal/v1/heartbeat`): isb and incus versions, the agent's build,
+architecture and protocol, its upgrade helper, CPU, load, memory,
 incus storage, the orgs placed there, the number of stacks, and the agent's
 last error event. `isb server ls` and `server_show` show it with the state:
 `unknown` (not heard from yet), `up`, `unreachable`. The web UI's Servers
@@ -322,6 +432,8 @@ server, so they hear about it only once it is back.
 | The agent restarts | Its event feed starts over; the control plane notices and follows from the start. |
 | The control plane's state directory is lost | The CA goes with it: restore it from backup (it is what every agent trusts). Without a backup, re-run `isb server add` on each box (it reissues the agent's certificate under a new CA) and recreate the placement. |
 | A certificate nears expiry | `isb server rotate-cert NAME`, or **Rotate certificate** in Admin, Servers; `server_show` has `cert_not_after`. |
+| An upgraded agent does not come back | The helper on the box restores the previous binary 120 s after the restart; `server_upgrade` fails saying so, and `upgrade.last` is `rolled_back`. |
+| An agent speaks another protocol | Calls for its orgs are refused with the reason: upgrade the older side. |
 | The SSH key leaks | It was used for the bootstrap only: remove it from the box's `authorized_keys`; the control plane never needs it again. |
 
 ## Tools
@@ -333,6 +445,7 @@ server, so they hear about it only once it is back.
 | `server_show` | One server. |
 | `server_remove` | Forget one (refused while it holds orgs; a dedicated VM is deleted with it). |
 | `server_rotate_cert` | Issue its agent a new certificate. |
+| `server_upgrade` | Replace a server's agent (or every server's) with this control plane's build or a release, and wait for it ([Upgrading servers](#upgrading-servers)). |
 | `server_provision_get` | Follow a server (or dedicated VM) being added: steps, log, error. |
 
 All are for platform admins.

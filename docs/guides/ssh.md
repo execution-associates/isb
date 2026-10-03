@@ -55,6 +55,11 @@ The guest user is yours to pick (`User` in the config, `ssh user@...`):
 anyone admitted may already exec as root in the org's instances, so SSH
 adds no reach.
 
+For an org placed on a server, the control plane bridges the websocket to
+that server's agent, sending the caller's keys as it reads them, and checks
+the session here as for a local one; the agent runs `sshd -i` in the
+instance ([SSH to an org on a server](servers.md#ssh-to-an-org-on-a-server)).
+
 ## Who gets in
 
 The websocket is admitted exactly like the web terminal: as if calling
@@ -162,8 +167,6 @@ Connect tab shows it for the workspace.
 
 ## Limits
 
-- Orgs placed on a server ([Servers](servers.md)): the control plane does not
-  forward SSH to them. The web terminal works there.
 - `isb ssh-proxy` sends only the isb token, no Cloudflare Access
   credentials, so it cannot pass a daemon behind Access. Reach the daemon on a
   tailnet or loopback `--listen` address instead ([Reach isb serve

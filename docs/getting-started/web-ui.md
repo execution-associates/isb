@@ -377,7 +377,9 @@ only, or one org).
   last heartbeat), isb version, CPU, memory and disk from the heartbeat, and
   the orgs on it; servers being added, with their progress. A server's
   details (address, how it was added, certificate fingerprint and expiry,
-  firewall sources, last error) open from its row, with **Remove**, offered
+  firewall sources, last error, and its isb build next to the control
+  plane's, with **Upgrade** when they differ; a badge on the row says so)
+  open from its row, with **Remove**, offered
   only while no org is placed on it (a dedicated VM is deleted with it).
   **Add server** is a wizard over `server_add`: name, `user@host`, the SSH
   private key (pasted, sent once, never stored, cleared from the form on

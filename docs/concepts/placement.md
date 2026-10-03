@@ -84,8 +84,9 @@ What it means:
 - Its agent port is reachable from the host only, and no SSH is installed.
 - The org's domains go out through the org's own Cloudflare Tunnel
   (`--ingress cloudflare-tunnel`), since the VM runs no public listeners.
-- Its isb is the control plane's build, copied at creation; it is not
-  upgraded with the control plane.
+- Its isb is the control plane's build, copied at creation; `isb server
+  upgrade` replaces it with the control plane's current one
+  ([Upgrading servers](../guides/servers.md#upgrading-servers)).
 
 Deleting the org with `--delete-vm` (`delete_vm`; a checkbox in the web UI,
 on by default there) deletes the VM and forgets the server once the org is

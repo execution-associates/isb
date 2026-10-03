@@ -113,5 +113,7 @@ More in [isb on macOS](../getting-started/macos.md).
 | A certificate nears expiry | Agent certificates last 397 days. | `isb server rotate-cert NAME`; `server_show` has `cert_not_after`. |
 | `isb server add` says the name exists | A recorded server is never re-bootstrapped. | `isb server rm NAME` (refused while orgs are placed on it) or pick another name. |
 | A dedicated VM cannot be created | The host cannot run VMs: no `qemu` driver or no `/dev/kvm` (a cloud VM without nested virtualization). | Use a server or this host instead; the reason is in `server_list`'s `dedicated_vm`. |
-| SSH to an instance of an org on a server is refused | The control plane does not forward SSH to servers. | Use the web terminal, which is forwarded. |
+| SSH or calls for an org on a server are refused with "agent protocol N" | The server's agent and the control plane are on builds that do not speak the same protocol (SSH needs 2). | Upgrade the older side: `isb server upgrade NAME`, or the control plane. |
+| `isb server upgrade` says the server restored its previous binary | The new agent did not answer within the helper's window; the box put the old binary back. | `isb server show NAME` (`version.last_upgrade`), and `journalctl -u isb-agent -u isb-agent-upgrade` on the box. |
+| `isb server upgrade` says the server has no upgrade helper | It was added by an isb without `server_upgrade`. | Replace its binary by hand once ([Upgrading isb](upgrades.md#servers-and-dedicated-vms)). |
 | `isb ssh-proxy` fails behind Cloudflare Access | It sends only the isb token, not Access credentials. | Reach the daemon on a tailnet or loopback `--listen` address ([SSH](../guides/ssh.md)). |

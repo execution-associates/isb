@@ -174,6 +174,7 @@ export interface ServerView {
   allow_from: string[];
   vm?: { org: string; project: string; instance: string; cpus: number; memory: string; disk: string };
   orgs: string[];
+  version?: ServerVersion;
   health: {
     state: "unknown" | "up" | "unreachable";
     failures: number;
@@ -182,6 +183,32 @@ export interface ServerView {
     last_error: string | null;
     heartbeat: Heartbeat | null;
   };
+}
+
+/** What a server's agent runs next to what this control plane runs. */
+export interface ServerVersion {
+  isb: string | null;
+  /** SHA-256 of the agent's binary. */
+  build: string | null;
+  protocol: number | null;
+  control_plane: { isb: string; build: string; protocol: number };
+  /** A different version or build than this control plane's. */
+  skew: boolean;
+  /** Calls are forwarded to it (its protocol is one this control plane speaks). */
+  compatible: boolean;
+  /** SSH sessions are forwarded to it. */
+  ssh: boolean;
+  /** server_upgrade can replace it (a dedicated VM, or a server with the upgrade helper). */
+  upgradable: boolean;
+  last_upgrade: { state: string; sha256: string; at: number; message: string } | null;
+}
+
+export interface ServerUpgrade {
+  name: string;
+  upgraded: boolean;
+  from?: { isb: string | null; build: string | null };
+  to?: { isb: string | null; build: string | null };
+  note?: string;
 }
 
 export type StepState = "pending" | "running" | "done" | "failed";

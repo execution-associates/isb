@@ -2,11 +2,11 @@
 // health, the orgs on each, adding one over SSH, and following a server
 // (or an org's dedicated VM) being made.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Cpu, HardDrive, MemoryStick, Plus, RotateCcw, ServerCog, Trash2 } from "lucide-react";
+import { ArrowUpCircle, ChevronRight, Cpu, HardDrive, MemoryStick, Plus, RotateCcw, ServerCog, Trash2 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
-import { callTool, type ProvisionView, type ServerList, type ServerStatus, type ServerView } from "@/api/tools";
+import { callTool, type ProvisionView, type ServerList, type ServerStatus, type ServerUpgrade, type ServerView } from "@/api/tools";
 import { ConfirmDialog, Empty, Panel } from "@/components/confirm";
 import { CopyIconButton, Field, FormError, SubmitButton } from "@/components/form";
 import { ProvisionProgress, ProvisionStateBadge, useProvision } from "@/components/provision-progress";
@@ -20,7 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { plural } from "@/lib/admin";
 import { dateTime, relativeTime } from "@/lib/format";
 import { errorMessage } from "@/lib/messages";
-import { type AddServerForm, addServerArgs, type BinarySource, emptyAddServer, healthTone, percent } from "@/lib/servers";
+import { type AddServerForm, addServerArgs, type BinarySource, emptyAddServer, healthTone, percent, shortBuild, versionSkew } from "@/lib/servers";
 import { cn } from "@/lib/utils";
 import { RowsSkeleton } from "@/pages/org-ui";
 
@@ -212,6 +212,7 @@ function ServerRow({ s, onOpen }: { s: ServerView; onOpen: () => void }) {
           {hb?.host?.hostname && ` · ${hb.host.hostname}`}
           {hb?.isb && ` · isb ${hb.isb}`}
         </div>
+        <SkewBadge s={s} />
       </TableCell>
       <TableCell>
         <div className="flex flex-col gap-1">
@@ -252,6 +253,79 @@ function ServerRow({ s, onOpen }: { s: ServerView; onOpen: () => void }) {
         <ChevronRight className="ml-auto size-4 text-muted-foreground" aria-hidden />
       </TableCell>
     </TableRow>
+  );
+}
+
+/** A badge when a server runs another build than this control plane. */
+function SkewBadge({ s }: { s: ServerView }) {
+  const v = versionSkew(s.version);
+  if (!v || v.label === "Current") return null;
+  return (
+    <span className="mt-1 inline-flex" title={v.text}>
+      <StatusBadge tone={v.tone}>{v.label === "Differs" ? "Another isb build" : "Incompatible isb"}</StatusBadge>
+    </span>
+  );
+}
+
+/** What the server runs against this control plane, and the Upgrade button. */
+function VersionPanel({ s }: { s: ServerView }) {
+  const qc = useQueryClient();
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const v = s.version;
+  const skew = versionSkew(v);
+  if (!v || !skew) return null;
+  const last = v.last_upgrade;
+  const canUpgrade = skew.label !== "Current" && v.upgradable && s.health.state === "up";
+  return (
+    <div className="grid gap-2 border-t px-5 py-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium">isb {v.isb}</span>
+        <span className="font-mono text-xs text-muted-foreground">build {shortBuild(v.build) || "unknown"}</span>
+        <StatusBadge tone={skew.tone}>{skew.label}</StatusBadge>
+      </div>
+      <p className="text-xs text-muted-foreground">{skew.text}</p>
+      {last && (
+        <p className="text-xs text-muted-foreground">
+          Last upgrade: {last.state.replace("_", " ")}, {relativeTime(last.at)}
+          {last.message ? ` (${last.message})` : ""}
+        </p>
+      )}
+      {skew.label !== "Current" && (
+        <>
+          <Button variant="outline" className="w-fit" disabled={!canUpgrade || busy} onClick={() => setConfirming(true)}>
+            <ArrowUpCircle />
+            {busy ? "Upgrading…" : `Upgrade to isb ${v.control_plane.isb}`}
+          </Button>
+          {!v.upgradable && (
+            <p className="text-xs text-muted-foreground">
+              This server has no upgrade helper (it was added by an older isb): replace its binary by hand once, then it can be upgraded from here.
+            </p>
+          )}
+        </>
+      )}
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title={`Upgrade ${s.name}?`}
+        description={`Its agent is replaced with this control plane's build (isb ${v.control_plane.isb}, build ${shortBuild(v.control_plane.build)}) and restarted. Workloads keep running; calls for ${s.orgs.length ? s.orgs.join(", ") : "its orgs"} fail for the few seconds it takes. If the new agent doesn't answer within two minutes, the box puts the old one back.`}
+        confirm="Upgrade"
+        onConfirm={async () => {
+          setBusy(true);
+          try {
+            const r = await callTool<ServerUpgrade, string>("server_upgrade", { name: s.name });
+            toast.success(r.upgraded ? `${s.name} upgraded` : `${s.name} unchanged`, {
+              description: r.upgraded ? `isb ${r.to?.isb} (build ${shortBuild(r.to?.build)})` : r.note,
+            });
+          } catch (e) {
+            toast.error(`${s.name} was not upgraded`, { description: errorMessage(e) });
+          } finally {
+            setBusy(false);
+            await qc.invalidateQueries({ queryKey: SERVER_LIST_KEY });
+          }
+        }}
+      />
+    </div>
   );
 }
 
@@ -363,6 +437,7 @@ function ServerSheet({ s, onOpenChange }: { s: ServerView | null; onOpenChange: 
               </Row>
               <Row k="Added">{dateTime(s.added_at)}</Row>
             </dl>
+            <VersionPanel s={s} />
             <div className="mt-auto grid gap-2 border-t px-5 py-4">
               <Button variant="destructive" disabled={s.orgs.length > 0} onClick={() => setRemoving(true)} className="w-fit">
                 <Trash2 />

@@ -220,6 +220,7 @@ isb server ls [--json]                  alias list
 isb server show NAME
 isb server rm NAME                      refused while orgs are placed on it; alias remove
 isb server rotate-cert NAME
+isb server upgrade NAME|--all [--isb-version V | --isb-binary FILE]
 ```
 
 Platform admins, through the local daemon (the control plane). See
