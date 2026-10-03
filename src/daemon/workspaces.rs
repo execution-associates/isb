@@ -49,6 +49,8 @@ const UPKEEP_EVERY: Duration = Duration::from_secs(15);
 const REAP_EVERY: Duration = Duration::from_secs(60);
 /// A sandbox using this much of a core is active.
 const ACTIVE_CPU_PCT: f32 = 2.0;
+/// How long an SSH session count is reused.
+const SSH_CACHE: Duration = Duration::from_secs(30);
 
 fn now() -> u64 {
     crate::stack::now_secs()
@@ -147,6 +149,9 @@ pub struct Workspaces {
     /// The init pid each workspace's credentials were delivered for.
     delivered: Mutex<HashMap<String, i64>>,
     bridges: Mutex<HashMap<OrgId, Bridge>>,
+    /// The SSH count per workspace and when it was asked, so pages that
+    /// poll do not exec in the machine every few seconds.
+    ssh: Mutex<HashMap<String, (std::time::Instant, Option<usize>)>>,
     serve: OnceLock<(Listener, Arc<Registry>, Healthz)>,
     /// Create, rebuild and delete one at a time.
     lock: Mutex<()>,
@@ -174,6 +179,7 @@ impl Workspaces {
             activity: Mutex::new(HashMap::new()),
             delivered: Mutex::new(HashMap::new()),
             bridges: Mutex::new(HashMap::new()),
+            ssh: Mutex::new(HashMap::new()),
             serve: OnceLock::new(),
             lock: Mutex::new(()),
             started: now(),
@@ -432,7 +438,7 @@ impl Workspaces {
     }
 
     /// The instance spec a workspace is created (and rebuilt) from.
-    fn spec(&self, org: &OrgId, w: &Workspace, pool: &str) -> Result<crate::spec::SandboxSpec> {
+    fn spec(org: &OrgId, w: &Workspace, pool: &str) -> Result<crate::spec::SandboxSpec> {
         let home = w.home_dir();
         let mut v = json!({
             "container_name": w.name,
@@ -449,7 +455,7 @@ impl Workspaces {
             v["cpus"] = json!(c.to_string());
         }
         if let Some(m) = &w.memory {
-            v["memory"] = json!(m);
+            v["mem_limit"] = json!(m);
         }
         if let Some(r) = &w.root_size {
             v["raw_devices"] = json!({"root": {"size": r}});
@@ -479,7 +485,14 @@ impl Workspaces {
                 ));
             }
         }
-        let spec = self.spec(org, w, &pool)?;
+        let mut w = w.clone();
+        if w.root_size.is_none() && project_has_disk_limit(&self.client, org) {
+            // incus counts every disk against limits.disk, so a root
+            // without a size cannot be created in such a project.
+            w.root_size = Some(DEFAULT_ROOT_SIZE.into());
+        }
+        let w = &w;
+        let spec = Self::spec(org, w, &pool)?;
         let base = std::env::temp_dir();
         let (_sb, _) = Sandbox::connect_or_create_with_base(
             &oc,
@@ -586,7 +599,17 @@ chown "$u": "$h"
     /// SSH connections inside the machine.
     pub fn sessions(&self, org: &OrgId, w: &Workspace, running: bool) -> Sessions {
         let terminals = self.terminals(&org.incus_project(), w.instance());
-        let ssh = if running {
+        let k = key(&org.incus_project(), w.instance());
+        let cached = self
+            .ssh
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&k)
+            .filter(|(at, _)| at.elapsed() < SSH_CACHE)
+            .map(|(_, n)| *n);
+        let ssh = if let (true, Some(n)) = (running, cached) {
+            n
+        } else if running {
             Sandbox::get(&self.oc(org), w.instance())
                 .and_then(|sb| {
                     sb.exec_with(
@@ -604,6 +627,12 @@ chown "$u": "$h"
         } else {
             None
         };
+        if running && cached.is_none() {
+            self.ssh
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(k, (std::time::Instant::now(), ssh));
+        }
         Sessions {
             terminals,
             ssh,
@@ -745,6 +774,25 @@ chown "$u": "$h"
 
 /// Is this org served here (not placed on another server)?
 pub type LocalOrg = Arc<dyn Fn(&OrgId) -> bool + Send + Sync>;
+
+/// The root disk's size when none is given in an org with a disk quota.
+const DEFAULT_ROOT_SIZE: &str = "20GiB";
+
+/// A sandbox's root disk size when it gives none in an org with a disk
+/// quota.
+pub const SANDBOX_ROOT_SIZE: &str = "10GiB";
+
+/// Whether the org's project has a disk quota (`limits.disk`).
+pub fn project_has_disk_limit(client: &Client, org: &OrgId) -> bool {
+    client
+        .get_opt(&format!(
+            "/1.0/projects/{}",
+            encode_segment(&org.incus_project())
+        ))
+        .ok()
+        .flatten()
+        .is_some_and(|p| p["config"]["limits.disk"].as_str().is_some())
+}
 
 fn unhex(s: &str) -> Option<Vec<u8>> {
     if s.len() % 2 != 0 {
@@ -1928,6 +1976,35 @@ mod tests {
     }
 
     #[test]
+    fn the_instance_spec_has_the_home_the_size_and_the_labels() {
+        let org = OrgId::new("acme").unwrap();
+        let mut w: Workspace = serde_json::from_value(json!({
+            "name": "workspace", "id": "x", "image": "dev-base", "user": "dev",
+            "home_size": "5GiB", "token_role": "admin", "created_at": 0, "created_by": "a@x.io",
+            "cpus": 2, "memory": "2GiB", "root_size": "30GiB", "labels": {"team": "ops"}
+        }))
+        .unwrap();
+        let s = Workspaces::spec(&org, &w, "default").unwrap();
+        assert_eq!(s.name.as_deref(), Some("workspace"));
+        assert_eq!(s.user.as_deref(), Some("dev"));
+        assert_eq!(s.working_dir.as_deref(), Some("/home/dev"));
+        assert_eq!(s.cpus.as_deref(), Some("2"));
+        assert!(s.memory.is_some());
+        assert_eq!(s.labels["isb.workspace"], "workspace");
+        assert_eq!(s.labels["isb.owner"], "a@x.io");
+        assert_eq!(s.labels["team"], "ops");
+        assert_eq!(s.raw_devices["root"]["size"], "30GiB");
+        assert_eq!(s.raw_config["boot.autostart"], "true");
+        assert_eq!(s.volumes.len(), 1);
+        assert_eq!(s.volumes[0].source, "acme_workspace_home");
+        assert_eq!(s.volumes[0].target, "/home/dev");
+        // A migration bind instead of the volume.
+        w.home_bind = Some("/srv/workspaces/acme/home".into());
+        let s = Workspaces::spec(&org, &w, "default").unwrap();
+        assert_eq!(s.volumes[0].source, "/srv/workspaces/acme/home");
+    }
+
+    #[test]
     fn workspace_tokens_authenticate_as_the_org_workspace_and_rotate() {
         let d = tempfile::tempdir().unwrap();
         let keyring = Arc::new(crate::secrets::Keyring::new(
@@ -1959,6 +2036,7 @@ mod tests {
             activity: Mutex::new(HashMap::new()),
             delivered: Mutex::new(HashMap::new()),
             bridges: Mutex::new(HashMap::new()),
+            ssh: Mutex::new(HashMap::new()),
             serve: OnceLock::new(),
             lock: Mutex::new(()),
             started: 0,

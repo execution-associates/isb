@@ -1399,6 +1399,8 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
                         "stack": i.config.get("user.isb.stack"),
                         "workspace": i.config.get(crate::workspace::KEY_WORKSPACE),
                         "owner": i.config.get("user.isb.owner"),
+                        // Created by this caller (who may extend it).
+                        "mine": i.config.get("user.isb.owner").is_some_and(|o| *o == owner_label(c)),
                         "created_at": created,
                         "age_secs": created.map(|c| now.saturating_sub(c as u64)),
                         "expires_at": num(crate::workspace::KEY_EXPIRES_AT),
@@ -1831,10 +1833,23 @@ fn sandbox_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         let info = sb.info()?;
         // A sandbox spec over the workspace would replace the org's machine.
         if info.config.contains_key(crate::workspace::KEY_WORKSPACE) {
-            return Err(Error::AlreadyExists(format!(
+            return Err(Error::invalid(format!(
                 "{name} is the org's workspace; pick another name"
             )));
         }
+    }
+    // incus counts every disk against an org's disk quota, and refuses a
+    // root disk without a size there.
+    if !spec
+        .raw_devices
+        .get("root")
+        .is_some_and(|r| r.contains_key("size"))
+        && workspaces::project_has_disk_limit(&d.client, &org)
+    {
+        spec.raw_devices
+            .entry("root".into())
+            .or_default()
+            .insert("size".into(), workspaces::SANDBOX_ROOT_SIZE.into());
     }
     // Short-lived by rule: the org's defaults unless the call says otherwise.
     let settings = d.workspaces.settings(&org)?;
