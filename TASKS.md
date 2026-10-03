@@ -39,8 +39,9 @@ any `proprietary/` directory is read at all).
 
 Installed for testing: (none yet)
 
-**minime is 93% full (14 GiB free on 2026-10-03).** Keep the Lima VM disk
-≤ 15 GiB, delete test VMs and downloaded binaries when done.
+**minime disk is tight: 21 GiB free after a cleanup (2026-10-03).** Keep the
+Lima VM disk ≤ 10 GiB for tests, delete test VMs and downloaded binaries when
+done. Stephan may free more (Downloads 6G, Claude desktop vm_bundles 10G).
 
 **Nothing untrusted builds on minime** (it holds Stephan's Apple session):
 macOS binaries are built and unit-tested by GitHub Actions macOS runners;
@@ -74,6 +75,23 @@ minime only runs binaries downloaded from our CI runs.
   the web UI, TUI, CLI and agents all use it.
 - **Web UI:** React + Vite + Tailwind + shadcn, built with bun, embedded in
   the binary; served by `isb serve`.
+- **Org runtime, measured on incus 7.5 (2026-10-03):** a restricted project
+  (`restricted=true`, unprivileged containers, `restricted.devices.disk=allow`
+  with `restricted.devices.disk.paths` = the org's bind roots,
+  `restricted.networks.access` = the org bridge, `restricted.idmap.uid/gid` =
+  the daemon user) makes incus itself refuse host paths outside the roots,
+  proxy devices, privileged, nesting, `raw.lxc`, `raw.idmap` of root, other
+  networks, and exceeding the org quota. With project `limits.cpu/memory`
+  set, every instance needs its own limits, so the org's default profile
+  carries defaults (like a LimitRange). `security.idmap.isolated=true` gives
+  each instance its own uid range. `features.images=false` shares the host's
+  images.
+- **Org network:** one bridge per org, `isbbr<hash>` (IFNAMSIZ is 15), with
+  `dns.domain=<org>.isb`, plus a per-org ACL (deny private ranges except its
+  own subnet). Default-deny host firewalls (ufw on titan) drop DHCP/DNS/egress
+  on new bridges, so `sudo isb host setup` installs wildcard allows once
+  (`ufw allow in on isbbr+` 67/udp, 53; `ufw route allow in on isbbr+ out on
+  <uplink>`); ufw's routed default-deny keeps org bridges apart.
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
@@ -82,7 +100,7 @@ minime only runs binaries downloaded from our CI runs.
 
 ## Phase 0: platform support
 
-- [ ] P0.1 macOS build: make the crate compile and its unit tests pass on
+- [~] (subagent p0.1) P0.1 macOS build: make the crate compile and its unit tests pass on
   macOS (gate `/proc`-based code: foreground ancestor polling via `sysctl`/
   `libproc` equivalents or `getppid` chains, host metrics via `sysctl`, peer
   credentials via `getpeereid`). CI: add macOS to the release matrix
@@ -103,7 +121,7 @@ minime only runs binaries downloaded from our CI runs.
 ## Phase 1: foundation
 
 ### Orgs
-- [ ] P1.1 Org model: `isb org create|ls|rm|show`, an org = incus project
+- [~] (orchestrator) P1.1 Org model: `isb org create|ls|rm|show`, an org = incus project
   `isb-<org>` created restricted (no privileged, managed disks only,
   limits from the org's quota), per-org network (bridge) and default ACLs.
   Every command, tool and the daemon take `--org` (default: a `default`
@@ -119,7 +137,7 @@ minime only runs binaries downloaded from our CI runs.
   postgres by name through a rolling replacement of the postgres.
 
 ### Identity and API
-- [ ] P1.4 Users and sessions: built-in store (SQLite in the state dir),
+- [~] (subagent p1.4) P1.4 Users and sessions: built-in store (SQLite in the state dir),
   argon2id passwords, sessions with secure cookies, first-run admin setup,
   invitations, roles (platform admin; org admin/member), API tokens (hashed,
   org-scoped). **Verify:** unit tests + login over HTTP.
@@ -135,7 +153,7 @@ minime only runs binaries downloaded from our CI runs.
   MCP, REST and CLI; an org token cannot touch another org.
 
 ### Secrets
-- [ ] P1.8 age store + driver trait + `isb secret create|set|get|ls|inspect|rm|
+- [~] (subagent p1.8) P1.8 age store + driver trait + `isb secret create|set|get|ls|inspect|rm|
   encrypt|reencrypt|refresh`, per org; daemon key lookup and generation;
   break-glass recipients. **Verify:** unit tests; reencrypt round trip with a
   second recipient.
@@ -199,8 +217,10 @@ minime only runs binaries downloaded from our CI runs.
   schedule and its logs are visible.
 - [ ] P4.3 Notifications (Slack, Discord, Telegram, email, webhook) on deploy,
   failure, health, backup events. **Verify:** a webhook receives events.
-- [ ] P4.4 Template catalog (one-click apps). **Verify:** deploy two
-  templates from the UI.
+- [ ] P4.4 Template catalog (one-click apps), including running Dokploy's
+  templates (docker-compose + `template.toml`: variables, domains, mounts)
+  directly; check the Dokploy/templates repo license before shipping its
+  catalog. **Verify:** deploy two native and two Dokploy templates from the UI.
 - [ ] P4.5 Preview deployments per pull request. **Verify:** a PR on the test
   repo gets a URL; closing it removes it.
 - [ ] P4.6 Metrics history (retained samples) and monitoring pages.
