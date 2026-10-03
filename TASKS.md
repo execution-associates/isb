@@ -100,6 +100,13 @@ minime only runs binaries downloaded from our CI runs.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
   and `isb serve` as an agent; the control plane places orgs on servers and
   proxies to them over mTLS.
+- **Local registry (P2.3) is TLS with an isb CA.** incus pulls OCI images
+  only from `https` remotes (plain HTTP is refused) and does not import an
+  OCI archive directly. It pulls through skopeo, which trusts a per-registry
+  CA at `/etc/containers/certs.d/<host:port>/ca.crt`. So the registry runs
+  with a cert from an isb-generated CA, and `isb host setup` installs that
+  CA file. Pulls keep OCI semantics (`oci.entrypoint`, uid/gid). Verified
+  on titan with `registry:2` and a pushed busybox.
 
 ## Phase 0: platform support
 
