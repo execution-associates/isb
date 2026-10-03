@@ -719,3 +719,125 @@ fn cookie_parsing() {
     let r = req("GET", "/", &[("Cookie", "isb_session=")], None);
     assert_eq!(cookie(&r, COOKIE), None);
 }
+
+#[test]
+fn admin_users_over_http() {
+    let t = api();
+    let root = t.setup();
+    let (_, v, _) = t.post(
+        "invitations",
+        &[("Cookie", &root)],
+        json!({"org": "ocai", "email": "o@x.io", "role": "owner"}),
+    );
+    let (_, v, r) = t.post(
+        "invitations/accept",
+        &[],
+        json!({"token": v["token"], "name": "O", "password": PW}),
+    );
+    let owner = cookie_of(&r);
+    let oid = v["user"]["id"].as_i64().unwrap();
+    let patch = |cookie: &str, uid: i64, body: Value| {
+        t.call(req(
+            "PATCH",
+            &format!("{PREFIX}admin/users/{uid}"),
+            &[CSRF, ("Cookie", cookie)],
+            Some(body),
+        ))
+    };
+
+    // Org owners are not platform admins: refused both ways.
+    assert_eq!(t.get("admin/users", &[("Cookie", &owner)]).0, 403);
+    assert_eq!(patch(&owner, oid, json!({"platform_admin": true})).0, 403);
+
+    // The list carries memberships and last activity, never hashes.
+    let (st, v, _) = t.get("admin/users", &[("Cookie", &root)]);
+    assert_eq!(st, 200, "{v}");
+    let users = v["users"].as_array().unwrap();
+    assert_eq!(users.len(), 2);
+    let o = users.iter().find(|u| u["email"] == "o@x.io").unwrap();
+    assert_eq!(o["memberships"], json!([{"org": "ocai", "role": "owner"}]));
+    assert!(o["last_active"].as_i64().is_some());
+    assert!(!v.to_string().contains("argon2"));
+
+    // Root cannot demote or disable itself.
+    let (_, me, _) = t.get("me", &[("Cookie", &root)]);
+    let rid = me["user"]["id"].as_i64().unwrap();
+    assert_eq!(patch(&root, rid, json!({"disabled": true})).0, 403);
+    assert_eq!(patch(&root, rid, json!({"platform_admin": false})).0, 403);
+    assert_eq!(patch(&root, rid, json!({"bogus": 1})).0, 400);
+
+    // Disabling ends the user's sessions; enabling lets them sign in again.
+    let (st, v, _) = patch(&root, oid, json!({"disabled": true}));
+    assert_eq!(st, 200, "{v}");
+    assert_eq!(v["user"]["disabled"], true);
+    assert_eq!(t.get("me", &[("Cookie", &owner)]).0, 401);
+    assert_eq!(patch(&root, oid, json!({"disabled": false})).0, 200);
+    let owner = t.login("o@x.io");
+
+    // A second platform admin may then demote the first.
+    assert_eq!(patch(&root, oid, json!({"platform_admin": true})).0, 200);
+    let (_, me, _) = t.get("me", &[("Cookie", &owner)]);
+    assert_eq!(me["platform_admin"], true);
+    assert_eq!(patch(&owner, rid, json!({"platform_admin": false})).0, 200);
+    let (st, v, _) = patch(&root, oid, json!({"platform_admin": false}));
+    assert_eq!(st, 403, "root is no longer a platform admin: {v}");
+    assert_eq!(patch(&owner, 9999, json!({"disabled": true})).0, 404);
+}
+
+#[test]
+fn the_last_platform_admin_stays() {
+    let t = api();
+    let root = t.setup();
+    let (_, me, _) = t.get("me", &[("Cookie", &root)]);
+    let rid = me["user"]["id"].as_i64().unwrap();
+    // A second admin, disabled: it does not count.
+    let other = t
+        .api
+        .store()
+        .create_user("b@x.io", "B", Some(PW), true)
+        .unwrap();
+    t.api.store().set_disabled(other.id, true).unwrap();
+    let (st, v, _) = t.call(req(
+        "PATCH",
+        &format!("{PREFIX}admin/users/{rid}"),
+        &[CSRF, ("Cookie", &root)],
+        Some(json!({"platform_admin": false})),
+    ));
+    // Refused as self-demotion first; the store's count is checked too.
+    assert_eq!(st, 403, "{v}");
+    assert_eq!(t.api.store().other_platform_admins(rid).unwrap(), 0);
+    t.api.store().set_disabled(other.id, false).unwrap();
+    assert_eq!(t.api.store().other_platform_admins(rid).unwrap(), 1);
+}
+
+#[test]
+fn org_members_and_tokens_carry_who_and_when() {
+    let t = api();
+    let root = t.setup();
+    let (_, v, _) = t.post(
+        "invitations",
+        &[("Cookie", &root)],
+        json!({"org": "ocai", "email": "m@x.io"}),
+    );
+    let (_, _, r) = t.post(
+        "invitations/accept",
+        &[],
+        json!({"token": v["token"], "name": "Mo", "password": PW}),
+    );
+    let member = cookie_of(&r);
+    let (_, v, _) = t.get("orgs/ocai/members", &[("Cookie", &member)]);
+    assert!(v["members"][0]["last_active"].as_i64().is_some(), "{v}");
+    // The platform admin makes a token in an org it is not a member of; the
+    // org's token list names its holder.
+    let (st, _, _) = t.post(
+        "tokens",
+        &[("Cookie", &root)],
+        json!({"name": "ci", "org": "ocai"}),
+    );
+    assert_eq!(st, 201);
+    let (st, v, _) = t.get("orgs/ocai/tokens", &[("Cookie", &root)]);
+    assert_eq!(st, 200);
+    assert_eq!(v["tokens"][0]["user"]["email"], "root@x.io");
+    // A member may not list the org's tokens.
+    assert_eq!(t.get("orgs/ocai/tokens", &[("Cookie", &member)]).0, 403);
+}

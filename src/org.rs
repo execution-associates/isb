@@ -139,6 +139,10 @@ pub struct OrgInfo {
     pub memory: Option<String>,
     pub disk: Option<String>,
     pub instances_limit: Option<String>,
+    /// What an instance gets when its spec sets no limits (the org's
+    /// default profile).
+    pub default_cpus: Option<String>,
+    pub default_memory: Option<String>,
     pub bind_roots: Vec<String>,
     /// Egress exceptions, as `isb org create --allow-egress` takes them.
     pub egress: Vec<String>,
@@ -756,11 +760,13 @@ fn info(base: &Client, org: OrgId, p: &Value) -> Result<OrgInfo> {
             .lines()
             .find_map(|l| l.trim().strip_prefix("hostsdir=").map(String::from))
     });
-    let instances = client(base, &org)
+    let oc = client(base, &org);
+    let instances = oc
         .get("/1.0/instances")?
         .as_array()
         .map(|a| a.len())
         .unwrap_or(0);
+    let defaults = strmap(&oc.get_opt("/1.0/profiles/default")?.unwrap_or_default()["config"]);
     Ok(OrgInfo {
         project: org.incus_project(),
         name: org,
@@ -770,6 +776,8 @@ fn info(base: &Client, org: OrgId, p: &Value) -> Result<OrgInfo> {
         memory: cfg.get("limits.memory").cloned(),
         disk: cfg.get("limits.disk").cloned(),
         instances_limit: cfg.get("limits.instances").cloned(),
+        default_cpus: defaults.get("limits.cpu").cloned(),
+        default_memory: defaults.get("limits.memory").cloned(),
         bind_roots: cfg
             .get("restricted.devices.disk.paths")
             .map(|s| {
