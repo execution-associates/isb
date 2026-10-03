@@ -37,6 +37,9 @@ use crate::supervise;
 const DRAIN: Duration = Duration::from_secs(10);
 /// How often an unhealthy app is restarted before its instance is replaced.
 const RESTARTS_BEFORE_REPLACE: u32 = 3;
+/// How long a service that was healthy must have no healthy replica before
+/// `health.unhealthy` is raised (restarts and short blips stay quiet).
+const HEALTH_DEBOUNCE: Duration = Duration::from_secs(20);
 
 /// One replica, as `stack_status` reports it.
 #[derive(Debug, Clone, Serialize)]
@@ -244,6 +247,8 @@ struct Inner {
     /// When driver-backed secrets are next checked for a new version.
     refresh: Mutex<super::secrets::RefreshSchedule>,
     observer: Option<Arc<dyn Observer>>,
+    /// Where each sample also goes: the metrics history.
+    metrics_sink: Mutex<Option<std::sync::mpsc::SyncSender<crate::metrics_history::Sample>>>,
 }
 
 impl Inner {
@@ -333,6 +338,7 @@ impl Controller {
                 edit: Mutex::new(()),
                 refresh: Mutex::new(Default::default()),
                 observer,
+                metrics_sink: Mutex::new(None),
             }),
         };
         // Driver-backed secrets are polled on their refresh intervals; the
@@ -356,6 +362,9 @@ impl Controller {
                 while let Some(inner) = weak.upgrade() {
                     match sampler.sample(&inner.client) {
                         Ok((host, insts)) => {
+                            if let Some(tx) = &*inner.metrics_sink.lock().unwrap() {
+                                crate::metrics_history::offer(tx, (now_ms(), insts.clone()));
+                            }
                             *inner.snapshot.lock().unwrap() = Snapshot {
                                 host,
                                 instances: insts
@@ -553,6 +562,14 @@ impl Controller {
             }
             std::thread::sleep(Duration::from_millis(250));
         }
+    }
+
+    /// Send every metrics sample to `tx` too (the metrics history).
+    pub fn set_metrics_sink(
+        &self,
+        tx: std::sync::mpsc::SyncSender<crate::metrics_history::Sample>,
+    ) {
+        *self.inner.metrics_sink.lock().unwrap() = Some(tx);
     }
 
     /// The latest metrics sample.
@@ -1204,6 +1221,12 @@ struct Worker {
     dns_error: Option<String>,
     /// The addresses last told to the observer.
     observed: Option<Vec<IpAddr>>,
+    /// The service had a healthy replica at some point in this run.
+    ever_healthy: bool,
+    /// Since when no replica has been healthy.
+    health_down: Option<Instant>,
+    /// `health.unhealthy` was raised and not yet answered by `recovered`.
+    health_alarm: bool,
 }
 
 fn spawn_worker(inner: Arc<Inner>, def: &StackDef, service: String, shared: Arc<WorkerShared>) {
@@ -1235,6 +1258,9 @@ fn spawn_worker(inner: Arc<Inner>, def: &StackDef, service: String, shared: Arc<
             dns_last: None,
             dns_error: None,
             observed: None,
+            ever_healthy: false,
+            health_down: None,
+            health_alarm: false,
         };
         w.run();
     });
@@ -1256,6 +1282,51 @@ impl Worker {
 
     fn client(&self) -> &Client {
         &self.oclient
+    }
+
+    /// Raise `health.unhealthy` once a service that was healthy has had no
+    /// healthy replica for [`HEALTH_DEBOUNCE`] (not while a rollout runs:
+    /// it reports its own failure), and `health.recovered` when one is back.
+    fn watch_health(&mut self, healthy: u32, replicas: u32) {
+        if healthy > 0 {
+            self.ever_healthy = true;
+            self.health_down = None;
+            if self.health_alarm {
+                self.health_alarm = false;
+                let msg = format!("{healthy} of {replicas} replicas healthy again");
+                eprintln!("isb serve: {}/{}: {msg}", self.q, self.service);
+                self.inner.emit_kind(
+                    Some("health.recovered"),
+                    "info",
+                    &self.q,
+                    &self.service,
+                    None,
+                    msg,
+                );
+            }
+            return;
+        }
+        if replicas == 0 || !self.ever_healthy || self.rollout.is_some() {
+            self.health_down = None;
+            return;
+        }
+        let since = *self.health_down.get_or_insert_with(Instant::now);
+        if !self.health_alarm && since.elapsed() >= HEALTH_DEBOUNCE {
+            self.health_alarm = true;
+            let msg = format!(
+                "no healthy replica (of {replicas}) for {}s",
+                since.elapsed().as_secs()
+            );
+            eprintln!("isb serve: {}/{}: {msg}", self.q, self.service);
+            self.inner.emit_kind(
+                Some("health.unhealthy"),
+                "error",
+                &self.q,
+                &self.service,
+                None,
+                msg,
+            );
+        }
     }
 
     fn key(&self) -> (String, String) {
@@ -2309,6 +2380,7 @@ impl Worker {
             .filter(|i| i.status.eq_ignore_ascii_case("running"))
             .count() as u32;
         let healthy = instances.iter().filter(|i| i.in_rotation).count() as u32;
+        self.watch_health(healthy, spec.replicas());
         let st = ServiceStatus {
             service: self.service.clone(),
             image: spec.image.clone(),

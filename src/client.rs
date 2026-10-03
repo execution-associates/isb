@@ -530,6 +530,20 @@ impl Client {
         Ok(())
     }
 
+    /// A `GET` whose answer is not the JSON envelope (`/1.0/metrics`).
+    pub(crate) fn get_raw(&self, path: &str) -> Result<Vec<u8>> {
+        let r = self.raw_bytes("GET", path, &[], &[], self.timeouts.request)?;
+        match r.status {
+            200 => Ok(r.body),
+            status => Err(Error::Api {
+                method: "GET".into(),
+                path: path.into(),
+                status,
+                message: String::from_utf8_lossy(&r.body[..r.body.len().min(200)]).into_owned(),
+            }),
+        }
+    }
+
     /// An instance's console log as incus keeps it (an OCI app's output).
     pub fn console_log(&self, instance: &str) -> Result<Vec<u8>> {
         let url = format!("/1.0/instances/{}/console", encode_segment(instance));

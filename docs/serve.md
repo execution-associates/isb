@@ -215,6 +215,9 @@ directly.
 | `org_create` | Create an org (`org`, optional `cpus`, `memory`, `disk`, `instances`, `default_cpus`, `default_memory`, `egress`); fails if it exists. Platform admins. |
 | `org_update` | Change an org's limits, defaults or `egress` (which replaces the list; `[]` clears it). Fields left out are kept. Platform admins. |
 | `org_delete` | Delete an org and its members, invitations and tokens; refused while stacks are deployed in it, and while it has sandboxes unless `force`. Platform admins. See [orgs.md](orgs.md). |
+| `notification_channel_create`, `notification_channel_list`, `notification_channel_get`, `notification_channel_update`, `notification_channel_delete`, `notification_test`, `notification_deliveries` | An org's notification channels (webhook, Slack, Discord, Telegram, email; URLs and tokens as org secrets), their rules on event kinds, a test send, and each channel's delivery log. See [notifications.md](notifications.md). |
+| `notification_settings` | Whether channels may reach loopback and private addresses (off by default). Platform admins. |
+| `metrics_query` | Metrics history of an org's instances (CPU, memory, network, disk I/O; 30 days in tiers): per instance, or summed/averaged over a service's replicas. See [metrics.md](metrics.md). |
 | `overview` | Everything a dashboard shows in one call: host CPU and memory with history, every stack in detail, sandboxes with their CPU and memory, the latest event number. |
 | `events` | The event feed (deploys, rollouts, health changes, restarts, failures) after a `since` cursor, optionally waiting up to 30 s for one. |
 

@@ -77,6 +77,17 @@ isb build DIR --app APP [--tag T] [--builder railpack|nixpacks|dockerfile] [--do
 isb registry setup [--port 5480] [--renew] the host's registry (directly on incus, not the daemon)
 isb registry ls [--json] | gc [--keep 10] [--dry-run]
 
+# notifications, per org, on the isb serve daemon (docs/notifications.md); all take --org ORG
+isb notify create NAME (--webhook URL_SECRET [--signing-secret S] | --slack URL_SECRET | --discord URL_SECRET
+               | --telegram TOKEN_SECRET --chat-id ID | --smtp-host H [--smtp-port P] [--smtp-tls starttls|tls|none]
+               [--smtp-user U --smtp-password-secret S] --from ADDR --to ADDR...)
+               [--events deploy.*,health.*] [--app-project P]... [--app A]... [--stack S]... [--disabled]
+isb notify ls [--json] | show NAME | rm NAME
+isb notify update NAME [--events ...] [--app-project P]... [--app A]... [--stack S]... [--enable|--disable]
+isb notify test NAME                       sends a test message now; exit 1 if it failed
+isb notify deliveries NAME [-n 20] [--json]
+isb notify settings [--allow-private-targets true|false]   platform admins
+
 # identity for isb serve, on <state>/isb.db directly (docs/auth.md)
 isb user create EMAIL [--admin] [--name N]  password from the terminal, or stdin's first line
 isb user ls [--json] | passwd EMAIL
