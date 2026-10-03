@@ -7,9 +7,10 @@
 //!   and Cloudflare Access, held to [`policy::RemotePolicy`].
 //!
 //! The tools manage stacks (long-running, replicated, load-balanced
-//! services), plain sandboxes (an isolated machine for an agent), and each
-//! org's secrets ([`crate::secrets`]).
+//! services), apps over them ([`crate::app`]), plain sandboxes (an isolated
+//! machine for an agent), and each org's secrets ([`crate::secrets`]).
 
+pub mod apps;
 pub mod policy;
 pub mod secrets;
 
@@ -120,6 +121,7 @@ struct Daemon {
     policy: RemotePolicy,
     state_dir: PathBuf,
     secrets: Arc<crate::secrets::Secrets>,
+    apps: crate::app::Apps,
 }
 
 /// Run the daemon until SIGINT/SIGTERM. Apps keep running when it stops.
@@ -154,12 +156,14 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         None => None,
     };
     let ctl = Controller::start(client.clone(), store, cfg.interval, secrets.clone())?;
+    let apps = crate::app::Apps::new(&cfg.state_dir, client.clone(), ctl.clone(), secrets.clone());
     let d = Arc::new(Daemon {
         client,
         ctl: ctl.clone(),
         policy: cfg.policy.clone(),
         state_dir: cfg.state_dir.clone(),
         secrets,
+        apps: apps.clone(),
     });
     let registry = registry(d.clone())?;
     let hooks = hooks(d.clone(), users.clone(), cfg.allow_unauthenticated);
@@ -167,7 +171,10 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     if let Some(addr) = &cfg.listen {
         let mut l = Listener::tcp(addr.clone())
             .policy(cfg.remote_tools.clone())
-            .hooks(hooks);
+            .hooks(hooks)
+            // Webhooks carry their own credential (a signature), and come
+            // from senders that hold no session.
+            .public_routes(apps::webhook_routes(apps.clone()));
         if let Some(r) = auth {
             l = l.routes(r);
         }
@@ -868,6 +875,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             Ok(json!({"ok": true}))
         }
     );
+    apps::register(&mut r, d.apps.clone())?;
     tool!(
         "server_status",
         "Server status",
@@ -906,7 +914,9 @@ rolling updates and a load balancer: stack_deploy, then stack_status) and sandbo
 (an isolated machine to run code in: sandbox_create, sandbox_exec, sandbox_remove). \
 Images: local incus aliases (dev-base), images:debian/12, or OCI images (docker:nginx:1.27, ghcr:org/app:tag). \
 Deploys return immediately; poll stack_status, or pass wait=true. \
-Each org also has a secret store (secret_create, secret_set, secret_list; values are base64).";
+Each org also has a secret store (secret_create, secret_set, secret_list; values are base64). \
+Apps (Dokploy-style): project_create, then app_create (an image, or a repository with a builder), \
+app_env_set, app_deploy; each project environment runs as one stack <project>-<env>.";
 
 impl Daemon {
     /// May this caller touch this instance? Local callers: always. Remote:

@@ -515,6 +515,12 @@ impl Controller {
         self.inner.emit(level, stack, "", None, message);
     }
 
+    /// Record an event about one service of a stack (an app's deployment
+    /// log, say). Not echoed to stderr: it can be chatty.
+    pub fn note_service(&self, level: &str, stack: &str, service: &str, message: String) {
+        self.inner.emit(level, stack, service, None, message);
+    }
+
     /// What deploying `def` would change, without deploying it.
     pub fn plan(&self, def: &StackDef) -> Result<Vec<DeployChange>> {
         self.validate(def)?;

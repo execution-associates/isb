@@ -1,7 +1,8 @@
 # `isb serve`: the daemon and its MCP server
 
-`isb serve` runs the stack controller ([stacks.md](stacks.md)) and exposes it,
-together with sandbox management, as [Model Context Protocol](https://modelcontextprotocol.io)
+`isb serve` runs the stack controller ([stacks.md](stacks.md)) and the app
+layer over it ([apps.md](apps.md)), and exposes them, together with sandbox
+management, as [Model Context Protocol](https://modelcontextprotocol.io)
 tools. It listens in two places:
 
 - a **unix socket** (`$ISB_SERVE_SOCKET`, else `$XDG_RUNTIME_DIR/isb/serve.sock`;
@@ -21,9 +22,12 @@ tools. It listens in two places:
   `GET /api/v1/openapi.json` describes the REST surface, `GET /api/v1/tools`
   lists the tools, `/healthz` answers without auth, and the identity
   endpoints (sign-in, invitations, API tokens) are under `/api/v1/auth/*`
-  ([auth.md](auth.md)). Every other `GET` is the **web UI**, embedded in the
-  binary: sign-in, invitations, accounts and a live dashboard, built on the
-  same API ([web.md](web.md)). It never answers an API path.
+  ([auth.md](auth.md)). `POST /api/v1/webhooks/<org>/<app>` takes an app's
+  push webhooks: no session, a signature or token instead, and served
+  ahead of Access ([apps.md](apps.md#webhooks)). Every other `GET` is the
+  **web UI**, embedded in the binary: sign-in, invitations, accounts and a
+  live dashboard, built on the same API ([web.md](web.md)). It never answers
+  an API path.
 
 `--listen` refuses anything but a loopback address: put a tunnel (or a
 reverse proxy) in front of it, never an open port.
@@ -193,6 +197,10 @@ directly.
 | `sandbox_exec` | Run argv in a sandbox: exit code, stdout, stderr (each capped at 256 KiB, keeping the end), optional stdin text and timeout (default 10m). |
 | `sandbox_remove` | Delete a sandbox (not a stack replica). |
 | `secret_create`, `secret_set`, `secret_get`, `secret_list`, `secret_inspect`, `secret_delete`, `secret_refresh`, `secret_reencrypt`, `secret_recipients`, `secret_resolve` | An org's secret store; values base64. `secret_set` and `secret_refresh` roll the stacks using the secret. `secret_resolve` (local callers only) is how `isb up` reads store-backed secrets. See [secrets.md](secrets.md). Remote callers reach every org's secrets, values included, unless `--deny-tools 'secret_*'`. |
+| `project_create`, `project_list`, `project_delete`, `environment_create`, `environment_list`, `environment_delete` | Projects and their environments; each environment runs its apps as the stack `<project>-<env>`. See [apps.md](apps.md). |
+| `app_create`, `app_get`, `app_list`, `app_update`, `app_delete` | Apps: an image or a repository with a builder, plus env, domains, volumes, ports, replicas, port, health check, resources, command. |
+| `app_deploy`, `app_rollback`, `app_deployments`, `app_deployment_log` | Deployments: queue one (`wait` blocks), go back to an earlier one's image and settings, the history, a deployment's log from an offset. |
+| `app_env_get`, `app_env_set`, `app_webhook`, `app_deploy_key` | An app's environment as `.env` text; its webhook path and secret (`rotate`); a new SSH deploy key. |
 | `server_status` | Versions, and the balancer's routes with live counters. |
 | `overview` | Everything a dashboard shows in one call: host CPU and memory with history, every stack in detail, sandboxes with their CPU and memory, the latest event number. |
 | `events` | The event feed (deploys, rollouts, health changes, restarts, failures) after a `since` cursor, optionally waiting up to 30 s for one. |

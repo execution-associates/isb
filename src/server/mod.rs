@@ -17,6 +17,8 @@
 //! - A listener can carry extra [`Routes`] (`isb serve` mounts the identity
 //!   endpoints, `/api/v1/auth/*`, this way). They authenticate their own
 //!   callers; with Access configured they sit behind it, as `/mcp` does.
+//! - [`Listener::public_routes`] are served ahead of Access, for requests
+//!   that carry their own credential (app webhooks, signed by the sender).
 
 pub mod access;
 pub mod client;
@@ -64,6 +66,9 @@ pub struct Listener {
     pub allow_unauthenticated: bool,
     /// Paths other than `/healthz` and `/mcp`.
     pub routes: Option<Routes>,
+    /// Routes that authenticate every request themselves and are served
+    /// even with Access configured (webhooks, signed by their sender).
+    pub public_routes: Option<Routes>,
     /// Authentication and authorization the embedder supplies.
     pub hooks: mcp::Hooks,
 }
@@ -96,6 +101,7 @@ impl Listener {
             policy: ToolPolicy::default(),
             allow_unauthenticated: false,
             routes: None,
+            public_routes: None,
             hooks: mcp::Hooks::default(),
         }
     }
@@ -108,6 +114,13 @@ impl Listener {
 
     pub fn routes(mut self, r: Routes) -> Self {
         self.routes = Some(r);
+        self
+    }
+
+    /// Serve `r` ahead of Access: only for routes whose every request
+    /// carries its own credential.
+    pub fn public_routes(mut self, r: Routes) -> Self {
+        self.public_routes = Some(r);
         self
     }
 
@@ -229,6 +242,7 @@ pub fn serve_until(
             access: l.access.clone(),
             healthz: healthz.clone(),
             routes: l.routes.clone(),
+            public_routes: l.public_routes.clone(),
             hooks: l.hooks.clone(),
         };
         bound.push((sock, Arc::new(move |r: &http::Request| ep.handle(r))));

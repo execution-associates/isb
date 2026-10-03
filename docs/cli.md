@@ -54,6 +54,22 @@ isb secret reencrypt [--all]               to the current recipients
 isb secret refresh NAME                    re-read from an external driver
 isb tui                                    live dashboard (docs/tui.md)
 
+# apps, per org, on the isb serve daemon (docs/apps.md); all take --org ORG
+isb project create NAME [--env E]... [--description D]   environments default to production
+isb project ls [--json] | rm NAME | env-add PROJECT ENV | env-rm PROJECT ENV
+isb app create NAME --project P [--environment E] (--image REF | --git URL [--ref R] [--subdir D]
+               [--token-secret S | --ssh-key-secret S] [--builder railpack|nixpacks|dockerfile|buildpacks]
+               [--dockerfile PATH] [--build-arg K=V]...) [-e K=V]... [--env-from F] [--port N]
+               [--replicas N] [-p SPEC]... [-v NAME:/path]... [--domain HOST[/PATH]]...
+               [--command CMD] [--cpus N] [--memory M] [--deploy]
+isb app ls [--project P] [--json] | show NAME | rm NAME
+isb app update NAME [-f PATCH|-] [--image REF] [--ref R] [--replicas N] [--port N] [--deploy]
+isb app deploy NAME [-d]                   follows the deployment's log; exit 0 when done
+isb app rollback NAME [ID] [-d]            a previous deployment's image and settings, no build
+isb app deployments NAME [--json] | logs NAME [ID] [-f]
+isb app env NAME | env-set NAME [FILE|-] [--deploy]   the environment as .env text
+isb app webhook NAME [--rotate] | deploy-key NAME
+
 # identity for isb serve, on <state>/isb.db directly (docs/auth.md)
 isb user create EMAIL [--admin] [--name N]  password from the terminal, or stdin's first line
 isb user ls [--json] | passwd EMAIL

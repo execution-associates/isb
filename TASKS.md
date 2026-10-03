@@ -117,6 +117,16 @@ minime only runs binaries downloaded from our CI runs.
   `cargo build` never needs bun. The UI uses only the public API (REST
   tools, `/api/v1/auth/*`, SSE). CSP forbids inline scripts. Tokens in links
   ride in the URL fragment.
+- **Apps** (P2.5): environments live inside the project record; app names
+  are unique per org; one deploy per app at a time, a newer request
+  supersedes a waiting one; rollback restores the deployment's image digest
+  and service settings, not the saved app; image sources are pinned to a
+  digest at deploy; apps take named volumes only; start-first rollouts, or
+  stop-first with volumes; deployment log lines go on the events feed at
+  level `log`.
+- **Webhooks bypass sessions and Access in the daemon** (`public_routes`),
+  authenticated by per-app HMAC or token. Behind Cloudflare Access the
+  Access app needs a bypass policy for `/api/v1/webhooks/*`.
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
@@ -210,7 +220,7 @@ minime only runs binaries downloaded from our CI runs.
 
 ## Phase 2: the deploy loop
 
-- [~] (subagent p2.5) P2.1 Git sources: GitHub App (install, repo list, webhooks), generic git
+- [~] (07e8dfc: generic git + webhooks done; GitHub App and the hcloud push check remain) P2.1 Git sources: GitHub App (install, repo list, webhooks), generic git
   over HTTPS/SSH with deploy keys, GitLab/Gitea webhooks. **Verify:** push to
   a test repo deploys on the hcloud box.
 - [~] (subagent p2.2) P2.2 Builds in sandboxes: Railpack (and Nixpacks), Dockerfile,
@@ -224,7 +234,7 @@ minime only runs binaries downloaded from our CI runs.
   service (host, path, port, https, redirects), generated hostnames
   (sslip.io-style) for quick starts; Cloudflare Tunnel as an alternative
   provider per org. **Verify:** HTTPS on the hcloud box with a real cert.
-- [~] (subagent p2.5) P2.5 App model + env editor: "application" (git/image source, build
+- [x] (07e8dfc) P2.5 App model + env editor: "application" (git/image source, build
   settings, env, domains, volumes, replicas) as a first-class object over
   stacks; project → environment → service hierarchy. **Verify:** create, edit,
   deploy and redeploy an app through the API.

@@ -87,6 +87,18 @@ slot by slot, and drives it: logs, shells, scaling, deploys and rollbacks
 sandboxes, held to a policy that keeps the host out of its reach. See
 [docs/stacks.md](docs/stacks.md) and [docs/serve.md](docs/serve.md).
 
+On top of stacks, **apps** work the way Dokploy's do: projects with
+environments, an app from an image or a repository, an `.env` editor,
+deployments with logs and rollbacks, and push webhooks from GitHub, GitLab
+and Gitea ([docs/apps.md](docs/apps.md)):
+
+```console
+$ isb project create shop
+$ isb app create web --project shop --image docker:traefik/whoami -p 127.0.0.1:8080:80 --deploy
+$ isb app env-set web web.env --deploy
+$ isb app rollback web
+```
+
 ## Why incus
 
 incus runs **system containers**: a whole Linux machine, with its own init,
@@ -292,6 +304,7 @@ filled in.
 - [docs/spec.md](docs/spec.md): every YAML field, and how reconciling works
 - [docs/cli.md](docs/cli.md): every command and flag
 - [docs/stacks.md](docs/stacks.md): long-running stacks: replicas, health, rollouts
+- [docs/apps.md](docs/apps.md): apps over stacks: projects, environments, deployments, repositories, webhooks
 - [docs/serve.md](docs/serve.md): the `isb serve` daemon and its MCP server behind Cloudflare Access
 - [docs/secrets.md](docs/secrets.md): per-org secrets: the age-encrypted store, break-glass recipients, `isb secret`
 - [docs/auth.md](docs/auth.md): users, roles, sessions, invitations and API tokens for `isb serve`

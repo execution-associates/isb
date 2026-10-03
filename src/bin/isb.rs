@@ -15,6 +15,9 @@ use isb::shorthand;
 use isb::spec::{IdmapMode, IdmapRaw, IdmapSpec, InstanceType, SandboxSpec};
 use isb::{Client, Error, ExecOptions, Result, Stdin, Timeouts};
 
+#[path = "isb/apps.rs"]
+mod apps;
+
 /// Declarative incus sandboxes.
 ///
 /// Talks to incusd over its unix socket ($INCUS_SOCKET, else
@@ -241,6 +244,13 @@ enum Cmd {
     /// Manage an org's secrets on the `isb serve` daemon (docs/secrets.md).
     #[command(subcommand)]
     Secret(SecretCmd),
+    /// Projects and their environments, for apps (docs/apps.md).
+    #[command(subcommand)]
+    Project(apps::ProjectCmd),
+    /// Apps on the `isb serve` daemon: an image or a repository, deployed
+    /// into its project environment's stack (docs/apps.md).
+    #[command(subcommand)]
+    App(apps::AppCmd),
     /// A live dashboard of stacks and sandboxes (`isb serve`'s view; with no
     /// daemon, sandboxes only).
     Tui,
@@ -996,6 +1006,8 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         }) => host_setup(uplink, user, dry_run),
         Cmd::Machine(m) => machine(ctx, m),
         Cmd::Secret(s) => secret(ctx, s),
+        Cmd::Project(p) => apps::project(&ctx.global.org, p),
+        Cmd::App(a) => apps::app(&ctx.global.org, a),
         Cmd::Tui => {
             isb::tui::run(ctx.client(None), isb::server::default_socket_path())?;
             Ok(0)
