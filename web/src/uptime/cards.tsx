@@ -78,7 +78,7 @@ export function DownMonitorsBanner({ org }: { org: string }) {
   if (!down.length) return null;
   const o = encodeURIComponent(org);
   return (
-    <Alert variant="destructive" className="border-destructive/30 bg-destructive/5">
+    <Alert variant="destructive" className="mb-6 border-destructive/30 bg-destructive/5">
       <CircleAlert />
       <AlertTitle>
         {down.length === 1 ? `${down[0].name} is down` : `${down.length} monitors are down`}

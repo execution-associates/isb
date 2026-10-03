@@ -73,6 +73,13 @@ See [Superadmins](../concepts/access.md#superadmins) and
 | `--oidc-name` | `ISB_OIDC_NAME` | `SSO` | the generic provider's button label |
 | `--open-signup` | `ISB_OPEN_SIGNUP` | off: provider sign-up needs an invitation | let a verified provider email make an account |
 
+### Heartbeat
+
+| Flag | Environment | Default | |
+|---|---|---|---|
+| `--heartbeat-url` | `ISB_HEARTBEAT_URL` | off | GET this URL every interval, a dead man's switch for an outside check (healthchecks.io and the like); its path is usually a token, so prefer the variable ([Uptime monitoring](../guides/uptime.md#host-down-a-dead-mans-switch)) |
+| `--heartbeat-interval` | `ISB_HEARTBEAT_INTERVAL` | `60s` | how often, 10 s to 1 h |
+
 Client secrets are never flags (argv shows in `ps`): they come from
 `ISB_GITHUB_CLIENT_SECRET`, `ISB_GOOGLE_CLIENT_SECRET` and
 `ISB_OIDC_CLIENT_SECRET`, or, when unset, a secret of the same name in the

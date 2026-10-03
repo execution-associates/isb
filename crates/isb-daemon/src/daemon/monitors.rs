@@ -187,7 +187,6 @@ fn settings(m: &Monitors, a: Value, _: &Caller) -> Result<Value> {
 pub(super) fn register(r: &mut Registry, m: Monitors) -> Result<()> {
     let ro = json!({"readOnlyHint": true, "openWorldHint": false});
     let write = json!({"destructiveHint": false, "openWorldHint": true});
-    let destructive = json!({"destructiveHint": true, "openWorldHint": false});
     let name_only = obj(json!({"name": {"type": "string"}}), &["name"]);
     reg(
         r,
@@ -237,9 +236,17 @@ pub(super) fn register(r: &mut Registry, m: Monitors) -> Result<()> {
         &write,
         update,
     )?;
+    register_more(r, &m, name_only)
+}
+
+/// Deleting, pausing, history and settings.
+fn register_more(r: &mut Registry, m: &Monitors, name_only: Value) -> Result<()> {
+    let ro = json!({"readOnlyHint": true, "openWorldHint": false});
+    let write = json!({"destructiveHint": false, "openWorldHint": true});
+    let destructive = json!({"destructiveHint": true, "openWorldHint": false});
     reg(
         r,
-        &m,
+        m,
         (
             "monitor_delete",
             "Delete an uptime monitor",
@@ -251,7 +258,7 @@ pub(super) fn register(r: &mut Registry, m: Monitors) -> Result<()> {
     )?;
     reg(
         r,
-        &m,
+        m,
         (
             "monitor_pause",
             "Pause an uptime monitor",
@@ -263,7 +270,7 @@ pub(super) fn register(r: &mut Registry, m: Monitors) -> Result<()> {
     )?;
     reg(
         r,
-        &m,
+        m,
         (
             "monitor_resume",
             "Resume an uptime monitor",
@@ -275,7 +282,7 @@ pub(super) fn register(r: &mut Registry, m: Monitors) -> Result<()> {
     )?;
     reg(
         r,
-        &m,
+        m,
         (
             "monitor_checks",
             "Uptime monitor history",
@@ -290,7 +297,7 @@ pub(super) fn register(r: &mut Registry, m: Monitors) -> Result<()> {
     )?;
     reg(
         r,
-        &m,
+        m,
         (
             "monitor_settings",
             "Uptime monitor settings",

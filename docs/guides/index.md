@@ -37,6 +37,9 @@ every flag and field is in the [Reference](../reference/index.md).
 - [Scheduled jobs](jobs.md): commands on a cron schedule against an app.
 - [Notifications](notifications.md): deploys, health, certificates, backups
   and jobs to a webhook, Slack, Discord, Telegram or email.
+- [Uptime monitoring](uptime.md): every app's public URL checked from
+  outside, with incidents, uptime history, certificate warnings and a
+  heartbeat for when the host dies.
 
 ## People, agents and access
 

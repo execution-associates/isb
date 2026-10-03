@@ -86,7 +86,10 @@ ok = hmac.compare_digest(sig, "sha256=" + hmac.new(key, body, hashlib.sha256).he
 ```
 
 `at` (unix milliseconds) is inside the signed body, so a receiver can refuse
-old replays.
+old replays. Events whose producer adds structure carry it in `details`:
+`monitor.*` events have the URL, HTTP status, latency, error, downtime and a
+link to the monitor ([Uptime monitoring](uptime.md#the-notification)); Slack,
+Discord, Telegram and email show the latency and the link too.
 
 ## Rules
 
@@ -96,7 +99,7 @@ matches any run of characters) and it passes every filter given:
 
 | Field | Matches |
 |---|---|
-| `events` | `deploy.*`, `health.*`, `backup.*`, `job.*`, `cert.*`, `*.failed`, `*` (the default) |
+| `events` | `deploy.*`, `health.*`, `monitor.*`, `backup.*`, `job.*`, `cert.*`, `*.failed`, `*` (the default) |
 | `projects` | the app's project (only app events have one) |
 | `apps` | the app (a service of that name) |
 | `stacks` | the stack's name in the org (`<project>-<env>` for apps) |
@@ -116,6 +119,9 @@ shortest globs (`*`, `deploy.*`, `*.failed`).
 | `health.recovered` | A replica of that service is healthy again. |
 | `cert.issued`, `cert.failed` | The ingress got a certificate for a domain, or failed to ([Domains and ingress](domains.md)). |
 | `backup.succeeded`, `backup.failed`, `job.succeeded`, `job.failed` | [Database and volume backups](databases.md#backups) and [scheduled jobs](jobs.md). |
+| `monitor.down`, `monitor.up` | An [uptime monitor](uptime.md) went down (its failure threshold reached), or came back (with the downtime). Once per incident; a flapping monitor is held until it settles. The body's `details` carry the URL, status, latency, error and a link. |
+| `monitor.cert_expiring` | An HTTPS certificate a monitor sees expires within its `cert_expiry_days`; once per certificate. |
+| `server.unreachable`, `server.recovered` | On a control plane: a [server](servers.md) stopped answering its heartbeat, or answers again (stack `<org>/@servers` for each org on it, and `system/@servers`). |
 
 The list is the `kind` field on the event feed (the `events` tool, the SSE
 stream); a producer adding a kind adds it there, and a `*` rule hears it.

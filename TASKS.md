@@ -652,6 +652,8 @@ Finishing this workstream is isb **1.0.0** (Stephan, 2026-10-03), not another 0.
 - [ ] Upgrade titan's `isb.service` from 0.7.0; `isb host setup`; `--workspace-home-root /srv/workspaces`.
 - [ ] lasso plugin sandboxing (queued until the running agents land): per-sandbox egress allowlist (`egress: [host[:port]]` / `none`, domains and `*.` suffixes, via a host-side egress proxy + filtered DNS behind a deny-all ACL; works for VMs) and secrets that never enter the guest (placeholder env var, substituted on the wire only to approved hosts via per-sandbox TLS interception); measure `isb exec -T` stdio round trip into a VM; design in docs; on release run `lasso notify "isb <version>: per-sandbox egress allowlist + on-the-wire secrets ready for lasso plugins"`.
 - [ ] Marketing site pulls isb docs from `main` (or the v1.0.0 tag) instead of `platform`.
+- [x] Uptime monitoring (branch `uptime`): `monitor_*` tools (HTTP(S), TCP and app monitors; thresholds, hysteresis, flap damping), apps with a served domain get `app-<name>` automatically, `monitor.down` / `monitor.up` / `monitor.cert_expiring` with details to channels, 7 d raw and 90 d hourly history with incidents, the Uptime section, monitor pages, the app card and the overview banner, and `--heartbeat-url` as a dead man's switch (docs/guides/uptime.md).
+- [ ] Uptime follow-ups: a public status page per org (off by default); `isb monitor` CLI commands; the control plane's `server.*` events reach only the control plane's channels for an org placed on a server, whose channels live on the agent.
 
 ## Log
 
