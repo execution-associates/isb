@@ -15,6 +15,7 @@ pub mod builds;
 mod orgs;
 pub mod policy;
 pub mod secrets;
+pub mod templates;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -278,6 +279,8 @@ const PLATFORM_TOOLS: &[&str] = &[
     "org_update",
     "org_delete",
     "registry_gc",
+    "template_catalog_add",
+    "template_catalog_remove",
 ];
 
 /// Read-only tools that span orgs: any signed-in user, filtered to their
@@ -979,6 +982,15 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
         }
     );
     apps::register(&mut r, d.apps.clone())?;
+    templates::register(
+        &mut r,
+        templates::Templates::new(
+            &d.state_dir,
+            d.apps.clone(),
+            d.secrets.clone(),
+            d.ingress.as_ref().and_then(|m| m.public_ip()),
+        ),
+    )?;
     tool!(
         "server_status",
         "Server status",
@@ -1021,7 +1033,7 @@ or the org's own builds in the local registry (registry:APP:TAG; build_run makes
 Deploys return immediately; poll stack_status, or pass wait=true. \
 Each org also has a secret store (secret_create, secret_set, secret_list; values are base64). \
 Apps (Dokploy-style): project_create, then app_create (an image, or a repository with a builder), \
-app_env_set, app_deploy; each project environment runs as one stack <project>-<env>.";
+app_env_set, app_deploy; each project environment runs as one stack <project>-<env>. One-click apps: template_list, template_get, then template_deploy (dry_run first shows the plan).";
 
 impl Daemon {
     /// May this caller touch this instance? Local callers: always. Remote:

@@ -469,6 +469,7 @@ impl Apps {
     /// at deploy).
     fn check_secrets(&self, org: &OrgId, spec: &AppSpec) -> Result<()> {
         let mut names = spec.env.secret_names();
+        names.extend(spec.files.iter().map(|f| f.secret.clone()));
         if let Source::Git(g) = &spec.source {
             names.extend(g.auth.secret().map(String::from));
         }

@@ -1,0 +1,40 @@
+id: n8n
+name: n8n
+description: Workflow automation with a visual editor, hundreds of integrations, and code when you need it.
+version: "1"
+tags: [automation, workflows]
+links:
+  website: https://n8n.io
+  source: https://github.com/n8n-io/n8n
+  docs: https://docs.n8n.io/hosting/
+variables:
+  - name: domain
+    type: domain
+    label: Domain
+    description: The public hostname; empty for a generated one.
+  - name: timezone
+    label: Time zone
+    description: For schedule triggers (an IANA name).
+    default: UTC
+  - name: encryption_key
+    type: base64
+    bytes: 32
+    description: Encrypts stored credentials; losing it loses them.
+apps:
+  - name: n8n
+    image: docker:n8nio/n8n:stable
+    port: 5678
+    volumes: ["data:/home/node/.n8n"]
+    env:
+      N8N_HOST: "${domain}"
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: https
+      WEBHOOK_URL: "https://${domain}/"
+      N8N_ENCRYPTION_KEY: "${encryption_key}"
+      GENERIC_TIMEZONE: "${timezone}"
+      TZ: "${timezone}"
+      N8N_RUNNERS_ENABLED: "true"
+    domains:
+      - {host: "${domain}"}
+notes:
+  - The first visit sets up the owner account.

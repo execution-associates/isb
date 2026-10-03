@@ -58,6 +58,7 @@ pub mod shorthand;
 pub mod spec;
 pub mod stack;
 pub mod supervise;
+pub mod template;
 pub mod tui;
 pub mod volume;
 pub mod web;
