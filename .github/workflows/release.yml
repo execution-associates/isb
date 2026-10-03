@@ -1,6 +1,7 @@
 name: Release
 
-# Static (musl) Linux binaries for x86_64 and aarch64, published as release
+# Static (musl) Linux binaries for x86_64 and aarch64, and macOS binaries for
+# both (linked only against the system libraries), published as release
 # assets with SHA256SUMS when a v* tag is pushed, so hosts can install with
 # `mise use -g github:execution-associates/isb` and never build on the host.
 # Run it by hand (workflow_dispatch) to build the artifacts without releasing.
@@ -28,6 +29,10 @@ jobs:
             runner: ubuntu-24.04
           - target: aarch64-unknown-linux-musl
             runner: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            runner: macos-15
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
     steps:
       - uses: actions/checkout@v4
       - name: tag matches Cargo.toml version
@@ -35,16 +40,29 @@ jobs:
         run: |
           want="v$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
           [ "$GITHUB_REF_NAME" = "$want" ] || { echo "tag $GITHUB_REF_NAME != Cargo.toml $want"; exit 1; }
-      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
       - run: cargo build --release --locked --target ${{ matrix.target }}
       - name: check the binary is static and runs
+        if: runner.os == 'Linux'
         run: |
           bin=target/${{ matrix.target }}/release/isb
           file "$bin"
           file "$bin" | grep -qE 'statically linked|static-pie linked'
+          "$bin" --version
+      # macOS has no static linking: allow only the system libraries.
+      - name: check the binary links only system libraries and runs
+        if: runner.os == 'macOS'
+        run: |
+          bin=target/${{ matrix.target }}/release/isb
+          file "$bin"
+          otool -L "$bin"
+          if otool -L "$bin" | tail -n +2 | grep -vE '^\s+/(usr/lib|System/Library)/'; then
+            echo "links a non-system library"; exit 1
+          fi
           "$bin" --version
       - name: package
         run: |

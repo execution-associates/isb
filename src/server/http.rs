@@ -49,7 +49,7 @@ impl Default for Limits {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Peer {
     Tcp(SocketAddr),
-    /// `uid` from SO_PEERCRED, when the platform has it.
+    /// `uid` from SO_PEERCRED (getpeereid on macOS), when the platform has it.
     Unix {
         uid: Option<u32>,
     },
@@ -415,7 +415,15 @@ fn peer_uid(s: &UnixStream) -> Option<u32> {
         .map(|c| c.uid.as_raw())
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
+fn peer_uid(s: &UnixStream) -> Option<u32> {
+    use std::os::fd::AsRawFd;
+    let (mut uid, mut gid) = (0, 0);
+    // SAFETY: a valid socket fd and two out-parameters.
+    (unsafe { libc::getpeereid(s.as_raw_fd(), &mut uid, &mut gid) } == 0).then_some(uid)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn peer_uid(_: &UnixStream) -> Option<u32> {
     None
 }
@@ -711,6 +719,13 @@ pub(crate) mod tests {
             Err(Some(r)) => r.status,
             Err(None) => 1,
         }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn unix_peer_is_this_uid() {
+        let (a, _b) = UnixStream::pair().unwrap();
+        assert_eq!(peer_uid(&a), Some(rustix::process::getuid().as_raw()));
     }
 
     #[test]

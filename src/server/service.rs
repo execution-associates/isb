@@ -41,6 +41,12 @@ pub struct ServiceInstall {
 /// Write the unit and env file, (re)start the service, and wait until it is
 /// healthy. Safe to run again: it updates an existing installation.
 pub fn install_user_service(opts: &ServiceOptions) -> Result<ServiceInstall> {
+    if cfg!(target_os = "macos") {
+        return Err(Error::invalid(
+            "installing the service is not supported on macOS yet (it needs a launchd agent); \
+             run `isb serve` in the foreground instead",
+        ));
+    }
     if !cfg!(target_os = "linux") {
         return Err(Error::invalid(
             "installing the service needs Linux with systemd user services",

@@ -811,7 +811,10 @@ pub(crate) fn attach(
                 }
                 continue;
             }
-            let _ = send_control(&control, json!({"command": "signal", "signal": sig}));
+            let _ = send_control(
+                &control,
+                json!({"command": "signal", "signal": linux_signal(sig)}),
+            );
         }
     });
     let stdout = std::io::stdout();
@@ -834,6 +837,18 @@ pub(crate) fn attach(
     handle.close();
     let _ = sig_thread.join();
     code
+}
+
+/// The guest is Linux whatever the host is, and the host's numbering can
+/// differ: SIGUSR1/SIGUSR2 are 30/31 on macOS, 10/12 on Linux. The others
+/// forwarded (INT, TERM, HUP, QUIT) agree everywhere.
+fn linux_signal(sig: i32) -> i32 {
+    use signal_hook::consts::signal::{SIGUSR1, SIGUSR2};
+    match sig {
+        SIGUSR1 => 10,
+        SIGUSR2 => 12,
+        s => s,
+    }
 }
 
 /// Width and height of the terminal on stdout, if it is one.

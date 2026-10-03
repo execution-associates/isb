@@ -220,7 +220,9 @@ impl Client {
             if remaining.is_zero() {
                 return Err(to_err(std::io::ErrorKind::TimedOut.into()));
             }
-            stream.set_read_timeout(Some(remaining))?;
+            // macOS refuses setsockopt (EINVAL) once incusd has closed; the
+            // read cannot block then, so the previous timeout is as good.
+            let _ = stream.set_read_timeout(Some(remaining));
             let n = stream.read(&mut chunk).map_err(to_err)?;
             if n == 0 {
                 break;

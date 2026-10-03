@@ -34,6 +34,26 @@ jobs:
       - name: package (publish dry run, never uploads)
         run: cargo package --locked --allow-dirty --target-dir "$RUNNER_TEMP/package"
 
+  # On a Mac isb drives incus in a Lima VM, so only host code differs: build
+  # everything and run the unit tests on both architectures.
+  macos:
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-latest
+          - arch: x86_64
+            runner: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --locked --all-targets
+      - run: cargo test --locked --lib --bins
+
   msrv:
     name: MSRV 1.85
     runs-on: ubuntu-latest
