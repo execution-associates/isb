@@ -244,6 +244,9 @@ minime only runs binaries downloaded from our CI runs.
   orgs placed there). An org is placed once; the default org is local. The
   SSH key is used only for bootstrap. A remote org's secrets and history
   live on its server; `audit_list` stays on the control plane.
+- **Known bug: database names with `-` crash-loop** (`pg-dash` fails with
+  "Failed to retrieve PID"; `pg`, `pgcopy` work). Found by the Phase 4 UI
+  agent; the restore dialog suggests `<db>copy` until it is fixed.
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
@@ -381,14 +384,14 @@ minime only runs binaries downloaded from our CI runs.
   schedule and its logs are visible.
 - [x] (6d71ea9) P4.3 Notifications (Slack, Discord, Telegram, email, webhook) on deploy,
   failure, health, backup events. **Verify:** a webhook receives events.
-- [~] (2aa485c, e153e1c, 0afef2b: built-in catalog + Dokploy translator; deploy from the web UI pending) P4.4 Template catalog (one-click apps). **Stretch goal:** running Dokploy's
+- [x] (2aa485c, e153e1c, 0afef2b, 83fa46e: Uptime Kuma deployed from the web catalog) P4.4 Template catalog (one-click apps). **Stretch goal:** running Dokploy's
   templates (docker-compose + `template.toml`: variables, domains, mounts)
   directly; check the Dokploy/templates repo license before shipping its
   catalog. Only if it fits isb's architecture without bending it.
   **Verify:** deploy two native (and, if done, two Dokploy) templates from the UI.
 - [x] (1502ebd; Gitea live; GitLab and fork previews unit-tested only) P4.5 Preview deployments per pull request. **Verify:** a PR on the test
   repo gets a URL; closing it removes it.
-- [~] (6d71ea9: history + `metrics_query` done; the web Monitoring tab still reads live samples only) P4.6 Metrics history (retained samples) and monitoring pages.
+- [x] (6d71ea9, 83fa46e) P4.6 Metrics history (retained samples) and monitoring pages.
 
 ## Phase 5: scale-out
 

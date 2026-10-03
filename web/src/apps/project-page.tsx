@@ -1,7 +1,7 @@
 // /orgs/:org/projects/:project/:env: a project, its environments as tabs, and
 // the apps of the one selected.
 import { useQueryClient } from "@tanstack/react-query";
-import { Boxes, ChevronRight, Globe, MoreHorizontal, Plus, Trash2 } from "lucide-react";
+import { Boxes, ChevronRight, Database, Globe, LayoutTemplate, MoreHorizontal, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
@@ -27,6 +27,8 @@ import { useOrgLive } from "./live";
 import { NewAppDialog } from "./new-app-dialog";
 import { NewEnvironmentDialog } from "./project-dialogs";
 import { imageName, shortSha } from "./util";
+import { engineLabel } from "@/data/api";
+import { NewDatabaseDialog } from "@/data/new-database";
 
 export function ProjectPage() {
   const { org = "", project = "", env } = useParams();
@@ -38,6 +40,7 @@ export function ProjectPage() {
   const qc = useQueryClient();
   const [newApp, setNewApp] = useState(false);
   const [newEnv, setNewEnv] = useState(false);
+  const [newDb, setNewDb] = useState(false);
   const [delEnv, setDelEnv] = useState(false);
   const [delProject, setDelProject] = useState(false);
 
@@ -87,6 +90,17 @@ export function ProjectPage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem onSelect={() => setNewDb(true)}>
+                  <Database />
+                  New database
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link to={`/orgs/${o}/templates?project=${encodeURIComponent(project)}&env=${encodeURIComponent(environment.name)}`}>
+                    <LayoutTemplate />
+                    From a template
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={() => setNewEnv(true)}>
                   <Plus />
                   Add environment
@@ -141,6 +155,7 @@ export function ProjectPage() {
 
       <NewAppDialog org={org} project={project} environment={environment.name} open={newApp} onOpenChange={setNewApp} />
       <NewEnvironmentDialog org={org} project={project} open={newEnv} onOpenChange={setNewEnv} />
+      <NewDatabaseDialog org={org} project={project} environment={environment.name} open={newDb} onOpenChange={setNewDb} />
       <ConfirmDialog
         open={delEnv}
         onOpenChange={setDelEnv}
@@ -173,6 +188,8 @@ export function ProjectPage() {
 }
 
 function sourceLabel(a: App, d?: Deployment) {
+  const db = (a.source as { database?: { engine: string; version?: string } }).database;
+  if (db) return { main: `${engineLabel(db.engine)} ${db.version ?? ""}`.trim(), sub: "database" };
   if (isGit(a.source)) {
     const repo = a.source.git.url.replace(/^https?:\/\//, "").replace(/\.git$/, "");
     return { main: repo, sub: d?.commit ? `${a.source.git.ref} · ${shortSha(d.commit.sha)} ${d.commit.message}` : a.source.git.ref };

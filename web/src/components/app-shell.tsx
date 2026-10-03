@@ -1,4 +1,4 @@
-import { Check, ChevronsUpDown, FolderKanban, KeyRound, LayoutDashboard, LogOut, Menu, Monitor, Moon, ScrollText, Settings, ShieldCheck, Sun, UserRound, Users } from "lucide-react";
+import { Bell, Check, ChevronsUpDown, DatabaseBackup, FolderKanban, KeyRound, LayoutDashboard, LayoutTemplate, LogOut, Menu, Monitor, Moon, ScrollText, Settings, ShieldCheck, Sun, UserRound, Users } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import type { Me } from "@/api/auth";
@@ -246,6 +246,15 @@ function SidebarContent({ me, onNavigate }: { me: Me; onNavigate?: () => void })
             </NavItem>
             <NavItem to={`/orgs/${encodeURIComponent(org)}/projects`} icon={FolderKanban} onNavigate={onNavigate}>
               Projects
+            </NavItem>
+            <NavItem to={`/orgs/${encodeURIComponent(org)}/templates`} icon={LayoutTemplate} onNavigate={onNavigate}>
+              Templates
+            </NavItem>
+            <NavItem to={`/orgs/${encodeURIComponent(org)}/backups`} icon={DatabaseBackup} onNavigate={onNavigate}>
+              Backups
+            </NavItem>
+            <NavItem to={`/orgs/${encodeURIComponent(org)}/notifications`} icon={Bell} onNavigate={onNavigate}>
+              Notifications
             </NavItem>
             <NavItem to={`/orgs/${encodeURIComponent(org)}/members`} icon={Users} onNavigate={onNavigate}>
               Members

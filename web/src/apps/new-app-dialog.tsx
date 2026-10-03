@@ -1,6 +1,7 @@
-// "New app" from an environment: from an image, from git, or (later) a template.
+// "New app" from an environment: from an image or git here; Database opens
+// the database dialog and Template the catalog, aimed at this environment.
 import { useQueryClient } from "@tanstack/react-query";
-import { Box, GitBranch, LayoutTemplate, Loader2 } from "lucide-react";
+import { Box, Database, GitBranch, LayoutTemplate, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
@@ -16,6 +17,7 @@ import { errorMessage } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 import { type App, type Builder, type Deployment, keys } from "./api";
 import { nameProblem } from "./util";
+import { NewDatabaseDialog } from "@/data/new-database";
 
 type Kind = "image" | "git";
 type AuthKind = "none" | "token" | "ssh-generate" | "ssh-secret";
@@ -49,6 +51,7 @@ export function NewAppDialog({
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [kind, setKind] = useState<Kind>("image");
+  const [dbOpen, setDbOpen] = useState(false);
   const [name, setName] = useState("");
   const [image, setImage] = useState("");
   const [port, setPort] = useState("");
@@ -202,6 +205,8 @@ export function NewAppDialog({
   const show = (err: string | null, v: string) => (touched || v ? err : null);
 
   return (
+    <>
+    <NewDatabaseDialog org={org} project={project} environment={environment} open={dbOpen} onOpenChange={setDbOpen} />
     <Dialog open={open} onOpenChange={close}>
       <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
@@ -211,15 +216,15 @@ export function NewAppDialog({
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="grid gap-4">
-          <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Source">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label="Source">
             {(
               [
                 ["image", Box, "Image", "A container image"],
                 ["git", GitBranch, "Git", "Build a repository"],
-                ["template", LayoutTemplate, "Template", "Coming soon"],
+                ["database", Database, "Database", "Postgres, MySQL, Redis…"],
+                ["template", LayoutTemplate, "Template", "A one-click app"],
               ] as const
             ).map(([k, Icon, label, hint]) => {
-              const disabled = k === "template";
               const active = kind === k;
               return (
                 <button
@@ -227,12 +232,19 @@ export function NewAppDialog({
                   type="button"
                   role="radio"
                   aria-checked={active}
-                  disabled={disabled}
-                  onClick={() => !disabled && setKind(k as Kind)}
+                  onClick={() => {
+                    // Database and Template are their own flows.
+                    if (k === "database") {
+                      close(false);
+                      setDbOpen(true);
+                    } else if (k === "template") {
+                      close(false);
+                      navigate(`/orgs/${encodeURIComponent(org)}/templates?project=${encodeURIComponent(project)}&env=${encodeURIComponent(environment)}`);
+                    } else setKind(k);
+                  }}
                   className={cn(
                     "flex flex-col items-start gap-1 rounded-lg border p-3 text-left text-sm transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none",
                     active ? "border-foreground/60 bg-accent" : "hover:bg-accent/60",
-                    disabled && "cursor-not-allowed opacity-50 hover:bg-transparent",
                   )}
                 >
                   <Icon className="size-4" />
@@ -371,5 +383,6 @@ export function NewAppDialog({
         </form>
       </DialogContent>
     </Dialog>
+    </>
   );
 }
