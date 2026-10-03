@@ -31,6 +31,7 @@
 
 pub mod auth;
 pub mod balance;
+pub mod build;
 pub mod client;
 pub mod compose;
 pub mod daemon;

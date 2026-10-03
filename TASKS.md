@@ -100,6 +100,17 @@ minime only runs binaries downloaded from our CI runs.
   setup`) wired in with `raw.dnsmasq=hostsdir=`, and incus runs a bridge's
   dnsmasq unconfined once `raw.dnsmasq` is set. It still runs as `incus`.
   Accepted for now; an opt-out per org is the fallback.
+- **Phase 2 contracts** (so P2.1/P2.5, P2.2/P2.3 and P2.4 can run in
+  parallel):
+  - `isb::build::{Builder, BuildRequest, BuiltImage, run}` (src/build/mod.rs)
+    is the one call the app layer makes to turn a checkout into an image.
+    Its owner may add fields, never rename these.
+  - A compose service takes `domains:` (list of `{host, path?, port,
+    https?, redirect?}`; `https` defaults true; `path` defaults `/`). The
+    ingress owns parsing and serving it; the app layer only emits it.
+  - The app layer renders apps to ordinary stacks: an org's project +
+    environment is one stack (`<project>-<env>`), each app one service in
+    it, so service names (`<app>.<project>-<env>`) work between apps.
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
