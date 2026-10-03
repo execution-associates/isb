@@ -9,7 +9,6 @@ crates/isb-apps/src/build/mod.rs 1118
 crates/isb-apps/src/notify/mod.rs 1275
 crates/isb-apps/src/s3.rs 1263
 crates/isb-apps/src/template/dokploy.rs 1368
-crates/isb-apps/src/template/mod.rs 1063
 crates/isb-core/src/compose.rs 1244
 crates/isb-core/src/ingress/caddy.rs 1131
 crates/isb-core/src/ingress/mod.rs 1165

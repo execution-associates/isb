@@ -646,3 +646,111 @@ fn app_resources(
     }
     Ok(Value::Object(out))
 }
+
+/// The domain variables used as some app's domain host, with the apps
+/// using each (in template order).
+pub(super) fn domain_uses(t: &Template) -> BTreeMap<String, Vec<String>> {
+    let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for a in &t.apps {
+        for d in &a.domains {
+            if let Some(Ok(parts)) = d.get("host").and_then(Value::as_str).map(parse_expr) {
+                if let [Part::Var(v)] = parts.as_slice() {
+                    let e = out.entry(v.clone()).or_default();
+                    if !e.contains(&a.name) {
+                        e.push(a.name.clone());
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// `exec ARGS...` for /bin/sh, each argument quoted, a secret's part as
+/// `"${ISB_TPL_VAR}"`: the value reaches the process through a variable,
+/// never through the stored command line. `used` gets the variables.
+pub(super) fn shell_line(args: Vec<Vec<Seg>>, used: &mut BTreeSet<String>) -> String {
+    let mut words = Vec::new();
+    for segs in args {
+        let mut w = String::new();
+        for s in segs {
+            match s {
+                Seg::Lit(l) if !l.is_empty() => w.push_str(&sh_single(&l)),
+                Seg::Lit(_) => {}
+                Seg::Secret { var, .. } => {
+                    w.push_str(&format!("\"${{{}}}\"", secret_env_name(&var)));
+                    used.insert(var);
+                }
+            }
+        }
+        if w.is_empty() {
+            w.push_str("''");
+        }
+        words.push(w);
+    }
+    format!("exec {}", words.join(" "))
+}
+
+pub(super) fn generate_value(
+    v: &Variable,
+    r: &Renderer,
+    ctx: &Context,
+    at: &str,
+) -> Result<String> {
+    Ok(match v.kind {
+        VarKind::Password => generate::password(v.length.unwrap_or(32).clamp(8, 256)),
+        VarKind::Base64 => generate::base64(v.bytes.unwrap_or(32).clamp(8, 512)),
+        VarKind::Hex => generate::hex(v.bytes.unwrap_or(32).clamp(4, 512)),
+        VarKind::Uuid => generate::uuid(),
+        VarKind::Username => generate::username(v.length.unwrap_or(8).clamp(3, 64)),
+        VarKind::Port => (ctx.free_port)()
+            .ok_or_else(|| Error::invalid(format!("{at}: no free port found")))?
+            .to_string(),
+        VarKind::Timestamp => {
+            let secs = match &v.at {
+                Some(d) => generate::parse_date(&r.plain(d, at)?).ok_or_else(|| {
+                    Error::invalid(format!("{at}: at: a date like 2030-01-01T00:00:00Z"))
+                })?,
+                None => generate::now_secs(),
+            };
+            match v.unit.as_deref() {
+                Some("ms") => (secs * 1000).to_string(),
+                _ => secs.to_string(),
+            }
+        }
+        VarKind::Jwt => {
+            let j = v.jwt.as_ref().expect("validated: a jwt has jwt.secret");
+            let secret = r
+                .vars
+                .get(&j.secret)
+                .and_then(|x| x.value.clone())
+                .ok_or_else(|| Error::invalid(format!("{at}: no value for {}", j.secret)))?;
+            let payload = match &j.payload {
+                Some(p) => {
+                    let text = concat(&r.render(p, at)?);
+                    let v: Value = serde_json::from_str(&text).map_err(|e| {
+                        Error::invalid(format!("{at}: the payload is not JSON: {e}"))
+                    })?;
+                    let Value::Object(mut o) = v else {
+                        return Err(Error::invalid(format!(
+                            "{at}: the payload must be a JSON object"
+                        )));
+                    };
+                    // A partial payload gets the default times.
+                    let now = generate::now_secs();
+                    o.entry("iat").or_insert(json!(now));
+                    o.entry("exp").or_insert(json!(now + 10 * 365 * 86400));
+                    Value::Object(o)
+                }
+                None => {
+                    let now = generate::now_secs();
+                    json!({"iss": "isb", "iat": now, "exp": now + 10 * 365 * 86400})
+                }
+            };
+            generate::jwt(&secret, &payload)
+        }
+        VarKind::String | VarKind::Email | VarKind::Url | VarKind::Int | VarKind::Domain => {
+            unreachable!("not a generated kind")
+        }
+    })
+}
