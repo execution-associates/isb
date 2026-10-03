@@ -76,6 +76,299 @@
         "summary": "Events"
       }
     },
+    "/api/v1/tools/org_create": {
+      "post": {
+        "description": "Platform admins: create an org (an incus project with its own bridge and network ACL), with optional limits and egress exceptions. Fails if it exists. Bind roots are set from the host's CLI only.",
+        "operationId": "org_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "cpus": {
+                    "description": "CPUs across the org's instances.",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "default_cpus": {
+                    "description": "CPUs an instance gets when its spec sets none.",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "default_memory": {
+                    "description": "Memory an instance gets when its spec sets none, e.g. 512MiB.",
+                    "type": "string"
+                  },
+                  "disk": {
+                    "description": "Disk across the org, e.g. 100GiB.",
+                    "type": "string"
+                  },
+                  "egress": {
+                    "description": "Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/orgs.md). Replaces the list; [] clears it.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "instances": {
+                    "description": "Instances in the org.",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "memory": {
+                    "description": "Memory across the org, e.g. 16GiB.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The new org's name: [a-z0-9-], starts with a letter.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "org"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Create an org"
+      }
+    },
+    "/api/v1/tools/org_delete": {
+      "post": {
+        "description": "Platform admins: delete an org: its project with its volumes, its network, ACL and service names, and its members, invitations and tokens. Refused while stacks are deployed in it (remove them first); with force=true its remaining sandboxes are deleted too. Its secrets stay on disk under the state directory.",
+        "operationId": "org_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "force": {
+                    "description": "Also delete the org's sandboxes.",
+                    "type": "boolean"
+                  },
+                  "org": {
+                    "description": "The org to delete.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "org"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Delete an org"
+      }
+    },
+    "/api/v1/tools/org_get": {
+      "post": {
+        "description": "An org's limits, per-instance defaults, network (bridge and subnet), egress exceptions, bind roots and service-name domain, with its instance, stack and member counts.",
+        "operationId": "org_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "The org (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Show an org"
+      }
+    },
+    "/api/v1/tools/org_list": {
+      "post": {
+        "description": "Platform admins: every org, as org_get shows one.",
+        "operationId": "org_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "Ignored.",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List orgs"
+      }
+    },
+    "/api/v1/tools/org_update": {
+      "post": {
+        "description": "Platform admins: change an org's limits, per-instance defaults or egress exceptions. Fields left out keep their value; `egress` replaces the list. A limit cannot be lifted once set (as with `isb org create`).",
+        "operationId": "org_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "cpus": {
+                    "description": "CPUs across the org's instances.",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "default_cpus": {
+                    "description": "CPUs an instance gets when its spec sets none.",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "default_memory": {
+                    "description": "Memory an instance gets when its spec sets none, e.g. 512MiB.",
+                    "type": "string"
+                  },
+                  "disk": {
+                    "description": "Disk across the org, e.g. 100GiB.",
+                    "type": "string"
+                  },
+                  "egress": {
+                    "description": "Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/orgs.md). Replaces the list; [] clears it.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "instances": {
+                    "description": "Instances in the org.",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "memory": {
+                    "description": "Memory across the org, e.g. 16GiB.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "org"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Change an org"
+      }
+    },
     "/api/v1/tools/overview": {
       "post": {
         "description": "Everything a dashboard shows in one call: the host's CPU and memory (with history), every stack in detail (as stack_status), the sandboxes (status, IP, CPU, memory), and the latest event number for the events tool.",
@@ -557,7 +850,7 @@
     },
     "/api/v1/tools/secret_list": {
       "post": {
-        "description": "An org's secrets: name, driver, version, timestamps, labels. Never values.",
+        "description": "An org's secrets: name, driver, version, timestamps, labels, and the deployed stacks using each (`used_by`). Never values. `references` lists the driver references (such as 1Password's vault/item/field) stacks use, which live outside the store.",
         "operationId": "secret_list",
         "requestBody": {
           "content": {

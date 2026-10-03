@@ -1,6 +1,6 @@
 // The identity endpoints, /api/v1/auth/* (docs/auth.md). They are hand
 // written, not generated: the OpenAPI document covers the tools.
-import { del, get, post } from "./client";
+import { api, del, get, post } from "./client";
 
 const A = "/api/v1/auth";
 
@@ -114,6 +114,24 @@ export interface Invitation {
   expires_at: number;
 }
 
+export interface Member {
+  user: User;
+  role: Role;
+  /** Last session or token use, unix seconds. */
+  last_active: number | null;
+}
+
+export interface OrgToken extends ApiToken {
+  user: { id: number; email: string; name: string };
+}
+
+export interface AdminUser extends User {
+  memberships: Membership[];
+  last_active: number | null;
+}
+
+const orgPath = (org: string) => `${A}/orgs/${encodeURIComponent(org)}`;
+
 export const auth = {
   setupNeeded: () => get<{ needed: boolean }>(`${A}/setup`),
   setup: (b: { setup_token: string; email: string; name: string; password: string }) =>
@@ -142,10 +160,17 @@ export const auth = {
   inspectInvitation: (token: string) => post<InvitationInfo>(`${A}/invitations/inspect`, { token }),
   acceptInvitation: (b: { token: string; name?: string; password?: string }) =>
     post<{ user: User; membership: Membership; created: boolean }>(`${A}/invitations/accept`, b),
-  orgInvitations: (org: string) => get<{ invitations: Invitation[] }>(`${A}/orgs/${encodeURIComponent(org)}/invitations`),
-  revokeInvitation: (org: string, id: number) => del(`${A}/orgs/${encodeURIComponent(org)}/invitations/${id}`),
-  members: (org: string) =>
-    get<{ members: { user: User; role: Role }[] }>(`${A}/orgs/${encodeURIComponent(org)}/members`),
+  orgInvitations: (org: string) => get<{ invitations: Invitation[] }>(`${orgPath(org)}/invitations`),
+  revokeInvitation: (org: string, id: number) => del(`${orgPath(org)}/invitations/${id}`),
+  members: (org: string) => get<{ members: Member[] }>(`${orgPath(org)}/members`),
+  setRole: (org: string, userId: number, role: Role) =>
+    api<{ user_id: number; role: Role }>("PUT", `${orgPath(org)}/members/${userId}`, { role }),
+  removeMember: (org: string, userId: number) => del(`${orgPath(org)}/members/${userId}`),
+  orgTokens: (org: string) => get<{ tokens: OrgToken[] }>(`${orgPath(org)}/tokens`),
+
+  adminUsers: () => get<{ users: AdminUser[] }>(`${A}/admin/users`),
+  adminUpdateUser: (id: number, b: { disabled?: boolean; platform_admin?: boolean }) =>
+    api<{ user: User }>("PATCH", `${A}/admin/users/${id}`, b),
 
   identities: () => get<{ identities: Identity[] }>(`${A}/identities`),
   unlinkIdentity: (id: number) => del(`${A}/identities/${id}`),

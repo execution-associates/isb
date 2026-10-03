@@ -276,7 +276,7 @@ Each takes `org` (default `default`). Values travel base64.
 | `secret_create` | Create (`name`, `value`, optional `driver`, `labels`); fails if it exists. |
 | `secret_set` | New value (`name`, `value`); returns the metadata with the new version, and the stacks rolling to it (`rolled`). |
 | `secret_get` | `{meta, value}`. |
-| `secret_list` | `{secrets: [meta...]}`, no values. |
+| `secret_list` | `{secrets: [meta...], references: [...]}`, no values. Each secret carries `used_by`, the deployed stacks whose services use it; `references` are the driver references (such as `vault/item/field`) stacks use, each `{name, driver, version, used_by}`. |
 | `secret_inspect` | One secret's metadata. |
 | `secret_delete` | Delete, unless a deployed stack uses it. |
 | `secret_refresh` | Re-read from an external source (a store name, or a stack's driver reference); `rolled` lists the stacks rolling. |

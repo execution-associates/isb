@@ -19,6 +19,29 @@ sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run] [--public-ingress
 
 `isb org create` on an existing org updates it to the flags given.
 
+## From the API and the web UI
+
+The same operations are daemon tools ([serve.md](serve.md#tools)), and the
+web UI's org Settings and Platform pages use them:
+
+| Tool | Who | Does |
+|---|---|---|
+| `org_get` | the org's members | limits, defaults, network, egress, bind roots, service-name domain (`<org>.isb`), counts |
+| `org_list` | platform admins | every org |
+| `org_create` | platform admins | `isb org create` without `--bind-root` |
+| `org_update` | platform admins | limits, per-instance defaults, egress exceptions |
+| `org_delete` | platform admins | `isb org rm`, refused while stacks are deployed in the org |
+
+Limits and egress exceptions are what keep one org from the others and from
+the host's networks, so changing them is for platform admins, not the org's
+own owners and admins, who see them read-only. Bind roots are host paths and
+are set only on the host (`isb org create --bind-root`): an update through
+the API keeps them, as it keeps any field it is not given. A limit, once
+set, can be changed but not lifted, as with the CLI. Creating an org through
+the API also adds it to the identity store, and deleting one removes its
+memberships, invitations and tokens; its secrets stay under the state
+directory.
+
 ## What an org is in incus
 
 Org `acme` is the incus project `isb-acme` (config `user.isb.org=acme`), its

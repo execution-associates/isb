@@ -136,6 +136,14 @@ minime only runs binaries downloaded from our CI runs.
   could reach host loopback such as the incus socket), reaching Caddy on a
   per-org listener at the org's bridge address :8480. Domains are left out
   of the service revision, so editing them never replaces instances.
+- **Org settings that keep orgs apart are platform-admin only** (limits,
+  egress, create/delete; `org_*` tools). Org owners see them read-only. Bind
+  roots and the domain allowlist/ingress provider are set only by `isb org
+  create` (host paths and cross-org claims). `org_delete` is refused while
+  stacks are deployed. Members may read their org's secret values (the org
+  is the trust boundary); the UI hides Reveal from members as a nicety only.
+- **Agents sharing this session's scratchpad use their own subdirectory**
+  (`scratchpad/<task>/`): one agent deleted another's script there.
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
@@ -261,7 +269,7 @@ minime only runs binaries downloaded from our CI runs.
 - [~] (subagent p3.2) P3.3 Deploy flows: new app from git/image/template, deploy with live
   build logs, rollback, scale, web terminal (xterm.js over websocket exec).
   **Verify:** end to end in the browser.
-- [~] (subagent p3.4) P3.4 Org admin: members, invitations, roles, API tokens, secrets editor,
+- [x] (e7b84ec, d00c451) P3.4 Org admin: members, invitations, roles, API tokens, secrets editor,
   settings. **Verify:** invite a second user and sign in as them.
 
 ## Phase 4: day 2

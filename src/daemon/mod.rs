@@ -11,6 +11,7 @@
 //! machine for an agent), and each org's secrets ([`crate::secrets`]).
 
 pub mod apps;
+mod orgs;
 pub mod policy;
 pub mod secrets;
 
@@ -125,6 +126,8 @@ struct Daemon {
     secrets: Arc<crate::secrets::Secrets>,
     apps: crate::app::Apps,
     ingress: Option<Arc<crate::ingress::Manager>>,
+    /// The identity store: the org list memberships hang off.
+    users: Arc<AuthStore>,
 }
 
 /// Run the daemon until SIGINT/SIGTERM. Apps keep running when it stops.
@@ -191,6 +194,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         secrets,
         apps: apps.clone(),
         ingress: ingress.clone(),
+        users: users.clone(),
     });
     let registry = registry(d.clone())?;
     let hooks = hooks(d.clone(), users.clone(), cfg.allow_unauthenticated);
@@ -256,7 +260,13 @@ fn with_external_drivers(
 }
 
 /// Tools that reach across orgs: platform admins only.
-const PLATFORM_TOOLS: &[&str] = &["server_status"];
+const PLATFORM_TOOLS: &[&str] = &[
+    "server_status",
+    "org_list",
+    "org_create",
+    "org_update",
+    "org_delete",
+];
 
 /// Read-only tools that span orgs: any signed-in user, filtered to their
 /// orgs by the tool itself.
@@ -301,53 +311,8 @@ fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate:
         }
         Authenticated::None
     });
-    let authorize: crate::server::mcp::Authorize = Arc::new(move |c, tool, mut args, scope| {
-        if let Some(org) = scope {
-            match args.get("org").and_then(Value::as_str) {
-                Some(o) if o != org.as_str() => {
-                    return Err(Error::Forbidden(format!(
-                        "this endpoint acts in org {org}, not {o}"
-                    )));
-                }
-                _ => args["org"] = json!(org.as_str()),
-            }
-        }
-        match c {
-            Caller::Local { .. } => Ok(args),
-            Caller::Unauthenticated { .. } if allow_anonymous => Ok(args),
-            Caller::Unauthenticated { .. } => Err(Error::Forbidden(
-                "sign in: send an API token as Authorization: Bearer (isb token create)".into(),
-            )),
-            Caller::Access(id) => Err(Error::Forbidden(format!(
-                "{} has no isb account; ask an org admin to invite you",
-                id.name()
-            ))),
-            Caller::User { principal: p } => {
-                if PLATFORM_TOOLS.contains(&tool.name.as_str()) && !p.platform_admin {
-                    return Err(Error::Forbidden(format!(
-                        "{} is for platform admins",
-                        tool.name
-                    )));
-                }
-                if tool.name == "secret_reencrypt"
-                    && args.get("all").and_then(Value::as_bool) == Some(true)
-                    && !p.platform_admin
-                {
-                    return Err(Error::Forbidden(
-                        "re-encrypting every org is for platform admins".into(),
-                    ));
-                }
-                if CROSS_ORG_READS.contains(&tool.name.as_str()) && scope.is_none() {
-                    return Ok(args);
-                }
-                let org = arg_org(&args)?;
-                if p.platform_admin || p.role_in(&org).is_some() {
-                    Ok(args)
-                } else {
-                    Err(Error::Forbidden(format!("no access to org {org}")))
-                }
-            }
-        }
+    let authorize: crate::server::mcp::Authorize = Arc::new(move |c, tool, args, scope| {
+        authorize(c, &tool.name, args, scope, allow_anonymous)
     });
     let events: crate::server::mcp::Events = Arc::new(move |c, since| {
         if let (Caller::Unauthenticated { .. }, false) = (c, allow_anonymous) {
@@ -387,6 +352,60 @@ fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate:
         authn: Some(authn),
         authorize: Some(authorize),
         events: Some(events),
+    }
+}
+
+/// May `c` call `tool` with `args`? The arguments to use (an org-bound
+/// endpoint pins `org`), or the refusal.
+fn authorize(
+    c: &Caller,
+    tool: &str,
+    mut args: Value,
+    scope: Option<&crate::org::OrgId>,
+    allow_anonymous: bool,
+) -> Result<Value> {
+    if let Some(org) = scope {
+        match args.get("org").and_then(Value::as_str) {
+            Some(o) if o != org.as_str() => {
+                return Err(Error::Forbidden(format!(
+                    "this endpoint acts in org {org}, not {o}"
+                )));
+            }
+            _ => args["org"] = json!(org.as_str()),
+        }
+    }
+    match c {
+        Caller::Local { .. } => Ok(args),
+        Caller::Unauthenticated { .. } if allow_anonymous => Ok(args),
+        Caller::Unauthenticated { .. } => Err(Error::Forbidden(
+            "sign in: send an API token as Authorization: Bearer (isb token create)".into(),
+        )),
+        Caller::Access(id) => Err(Error::Forbidden(format!(
+            "{} has no isb account; ask an org admin to invite you",
+            id.name()
+        ))),
+        Caller::User { principal: p } => {
+            if PLATFORM_TOOLS.contains(&tool) && !p.platform_admin {
+                return Err(Error::Forbidden(format!("{} is for platform admins", tool)));
+            }
+            if tool == "secret_reencrypt"
+                && args.get("all").and_then(Value::as_bool) == Some(true)
+                && !p.platform_admin
+            {
+                return Err(Error::Forbidden(
+                    "re-encrypting every org is for platform admins".into(),
+                ));
+            }
+            if CROSS_ORG_READS.contains(&tool) && scope.is_none() {
+                return Ok(args);
+            }
+            let org = arg_org(&args)?;
+            if p.platform_admin || p.role_in(&org).is_some() {
+                Ok(args)
+            } else {
+                Err(Error::Forbidden(format!("no access to org {org}")))
+            }
+        }
     }
 }
 
@@ -816,6 +835,22 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
         sandbox_create
     );
     let ctl = d.ctl.clone();
+    let bindings: secrets::Bindings = Arc::new(move |org: &crate::org::OrgId| {
+        let mut out = Vec::new();
+        for def in ctl.definitions().iter().filter(|def| def.org == *org) {
+            let used = crate::stack::secrets::used_keys(&def.file);
+            for (_, b) in def.secrets.iter().filter(|(k, _)| used.contains(*k)) {
+                out.push(secrets::Binding {
+                    name: b.name.clone(),
+                    driver: b.driver.clone(),
+                    version: b.version,
+                    stack: def.name.clone(),
+                });
+            }
+        }
+        out
+    });
+    let ctl = d.ctl.clone();
     let in_use: secrets::InUse = Arc::new(move |org: &crate::org::OrgId, name: &str| {
         ctl.definitions()
             .iter()
@@ -836,6 +871,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             in_use,
             changed,
             refresh,
+            bindings,
         },
     )?;
     tool!(
@@ -952,6 +988,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             }))
         }
     );
+    orgs::register(&mut r, d.clone())?;
     Ok(r)
 }
 
@@ -1329,4 +1366,105 @@ pub fn local_deploy_args(
 /// Default state directory, exported for the CLI.
 pub fn default_state_dir() -> PathBuf {
     Store::default_dir()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::{Principal, PrincipalKind, Role, User};
+    use crate::org::OrgId;
+
+    fn user(orgs: &[(&str, Role)], platform_admin: bool) -> Caller {
+        Caller::User {
+            principal: Arc::new(Principal {
+                user: User {
+                    id: 7,
+                    email: "u@x.io".into(),
+                    name: "U".into(),
+                    platform_admin,
+                    created_at: 0,
+                    disabled: false,
+                    has_password: true,
+                },
+                kind: PrincipalKind::Session { id: 1 },
+                orgs: orgs
+                    .iter()
+                    .map(|(o, r)| (OrgId::new(*o).unwrap(), *r))
+                    .collect(),
+                platform_admin,
+            }),
+        }
+    }
+
+    fn ok(c: &Caller, tool: &str, args: Value) -> bool {
+        authorize(c, tool, args, None, false).is_ok()
+    }
+
+    #[test]
+    fn org_tools_are_platform_admin_only_but_org_get() {
+        let member = user(&[("acme", Role::Member)], false);
+        let admin = user(&[("acme", Role::Admin)], false);
+        let owner = user(&[("acme", Role::Owner)], false);
+        let platform = user(&[], true);
+        let acme = json!({"org": "acme"});
+        // Reading an org: its members, not other orgs' people.
+        for c in [&member, &admin, &owner, &platform] {
+            assert!(ok(c, "org_get", acme.clone()));
+        }
+        assert!(!ok(&owner, "org_get", json!({"org": "other"})));
+        // Changing, creating, deleting and listing orgs: platform admins
+        // only, whatever the org role.
+        for t in [
+            "org_update",
+            "org_delete",
+            "org_create",
+            "org_list",
+            "server_status",
+        ] {
+            for c in [&member, &admin, &owner] {
+                let e = authorize(c, t, acme.clone(), None, false).unwrap_err();
+                assert!(e.to_string().contains("platform admins"), "{t}: {e}");
+            }
+            assert!(ok(&platform, t, acme.clone()), "{t}");
+        }
+        // Not through an org-bound endpoint either.
+        let scope = OrgId::new("acme").unwrap();
+        assert!(authorize(&owner, "org_update", json!({}), Some(&scope), false).is_err());
+        // The local socket is the daemon's own user.
+        assert!(ok(&Caller::Local { uid: None }, "org_delete", acme));
+    }
+
+    #[test]
+    fn secrets_stay_in_their_org() {
+        let member = user(&[("acme", Role::Member)], false);
+        assert!(ok(
+            &member,
+            "secret_get",
+            json!({"org": "acme", "name": "x"})
+        ));
+        assert!(ok(&member, "secret_list", json!({"org": "acme"})));
+        assert!(!ok(
+            &member,
+            "secret_get",
+            json!({"org": "beta", "name": "x"})
+        ));
+        assert!(
+            !ok(&member, "secret_delete", json!({"name": "x"})),
+            "default org"
+        );
+        // An org-bound endpoint pins the org, and refuses another.
+        let scope = OrgId::new("acme").unwrap();
+        let a = authorize(&member, "secret_list", json!({}), Some(&scope), false).unwrap();
+        assert_eq!(a["org"], "acme");
+        assert!(
+            authorize(
+                &member,
+                "secret_list",
+                json!({"org": "beta"}),
+                Some(&scope),
+                false
+            )
+            .is_err()
+        );
+    }
 }

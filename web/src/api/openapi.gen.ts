@@ -24,6 +24,106 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/org_create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create an org
+         * @description Platform admins: create an org (an incus project with its own bridge and network ACL), with optional limits and egress exceptions. Fails if it exists. Bind roots are set from the host's CLI only.
+         */
+        post: operations["org_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/org_delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete an org
+         * @description Platform admins: delete an org: its project with its volumes, its network, ACL and service names, and its members, invitations and tokens. Refused while stacks are deployed in it (remove them first); with force=true its remaining sandboxes are deleted too. Its secrets stay on disk under the state directory.
+         */
+        post: operations["org_delete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/org_get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Show an org
+         * @description An org's limits, per-instance defaults, network (bridge and subnet), egress exceptions, bind roots and service-name domain, with its instance, stack and member counts.
+         */
+        post: operations["org_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/org_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List orgs
+         * @description Platform admins: every org, as org_get shows one.
+         */
+        post: operations["org_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/org_update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change an org
+         * @description Platform admins: change an org's limits, per-instance defaults or egress exceptions. Fields left out keep their value; `egress` replaces the list. A limit cannot be lifted once set (as with `isb org create`).
+         */
+        post: operations["org_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/overview": {
         parameters: {
             query?: never;
@@ -215,7 +315,7 @@ export interface paths {
         put?: never;
         /**
          * List secrets
-         * @description An org's secrets: name, driver, version, timestamps, labels. Never values.
+         * @description An org's secrets: name, driver, version, timestamps, labels, and the deployed stacks using each (`used_by`). Never values. `references` lists the driver references (such as 1Password's vault/item/field) stacks use, which live outside the store.
          */
         post: operations["secret_list"];
         delete?: never;
@@ -551,6 +651,216 @@ export interface operations {
                     org?: string;
                     since?: number;
                     wait?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    org_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description CPUs across the org's instances. */
+                    cpus?: number;
+                    /** @description CPUs an instance gets when its spec sets none. */
+                    default_cpus?: number;
+                    /** @description Memory an instance gets when its spec sets none, e.g. 512MiB. */
+                    default_memory?: string;
+                    /** @description Disk across the org, e.g. 100GiB. */
+                    disk?: string;
+                    /** @description Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/orgs.md). Replaces the list; [] clears it. */
+                    egress?: string[];
+                    /** @description Instances in the org. */
+                    instances?: number;
+                    /** @description Memory across the org, e.g. 16GiB. */
+                    memory?: string;
+                    /** @description The new org's name: [a-z0-9-], starts with a letter. */
+                    org: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    org_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Also delete the org's sandboxes. */
+                    force?: boolean;
+                    /** @description The org to delete. */
+                    org: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    org_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The org (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    org_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Ignored. */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    org_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description CPUs across the org's instances. */
+                    cpus?: number;
+                    /** @description CPUs an instance gets when its spec sets none. */
+                    default_cpus?: number;
+                    /** @description Memory an instance gets when its spec sets none, e.g. 512MiB. */
+                    default_memory?: string;
+                    /** @description Disk across the org, e.g. 100GiB. */
+                    disk?: string;
+                    /** @description Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/orgs.md). Replaces the list; [] clears it. */
+                    egress?: string[];
+                    /** @description Instances in the org. */
+                    instances?: number;
+                    /** @description Memory across the org, e.g. 16GiB. */
+                    memory?: string;
+                    /** @description The org. */
+                    org: string;
                 };
             };
         };

@@ -269,6 +269,10 @@ impl AuthApi {
             }
             ("POST", ["passkeys", "login", "options"]) => self.passkey_login_options(req),
             ("POST", ["passkeys", "login", "verify"]) => self.passkey_login_verify(req),
+            ("GET", ["admin", "users"]) => self.with_principal(req, |p| self.admin_users(p)),
+            ("PATCH", ["admin", "users", id]) => {
+                self.with_principal(req, |p| self.admin_user_update(req, p, id))
+            }
             (_, ["orgs", org, rest @ ..]) => {
                 let org = match OrgId::new(*org) {
                     Ok(o) => o,
@@ -705,8 +709,11 @@ impl AuthApi {
                     .store
                     .list_members(org)?
                     .into_iter()
-                    .map(|(u, r)| json!({"user": u, "role": r}))
-                    .collect();
+                    .map(|(u, r)| {
+                        let last = self.store.last_active(u.id)?;
+                        Ok(json!({"user": u, "role": r, "last_active": last}))
+                    })
+                    .collect::<Result<_, AuthError>>()?;
                 Ok(Response::json(200, &json!({"members": list})))
             }
             ("PUT", ["members", uid]) => {
@@ -751,11 +758,94 @@ impl AuthApi {
             }
             ("GET", ["tokens"]) => {
                 manage()?;
-                let list = self.store.list_org_api_tokens(org)?;
+                // With who holds each: a platform admin's token in an org
+                // they are not a member of has no member row to name it.
+                let list: Vec<Value> = self
+                    .store
+                    .list_org_api_tokens(org)?
+                    .into_iter()
+                    .map(|t| {
+                        let u = self.store.user(t.user_id)?;
+                        let mut v = serde_json::to_value(&t).unwrap_or_default();
+                        v["user"] = json!({"id": u.id, "email": u.email, "name": u.name});
+                        Ok(v)
+                    })
+                    .collect::<Result<_, AuthError>>()?;
                 Ok(Response::json(200, &json!({"tokens": list})))
             }
             _ => Ok(org_405(rest)),
         }
+    }
+
+    // ---- platform administration ----
+
+    fn platform_admin(&self, p: &Principal) -> Result<(), AuthError> {
+        if p.platform_admin {
+            Ok(())
+        } else {
+            Err(AuthError::Forbidden("this is for platform admins".into()))
+        }
+    }
+
+    /// Every user, with their orgs and when they were last active.
+    fn admin_users(&self, p: &Principal) -> Result<Response, AuthError> {
+        self.platform_admin(p)?;
+        let list: Vec<Value> = self
+            .store
+            .list_users()?
+            .into_iter()
+            .map(|u| {
+                let memberships = self.store.memberships(u.id)?;
+                let last = self.store.last_active(u.id)?;
+                let mut v = serde_json::to_value(&u).unwrap_or_default();
+                v["memberships"] = json!(memberships);
+                v["last_active"] = json!(last);
+                Ok(v)
+            })
+            .collect::<Result<_, AuthError>>()?;
+        Ok(Response::json(200, &json!({"users": list})))
+    }
+
+    /// Disable or enable a user, or make or unmake a platform admin. Nobody
+    /// does either to themselves, and the platform keeps an enabled admin.
+    fn admin_user_update(
+        &self,
+        req: &Request,
+        p: &Principal,
+        id: &str,
+    ) -> Result<Response, AuthError> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct B {
+            #[serde(default)]
+            disabled: Option<bool>,
+            #[serde(default)]
+            platform_admin: Option<bool>,
+        }
+        self.platform_admin(p)?;
+        let id = parse_id(id)?;
+        let b: B = body(req)?;
+        let u = self.store.user(id)?;
+        let demoting = b.disabled == Some(true) || b.platform_admin == Some(false);
+        if demoting && id == p.user.id {
+            return Err(AuthError::Forbidden(
+                "you cannot disable yourself or drop your own platform admin role; ask another platform admin".into(),
+            ));
+        }
+        if demoting && u.platform_admin && self.store.other_platform_admins(id)? == 0 {
+            return Err(AuthError::Conflict(format!(
+                "{} is the last enabled platform admin; make someone else one first",
+                u.email
+            )));
+        }
+        if let Some(a) = b.platform_admin {
+            self.store.set_platform_admin(id, a)?;
+        }
+        if let Some(d) = b.disabled {
+            self.store.set_disabled(id, d)?;
+        }
+        let u = self.store.user(id)?;
+        Ok(Response::json(200, &json!({"user": u})))
     }
 
     /// Only an owner (or platform admin) touches an owner or makes one; an
@@ -954,6 +1044,8 @@ fn not_found_or_405(seg: &[&str]) -> Response {
         ["me" | "sessions" | "providers" | "identities" | "passkeys"] => "GET",
         ["tokens"] => "GET, POST",
         ["sessions" | "tokens" | "identities" | "passkeys", _] => "DELETE",
+        ["admin", "users"] => "GET",
+        ["admin", "users", _] => "PATCH",
         ["oauth", _, "start"] => "GET, POST",
         ["oauth", _, "callback"] => "GET",
         ["passkeys", "register" | "login", "options" | "verify"] => "POST",

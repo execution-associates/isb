@@ -679,6 +679,28 @@ impl AuthStore {
         Ok(())
     }
 
+    /// When a user last did anything: the latest of their sessions' last use
+    /// and their tokens' last use (`None`: never, or nothing left to tell).
+    pub fn last_active(&self, user_id: i64) -> AuthResult<Option<i64>> {
+        Ok(self.db().query_row(
+            "SELECT MAX(t) FROM (
+                 SELECT MAX(last_seen) AS t FROM sessions WHERE user_id = ?1
+                 UNION ALL
+                 SELECT MAX(last_used) FROM api_tokens WHERE user_id = ?1)",
+            [user_id],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// Enabled platform admins other than `except`.
+    pub fn other_platform_admins(&self, except: i64) -> AuthResult<i64> {
+        Ok(self.db().query_row(
+            "SELECT COUNT(*) FROM users WHERE platform_admin = 1 AND disabled = 0 AND id != ?1",
+            [except],
+            |r| r.get(0),
+        )?)
+    }
+
     pub fn set_platform_admin(&self, user_id: i64, admin: bool) -> AuthResult<()> {
         let n = self.db().execute(
             "UPDATE users SET platform_admin = ?2 WHERE id = ?1",

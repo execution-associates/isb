@@ -1,4 +1,4 @@
-import { Check, ChevronsUpDown, LayoutDashboard, LogOut, Menu, Monitor, Moon, Sun, UserRound } from "lucide-react";
+import { Check, ChevronsUpDown, KeyRound, LayoutDashboard, LogOut, Menu, Monitor, Moon, Settings, ShieldCheck, Sun, UserRound, Users } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import type { Me } from "@/api/auth";
@@ -87,6 +87,8 @@ function useCurrentOrg(me: Me): string | null {
 function OrgSwitcher({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
   const current = useCurrentOrg(me);
   const navigate = useNavigate();
+  // Switching orgs keeps the section (Members, Secrets...).
+  const section = useLocation().pathname.match(/^\/orgs\/[^/]+(\/[a-z]+)$/)?.[1] ?? "";
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -115,7 +117,7 @@ function OrgSwitcher({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
           <DropdownMenuItem
             key={o}
             onSelect={() => {
-              navigate(`/orgs/${encodeURIComponent(o)}`);
+              navigate(`/orgs/${encodeURIComponent(o)}${section}`);
               onNavigate?.();
             }}
           >
@@ -147,6 +149,15 @@ function NavItem({ to, icon: Icon, children, onNavigate, end }: { to: string; ic
       <Icon className="size-4" />
       {children}
     </NavLink>
+  );
+}
+
+function NavSection({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="grid gap-1">
+      <div className="truncate px-2.5 pb-1 text-xs font-medium text-muted-foreground/80">{label}</div>
+      {children}
+    </div>
   );
 }
 
@@ -227,15 +238,33 @@ function SidebarContent({ me, onNavigate }: { me: Me; onNavigate?: () => void })
         <span className="text-lg">isb</span>
       </Link>
       <OrgSwitcher me={me} onNavigate={onNavigate} />
-      <nav className="grid gap-1" aria-label="Main">
-        {org && (
-          <NavItem to={`/orgs/${encodeURIComponent(org)}`} icon={LayoutDashboard} onNavigate={onNavigate} end>
-            Overview
-          </NavItem>
+      <nav className="grid gap-4" aria-label="Main">
+        {org && me.orgs.includes(org) && (
+          <NavSection label={org}>
+            <NavItem to={`/orgs/${encodeURIComponent(org)}`} icon={LayoutDashboard} onNavigate={onNavigate} end>
+              Overview
+            </NavItem>
+            <NavItem to={`/orgs/${encodeURIComponent(org)}/members`} icon={Users} onNavigate={onNavigate}>
+              Members
+            </NavItem>
+            <NavItem to={`/orgs/${encodeURIComponent(org)}/secrets`} icon={KeyRound} onNavigate={onNavigate}>
+              Secrets
+            </NavItem>
+            <NavItem to={`/orgs/${encodeURIComponent(org)}/settings`} icon={Settings} onNavigate={onNavigate}>
+              Settings
+            </NavItem>
+          </NavSection>
         )}
-        <NavItem to="/account" icon={UserRound} onNavigate={onNavigate}>
-          Account
-        </NavItem>
+        <NavSection label="You">
+          {me.platform_admin && (
+            <NavItem to="/admin" icon={ShieldCheck} onNavigate={onNavigate}>
+              Platform
+            </NavItem>
+          )}
+          <NavItem to="/account" icon={UserRound} onNavigate={onNavigate}>
+            Account
+          </NavItem>
+        </NavSection>
       </nav>
       <div className="mt-auto border-t pt-3">
         <UserMenu me={me} onNavigate={onNavigate} />

@@ -18,12 +18,43 @@ of it) in a browser:
   `/forgot-password` makes a reset link (written to the daemon's log while no
   mailer is configured) and `/reset-password#TOKEN` sets the new password.
 - **Signed in**: a sidebar with an org switcher (the orgs you can open: your
-  memberships, or every org for a platform admin) and your account menu
-  (account, theme, sign out). Each org's overview lists its stacks and a live
-  activity feed. **Account** changes your password, links and unlinks
-  providers, adds and deletes passkeys, makes and revokes API tokens (shown
-  once), and lists your sessions. Org owners and admins invite people from
-  the org overview.
+  memberships, or every org for a platform admin; switching keeps the
+  section you are in), the selected org's sections, and your account menu
+  (account, theme, sign out). **Account** changes your password, links and
+  unlinks providers, adds and deletes passkeys, makes and revokes API tokens
+  (shown once), and lists your sessions.
+
+Each org has four sections:
+
+- **Overview** (`/orgs/ORG`): its stacks and a live activity feed.
+- **Members** (`/orgs/ORG/members`): who is in the org, their role and when
+  they were last active. Owners and admins also invite people (a link,
+  shown once), change roles, remove members, make a new link for or revoke a
+  pending invitation, and see and revoke every API token in the org. The
+  role choices follow the server's rules: an admin hands out member and
+  admin, only an owner touches an owner, and the last owner stays. Anyone
+  can leave.
+- **Secrets** (`/orgs/ORG/secrets`): the org's secrets with driver, version,
+  update time, labels and the stacks using each, plus the driver references
+  stacks read (refresh one to check it now). Create one or give it a new
+  value from a password-style field or a file (sent once, never shown back),
+  delete one (the server's refusal is shown while a stack uses it), and set
+  up 1Password (the `onepassword-token` secret and how to write references).
+  Values never reach the page except through **Reveal**: owners and admins
+  only, after a confirmation, through `secret_get`, and hidden again after 30
+  seconds. Members can read values through the API anyway (the org is the
+  trust boundary); the UI keeps them off screen.
+- **Settings** (`/orgs/ORG/settings`): quota and per-instance defaults,
+  network (bridge, subnet, service-name domain, bind roots) and egress
+  exceptions. Platform admins edit the quota and egress exceptions and
+  delete the org (typing its name); everyone else sees them read-only.
+
+Platform admins also get **Platform** (`/admin/orgs`, `/admin/users`,
+`/admin/server`): every org (create, delete), every user (disable, enable,
+make or unmake platform admin) and the server's status.
+
+The UI hides what a role may not do; the server decides ([auth.md](auth.md),
+[orgs.md](orgs.md)), and its refusals are shown as it words them.
 
 Light, dark and system themes; it works down to phone width.
 

@@ -27,12 +27,26 @@ pub type Changed = Arc<dyn Fn(&OrgId, &str) -> Vec<String> + Send + Sync>;
 pub type Refresh =
     Arc<dyn Fn(&OrgId, &str) -> Result<crate::stack::secrets::Refreshed> + Send + Sync>;
 
+/// One stack's use of a secret, as deployed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Binding {
+    /// A store name, or a driver reference (`vault/item/field`).
+    pub name: String,
+    pub driver: String,
+    pub version: u64,
+    pub stack: String,
+}
+
+/// Every secret the org's deployed stacks use.
+pub type Bindings = Arc<dyn Fn(&OrgId) -> Vec<Binding> + Send + Sync>;
+
 /// How the secret tools reach the stacks.
 #[derive(Clone)]
 pub struct Hooks {
     pub in_use: InUse,
     pub changed: Changed,
     pub refresh: Refresh,
+    pub bindings: Bindings,
 }
 
 impl Hooks {
@@ -42,6 +56,7 @@ impl Hooks {
             in_use: Arc::new(|_, _| Vec::new()),
             changed: Arc::new(|_, _| Vec::new()),
             refresh: Arc::new(|_, _| Ok((Vec::new(), Vec::new()))),
+            bindings: Arc::new(|_| Vec::new()),
         }
     }
 }
@@ -99,12 +114,44 @@ fn value_of(b64: &str) -> Result<Vec<u8>> {
     crate::rpc::b64_decode(b64).map_err(|_| Error::invalid("value must be base64"))
 }
 
+/// `secret_list`'s answer: the stored secrets with the stacks using each,
+/// then the references stacks use that are not in the store.
+fn listing(stored: Vec<crate::secrets::SecretMeta>, used: Vec<Binding>) -> Result<Value> {
+    let stacks_of = |name: &str| -> Vec<String> {
+        let mut v: Vec<String> = used
+            .iter()
+            .filter(|b| b.name == name)
+            .map(|b| b.stack.clone())
+            .collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+    let mut secrets = Vec::new();
+    for m in &stored {
+        let mut v = serde_json::to_value(m)?;
+        v["used_by"] = json!(stacks_of(&m.name));
+        secrets.push(v);
+    }
+    let mut refs: BTreeMap<&str, Value> = BTreeMap::new();
+    for b in used
+        .iter()
+        .filter(|b| !stored.iter().any(|m| m.name == b.name))
+    {
+        refs.entry(b.name.as_str()).or_insert_with(|| {
+            json!({"name": b.name, "driver": b.driver, "version": b.version, "used_by": stacks_of(&b.name)})
+        });
+    }
+    Ok(json!({"secrets": secrets, "references": refs.into_values().collect::<Vec<_>>()}))
+}
+
 /// Register the secret tools.
 pub fn register(r: &mut Registry, secrets: Arc<Secrets>, hooks: Hooks) -> Result<()> {
     let Hooks {
         in_use,
         changed,
         refresh,
+        bindings,
     } = hooks;
     let ro = json!({"readOnlyHint": true, "openWorldHint": false});
     let destructive = json!({"destructiveHint": true, "openWorldHint": false});
@@ -209,13 +256,13 @@ pub fn register(r: &mut Registry, secrets: Arc<Secrets>, hooks: Hooks) -> Result
     add(
         "secret_list",
         "List secrets",
-        "An org's secrets: name, driver, version, timestamps, labels. Never values.",
+        "An org's secrets: name, driver, version, timestamps, labels, and the deployed stacks using each (`used_by`). Never values. `references` lists the driver references (such as 1Password's vault/item/field) stacks use, which live outside the store.",
         obj(props(json!({})), &[]),
         &ro,
-        Box::new(|s, a, c| {
+        Box::new(move |s, a, c| {
             let a: OrgOnly = args(a)?;
             let org = org_for(c, a.org.as_deref())?;
-            Ok(json!({"secrets": s.list(&org)?}))
+            listing(s.list(&org)?, bindings(&org))
         }),
     )?;
     add(
@@ -404,6 +451,24 @@ mod tests {
                 Ok((vec![], vec![]))
             }
         });
+        let bindings: Bindings = Arc::new(|org: &OrgId| {
+            let b = |name: &str, driver: &str, stack: &str| Binding {
+                name: name.into(),
+                driver: driver.into(),
+                version: 3,
+                stack: stack.into(),
+            };
+            if org.is_default() {
+                vec![
+                    b("used", "local", "web"),
+                    b("used", "local", "app"),
+                    b("used", "local", "app"),
+                    b("vault/item/field", "onepassword", "app"),
+                ]
+            } else {
+                vec![]
+            }
+        });
         let mut r = Registry::new();
         register(
             &mut r,
@@ -412,6 +477,7 @@ mod tests {
                 in_use,
                 changed,
                 refresh,
+                bindings,
             },
         )
         .unwrap();
@@ -462,6 +528,34 @@ mod tests {
         )
         .unwrap_err();
         assert!(e.to_string().contains("local callers"), "{e}");
+    }
+
+    #[test]
+    fn list_says_who_uses_what() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = registry(dir.path());
+        let v = crate::rpc::b64_encode(b"x");
+        for n in ["used", "idle"] {
+            call(&r, "secret_create", json!({"name": n, "value": v})).unwrap();
+        }
+        let l = call(&r, "secret_list", json!({})).unwrap();
+        let by = |n: &str| {
+            l["secrets"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|s| s["name"] == n)
+                .unwrap()["used_by"]
+                .clone()
+        };
+        assert_eq!(by("used"), json!(["app", "web"]));
+        assert_eq!(by("idle"), json!([]));
+        assert_eq!(
+            l["references"],
+            json!([{"name": "vault/item/field", "driver": "onepassword", "version": 3, "used_by": ["app"]}])
+        );
+        let l = call(&r, "secret_list", json!({"org": "norm"})).unwrap();
+        assert_eq!(l["references"], json!([]));
     }
 
     fn call(r: &Registry, tool: &str, a: Value) -> Result<Value> {

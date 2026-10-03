@@ -14,13 +14,19 @@ An org is the trust boundary: its members administer what is in it (apps,
 stacks, sandboxes, secrets), and nothing crosses orgs. Each membership has a
 role:
 
-| Role | Administer the org's apps and secrets | Manage members, invitations, every token in the org | Delete the org |
+| Role | Administer the org's apps and secrets | Manage members, invitations, every token in the org | Make and change owners |
 |---|---|---|---|
 | `member` | yes | | |
 | `admin` | yes | yes | |
 | `owner` | yes | yes | yes |
 
-A **platform admin** (a flag on the user) can do everything in every org.
+A **platform admin** (a flag on the user) can do everything in every org,
+and alone creates and deletes orgs and changes their limits and egress
+exceptions ([orgs.md](orgs.md#from-the-api-and-the-web-ui)): those are what
+keep orgs apart. Platform admins manage users from the web UI's Platform
+page or the `admin/users` endpoints: disable and enable them, and make or
+unmake platform admins. Nobody does either to themselves, and an enabled
+platform admin always remains.
 
 - An actor grants roles up to its own: an admin can add members and admins,
   only an owner (or platform admin) can make or change an owner.
@@ -344,12 +350,14 @@ JSON in and out; every response is `Cache-Control: no-store`. Errors are
 | `POST password` | signed in with a session | `{current_password, new_password}` | `204` |
 | `POST password-reset/request` | anyone | `{email}` | `202 {"ok": true}` |
 | `POST password-reset/confirm` | anyone with the token | `{token, password}` | `204` |
-| `GET orgs/ORG/members` | org members | | `{members: [{user, role}]}` |
+| `GET orgs/ORG/members` | org members | | `{members: [{user, role, last_active}]}`; `last_active` is the latest session or token use (unix seconds, or null) |
 | `PUT orgs/ORG/members/USER_ID` | org owner/admin | `{role}` | `{user_id, role}` |
 | `DELETE orgs/ORG/members/USER_ID` | org owner/admin, or the member leaving | | `204` |
 | `GET orgs/ORG/invitations` | org owner/admin | | `{invitations: [...]}` (pending) |
 | `DELETE orgs/ORG/invitations/ID` | org owner/admin | | `204` |
-| `GET orgs/ORG/tokens` | org owner/admin | | `{tokens: [...]}` |
+| `GET orgs/ORG/tokens` | org owner/admin | | `{tokens: [...]}`, each with `user: {id, email, name}` |
+| `GET admin/users` | platform admins | | `{users: [user + {memberships, last_active}]}` |
+| `PATCH admin/users/ID` | platform admins | `{disabled?, platform_admin?}` | `{user}`; `403` for yourself, `409` for the last enabled platform admin |
 | `GET providers` | anyone | | `{providers: [{id, label, kind, start}], password: true, passkeys: bool, open_signup: bool}`; `kind` is `oauth2` or `oidc` |
 | `GET oauth/PROVIDER/start` | anyone | query `next`, `invite`, `intent=login\|link` | `303` to the provider, `isb_oauth` cookie set |
 | `POST oauth/PROVIDER/start` | anyone | `{next?, invite?, intent?}` | `{url}`, `isb_oauth` cookie set |

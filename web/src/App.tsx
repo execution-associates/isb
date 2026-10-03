@@ -9,7 +9,11 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AccountPage } from "@/pages/account";
 import { InvitePage } from "@/pages/invite";
 import { LoginPage } from "@/pages/login";
+import { AdminPage } from "@/pages/admin";
 import { OrgPage } from "@/pages/org";
+import { MembersPage } from "@/pages/org-members";
+import { SecretsPage } from "@/pages/org-secrets";
+import { SettingsPage } from "@/pages/org-settings";
 import { ForgotPasswordPage, ResetPasswordPage } from "@/pages/password-reset";
 import { SetupPage } from "@/pages/setup";
 import { SignupPage } from "@/pages/signup";
@@ -49,6 +53,11 @@ export function App() {
             <Route element={<RequireAuth />}>
               <Route index element={<Home />} />
               <Route path="/orgs/:org" element={<OrgPage />} />
+              <Route path="/orgs/:org/members" element={<MembersPage />} />
+              <Route path="/orgs/:org/secrets" element={<SecretsPage />} />
+              <Route path="/orgs/:org/settings" element={<SettingsPage />} />
+              <Route path="/admin" element={<AdminPage />} />
+              <Route path="/admin/:tab" element={<AdminPage />} />
               <Route path="/account" element={<AccountPage />} />
             </Route>
             <Route path="*" element={<NotFound />} />
