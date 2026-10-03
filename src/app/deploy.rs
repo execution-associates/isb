@@ -473,6 +473,7 @@ impl Apps {
         if let Some(p) = &spec.previews {
             names.extend(p.secret_names());
         }
+        names.extend(spec.files.iter().map(|f| f.secret.clone()));
         if let Source::Git(g) = &spec.source {
             names.extend(g.auth.secret().map(String::from));
         }

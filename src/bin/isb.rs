@@ -19,6 +19,8 @@ use isb::{Client, Error, ExecOptions, Result, Stdin, Timeouts};
 mod apps;
 #[path = "isb/notify.rs"]
 mod notify;
+#[path = "isb/templates.rs"]
+mod templates;
 
 /// Declarative incus sandboxes.
 ///
@@ -260,6 +262,10 @@ enum Cmd {
     /// into its project environment's stack (docs/apps.md).
     #[command(subcommand)]
     App(apps::AppCmd),
+    /// One-click apps: deploy a template from the catalog into a project
+    /// environment (docs/templates.md).
+    #[command(subcommand)]
+    Template(templates::TemplateCmd),
     /// Build a source directory into an image in the org's local registry,
     /// in a fresh sandbox, through `isb serve` (docs/builds.md).
     Build(BuildArgs),
@@ -1150,6 +1156,7 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         Cmd::Secret(s) => secret(ctx, s),
         Cmd::Project(p) => apps::project(&ctx.global.org, p),
         Cmd::App(a) => apps::app(&ctx.global.org, a),
+        Cmd::Template(t) => templates::template(&ctx.global.org, t),
         Cmd::Build(a) => build_cmd(ctx, a),
         Cmd::Registry(r) => registry_cmd(ctx, r),
         Cmd::Notify(n) => notify::notify(&ctx.global.org, n),

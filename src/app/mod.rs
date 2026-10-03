@@ -186,6 +186,28 @@ pub struct AppSpec {
     /// Preview deployments per pull request (git sources).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previews: Option<PreviewSettings>,
+    /// Files in the app's instances, each an org secret's value (config
+    /// files, certificates). Delivered like a stack's file secrets.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<AppFile>,
+    /// The user the app runs as; numeric (`uid[:gid]`) on an OCI image.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
+}
+
+/// A file an app gets: the value of org secret `secret` at `path`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppFile {
+    /// Absolute path in the instance.
+    pub path: String,
+    /// The org secret holding the content.
+    pub secret: String,
+    /// Octal mode (default `0400`, owned by the app's numeric user or root).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
 }
 
 fn default_env() -> String {
@@ -255,6 +277,19 @@ impl AppSpec {
         }
         if let Some(p) = &self.previews {
             p.validate(self)?;
+        }
+        let mut paths = std::collections::BTreeSet::new();
+        for f in &self.files {
+            if !f.path.starts_with('/') || f.path.ends_with('/') || f.path.contains("/../") {
+                return Err(Error::invalid(format!(
+                    "file {:?}: the path must be an absolute file path",
+                    f.path
+                )));
+            }
+            if !paths.insert(f.path.as_str()) {
+                return Err(Error::invalid(format!("file {:?} is given twice", f.path)));
+            }
+            crate::secrets::validate_name(&f.secret)?;
         }
         for d in &self.domains {
             let host = d.get("host").and_then(Value::as_str).unwrap_or("");
@@ -424,6 +459,32 @@ pub fn render(spec: &AppSpec, image: &str, notes: &mut Vec<String>) -> Result<Re
     }
     if let Some(h) = &spec.healthcheck {
         svc["healthcheck"] = h.clone();
+    }
+    if !spec.files.is_empty() {
+        let mut refs = Vec::new();
+        for f in &spec.files {
+            let key = secret_key(&spec.name, &f.secret);
+            let mut r = json!({"source": key, "target": f.path});
+            if let Some(m) = &f.mode {
+                r["mode"] = json!(m);
+            }
+            refs.push(r);
+            secrets.insert(
+                key,
+                SecretDef {
+                    external: true,
+                    name: Some(f.secret.clone()),
+                    ..Default::default()
+                },
+            );
+        }
+        svc["secrets"] = json!(refs);
+    }
+    if let Some(u) = &spec.user {
+        svc["user"] = json!(u);
+    }
+    if let Some(w) = &spec.working_dir {
+        svc["working_dir"] = json!(w);
     }
     if let Some(r) = &spec.resources {
         if let Some(c) = &r.cpus {

@@ -1,0 +1,24 @@
+id: whoami
+name: whoami
+description: A tiny HTTP server that echoes the request back, for checking domains and routing.
+version: "1.10"
+tags: [utility, testing]
+links:
+  source: https://github.com/traefik/whoami
+variables:
+  - name: domain
+    type: domain
+    label: Domain
+    description: The public hostname; empty for a generated one.
+  - name: name
+    label: Name
+    description: Shown in every answer (WHOAMI_NAME).
+    default: isb
+apps:
+  - name: web
+    image: docker:traefik/whoami:v1.10
+    port: 80
+    env:
+      WHOAMI_NAME: "${name}"
+    domains:
+      - {host: "${domain}"}

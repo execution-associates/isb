@@ -291,6 +291,25 @@ pub fn preview_spec(
         }
     }
     spec.env = env;
+    // Files are secret values too: they follow the env's rules, so a preview
+    // gets the app's only with `inherit_env`, and a fork's only those in
+    // `fork_secrets`.
+    spec.files.retain(|f| {
+        let keep = s.inherit_env && (!fork || s.fork_secrets.contains(&f.secret));
+        if !keep {
+            notes.push(format!(
+                "{}: the app's file from secret {} is left out{}",
+                f.path,
+                f.secret,
+                if s.inherit_env {
+                    "; not in fork_secrets, withheld from a fork's pull request"
+                } else {
+                    " (previews take the app's files only with inherit_env)"
+                }
+            ));
+        }
+        keep
+    });
     if !spec.ports.is_empty() {
         notes.push(format!(
             "published ports ({}) are production's; previews are served on their domain only",
@@ -1723,6 +1742,38 @@ mod tests {
             Some(&EnvValue::Plain("x".into()))
         );
         assert!(p2.env.get("TOKEN").is_some());
+    }
+
+    #[test]
+    fn app_files_follow_the_env_rules() {
+        let mut a = git_app();
+        a.files = vec![
+            crate::app::AppFile {
+                path: "/etc/app/prod.conf".into(),
+                secret: "prod_conf".into(),
+                mode: None,
+            },
+            crate::app::AppFile {
+                path: "/etc/app/public.pem".into(),
+                secret: "public_key".into(),
+                mode: None,
+            },
+        ];
+        let mut notes = vec![];
+        let paths = |p: &AppSpec| p.files.iter().map(|f| f.path.clone()).collect::<Vec<_>>();
+        // Without inherit_env a preview takes none of the app's files.
+        let s = settings(json!({"enabled": true}));
+        assert!(preview_spec(&a, &s, 1, false, &mut notes).files.is_empty());
+        // With it, a same-repo preview takes them all, a fork only fork_secrets'.
+        let s = settings(json!({
+            "enabled": true, "forks": true, "inherit_env": true, "fork_secrets": ["public_key"],
+        }));
+        assert_eq!(paths(&preview_spec(&a, &s, 1, false, &mut notes)).len(), 2);
+        assert_eq!(
+            paths(&preview_spec(&a, &s, 1, true, &mut notes)),
+            vec!["/etc/app/public.pem".to_string()]
+        );
+        assert!(notes.iter().any(|n| n.contains("prod_conf")), "{notes:?}");
     }
 
     #[test]

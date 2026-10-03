@@ -188,6 +188,22 @@ minime only runs binaries downloaded from our CI runs.
 - **Known flaky test:** `balance::tests::changing_listen_moves_the_route`
   failed once in a P4.5 run, then passed three times. Investigate if seen
   again.
+- **Templates** (P4.4) instantiate as apps (so app pages, deploys and
+  rollback work for them); generated values are org secrets
+  `tpl.<name>.<var>`, derived values their own secrets. Dokploy's catalog
+  (MIT) is fetched at runtime as an added catalog, not bundled. The
+  translator refuses rather than weakens isolation (privileged, caps,
+  devices, host namespaces/paths, docker socket); of 532 blueprints, 151
+  translate cleanly, 250 with notes, 131 are refused. Apps gained `files`,
+  `user` and `working_dir`; previews take `files` only with `inherit_env`,
+  forks only `fork_secrets`' (a fix made at merge).
+- **Same-org TCP needs `isb host setup`'s bridged-forward rule** on hosts
+  with `br_netfilter` (titan: k3s, Docker): ufw's routed default-deny
+  dropped all but ICMP between an org's instances. Fixed 2026-10-03
+  (4c297ae); `orgs_isolate` now checks TCP, not only ping.
+- **`dev-base` is gone from titan** (image alias and its source container),
+  found 2026-10-03; cause unknown. lasso and isb's tests default to it.
+  Agents since build sandboxes from `images:ubuntu/24.04` + mise.
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
@@ -325,7 +341,7 @@ minime only runs binaries downloaded from our CI runs.
   schedule and its logs are visible.
 - [x] (6d71ea9) P4.3 Notifications (Slack, Discord, Telegram, email, webhook) on deploy,
   failure, health, backup events. **Verify:** a webhook receives events.
-- [~] (subagent p4.4) P4.4 Template catalog (one-click apps). **Stretch goal:** running Dokploy's
+- [~] (2aa485c, e153e1c, 0afef2b: built-in catalog + Dokploy translator; deploy from the web UI pending) P4.4 Template catalog (one-click apps). **Stretch goal:** running Dokploy's
   templates (docker-compose + `template.toml`: variables, domains, mounts)
   directly; check the Dokploy/templates repo license before shipping its
   catalog. Only if it fits isb's architecture without bending it.

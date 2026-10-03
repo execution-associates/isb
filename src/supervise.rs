@@ -389,15 +389,18 @@ pub fn unit_state(sb: &Sandbox, service: &str) -> Result<String> {
 
 /// Write the service's secrets under `/run/secrets` (or their targets), and
 /// the persisted copies plus the script that restores them after a boot.
-/// `values` maps a top-level secret key to its value.
+/// `values` maps a top-level secret key to its value. Returns whether a
+/// file was missing or different: an OCI app, already running when its
+/// files arrive, needs a restart to read them.
 pub fn push_secrets(
     sb: &Sandbox,
     spec: &SandboxSpec,
     values: &BTreeMap<String, Vec<u8>>,
-) -> Result<()> {
+) -> Result<bool> {
     if spec.secrets.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
+    let mut changed = false;
     let client = sb.client();
     let name = sb.name();
     let (def_uid, def_gid) = numeric_user(spec.user.as_deref()).unwrap_or((0, 0));
@@ -414,6 +417,8 @@ pub fn push_secrets(
         make_dirs(client, name, parent)?;
         let mode = s.file_mode().map_err(Error::invalid)?;
         let (uid, gid) = (s.uid.unwrap_or(def_uid), s.gid.or(s.uid).unwrap_or(def_gid));
+        changed |=
+            client.read_file(name, &path).ok().flatten().as_deref() != Some(value.as_slice());
         client.push_file(name, &path, value, uid, gid, mode)?;
         let stored = format!("{SECRETS_STORE}/{n}");
         client.push_file(name, &stored, value, 0, 0, 0o400)?;
@@ -423,7 +428,8 @@ pub fn push_secrets(
             sh_quote(&path)
         ));
     }
-    client.push_file(name, SECRETS_RESTORE, script.as_bytes(), 0, 0, 0o700)
+    client.push_file(name, SECRETS_RESTORE, script.as_bytes(), 0, 0, 0o700)?;
+    Ok(changed)
 }
 
 fn sh_quote(s: &str) -> String {

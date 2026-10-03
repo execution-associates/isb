@@ -288,6 +288,11 @@ impl Manager {
         Ok(())
     }
 
+    /// The address generated (`host: auto`) names point at.
+    pub fn public_ip(&self) -> Option<IpAddr> {
+        self.cfg.public_ip
+    }
+
     pub fn shutdown(&self) {
         if let Some(e) = self.edge.get() {
             e.shutdown();

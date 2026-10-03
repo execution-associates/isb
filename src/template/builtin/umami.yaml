@@ -1,0 +1,42 @@
+id: umami
+name: Umami
+description: Simple, privacy-focused web analytics, with a Postgres database.
+version: "2"
+tags: [analytics]
+links:
+  website: https://umami.is
+  source: https://github.com/umami-software/umami
+variables:
+  - name: domain
+    type: domain
+    label: Domain
+    description: The public hostname; empty for a generated one.
+  - name: db_password
+    type: password
+  - name: app_secret
+    type: hex
+    bytes: 32
+apps:
+  - name: db
+    image: docker:postgres:16-alpine
+    volumes: ["data:/var/lib/postgresql/data"]
+    env:
+      POSTGRES_DB: umami
+      POSTGRES_USER: umami
+      POSTGRES_PASSWORD: "${db_password}"
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U umami -d umami"]
+      interval: 5s
+      retries: 10
+  - name: umami
+    image: ghcr:umami-software/umami:postgresql-latest
+    port: 3000
+    depends_on: [db]
+    env:
+      DATABASE_URL: "postgresql://umami:${db_password}@${host:db}:5432/umami"
+      APP_SECRET: "${app_secret}"
+    domains:
+      - {host: "${domain}"}
+main: umami
+notes:
+  - Sign in as admin / umami and change the password at once.

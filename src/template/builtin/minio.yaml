@@ -1,0 +1,35 @@
+id: minio
+name: MinIO
+description: S3-compatible object storage, with its web console on the domain and the S3 API inside the org.
+version: "1"
+tags: [storage, s3]
+links:
+  website: https://min.io
+  source: https://github.com/minio/minio
+variables:
+  - name: domain
+    type: domain
+    label: Console domain
+    description: The web console's hostname; empty for a generated one.
+  - name: root_user
+    label: Root user
+    default: admin
+    min_length: 3
+  - name: root_password
+    type: password
+    length: 32
+apps:
+  - name: minio
+    image: docker:minio/minio:latest
+    port: 9001
+    command: [minio, server, /data, --console-address, ":9001"]
+    volumes: ["data:/data"]
+    env:
+      MINIO_ROOT_USER: "${root_user}"
+      MINIO_ROOT_PASSWORD: "${root_password}"
+      MINIO_BROWSER_REDIRECT_URL: "https://${domain}"
+    domains:
+      - {host: "${domain}", port: 9001}
+notes:
+  - The S3 API listens on port 9000, reachable inside the org at <name>.<project>-<env>:9000; add a domain with port 9000 to the app to publish it.
+  - The root password is the org secret tpl.<name>.root_password.

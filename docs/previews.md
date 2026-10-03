@@ -68,6 +68,7 @@ are fetched from the base repository, never from the fork.
 | image | `registry:<app>:<sha>` | `registry:<app>:pr-<n>-<sha>` |
 | volumes | `<app>_<name>` | `<stack>_<app>_<name>`: fresh, its own |
 | environment | the app's `env` | `previews.env` only; the app's too (under it) with `inherit_env: true` |
+| files | the app's `files` | none; the app's with `inherit_env: true` (a fork's: only those whose secret is in `fork_secrets`) |
 | published host ports | the app's `ports` | none |
 | replicas, resources | the app's | `previews.replicas` (default 1), `previews.resources` (default the app's) |
 | build cache | `build-cache-<app>` | `build-cache-<app>-preview`; a fork's `build-cache-<app>-pr-<n>` |

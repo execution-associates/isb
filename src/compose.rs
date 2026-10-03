@@ -557,8 +557,9 @@ pub fn up_handles(
             report(&format!("{}: up to date", d.name));
         }
         let sb = crate::Sandbox::from_desired(&c, &d);
-        if !spec.secrets.is_empty() {
-            crate::supervise::push_secrets(&sb, spec, &secret_values)?;
+        // An OCI app started before its files arrived: restart it once.
+        if crate::supervise::push_secrets(&sb, spec, &secret_values)? && d.image.is_oci() {
+            sb.restart()?;
         }
         if spec.long_running()
             && spec.command.is_some()
