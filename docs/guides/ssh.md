@@ -168,6 +168,8 @@ Connect tab shows it for the workspace.
   credentials, so it cannot pass a daemon behind Access. Reach the daemon on a
   tailnet or loopback `--listen` address instead ([Reach isb serve
   remotely](remote-access.md)).
-- The web terminal (`?instance=NAME`) has tabs on the workspace page but no
-  reattach: closing a page or a tab ends its shell. Use SSH (and herdr) for
-  sessions that should outlive a browser tab.
+- The web terminal's shells outlive their tab only in a workspace with herdr
+  installed, where each tab is a herdr session ([The web
+  terminal](../concepts/workspaces.md#the-web-terminal)); elsewhere, closing a
+  page or a tab ends its shell. Use SSH (and herdr) for sessions on other
+  instances.

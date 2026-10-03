@@ -22,6 +22,8 @@ export function TerminalPane({
   hint,
   idleText,
   autoConnect,
+  liveText,
+  reattach,
   className,
 }: {
   /** The websocket URL for a terminal of this size. */
@@ -35,13 +37,24 @@ export function TerminalPane({
   idleText: ReactNode;
   /** Connect as soon as it mounts. */
   autoConnect?: boolean;
+  /** The line while connected (default: the shell ends on disconnect). */
+  liveText?: ReactNode;
+  /** The session outlives the socket: reconnect by itself when the connection drops. */
+  reattach?: boolean;
   className?: string;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const session = useRef<{ ws: WebSocket; term: Terminal; ro: ResizeObserver } | null>(null);
   const [state, setState] = useState<State>({ kind: "idle" });
+  // The latest url, for a reconnect scheduled by an earlier render.
+  const urlRef = useRef(url);
+  useEffect(() => {
+    urlRef.current = url;
+  });
+  const retry = useRef<{ n: number; timer?: ReturnType<typeof setTimeout> }>({ n: 0 });
 
   const disconnect = () => {
+    clearTimeout(retry.current.timer);
     const s = session.current;
     session.current = null;
     if (!s) return;
@@ -68,7 +81,7 @@ export function TerminalPane({
     term.loadAddon(fit);
     term.open(el);
     fit.fit();
-    const ws = new WebSocket(url(term.cols, term.rows));
+    const ws = new WebSocket(urlRef.current(term.cols, term.rows));
     ws.binaryType = "arraybuffer";
     const enc = new TextEncoder();
     let opened = false;
@@ -76,6 +89,7 @@ export function TerminalPane({
     setState({ kind: "connecting" });
     ws.onopen = () => {
       opened = true;
+      retry.current.n = 0;
       setState({ kind: "open" });
       term.focus();
     };
@@ -101,6 +115,13 @@ export function TerminalPane({
     };
     ws.onclose = () => {
       if (ended) return;
+      // A dropped connection to a session that lives on: reattach, a few times, backing off.
+      if (reattach && opened && session.current?.ws === ws && retry.current.n < 5) {
+        retry.current.n += 1;
+        setState({ kind: "connecting" });
+        retry.current.timer = setTimeout(connect, 1000 * retry.current.n);
+        return;
+      }
       setState({
         kind: "closed",
         message: opened ? "The connection closed." : "Could not open a terminal: you may be signed out, not allowed to, or the server refused it.",
@@ -152,7 +173,7 @@ export function TerminalPane({
           )
         )}
         <p className="w-full text-[13px] text-muted-foreground sm:w-auto sm:min-w-0 sm:flex-1 sm:text-right">
-          {state.kind === "open" && "The shell ends when you disconnect or leave the page."}
+          {state.kind === "open" && (liveText ?? "The shell ends when you disconnect or leave the page.")}
           {state.kind === "closed" && state.message}
           {(state.kind === "idle" || state.kind === "connecting") && hint}
         </p>

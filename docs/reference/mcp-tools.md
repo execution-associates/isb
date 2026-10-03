@@ -93,7 +93,7 @@ means every member of the org, *member* means members, admins and owners.
 | `ssh_host_keys` | viewer | An instance's SSH host public keys, for pinning, and the user `isb ssh-config` logs in as by default. |
 | `workspace_get` | viewer | The workspace (or `null`) and the org's settings: definition, status, resources, home, live sessions, last activity, token metadata, `connect` (`url`, `mcp_url`), sandbox count. |
 | `workspace_list` | viewer | Every workspace in the org. |
-| `workspace_create` | admin | `image` (default `dev-base` where the host has it, else `images:ubuntu/24.04`), `name`, `user`, `cpus`, `memory`, `root_size`, `home_size`, `env`, `secrets`, `labels`, `token_role`; `home_bind` (a host folder as the home) is for superadmins. |
+| `workspace_create` | admin | `image` (default `isb-workspace`, then `dev-base`, where the host has it, else `images:ubuntu/24.04`), `name`, `user`, `cpus`, `memory`, `root_size`, `home_size`, `env`, `secrets`, `labels`, `token_role`, `setup` (a first-boot script); `home_bind` (a host folder as the home) is for superadmins. |
 | `workspace_update` | admin | Any of those but `name`, `user`, `home_bind`; resizing needs `confirm: true`. |
 | `workspace_start` | member | Start it and deliver its credentials. |
 | `workspace_stop`, `workspace_restart` | member | Without `confirm: true`, only report the live sessions it would end. |
@@ -101,6 +101,13 @@ means every member of the org, *member* means members, admins and owners.
 | `workspace_delete` | admin | The machine and its token, and the home unless `keep_home`; `confirm`. |
 | `workspace_token_rotate` | admin | A new token, delivered inside; the old one stops at once. |
 | `workspace_settings` | member reads, admin changes | `sandbox_expiry`, `sandbox_idle`; `max_workspaces`, `home_kind`, `home_pool` are for platform admins. |
+| `workspace_setup_run` | admin | Run the first-boot script again, as root: now when running, else on the next start; outcome and output in the history (`workspace.setup`). |
+| `workspace_terminals` | member | The web terminal's mode (`herdr` or `shell`) and its herdr sessions. |
+| `workspace_terminal_update` | member | A herdr session: `rename`, or `end: true`. |
+| `workspace_image_build` | platform admin | Build a workspace image from a recipe (default: isb's, as `isb-workspace`) in a throwaway container in `isb-system`; returns an `id`. [Workspace images](../guides/workspace-images.md). |
+| `workspace_image_logs` | platform admin | A build's state and log lines (`since`, `wait`). |
+| `workspace_image_list` | platform admin | The images isb built, recent builds, and whether the default image is current. |
+| `workspace_image_remove` | platform admin | Remove an image isb built (never another). |
 
 ## Secrets
 

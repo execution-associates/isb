@@ -240,6 +240,9 @@ isb workspace update [NAME] [--image I] [--cpus N] [--memory M] [--root-size S]
                      [--home-size S] [--token-role R] [--yes]
 isb workspace rm [NAME] [--keep-home] --yes          alias delete
 isb workspace rotate-token [NAME]
+isb workspace setup [NAME] [--run]
+isb workspace image build [NAME] [--recipe FILE] [--base IMAGE] [--description T] [--timeout 30m] [--force]
+isb workspace image ls|logs ID|rm NAME
 isb workspace settings [--max-workspaces N] [--sandbox-expiry 24h] [--sandbox-idle 2h|none]
                        [--home-kind volume|host] [--home-pool POOL]
 isb workspace sandboxes [--json]

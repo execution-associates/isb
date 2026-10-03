@@ -37,7 +37,7 @@ use crate::error::{Error, Result};
 use crate::exec::{ExecEvent, ExecOptions, Stdin};
 use crate::org::OrgId;
 use crate::sandbox::Sandbox;
-
+pub mod workspace_image;
 /// How a source tree becomes an image.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]

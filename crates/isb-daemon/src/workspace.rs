@@ -99,6 +99,122 @@ pub struct Workspace {
     pub rebuilt_at: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token: Option<TokenMeta>,
+    /// A first-boot script: run once as root on the first start after a
+    /// create or a rebuild, and again on demand. Not for secrets: the
+    /// definition shows it (use `secrets`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup: Option<String>,
+    /// Where the setup script is: pending, running, succeeded or failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup_state: Option<SetupState>,
+}
+
+/// The largest setup script accepted.
+pub const MAX_SETUP: usize = 64 * 1024;
+
+/// A setup script's state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SetupStatus {
+    /// To run on the next start (or now, when running).
+    Pending,
+    Running,
+    Succeeded,
+    Failed,
+}
+
+/// The setup script's last run, or the one to come.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetupState {
+    pub status: SetupStatus,
+    /// When the status last changed.
+    pub at: u64,
+    /// How many times it has started.
+    #[serde(default)]
+    pub runs: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// What happens to a setup script.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SetupEvent {
+    /// The machine was created or rebuilt.
+    Built,
+    /// Someone asked to run it again.
+    Requested,
+    /// The daemon began running it.
+    Started,
+    /// It ended with this exit code.
+    Finished(i32),
+    /// It could not run (the push or the exec failed, or it timed out).
+    Error(String),
+    /// The daemon started: a run it had begun is gone.
+    DaemonStarted,
+}
+
+/// The setup state after `ev`: `None` when there is no script.
+pub fn setup_next(
+    script: bool,
+    cur: Option<&SetupState>,
+    ev: SetupEvent,
+    now: u64,
+) -> Result<Option<SetupState>> {
+    use SetupStatus::*;
+    if !script {
+        return match ev {
+            SetupEvent::Requested => Err(Error::invalid(
+                "the workspace has no setup script (set one with workspace_update)",
+            )),
+            _ => Ok(None),
+        };
+    }
+    let runs = cur.map_or(0, |c| c.runs);
+    let status = cur.map(|c| c.status);
+    let st = |status, exit_code, message| SetupState {
+        status,
+        at: now,
+        runs,
+        exit_code,
+        message,
+    };
+    Ok(Some(match (ev, status) {
+        (SetupEvent::Requested, Some(Running)) => {
+            return Err(Error::invalid(
+                "the setup script is running; wait for it to end",
+            ));
+        }
+        (SetupEvent::Built | SetupEvent::Requested, _) => st(Pending, None, None),
+        (SetupEvent::Started, Some(Pending)) => SetupState {
+            runs: runs + 1,
+            ..st(Running, None, None)
+        },
+        (SetupEvent::Finished(0), Some(Running)) => st(Succeeded, Some(0), None),
+        (SetupEvent::Finished(c), Some(Running)) => st(Failed, Some(c), None),
+        (SetupEvent::Error(m), Some(Running)) => st(Failed, None, Some(m)),
+        (SetupEvent::DaemonStarted, Some(Running)) => st(
+            Failed,
+            None,
+            Some("interrupted: the daemon restarted while it ran".into()),
+        ),
+        (ev @ (SetupEvent::Started | SetupEvent::Finished(_) | SetupEvent::Error(_)), _) => {
+            return Err(Error::invalid(format!(
+                "setup: {ev:?} while it is {}",
+                status.map_or("not set up".into(), |s| format!("{s:?}").to_lowercase())
+            )));
+        }
+        (SetupEvent::DaemonStarted, _) => return Ok(cur.cloned()),
+    }))
+}
+
+/// Whether the setup script should run now (the machine running).
+pub fn setup_due(w: &Workspace) -> bool {
+    w.setup.is_some()
+        && w.setup_state
+            .as_ref()
+            .is_some_and(|s| s.status == SetupStatus::Pending)
 }
 
 /// What is kept of the workspace's token: never the token.
@@ -678,6 +794,8 @@ mod tests {
             updated_at: 1,
             rebuilt_at: None,
             token: None,
+            setup: None,
+            setup_state: None,
         };
         st.put(&org, &w).unwrap();
         st.put_settings(&org, &Settings::default()).unwrap();
@@ -703,5 +821,54 @@ mod tests {
         assert!(p.contains("export ISB_URL='http://10.0.0.1:8481'\n"));
         assert!(p.contains("export ISB_ORG='acme'\n"));
         assert!(p.contains("ISB_TOKEN=$(cat /run/isb/token)"));
+    }
+
+    #[test]
+    fn the_setup_script_runs_once_per_build_and_again_on_request() {
+        use SetupStatus::*;
+        let next = |cur: Option<&SetupState>, ev| setup_next(true, cur, ev, 7).unwrap();
+        // Built: pending; started: running, counted; finished: done.
+        let p = next(None, SetupEvent::Built).unwrap();
+        assert_eq!((p.status, p.runs), (Pending, 0));
+        let r = next(Some(&p), SetupEvent::Started).unwrap();
+        assert_eq!((r.status, r.runs), (Running, 1));
+        let ok = next(Some(&r), SetupEvent::Finished(0)).unwrap();
+        assert_eq!((ok.status, ok.exit_code), (Succeeded, Some(0)));
+        let bad = next(Some(&r), SetupEvent::Finished(3)).unwrap();
+        assert_eq!((bad.status, bad.exit_code), (Failed, Some(3)));
+        let err = next(Some(&r), SetupEvent::Error("timed out".into())).unwrap();
+        assert_eq!(
+            (err.status, err.message.as_deref()),
+            (Failed, Some("timed out"))
+        );
+        // Done stays done until a rebuild or a request; both keep the count.
+        let again = next(Some(&ok), SetupEvent::Requested).unwrap();
+        assert_eq!((again.status, again.runs), (Pending, 1));
+        assert_eq!(next(Some(&bad), SetupEvent::Built).unwrap().status, Pending);
+        // Not twice at once, and no start or finish out of turn.
+        assert!(setup_next(true, Some(&r), SetupEvent::Requested, 7).is_err());
+        assert!(setup_next(true, Some(&ok), SetupEvent::Started, 7).is_err());
+        assert!(setup_next(true, Some(&p), SetupEvent::Finished(0), 7).is_err());
+        // A daemon restart fails a run it had begun, and nothing else.
+        let lost = next(Some(&r), SetupEvent::DaemonStarted).unwrap();
+        assert_eq!(lost.status, Failed);
+        assert!(lost.message.unwrap().contains("restarted"));
+        assert_eq!(next(Some(&ok), SetupEvent::DaemonStarted), Some(ok.clone()));
+        // No script: no state, and nothing to request.
+        assert_eq!(
+            setup_next(false, Some(&p), SetupEvent::Built, 7).unwrap(),
+            None
+        );
+        assert!(setup_next(false, None, SetupEvent::Requested, 7).is_err());
+        // Due only when pending with a script.
+        let mut w: Workspace = serde_json::from_value(serde_json::json!({
+            "name": "workspace", "id": "x", "image": "dev-base", "user": "dev",
+            "home_size": "1GiB", "token_role": "admin", "created_at": 0, "created_by": "a",
+            "setup": "apt-get install -y htop", "setup_state": {"status": "pending", "at": 1}
+        }))
+        .unwrap();
+        assert!(setup_due(&w));
+        w.setup_state = Some(ok);
+        assert!(!setup_due(&w));
     }
 }

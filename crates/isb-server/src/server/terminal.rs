@@ -46,6 +46,9 @@ pub struct TermRequest {
     pub slot: Option<u32>,
     /// An instance of the org (a workspace, a sandbox) instead of an app.
     pub instance: Option<String>,
+    /// A workspace's named terminal session (herdr-backed), which outlives
+    /// the websocket; `None` is a plain shell that ends with it.
+    pub session: Option<String>,
     pub cols: u16,
     pub rows: u16,
 }
@@ -60,6 +63,9 @@ impl TermRequest {
         q.push_str(&format!("&cols={}&rows={}", self.cols, self.rows));
         if let Some(n) = self.slot {
             q.push_str(&format!("&slot={n}"));
+        }
+        if let Some(s) = &self.session {
+            q.push_str(&format!("&session={}", pct_encode(s)));
         }
         q
     }
@@ -156,6 +162,44 @@ pub fn query_param(req: &Request, key: &str) -> Option<String> {
     param(req, key)
 }
 
+/// Percent-encode everything but unreserved characters.
+pub fn pct_encode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                (b as char).to_string()
+            }
+            b => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// Undo [`pct_encode`] (and a form's `+` for a space); `None` when it is not
+/// valid UTF-8 or a `%` is not followed by two hex digits.
+pub fn pct_decode(s: &str) -> Option<String> {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'%' => {
+                let hex = std::str::from_utf8(b.get(i + 1..i + 3)?).ok()?;
+                out.push(u8::from_str_radix(hex, 16).ok()?);
+                i += 3;
+            }
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            c => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
 /// The request's terminal parameters, or what is wrong with them.
 pub fn term_request(req: &Request) -> std::result::Result<TermRequest, String> {
     let (app, instance) = match (param(req, "app"), param(req, "instance")) {
@@ -181,10 +225,23 @@ pub fn term_request(req: &Request) -> std::result::Result<TermRequest, String> {
         Some(_) if instance.is_some() => return Err("slot= is for apps".into()),
         Some(_) => Some(num("slot", 1, 1000, 1)?),
     };
+    let session = match param(req, "session") {
+        None => None,
+        Some(_) if instance.is_none() => return Err("session= is for instances".into()),
+        Some(v) => match pct_decode(&v) {
+            Some(s)
+                if !s.is_empty() && s.chars().count() <= 40 && !s.chars().any(char::is_control) =>
+            {
+                Some(s)
+            }
+            _ => return Err("session= is not a session name".into()),
+        },
+    };
     Ok(TermRequest {
         app,
         slot,
         instance,
+        session,
         cols: num("cols", 2, 1000, 80)? as u16,
         rows: num("rows", 2, 1000, 24)? as u16,
     })
@@ -435,9 +492,17 @@ mod tests {
                 app: "web".into(),
                 slot: Some(2),
                 instance: None,
+                session: None,
                 cols: 120,
                 rows: 40
             }
+        );
+        let t = term_request(&req("instance=box&session=Shell%202", &[])).unwrap();
+        assert_eq!(t.session.as_deref(), Some("Shell 2"));
+        assert_eq!(t.query(), "instance=box&cols=80&rows=24&session=Shell%202");
+        assert_eq!(
+            pct_decode(&pct_encode("api: logs #2")).as_deref(),
+            Some("api: logs #2")
         );
         let t = term_request(&req("instance=box-1", &[])).unwrap();
         assert_eq!((t.app.as_str(), t.instance.as_deref()), ("", Some("box-1")));
@@ -456,6 +521,10 @@ mod tests {
             "instance=Box",
             "instance=a&app=b",
             "instance=a&slot=1",
+            "app=web&session=x",
+            "instance=a&session=",
+            "instance=a&session=%0A",
+            "instance=a&session=%zz",
         ] {
             assert!(term_request(&req(bad, &[])).is_err(), "{bad}");
         }

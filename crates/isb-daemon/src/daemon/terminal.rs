@@ -93,14 +93,24 @@ pub(super) fn terminal(d: Arc<Daemon>) -> Terminal {
                     )));
                 }
                 // The workspace opens as its user, in its home.
-                let user = match info.config.get(crate::workspace::KEY_WORKSPACE) {
-                    Some(w) => d
-                        .workspaces_def(org, w)
-                        .ok()
-                        .map(|w| (w.user.clone(), w.home_dir())),
-                    None => None,
+                let def = info
+                    .config
+                    .get(crate::workspace::KEY_WORKSPACE)
+                    .and_then(|w| d.workspaces_def(org, w).ok());
+                let user = def.as_ref().map(|w| (w.user.clone(), w.home_dir()));
+                // A named session is a herdr tab that outlives this socket.
+                let argv = match (&t.session, &def) {
+                    (Some(s), Some(w)) => {
+                        let h = super::workspaces::Herdr::new(&oc, w)?;
+                        let term = h.ensure_session(s)?;
+                        super::workspaces::attach_argv(&term)
+                    }
+                    (Some(_), None) => {
+                        return Err(Error::invalid("named terminal sessions are for workspaces"));
+                    }
+                    (None, _) => vec!["/bin/sh".into(), "-c".into(), SHELL.into()],
                 };
-                let mut pty = shell(&oc, name, t, user)?;
+                let mut pty = shell(&oc, name, t, user, argv)?;
                 pty.guard = Some(d.workspaces.session(&org.incus_project(), name));
                 return Ok(pty);
             }
@@ -135,7 +145,8 @@ pub(super) fn terminal(d: Arc<Daemon>) -> Terminal {
                     inst.status.to_lowercase()
                 )));
             }
-            let pty = shell(&oc, &inst.name, t, None)?;
+            let argv = vec!["/bin/sh".into(), "-c".into(), SHELL.into()];
+            let pty = shell(&oc, &inst.name, t, None, argv)?;
             d.ctl.service_event(
                 "info",
                 &stack,
@@ -147,12 +158,14 @@ pub(super) fn terminal(d: Arc<Daemon>) -> Terminal {
     )
 }
 
-/// A login shell in `instance`, on a pseudo-terminal of the asked size.
+/// `argv` (a login shell, or herdr's attach) in `instance`, on a
+/// pseudo-terminal of the asked size.
 fn shell(
     oc: &crate::client::Client,
     instance: &str,
     t: &TermRequest,
     user: Option<(String, String)>,
+    argv: Vec<String>,
 ) -> Result<Box<ExecPty>> {
     let sb = Sandbox::get(oc, instance)?;
     let mut opts = ExecOptions::default()
@@ -170,7 +183,7 @@ fn shell(
     opts.width = Some(t.cols);
     opts.height = Some(t.rows);
     let stream = sb
-        .exec_stream(["/bin/sh", "-c", SHELL], opts)
+        .exec_stream(argv, opts)
         .map_err(|e| Error::invalid(format!("cannot start a shell in {instance}: {e}")))?;
     Ok(Box::new(ExecPty {
         ctl: stream.controller(),

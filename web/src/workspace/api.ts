@@ -64,6 +64,9 @@ export interface Workspace {
   connect: { url: string | null; mcp_url: string | null; org: string; user: string; token_path: string; env: string[] };
   /** Sandboxes in the org. */
   sandboxes: number;
+  /** The first-boot script, run once as root after each create or rebuild. */
+  setup?: string | null;
+  setup_state?: { status: "pending" | "running" | "succeeded" | "failed"; at: number; runs: number; exit_code?: number | null; message?: string | null } | null;
 }
 
 /** An image a workspace can be made from: local to this host, or remote. */
@@ -77,6 +80,8 @@ export interface WorkspaceImage {
 export interface WorkspaceCreateOptions {
   images: WorkspaceImage[];
   default_image: string;
+  /** isb's default workspace image (built from its recipe) and whether this host has it. */
+  default_recipe?: { image: string; exists: boolean };
   quota: Quota;
 }
 

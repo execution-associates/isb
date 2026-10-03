@@ -23,7 +23,7 @@ crates/isb-core/src/stack/controller.rs 2562
 crates/isb-daemon/src/daemon/audit.rs 1063
 crates/isb-daemon/src/daemon/mod.rs 1821
 crates/isb-daemon/src/daemon/servers.rs 1337
-crates/isb-daemon/src/daemon/workspaces.rs 2043
+crates/isb-daemon/src/daemon/workspaces.rs 1972
 crates/isb-server/src/audit.rs 1160
 crates/isb-server/src/auth/http.rs 1134
 crates/isb-server/src/auth/mod.rs 1793

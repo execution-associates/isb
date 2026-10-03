@@ -96,17 +96,19 @@ stated in one place.
 
 ## Pieces
 
-W1 (the workspace and its sandboxes), W2 (the workspace as an org actor)
-and W7 (the web UI) have shipped: [workspaces.md](../workspaces.md) and
-[web.md](../web.md#the-workspace).
+W1 (the workspace and its sandboxes), W2 (the workspace as an org actor),
+W5 (workspace images) and W7 (the web UI) have shipped:
+[workspaces.md](../concepts/workspaces.md),
+[workspace-images.md](../guides/workspace-images.md) and
+[web-ui.md](../getting-started/web-ui.md#the-workspace).
 
 ### W3. Doors
 
-SSH over the daemon's websocket ([ssh.md](../ssh.md)), `isb workspace ssh`
-and `ssh-config`, the web terminal on any instance with tabs, and the
-Connect panel's SSH and herdr lines have shipped. Left:
+SSH over the daemon's websocket ([ssh.md](../guides/ssh.md)), `isb workspace ssh`
+and `ssh-config`, the web terminal on any instance with tabs, terminal
+reattach through herdr when the image has it, and the Connect panel's SSH
+and herdr lines have shipped. Left:
 
-- **Terminal reattach**: a shell that survives closing its tab.
 - **Ports**: the workspace can publish ports through the org's ingress (a dev
   server preview at `<port>.workspace.<domain>`), with the same Access and
   domain rules as apps; the workspace gains a `ports` field and the page a
@@ -126,13 +128,10 @@ Left: rebuild and delete say what happens to a home's staged restores.
 
 ### W5. Workspace images
 
-- A workspace image is built like an app image (build service, registry)
-  from a recipe repo, or is any incus image (`dev-base`, `images:ubuntu/...`).
-- Templates gain a workspace kind: "Claude Code + herdr + mise", "plain
-  Ubuntu", and the user's own. The titan-iac `titan-org-guest` recipe
-  becomes one.
-- Software that must survive a rebuild lives outside the home (`/opt/...`),
-  the titan-iac lesson about `~/.local/bin` shadowing the image.
+Recipe-script images, isb's default recipe (`isb-workspace`) and first-boot
+scripts have shipped. Left: a recipe kept in a repository and rebuilt on
+push, and workspace templates (a recipe plus a first-boot script) in the
+template catalog.
 
 ### W6. The Docker exception
 
@@ -192,5 +191,5 @@ Per org, attended, one at a time:
 
 ## Order of work
 
-W4, then W6, W5, and W3's ports. Each lands with its docs,
+W6, then W3's ports. Each lands with its docs,
 tests and a live check on titan, like the platform phases did.
