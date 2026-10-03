@@ -599,6 +599,7 @@ mod tests {
                 events: None,
                 terminal: None,
                 audit: Some(hook(log.clone(), false)),
+                route: None,
             },
         };
         T { ep, log, _dir: dir }

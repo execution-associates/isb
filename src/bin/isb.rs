@@ -21,6 +21,8 @@ mod apps;
 mod data;
 #[path = "isb/notify.rs"]
 mod notify;
+#[path = "isb/servers.rs"]
+mod servers;
 #[path = "isb/templates.rs"]
 mod templates;
 
@@ -290,6 +292,10 @@ enum Cmd {
     /// Slack, Discord, Telegram, email (docs/notifications.md).
     #[command(subcommand)]
     Notify(notify::NotifyCmd),
+    /// Servers this control plane places orgs on: add one over SSH, list,
+    /// show, remove, rotate its certificate (docs/servers.md).
+    #[command(subcommand)]
+    Server(servers::ServerCmd),
     /// A live dashboard of stacks and sandboxes (`isb serve`'s view; with no
     /// daemon, sandboxes only).
     Tui,
@@ -581,6 +587,16 @@ struct ServeArgs {
     /// A Caddy binary to run instead of the pinned release isb downloads.
     #[arg(long, env = "ISB_CADDY_BIN")]
     caddy_bin: Option<PathBuf>,
+    /// Run as a server's agent for a control plane (`isb server add` sets
+    /// this up): no identity store or web UI, an mTLS listener instead.
+    #[arg(long, env = "ISB_AGENT", requires_all = ["agent_listen", "agent_tls"])]
+    agent: bool,
+    /// The agent's mTLS listener, e.g. 0.0.0.0:7443.
+    #[arg(long, env = "ISB_AGENT_LISTEN", requires = "agent")]
+    agent_listen: Option<String>,
+    /// The agent's TLS directory: ca.crt, tls.crt, tls.key.
+    #[arg(long, env = "ISB_AGENT_TLS", requires = "agent")]
+    agent_tls: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -649,6 +665,10 @@ enum OrgCmd {
         /// per hostname).
         #[arg(long, value_name = "ID")]
         cloudflare_zone: Option<String>,
+        /// Run the org on this server (`isb server ls`) instead of this
+        /// host, through the local daemon. Set once: orgs do not move.
+        #[arg(long, value_name = "SERVER")]
+        server: Option<String>,
     },
     /// List orgs.
     #[command(alias = "list")]
@@ -1262,6 +1282,7 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         Cmd::Build(a) => build_cmd(ctx, a),
         Cmd::Registry(r) => registry_cmd(ctx, r),
         Cmd::Notify(n) => notify::notify(&ctx.global.org, n),
+        Cmd::Server(c) => servers::server(c),
         Cmd::Tui => {
             isb::tui::run(ctx.client(None), isb::server::default_socket_path())?;
             Ok(0)
@@ -2159,6 +2180,12 @@ fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
             a.acme_email,
             a.caddy_bin,
         )?,
+        agent: match (a.agent, a.agent_listen, a.agent_tls) {
+            (true, Some(listen), Some(tls_dir)) => {
+                Some(isb::daemon::AgentConfig { listen, tls_dir })
+            }
+            _ => None,
+        },
     };
     isb::daemon::serve(ctx.client(None), cfg)?;
     Ok(0)
@@ -2936,7 +2963,57 @@ fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
             ingress,
             cloudflare_account,
             cloudflare_zone,
+            server,
         } => {
+            if let Some(server) = server.filter(|s| s != "local") {
+                if !bind_root.is_empty()
+                    || !allow_domain.is_empty()
+                    || ingress.is_some()
+                    || cloudflare_account.is_some()
+                    || cloudflare_zone.is_some()
+                {
+                    return Err(Error::Invalid(
+                        "--server: bind roots, domains and the ingress provider of an org on a server are not set from here yet".into(),
+                    ));
+                }
+                let mut a = serde_json::json!({"org": name, "server": server});
+                for (k, v) in [
+                    ("cpus", cpus),
+                    ("instances", instances),
+                    ("default_cpus", default_cpus),
+                ] {
+                    if let Some(v) = v {
+                        a[k] = serde_json::json!(v);
+                    }
+                }
+                for (k, v) in [
+                    ("memory", memory),
+                    ("disk", disk),
+                    ("default_memory", default_memory),
+                ] {
+                    if let Some(v) = v {
+                        a[k] = serde_json::json!(v);
+                    }
+                }
+                if !allow_egress.is_empty() {
+                    let e: Vec<String> = if allow_egress == ["none"] {
+                        vec![]
+                    } else {
+                        allow_egress
+                    };
+                    a["egress"] = serde_json::json!(e);
+                }
+                let v = call("org_create", a, Duration::from_secs(300))?;
+                println!(
+                    "{} on server {} (project {}, network {} {})",
+                    v["name"].as_str().unwrap_or(""),
+                    v["server"].as_str().unwrap_or(""),
+                    v["project"].as_str().unwrap_or(""),
+                    v["network"].as_str().unwrap_or(""),
+                    v["subnet"].as_str().unwrap_or("")
+                );
+                return Ok(0);
+            }
             let domains = if allow_domain.is_empty() {
                 None
             } else if allow_domain == ["none"] {
@@ -3029,7 +3106,17 @@ fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
             Ok(0)
         }
         OrgCmd::Show { name, json } => {
-            let o = org::get(&c, &OrgId::new(name)?)?;
+            let id = OrgId::new(name)?;
+            let o = match org::get(&c, &id) {
+                Err(e) if e.is_not_found() => {
+                    // Perhaps an org on a server: the daemon knows.
+                    let v =
+                        call("org_get", serde_json::json!({"org": id}), SHORT).map_err(|_| e)?;
+                    print_json(&v);
+                    return Ok(0);
+                }
+                r => r?,
+            };
             if json {
                 print_json(&o);
             } else {
@@ -3097,6 +3184,18 @@ fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
         }
         OrgCmd::Rm { name, force } => {
             let id = OrgId::new(name)?;
+            if let Err(e) = org::get(&c, &id) {
+                if e.is_not_found() {
+                    // Perhaps an org on a server: the daemon deletes it there.
+                    call(
+                        "org_delete",
+                        serde_json::json!({"org": id, "force": force}),
+                        Duration::from_secs(300),
+                    )
+                    .map_err(|_| e)?;
+                    return Ok(0);
+                }
+            }
             org::remove(&c, &id, force, &mut rep)?;
             // Memberships, invitations and tokens for it go with it.
             open_auth(&AuthDb {

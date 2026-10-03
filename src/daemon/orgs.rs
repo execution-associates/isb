@@ -36,10 +36,19 @@ pub(super) struct Settings {
     /// Replaces the exceptions; `[]` clears them.
     #[serde(default)]
     pub egress: Option<Vec<String>>,
+    /// Where the org runs: `local` (this daemon) or a server's name. A
+    /// control plane routes a server placement before the tool runs.
+    #[serde(default)]
+    pub server: Option<String>,
 }
 
 impl Settings {
     fn org(&self) -> Result<OrgId> {
+        if let Some(s) = self.server.as_deref().filter(|s| *s != "local") {
+            return Err(Error::invalid(format!(
+                "server {s}: this daemon places no orgs on servers (only a control plane does: docs/servers.md)"
+            )));
+        }
         let o = OrgId::new(
             self.org
                 .clone()
@@ -159,7 +168,8 @@ fn settings_props() -> Value {
         "instances": {"type": "integer", "minimum": 1, "description": "Instances in the org."},
         "default_cpus": {"type": "integer", "minimum": 1, "description": "CPUs an instance gets when its spec sets none."},
         "default_memory": {"type": "string", "description": "Memory an instance gets when its spec sets none, e.g. 512MiB."},
-        "egress": {"type": "array", "items": {"type": "string"}, "description": "Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/orgs.md). Replaces the list; [] clears it."}
+        "egress": {"type": "array", "items": {"type": "string"}, "description": "Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/orgs.md). Replaces the list; [] clears it."},
+        "server": {"type": "string", "description": "Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers."}
     })
 }
 
