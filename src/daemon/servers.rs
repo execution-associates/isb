@@ -22,8 +22,9 @@ use crate::error::{Error, Result};
 use crate::org::OrgId;
 use crate::server::http::{Request, Response, TlsConfig};
 use crate::server::{Caller, Hooks, Listener, Registry, Routes, Tool};
+use crate::servers::provision::{Kind, Provision};
 use crate::servers::wire::Assertion;
-use crate::servers::{Servers, bootstrap, health, merge};
+use crate::servers::{Servers, bootstrap, health, merge, vm};
 
 /// How long one server may take to answer a merged read.
 const FAN_OUT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -106,7 +107,9 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
             "allow_from": {"type": "array", "items": {"type": "string"}, "description": "Addresses or CIDRs that may reach the agent port (this control plane's egress address); the box's firewall then allows only SSH and these."},
             "isb_binary": {"type": "string", "description": "A Linux isb binary on this host to install (local CLI only); default the release of this version."},
             "version": {"type": "string", "description": "The isb release to install (default this daemon's)."},
-            "public_ingress": {"type": "boolean", "description": "Serve the server's orgs' domains on its own ports 80 and 443 (opened in its firewall)."}
+            "self_binary": {"type": "boolean", "description": "Install this control plane's own isb executable instead of a release (same version and build; the box must have the same architecture)."},
+            "public_ingress": {"type": "boolean", "description": "Serve the server's orgs' domains on its own ports 80 and 443 (opened in its firewall)."},
+            "wait": {"type": "boolean", "description": "Wait for the bootstrap to finish (default true). false answers at once with `provision`; follow it with server_provision_get."}
         }, "required": ["name", "ssh"], "additionalProperties": false}),
         write,
         |d: &Daemon, a: Value, c: &Caller| -> Result<Value> {
@@ -125,7 +128,10 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
                 isb_binary: Option<PathBuf>,
                 version: Option<String>,
                 #[serde(default)]
+                self_binary: bool,
+                #[serde(default)]
                 public_ingress: bool,
+                wait: Option<bool>,
             }
             platform_only(c)?;
             let s = servers(d)?;
@@ -135,69 +141,131 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
                     "key and isb_binary are paths on the control plane's host: local CLI only (send ssh_key)".into(),
                 ));
             }
+            if a.self_binary && (a.isb_binary.is_some() || a.version.is_some()) {
+                return Err(Error::invalid(
+                    "self_binary installs this daemon's own build: drop isb_binary and version",
+                ));
+            }
             bootstrap::validate_name(&a.name)?;
-            let mut temp_key = None;
-            let key = match (a.key, a.ssh_key) {
-                (Some(k), None) => k,
-                (None, Some(text)) => {
-                    let p = d
-                        .state_dir
-                        .join("servers")
-                        .join(format!("bootstrap-key-{}", a.name));
-                    std::fs::create_dir_all(d.state_dir.join("servers"))?;
-                    let mut text = text;
-                    if !text.ends_with('\n') {
-                        text.push('\n');
-                    }
-                    crate::servers::pki::write_private(&p, &text)?;
-                    temp_key = Some(p.clone());
-                    p
-                }
-                _ => return Err(Error::invalid("pass exactly one of key or ssh_key")),
-            };
-            let o = bootstrap::AddOptions {
-                name: a.name,
+            let request = json!({
+                "name": a.name, "ssh": a.ssh, "ssh_port": a.ssh_port.unwrap_or(22),
+                "address": a.address, "agent_port": a.agent_port.unwrap_or(bootstrap::DEFAULT_AGENT_PORT),
+                "allow_from": a.allow_from, "version": a.version, "self_binary": a.self_binary,
+                "public_ingress": a.public_ingress,
+            });
+            let mut o = bootstrap::AddOptions {
+                name: a.name.clone(),
                 ssh: a.ssh,
                 ssh_port: a.ssh_port.unwrap_or(22),
-                key,
+                key: PathBuf::new(),
                 address: a.address,
                 agent_port: a.agent_port.unwrap_or(bootstrap::DEFAULT_AGENT_PORT),
                 allow_from: a.allow_from,
                 isb_binary: a.isb_binary,
                 version: a.version,
+                self_binary: a.self_binary,
                 public_ingress: a.public_ingress,
             };
-            let mut log: Vec<String> = Vec::new();
-            let r = s.add(&o, Some(&d.ctl), &mut |m: &str| {
-                eprintln!("isb serve: server {}: {m}", o.name);
-                log.push(m.to_string());
-            });
-            if let Some(p) = temp_key {
-                let _ = std::fs::remove_file(p);
+            s.check_add(&o)?;
+            let p = s.runs.begin(Provision::new(&o.name, Kind::Ssh, None, request))?;
+            let mut temp_key = None;
+            o.key = match (a.key, a.ssh_key) {
+                (Some(k), None) => k,
+                (None, Some(text)) => {
+                    let path = d
+                        .state_dir
+                        .join("servers")
+                        .join(format!("bootstrap-key-{}", a.name));
+                    let r = std::fs::create_dir_all(d.state_dir.join("servers"))
+                        .map_err(Error::from)
+                        .and_then(|()| {
+                            let mut text = text;
+                            if !text.ends_with('\n') {
+                                text.push('\n');
+                            }
+                            crate::servers::pki::write_private(&path, &text)
+                        });
+                    if let Err(e) = r {
+                        p.finish(Err(e.to_string()));
+                        return Err(e);
+                    }
+                    temp_key = Some(path.clone());
+                    path
+                }
+                _ => {
+                    let e = Error::invalid("pass exactly one of key or ssh_key");
+                    p.finish(Err(e.to_string()));
+                    return Err(e);
+                }
+            };
+            let run = {
+                let (s, ctl, p) = (s.clone(), d.ctl.clone(), p.clone());
+                move || -> Result<Value> {
+                    let r = s.add(&o, Some(&ctl), &p);
+                    if let Some(k) = &temp_key {
+                        let _ = std::fs::remove_file(k);
+                    }
+                    let rec = r?;
+                    if o.allow_from.is_empty() {
+                        p.log(&format!(
+                            "the agent port {} is open to any address (mTLS still required); pass allow_from to firewall it",
+                            o.agent_port
+                        ));
+                    }
+                    Ok(s.view(&rec))
+                }
+            };
+            if a.wait == Some(false) {
+                spawn_run(p.clone(), run);
+                return Ok(json!({"provision": p.view()}));
             }
-            let rec = r?;
-            if o.allow_from.is_empty() {
-                log.push(format!(
-                    "the agent port {} is open to any address (mTLS still required); pass allow_from to firewall it",
-                    o.agent_port
-                ));
-            }
-            let mut v = s.view(&rec);
-            v["log"] = json!(log);
+            let r = run();
+            p.finish(r.as_ref().map(Value::clone).map_err(|e| e.to_string()));
+            let mut v = r?;
+            v["log"] = json!(p.view().log);
             Ok(v)
         }
     );
     tool!(
         "server_list",
         "List servers",
-        "Platform admins: the servers orgs can be placed on, with their health (up, unreachable, unknown), last heartbeat (versions, CPU, memory, disk) and the orgs on each.",
+        "Platform admins: the servers orgs can be placed on, with their health (up, unreachable, unknown), last heartbeat (versions, CPU, memory, disk) and the orgs on each; `provisions`, servers being added (and recent failures); `dedicated_vm`, whether this host can run dedicated VMs; `suggested_allow_from`, addresses this control plane's traffic leaves from.",
         json!({"type": "object", "properties": {}, "additionalProperties": false}),
         ro,
         |d: &Daemon, _a: Value, c: &Caller| -> Result<Value> {
             platform_only(c)?;
             let s = servers(d)?;
             let v: Vec<Value> = s.records().iter().map(|r| s.view(r)).collect();
-            Ok(json!({"servers": v}))
+            let vm = match vm::support(&d.client) {
+                Ok(()) => json!({"supported": true}),
+                Err(reason) => json!({"supported": false, "reason": reason}),
+            };
+            Ok(json!({
+                "servers": v,
+                "provisions": s.runs.list(),
+                "dedicated_vm": vm,
+                "suggested_allow_from": suggested_allow_from(),
+            }))
+        }
+    );
+    tool!(
+        "server_provision_get",
+        "Follow a server being added",
+        "Platform admins: how far adding a server (server_add with wait=false) or making an org's dedicated VM (org_create with placement vm) got: its steps, log, state (running, done, failed) and error. Kept for an hour after a failure.",
+        name_only.clone(),
+        ro,
+        |d: &Daemon, a: Value, c: &Caller| -> Result<Value> {
+            #[derive(Deserialize)]
+            struct A {
+                name: String,
+            }
+            platform_only(c)?;
+            let a: A = args(a)?;
+            let s = servers(d)?;
+            s.runs
+                .get(&a.name)
+                .map(|v| serde_json::to_value(v).unwrap_or_default())
+                .ok_or_else(|| Error::NotFound(format!("no server {} being added", a.name)))
         }
     );
     tool!(
@@ -220,7 +288,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
     tool!(
         "server_remove",
         "Remove a server",
-        "Platform admins: forget a server. Refused while orgs are placed on it (delete them first). The agent keeps running on the box until it is stopped there (systemctl disable --now isb-agent).",
+        "Platform admins: forget a server. Refused while orgs are placed on it (delete them first). A box added over SSH keeps running its agent until it is stopped there (systemctl disable --now isb-agent); a dedicated VM this control plane made is deleted with it.",
         name_only.clone(),
         destructive,
         |d: &Daemon, a: Value, c: &Caller| -> Result<Value> {
@@ -230,10 +298,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
             }
             platform_only(c)?;
             let a: A = args(a)?;
-            let r = servers(d)?.remove(&a.name)?;
-            Ok(json!({"ok": true, "removed": r.name, "note": format!(
-                "the agent still runs on {}: stop it there with `systemctl disable --now {}`", r.ssh, bootstrap::AGENT_UNIT
-            )}))
+            remove_server(d, servers(d)?, &a.name)
         }
     );
     tool!(
@@ -254,6 +319,72 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
         }
     );
     Ok(())
+}
+
+/// Run a provisioning in the background, recording how it ends.
+fn spawn_run(p: Provision, run: impl FnOnce() -> Result<Value> + Send + 'static) {
+    let name = p.view().name;
+    let p2 = p.clone();
+    let spawned = std::thread::Builder::new()
+        .name(format!("isb-provision-{name}"))
+        .spawn(move || {
+            let r = run();
+            p2.finish(r.map_err(|e| e.to_string()));
+        });
+    if let Err(e) = spawned {
+        p.finish(Err(format!("start the provisioning thread: {e}")));
+    }
+}
+
+/// Forget a server; a dedicated VM is deleted first (refused while orgs
+/// are placed on it, like any server).
+fn remove_server(d: &Daemon, s: &Arc<Servers>, name: &str) -> Result<Value> {
+    let rec = s.record(name)?;
+    let orgs = s.orgs_on(name);
+    if !orgs.is_empty() {
+        // The same refusal remove() gives, before a VM is touched.
+        return s.remove(name).map(|_| Value::Null);
+    }
+    if let Some(v) = &rec.vm {
+        vm::delete(&d.client, &v.project, &v.instance)?;
+        s.remove(name)?;
+        return Ok(json!({"ok": true, "removed": rec.name, "note": format!(
+            "deleted VM {} in project {}", v.instance, v.project
+        )}));
+    }
+    let r = s.remove(name)?;
+    Ok(json!({"ok": true, "removed": r.name, "note": format!(
+        "the agent still runs on {}: stop it there with `systemctl disable --now {}`", r.ssh, bootstrap::AGENT_UNIT
+    )}))
+}
+
+/// Addresses this control plane's traffic leaves from, for a new server's
+/// `allow_from`: toward the internet, and toward the tailnet when there is
+/// one. Behind NAT a box sees the public address instead.
+fn suggested_allow_from() -> Vec<Value> {
+    let from = |dest: &str| -> Option<std::net::IpAddr> {
+        let s = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+        s.connect(dest).ok()?;
+        let ip = s.local_addr().ok()?.ip();
+        (!ip.is_unspecified() && !ip.is_loopback()).then_some(ip)
+    };
+    let mut out: Vec<Value> = Vec::new();
+    if let Some(ip) = from("1.1.1.1:53") {
+        let private = matches!(ip, std::net::IpAddr::V4(v) if v.is_private());
+        out.push(json!({
+            "address": ip.to_string(),
+            "via": if private { "default route (private: behind NAT, a box on the internet sees your public address instead)" } else { "default route" },
+        }));
+    }
+    if let Some(ip @ std::net::IpAddr::V4(v)) = from("100.100.100.100:53") {
+        if v.octets()[0] == 100
+            && (64..128).contains(&v.octets()[1])
+            && !out.iter().any(|o| o["address"] == ip.to_string())
+        {
+            out.push(json!({"address": ip.to_string(), "via": "tailnet"}));
+        }
+    }
+    out
 }
 
 /// A call as forwarded: a compose file the local CLI resolved goes as YAML
@@ -287,6 +418,8 @@ enum Way {
     FanOut,
     /// Creating an org on this server.
     OrgCreate(String),
+    /// Creating an org in a dedicated VM this control plane makes.
+    OrgCreateVm(vm::VmSize),
     /// `org_get`, `org_update`, `org_delete`: forwarded when the org is on
     /// a server (and a move is refused).
     OrgOther,
@@ -301,9 +434,11 @@ fn decide(name: &str, a: &Value, placement: &dyn Fn(&OrgId) -> Option<String>) -
     }
     match name {
         "org_create" => {
-            return match a.get("server").and_then(Value::as_str) {
-                Some(s) if s != "local" => Way::OrgCreate(s.to_string()),
-                _ => Way::Here,
+            // A bad placement is the local tool's to refuse.
+            return match vm::placement(a) {
+                Ok(vm::Placement::Server(s)) => Way::OrgCreate(s),
+                Ok(vm::Placement::Vm(size)) => Way::OrgCreateVm(size),
+                Ok(vm::Placement::Local) | Err(_) => Way::Here,
             };
         }
         "org_update" | "org_delete" | "org_get" => return Way::OrgOther,
@@ -331,6 +466,7 @@ pub(super) fn route(d: Arc<Daemon>) -> crate::server::mcp::Route {
         match decide(name, a, &|o| s.placement(o)) {
             Way::Here => None,
             Way::OrgCreate(server) => Some(org_create(&d, s, &server, a, caller, rid)),
+            Way::OrgCreateVm(size) => Some(org_create_vm(&d, s, size, a, caller, rid)),
             Way::OrgOther => org_other(&d, s, name, a, caller, rid),
             Way::FanOut => Some(fan_out(&d, s, tool, a, caller, rid)),
             Way::Forward(server, org) => Some(
@@ -341,12 +477,30 @@ pub(super) fn route(d: Arc<Daemon>) -> crate::server::mcp::Route {
     })
 }
 
+/// The arguments an agent takes: where the org runs is the control
+/// plane's business.
 fn without_server(a: &Value) -> Value {
     let mut a = a.clone();
     if let Some(o) = a.as_object_mut() {
-        o.remove("server");
+        for k in ["server", "placement", "wait", "delete_vm"] {
+            o.remove(k);
+        }
     }
     a
+}
+
+/// Where an org runs and how it is kept apart, for org_get and org_list.
+pub(super) fn placement_view(s: Option<&Arc<Servers>>, org: &OrgId) -> Value {
+    let Some(name) = s.and_then(|s| s.placement(org)) else {
+        return json!({"kind": "local", "server": "local", "isolation": "shared-kernel"});
+    };
+    match s.and_then(|s| s.record(&name).ok()).and_then(|r| r.vm) {
+        Some(v) => json!({
+            "kind": "vm", "server": name, "isolation": "own-kernel",
+            "vm": {"cpus": v.cpus, "memory": v.memory, "disk": v.disk, "project": v.project, "instance": v.instance},
+        }),
+        None => json!({"kind": "server", "server": name, "isolation": "own-host"}),
+    }
 }
 
 fn org_create(
@@ -357,35 +511,104 @@ fn org_create(
     c: &Caller,
     rid: Option<&str>,
 ) -> Result<Value> {
-    {
-        let org = arg_org(a)?;
-        if org.is_default() {
-            return Err(Error::invalid("the default org stays on the control plane"));
-        }
-        s.record(server)?;
-        if s.placement(&org).is_some() {
-            return Err(Error::AlreadyExists(format!("org {org}")));
-        }
-        match crate::org::get(&d.client, &org) {
-            Ok(_) => return Err(Error::AlreadyExists(format!("org {org} (on this host)"))),
-            Err(e) if e.is_not_found() => {}
-            Err(e) => return Err(e),
-        }
-        s.place(&org, Some(server))?;
-        let r = s.call(server, "org_create", &without_server(a), c, Some(&org), rid);
-        let mut v = match r {
-            Ok(v) => v,
-            Err(e) => {
-                let _ = s.place(&org, None);
-                return Err(e);
-            }
-        };
-        d.users
-            .ensure_org(&org)
-            .map_err(|e| Error::invalid(e.to_string()))?;
-        v["server"] = json!(server);
-        Ok(v)
+    let org = new_org(d, s, a)?;
+    s.record(server)?;
+    create_on(d, s, server, &org, a, c, rid)
+}
+
+/// The org a create is for, if it is free: not the default, not placed,
+/// not on this host.
+fn new_org(d: &Daemon, s: &Servers, a: &Value) -> Result<OrgId> {
+    let org = arg_org(a)?;
+    if org.is_default() {
+        return Err(Error::invalid("the default org stays on the control plane"));
     }
+    if s.placement(&org).is_some() {
+        return Err(Error::AlreadyExists(format!("org {org}")));
+    }
+    match crate::org::get(&d.client, &org) {
+        Ok(_) => Err(Error::AlreadyExists(format!("org {org} (on this host)"))),
+        Err(e) if e.is_not_found() => Ok(org),
+        Err(e) => Err(e),
+    }
+}
+
+/// Place `org` on `server` and create it there.
+fn create_on(
+    d: &Daemon,
+    s: &Arc<Servers>,
+    server: &str,
+    org: &OrgId,
+    a: &Value,
+    c: &Caller,
+    rid: Option<&str>,
+) -> Result<Value> {
+    s.place(org, Some(server))?;
+    let r = s.call(server, "org_create", &without_server(a), c, Some(org), rid);
+    let mut v = match r {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = s.place(org, None);
+            return Err(e);
+        }
+    };
+    d.users
+        .ensure_org(org)
+        .map_err(|e| Error::invalid(e.to_string()))?;
+    v["server"] = json!(server);
+    v["placement"] = placement_view(Some(s), org);
+    Ok(v)
+}
+
+/// `org_create` with `placement: {vm: ...}`: make the org a VM of its own
+/// on this host (server `vm-<org>`), then create it there. With
+/// `wait: false` it answers at once with the provisioning to follow.
+fn org_create_vm(
+    d: &Arc<Daemon>,
+    s: &Arc<Servers>,
+    size: vm::VmSize,
+    a: &Value,
+    c: &Caller,
+    rid: Option<&str>,
+) -> Result<Value> {
+    let org = new_org(d, s, a)?;
+    // The org's own settings are checked now, not after the VM is made.
+    let st: super::orgs::Settings = args(without_server(a))?;
+    st.options(None)?;
+    vm::support(&d.client)
+        .map_err(|e| Error::invalid(format!("a dedicated VM cannot be made here: {e}")))?;
+    let name = vm::server_name(&org);
+    if let Ok(r) = s.record(&name) {
+        if r.vm.as_ref().is_none_or(|v| v.org != org) {
+            return Err(Error::AlreadyExists(format!(
+                "server {name} exists and is not org {org}'s dedicated VM"
+            )));
+        }
+    }
+    let mut request = without_server(a);
+    request["placement"] = json!({"vm": size});
+    let p = s
+        .runs
+        .begin(Provision::new(&name, Kind::Vm, Some(org.as_str()), request))?;
+    let run = {
+        let (d, s, p, c) = (d.clone(), s.clone(), p.clone(), c.clone());
+        let (a, rid) = (a.clone(), rid.map(str::to_string));
+        move || -> Result<Value> {
+            let rec = s.add_vm(&d.client, &org, &size, Some(&d.ctl), &p)?;
+            p.step("org");
+            p.log(&format!("creating org {org} on server {}", rec.name));
+            let v = create_on(&d, &s, &rec.name, &org, &a, &c, rid.as_deref())?;
+            p.log(&format!("org {org} runs in its own VM"));
+            Ok(v)
+        }
+    };
+    if a.get("wait").and_then(Value::as_bool) == Some(false) {
+        spawn_run(p.clone(), run);
+        return Ok(json!({"provision": p.view()}));
+    }
+    let r = run();
+    p.finish(r.as_ref().map(Value::clone).map_err(|e| e.to_string()));
+    r
 }
 
 fn org_other(
@@ -398,16 +621,20 @@ fn org_other(
 ) -> Option<Result<Value>> {
     let org = arg_org(a).ok()?;
     let here = s.placement(&org);
-    if tool == "org_update" {
-        if let Some(want) = a.get("server").and_then(Value::as_str) {
-            let now = here.as_deref().unwrap_or("local");
-            if want != now {
-                return Some(Err(Error::invalid(format!(
-                    "org {org} runs on {now}; moving an org between servers is not supported \
-                     (docs/servers.md#moving-an-org: remove its workloads, delete it, create it \
-                     again with --server {want}, restore its data)"
-                ))));
-            }
+    if tool == "org_update" && (a.get("server").is_some() || a.get("placement").is_some()) {
+        let now = here.as_deref().unwrap_or("local");
+        let want = match vm::placement(a) {
+            Ok(vm::Placement::Local) => "local".to_string(),
+            Ok(vm::Placement::Server(s)) => s,
+            Ok(vm::Placement::Vm(_)) => vm::server_name(&org),
+            Err(e) => return Some(Err(e)),
+        };
+        if want != now {
+            return Some(Err(Error::invalid(format!(
+                "org {org} runs on {now}; moving an org is not supported \
+                 (docs/servers.md#moving-an-org: remove its workloads, delete it, create it \
+                 again where it should run, restore its data)"
+            ))));
         }
     }
     let server = here?;
@@ -419,9 +646,28 @@ fn org_other(
                     .delete_org(&org)
                     .map_err(|e| Error::invalid(e.to_string()))?;
                 s.place(&org, None)?;
+                let dedicated = s
+                    .record(&server)
+                    .ok()
+                    .and_then(|r| r.vm)
+                    .filter(|v| v.org == org);
+                if let Some(vm) = dedicated {
+                    if a.get("delete_vm").and_then(Value::as_bool) == Some(true) {
+                        if s.orgs_on(&server).is_empty() {
+                            remove_server(d, s, &server)?;
+                            v["deleted_vm"] = json!(vm.instance);
+                        }
+                    } else {
+                        v["notes"] = json!([format!(
+                            "its VM {} keeps running as server {server}: `isb server rm {server}` deletes it",
+                            vm.instance
+                        )]);
+                    }
+                }
             }
             _ => {
                 v["server"] = json!(server);
+                v["placement"] = placement_view(Some(s), &org);
                 v["members"] = json!(d.users.list_members(&org).map(|m| m.len()).unwrap_or(0));
             }
         }
@@ -498,6 +744,7 @@ fn fan_out(
                         if let Some(Ok(id)) = o["name"].as_str().map(OrgId::new) {
                             o["members"] =
                                 json!(d.users.list_members(&id).map(|m| m.len()).unwrap_or(0));
+                            o["placement"] = placement_view(Some(s), &id);
                         }
                     }
                 }
@@ -807,6 +1054,33 @@ mod tests {
             Way::Here
         );
         assert_eq!(d("org_create", json!({"org": "x"})), Way::Here);
+        assert_eq!(
+            d("org_create", json!({"org": "x", "placement": {"server": "box"}})),
+            Way::OrgCreate("box".into())
+        );
+        assert_eq!(
+            d(
+                "org_create",
+                json!({"org": "x", "placement": {"vm": {"cpus": 4}}})
+            ),
+            Way::OrgCreateVm(vm::VmSize {
+                cpus: 4,
+                memory: "4GiB".into(),
+                disk: "40GiB".into()
+            })
+        );
+        assert_eq!(
+            d("org_create", json!({"org": "x", "placement": "local"})),
+            Way::Here
+        );
+        assert_eq!(
+            d(
+                "org_create",
+                json!({"org": "x", "placement": {"vm": {"cpus": 0}}})
+            ),
+            Way::Here,
+            "the local tool refuses a bad placement"
+        );
         assert_eq!(d("org_delete", json!({"org": "far"})), Way::OrgOther);
     }
 

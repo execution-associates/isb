@@ -9,7 +9,9 @@ pub mod client;
 pub mod health;
 pub mod merge;
 pub mod pki;
+pub mod provision;
 pub mod store;
+pub mod vm;
 pub mod wire;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -39,7 +41,10 @@ pub struct Servers {
     store: Mutex<store::Store>,
     health: Mutex<BTreeMap<String, health::Health>>,
     mirrored: Mutex<BTreeSet<String>>,
-    /// Serializes adds, removals and placement changes.
+    /// Servers being added, and recently added or failed.
+    pub runs: provision::Runs,
+    /// Serializes record and placement changes (held briefly; a bootstrap
+    /// runs outside it, one per name through `runs`).
     admin: Mutex<()>,
     stop: Arc<AtomicBool>,
 }
@@ -65,6 +70,7 @@ impl Servers {
             store: Mutex::new(store),
             health: Mutex::new(BTreeMap::new()),
             mirrored: Mutex::new(BTreeSet::new()),
+            runs: provision::Runs::default(),
             admin: Mutex::new(()),
             stop: Arc::new(AtomicBool::new(false)),
         }))
@@ -125,6 +131,7 @@ impl Servers {
     /// A server as `server_list` and `server_show` answer it.
     pub fn view(&self, r: &ServerRecord) -> Value {
         let mut v = serde_json::to_value(r).unwrap_or_default();
+        v["kind"] = json!(if r.vm.is_some() { "vm" } else { "ssh" });
         v["orgs"] = json!(self.orgs_on(&r.name));
         v["health"] = serde_json::to_value(self.health(&r.name)).unwrap_or_default();
         v
@@ -185,59 +192,165 @@ impl Servers {
             .call(tool, args, &who, org, request_id, CALL_TIMEOUT)
     }
 
-    /// Bootstrap a new server over SSH and record it.
-    pub fn add(
-        self: &Arc<Self>,
-        o: &bootstrap::AddOptions,
-        ctl: Option<&Controller>,
-        log: &mut dyn FnMut(&str),
-    ) -> Result<ServerRecord> {
+    /// What `add` would refuse before it starts: a bad name, target or
+    /// address, or a server of that name already.
+    pub fn check_add(&self, o: &bootstrap::AddOptions) -> Result<String> {
         bootstrap::validate_name(&o.name)?;
         let (_, host) = bootstrap::ssh_host(&o.ssh)?;
         for c in &o.allow_from {
             bootstrap::check_cidr(c)?;
         }
-        let _g = self.admin.lock().unwrap();
+        let address = o.address.clone().unwrap_or_else(|| host.to_string());
+        bootstrap::check_address(&address)?;
         if self.store.lock().unwrap().servers.contains_key(&o.name) {
             return Err(Error::AlreadyExists(format!("server {}", o.name)));
         }
-        let address = o.address.clone().unwrap_or_else(|| host.to_string());
-        bootstrap::check_address(&address)?;
+        Ok(address)
+    }
+
+    /// Bootstrap a new server over SSH and record it, reporting to `p`.
+    pub fn add(
+        self: &Arc<Self>,
+        o: &bootstrap::AddOptions,
+        ctl: Option<&Controller>,
+        p: &provision::Provision,
+    ) -> Result<ServerRecord> {
+        let address = self.check_add(o)?;
         let leaf = self.ca.issue_server(&o.name, &address)?;
         let known = self.dir.join("known_hosts");
         let ssh = bootstrap::Ssh::new(&o.ssh, o.ssh_port, &o.key, &known);
         let scratch = self.dir.join(format!("tmp-{}", o.name));
         std::fs::create_dir_all(&scratch)?;
-        let r = bootstrap::run(o, &ssh, &self.ca.cert_pem, &leaf, &scratch, log);
+        let r = bootstrap::run(o, &ssh, &self.ca.cert_pem, &leaf, &scratch, p);
         let _ = std::fs::remove_dir_all(&scratch);
         let incus = r?;
-        log(&format!(
-            "waiting for the agent on {address}:{} ({incus})",
-            o.agent_port
+        self.register(
+            ServerRecord {
+                name: o.name.clone(),
+                address,
+                port: o.agent_port,
+                ssh: o.ssh.clone(),
+                ssh_port: o.ssh_port,
+                added_at: now_secs(),
+                fingerprint: leaf.fingerprint()?,
+                cert_not_after: Some(now_secs() + pki::LEAF_DAYS as u64 * 86400),
+                isb_version: String::new(),
+                allow_from: o.allow_from.clone(),
+                vm: None,
+            },
+            &incus,
+            ctl,
+            p,
+        )
+    }
+
+    /// Make a dedicated VM for `org` on this host and record it as server
+    /// `vm-<org>` (docs/servers.md#dedicated-vms). Idempotent: a VM or a
+    /// record left by an earlier attempt is reused.
+    pub fn add_vm(
+        self: &Arc<Self>,
+        client: &crate::Client,
+        org: &OrgId,
+        size: &vm::VmSize,
+        ctl: Option<&Controller>,
+        p: &provision::Provision,
+    ) -> Result<ServerRecord> {
+        let name = vm::server_name(org);
+        if let Ok(r) = self.record(&name) {
+            match &r.vm {
+                Some(v) if &v.org == org => {
+                    let c = self.client(&name)?;
+                    if c.internal("GET", "/internal/v1/heartbeat", None, health::TIMEOUT)
+                        .is_ok()
+                    {
+                        p.log(&format!("server {name} is up already"));
+                        return Ok(r);
+                    }
+                    p.log(&format!(
+                        "server {name} is recorded but does not answer: bootstrapping it again"
+                    ));
+                }
+                _ => {
+                    return Err(Error::AlreadyExists(format!(
+                        "server {name} (not org {org}'s dedicated VM)"
+                    )));
+                }
+            }
+        }
+        let booted = vm::boot(client, org, size, p)?;
+        let leaf = self.ca.issue_server(&name, &booted.address)?;
+        let binary = bootstrap::own_binary(std::env::consts::ARCH)?;
+        let sha = bootstrap::sha256_hex(&binary);
+        let upload = "/root/isb-agent.upload";
+        let allow = vec![booted.host_address.clone()];
+        let script = bootstrap::render_script(
+            upload,
+            &sha,
+            &self.ca.cert_pem,
+            &leaf,
+            bootstrap::DEFAULT_AGENT_PORT,
+            &allow,
+            None,
+            false,
+        );
+        let incus = vm::install(client, org, &binary, &script, upload, p)?;
+        self.register(
+            ServerRecord {
+                name: name.clone(),
+                address: booted.address,
+                port: bootstrap::DEFAULT_AGENT_PORT,
+                ssh: String::new(),
+                ssh_port: 0,
+                added_at: now_secs(),
+                fingerprint: leaf.fingerprint()?,
+                cert_not_after: Some(now_secs() + pki::LEAF_DAYS as u64 * 86400),
+                isb_version: String::new(),
+                allow_from: allow,
+                vm: Some(store::VmRecord {
+                    org: org.clone(),
+                    project: vm::PROJECT.to_string(),
+                    instance: name,
+                    cpus: size.cpus,
+                    memory: size.memory.clone(),
+                    disk: size.disk.clone(),
+                }),
+            },
+            &incus,
+            ctl,
+            p,
+        )
+    }
+
+    /// Wait for a freshly bootstrapped agent, check it presents the
+    /// certificate just issued, and record it.
+    fn register(
+        self: &Arc<Self>,
+        mut rec: ServerRecord,
+        incus: &str,
+        ctl: Option<&Controller>,
+        p: &provision::Provision,
+    ) -> Result<ServerRecord> {
+        p.step("agent");
+        p.log(&format!(
+            "waiting for the agent on {}:{} ({incus})",
+            rec.address, rec.port
         ));
-        let c = AgentClient::new(&o.name, &address, o.agent_port, self.tls.clone());
+        let c = AgentClient::new(&rec.name, &rec.address, rec.port, self.tls.clone());
         let hb = wait_heartbeat(&c, Duration::from_secs(120))?;
-        let fingerprint = leaf.fingerprint()?;
-        if c.peer_fingerprint()? != fingerprint {
+        if c.peer_fingerprint()? != rec.fingerprint {
             return Err(Error::invalid(format!(
                 "server {}: the agent answered with a certificate other than the one just issued",
-                o.name
+                rec.name
             )));
         }
-        let rec = ServerRecord {
-            name: o.name.clone(),
-            address,
-            port: o.agent_port,
-            ssh: o.ssh.clone(),
-            ssh_port: o.ssh_port,
-            added_at: now_secs(),
-            fingerprint,
-            cert_not_after: Some(now_secs() + pki::LEAF_DAYS as u64 * 86400),
-            isb_version: hb["isb"].as_str().unwrap_or("").to_string(),
-            allow_from: o.allow_from.clone(),
-        };
+        rec.isb_version = hb["isb"].as_str().unwrap_or("").to_string();
         {
+            let _g = self.admin.lock().unwrap();
             let mut st = self.store.lock().unwrap();
+            if let Some(old) = st.servers.get(&rec.name) {
+                // Bootstrapped again (a dedicated VM that stopped answering).
+                rec.added_at = old.added_at;
+            }
             st.servers.insert(rec.name.clone(), rec.clone());
             st.save()?;
         }
@@ -250,6 +363,7 @@ impl Servers {
         if let Some(ctl) = ctl {
             self.mirror(&rec.name, ctl.clone());
         }
+        p.log(&format!("server {} is up", rec.name));
         Ok(rec)
     }
 

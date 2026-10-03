@@ -611,6 +611,7 @@ const PLATFORM_TOOLS: &[&str] = &[
     "server_show",
     "server_remove",
     "server_rotate_cert",
+    "server_provision_get",
 ];
 
 /// Read-only tools that span orgs: any signed-in user, filtered to their

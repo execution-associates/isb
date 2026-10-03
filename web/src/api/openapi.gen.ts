@@ -1795,9 +1795,29 @@ export interface paths {
         put?: never;
         /**
          * List servers
-         * @description Platform admins: the servers orgs can be placed on, with their health (up, unreachable, unknown), last heartbeat (versions, CPU, memory, disk) and the orgs on each.
+         * @description Platform admins: the servers orgs can be placed on, with their health (up, unreachable, unknown), last heartbeat (versions, CPU, memory, disk) and the orgs on each; `provisions`, servers being added (and recent failures); `dedicated_vm`, whether this host can run dedicated VMs; `suggested_allow_from`, addresses this control plane's traffic leaves from.
          */
         post: operations["server_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/server_provision_get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Follow a server being added
+         * @description Platform admins: how far adding a server (server_add with wait=false) or making an org's dedicated VM (org_create with placement vm) got: its steps, log, state (running, done, failed) and error. Kept for an hour after a failure.
+         */
+        post: operations["server_provision_get"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1815,7 +1835,7 @@ export interface paths {
         put?: never;
         /**
          * Remove a server
-         * @description Platform admins: forget a server. Refused while orgs are placed on it (delete them first). The agent keeps running on the box until it is stopped there (systemctl disable --now isb-agent).
+         * @description Platform admins: forget a server. Refused while orgs are placed on it (delete them first). A box added over SSH keeps running its agent until it is stopped there (systemctl disable --now isb-agent); a dedicated VM this control plane made is deleted with it.
          */
         post: operations["server_remove"];
         delete?: never;
@@ -4760,8 +4780,22 @@ export interface operations {
                     memory?: string;
                     /** @description The new org's name: [a-z0-9-], starts with a letter. */
                     org: string;
-                    /** @description Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. */
+                    /** @description Where the org runs, set at creation: "local" (this host: an incus project sharing its kernel), {"server": NAME} (another host, server_list), or {"vm": {"cpus", "memory", "disk"}} (a dedicated VM this control plane makes on its own host: the org's own kernel; defaults 2 CPUs, 4GiB, 40GiB). An org is not moved afterwards. */
+                    placement?: "local" | {
+                        server: string;
+                    } | {
+                        vm: {
+                            cpus?: number;
+                            /** @description At least 10GiB (default 40GiB). */
+                            disk?: string;
+                            /** @description At least 2GiB (default 4GiB). */
+                            memory?: string;
+                        };
+                    };
+                    /** @description Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. Same as placement {"server": NAME}. */
                     server?: string;
+                    /** @description With a dedicated VM: wait until it is made and the org created (default true; minutes). false answers at once with `provision`; follow it with server_provision_get (name vm-<org>). */
+                    wait?: boolean;
                 };
             };
         };
@@ -4796,6 +4830,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description For an org in a dedicated VM: delete the VM and its server registration too (default false: the VM keeps running as an empty server). */
+                    delete_vm?: boolean;
                     /** @description Also delete the org's sandboxes. */
                     force?: boolean;
                     /** @description The org to delete. */
@@ -4922,8 +4958,22 @@ export interface operations {
                     memory?: string;
                     /** @description The org. */
                     org: string;
-                    /** @description Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. */
+                    /** @description Where the org runs, set at creation: "local" (this host: an incus project sharing its kernel), {"server": NAME} (another host, server_list), or {"vm": {"cpus", "memory", "disk"}} (a dedicated VM this control plane makes on its own host: the org's own kernel; defaults 2 CPUs, 4GiB, 40GiB). An org is not moved afterwards. */
+                    placement?: "local" | {
+                        server: string;
+                    } | {
+                        vm: {
+                            cpus?: number;
+                            /** @description At least 10GiB (default 40GiB). */
+                            disk?: string;
+                            /** @description At least 2GiB (default 4GiB). */
+                            memory?: string;
+                        };
+                    };
+                    /** @description Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. Same as placement {"server": NAME}. */
                     server?: string;
+                    /** @description With a dedicated VM: wait until it is made and the org created (default true; minutes). false answers at once with `provision`; follow it with server_provision_get (name vm-<org>). */
+                    wait?: boolean;
                 };
             };
         };
@@ -5949,6 +5999,8 @@ export interface operations {
                     name: string;
                     /** @description Serve the server's orgs' domains on its own ports 80 and 443 (opened in its firewall). */
                     public_ingress?: boolean;
+                    /** @description Install this control plane's own isb executable instead of a release (same version and build; the box must have the same architecture). */
+                    self_binary?: boolean;
                     /** @description user@host */
                     ssh: string;
                     /** @description The private key itself (kept only for the bootstrap). */
@@ -5956,6 +6008,8 @@ export interface operations {
                     ssh_port?: number;
                     /** @description The isb release to install (default this daemon's). */
                     version?: string;
+                    /** @description Wait for the bootstrap to finish (default true). false answers at once with `provision`; follow it with server_provision_get. */
+                    wait?: boolean;
                 };
             };
         };
@@ -5990,6 +6044,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    server_provision_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                };
             };
         };
         responses: {

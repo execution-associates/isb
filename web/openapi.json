@@ -3617,9 +3617,64 @@
                     "description": "The new org's name: [a-z0-9-], starts with a letter.",
                     "type": "string"
                   },
+                  "placement": {
+                    "description": "Where the org runs, set at creation: \"local\" (this host: an incus project sharing its kernel), {\"server\": NAME} (another host, server_list), or {\"vm\": {\"cpus\", \"memory\", \"disk\"}} (a dedicated VM this control plane makes on its own host: the org's own kernel; defaults 2 CPUs, 4GiB, 40GiB). An org is not moved afterwards.",
+                    "oneOf": [
+                      {
+                        "enum": [
+                          "local"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "server": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "server"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "vm": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "cpus": {
+                                "maximum": 256,
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              "disk": {
+                                "description": "At least 10GiB (default 40GiB).",
+                                "type": "string"
+                              },
+                              "memory": {
+                                "description": "At least 2GiB (default 4GiB).",
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "vm"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
                   "server": {
-                    "description": "Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers.",
+                    "description": "Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. Same as placement {\"server\": NAME}.",
                     "type": "string"
+                  },
+                  "wait": {
+                    "description": "With a dedicated VM: wait until it is made and the org created (default true; minutes). false answers at once with `provision`; follow it with server_provision_get (name vm-<org>).",
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -3662,6 +3717,10 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "delete_vm": {
+                    "description": "For an org in a dedicated VM: delete the VM and its server registration too (default false: the VM keeps running as an empty server).",
+                    "type": "boolean"
+                  },
                   "force": {
                     "description": "Also delete the org's sandboxes.",
                     "type": "boolean"
@@ -3835,9 +3894,64 @@
                     "description": "The org.",
                     "type": "string"
                   },
+                  "placement": {
+                    "description": "Where the org runs, set at creation: \"local\" (this host: an incus project sharing its kernel), {\"server\": NAME} (another host, server_list), or {\"vm\": {\"cpus\", \"memory\", \"disk\"}} (a dedicated VM this control plane makes on its own host: the org's own kernel; defaults 2 CPUs, 4GiB, 40GiB). An org is not moved afterwards.",
+                    "oneOf": [
+                      {
+                        "enum": [
+                          "local"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "server": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "server"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "vm": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "cpus": {
+                                "maximum": 256,
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              "disk": {
+                                "description": "At least 10GiB (default 40GiB).",
+                                "type": "string"
+                              },
+                              "memory": {
+                                "description": "At least 2GiB (default 4GiB).",
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "vm"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
                   "server": {
-                    "description": "Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers.",
+                    "description": "Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. Same as placement {\"server\": NAME}.",
                     "type": "string"
+                  },
+                  "wait": {
+                    "description": "With a dedicated VM: wait until it is made and the org created (default true; minutes). false answers at once with `provision`; follow it with server_provision_get (name vm-<org>).",
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -5211,6 +5325,10 @@
                     "description": "Serve the server's orgs' domains on its own ports 80 and 443 (opened in its firewall).",
                     "type": "boolean"
                   },
+                  "self_binary": {
+                    "description": "Install this control plane's own isb executable instead of a release (same version and build; the box must have the same architecture).",
+                    "type": "boolean"
+                  },
                   "ssh": {
                     "description": "user@host",
                     "type": "string"
@@ -5227,6 +5345,10 @@
                   "version": {
                     "description": "The isb release to install (default this daemon's).",
                     "type": "string"
+                  },
+                  "wait": {
+                    "description": "Wait for the bootstrap to finish (default true). false answers at once with `provision`; follow it with server_provision_get.",
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -5262,7 +5384,7 @@
     },
     "/api/v1/tools/server_list": {
       "post": {
-        "description": "Platform admins: the servers orgs can be placed on, with their health (up, unreachable, unknown), last heartbeat (versions, CPU, memory, disk) and the orgs on each.",
+        "description": "Platform admins: the servers orgs can be placed on, with their health (up, unreachable, unknown), last heartbeat (versions, CPU, memory, disk) and the orgs on each; `provisions`, servers being added (and recent failures); `dedicated_vm`, whether this host can run dedicated VMs; `suggested_allow_from`, addresses this control plane's traffic leaves from.",
         "operationId": "server_list",
         "requestBody": {
           "content": {
@@ -5297,9 +5419,53 @@
         "summary": "List servers"
       }
     },
+    "/api/v1/tools/server_provision_get": {
+      "post": {
+        "description": "Platform admins: how far adding a server (server_add with wait=false) or making an org's dedicated VM (org_create with placement vm) got: its steps, log, state (running, done, failed) and error. Kept for an hour after a failure.",
+        "operationId": "server_provision_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Follow a server being added"
+      }
+    },
     "/api/v1/tools/server_remove": {
       "post": {
-        "description": "Platform admins: forget a server. Refused while orgs are placed on it (delete them first). The agent keeps running on the box until it is stopped there (systemctl disable --now isb-agent).",
+        "description": "Platform admins: forget a server. Refused while orgs are placed on it (delete them first). A box added over SSH keeps running its agent until it is stopped there (systemctl disable --now isb-agent); a dedicated VM this control plane made is deleted with it.",
         "operationId": "server_remove",
         "requestBody": {
           "content": {

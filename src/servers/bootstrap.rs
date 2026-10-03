@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use super::pki::Leaf;
+use super::provision::Provision;
 use crate::error::{Error, Result};
 
 /// Where things go on the box.
@@ -38,15 +39,19 @@ pub struct AddOptions {
     /// A Linux isb binary to install; default the release of this version.
     pub isb_binary: Option<PathBuf>,
     pub version: Option<String>,
+    /// Install this control plane's own executable (it must be a Linux
+    /// build for the box's architecture).
+    pub self_binary: bool,
     /// Serve the box's orgs' domains on its own 80 and 443 (`isb host
     /// setup --public-ingress`, the agent's `--ingress-http/https`).
     pub public_ingress: bool,
 }
 
-/// Server names: `[a-z0-9-]`, a letter first, at most 32.
+/// Server names: `[a-z0-9-]`, a letter first, at most 40 (so `vm-` and
+/// the longest org name fit).
 pub fn validate_name(name: &str) -> Result<()> {
     let ok = !name.is_empty()
-        && name.len() <= 32
+        && name.len() <= 40
         && name.starts_with(|c: char| c.is_ascii_lowercase())
         && name
             .bytes()
@@ -54,7 +59,7 @@ pub fn validate_name(name: &str) -> Result<()> {
         && name != "local";
     if !ok {
         return Err(Error::invalid(format!(
-            "server name {name:?}: [a-z0-9-], starting with a letter, at most 32 characters, not \"local\""
+            "server name {name:?}: [a-z0-9-], starting with a letter, at most 40 characters, not \"local\""
         )));
     }
     Ok(())
@@ -240,7 +245,8 @@ WantedBy=multi-user.target
 }
 
 /// The root script: everything idempotent, so a second `server add` (or a
-/// rerun after a failure) converges.
+/// rerun after a failure) converges. `ssh_port` stays open in the
+/// firewall; a dedicated VM, bootstrapped through incus, has none.
 #[allow(clippy::too_many_arguments)]
 pub fn render_script(
     upload: &str,
@@ -249,15 +255,17 @@ pub fn render_script(
     leaf: &Leaf,
     port: u16,
     allow_from: &[String],
-    ssh_port: u16,
+    ssh_port: Option<u16>,
     public_ingress: bool,
 ) -> String {
     let mut fw = String::new();
     if !allow_from.is_empty() {
         fw.push_str(
-            "command -v ufw >/dev/null 2>&1 || apt-get install -y --no-install-recommends ufw\n",
+            "command -v ufw >/dev/null 2>&1 || { apt-get update; apt-get install -y --no-install-recommends ufw; }\n",
         );
-        fw.push_str(&format!("ufw allow {ssh_port}/tcp\n"));
+        if let Some(p) = ssh_port {
+            fw.push_str(&format!("ufw allow {p}/tcp\n"));
+        }
         for c in allow_from {
             fw.push_str(&format!(
                 "ufw allow proto tcp from {} to any port {port}\n",
@@ -346,17 +354,18 @@ echo "incus $(incus version 2>/dev/null | tail -n1 | awk '{{print $NF}}')"
     )
 }
 
-/// Run the bootstrap. `log` hears each step.
+/// Run the bootstrap, reporting each step to `p`.
 pub fn run(
     o: &AddOptions,
     ssh: &Ssh,
     ca_pem: &str,
     leaf: &Leaf,
     scratch: &Path,
-    log: &mut dyn FnMut(&str),
+    p: &Provision,
 ) -> Result<String> {
     let (user, _) = ssh_host(&o.ssh)?;
-    log("checking the box (uname, sudo)");
+    p.step("check");
+    p.log(&format!("checking the box: ssh {}:{}", o.ssh, o.ssh_port));
     let uname = ssh.run("check the box", "uname -sm", b"")?;
     let arch = match uname.split_whitespace().collect::<Vec<_>>().as_slice() {
         ["Linux", "x86_64"] => "x86_64",
@@ -369,31 +378,21 @@ pub fn run(
             )));
         }
     };
-    let sudo = if user == "root" { "" } else { "sudo -n " };
-    let binary = match &o.isb_binary {
-        Some(p) => std::fs::read(p).map_err(|e| Error::invalid(format!("{}: {e}", p.display())))?,
-        None => {
-            let ver = o
-                .version
-                .clone()
-                .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
-            log(&format!("downloading isb v{ver} for {arch}"));
-            let dst = scratch.join("isb");
-            crate::machine::download_release(&ver, arch, scratch, &dst)?;
-            std::fs::read(&dst)?
-        }
-    };
-    match elf_arch(&binary) {
-        Some(a) if a == arch => {}
-        Some(a) => {
-            return Err(Error::invalid(format!(
-                "the isb binary is for {a}; the box is {arch}"
-            )));
-        }
-        None => return Err(Error::invalid("the isb binary is not a Linux executable")),
+    p.log(&format!("{} {arch}", uname.split_whitespace().next().unwrap_or("")));
+    if user != "root" {
+        ssh.run("check sudo", "sudo -n true", b"").map_err(|_| {
+            Error::invalid(format!(
+                "{}: the user needs passwordless sudo (or connect as root)",
+                o.ssh
+            ))
+        })?;
     }
-    let sha = crate::machine::hex(ring::digest::digest(&ring::digest::SHA256, &binary).as_ref());
-    log(&format!(
+    let sudo = if user == "root" { "" } else { "sudo -n " };
+    p.step("binary");
+    let binary = binary(o, arch, scratch, p)?;
+    let sha = sha256_hex(&binary);
+    p.step("upload");
+    p.log(&format!(
         "uploading isb ({} MiB, sha256 {})",
         binary.len() >> 20,
         &sha[..16]
@@ -415,7 +414,8 @@ pub fn run(
             "upload isb: unexpected path {upload:?}"
         )));
     }
-    log("installing incus, the agent and its unit (this takes a few minutes on a fresh box)");
+    p.step("install");
+    p.log("installing incus, the agent and its unit (this takes a few minutes on a fresh box)");
     let script = render_script(
         &upload,
         &sha,
@@ -423,7 +423,7 @@ pub fn run(
         leaf,
         o.agent_port,
         &o.allow_from,
-        o.ssh_port,
+        Some(o.ssh_port),
         o.public_ingress,
     );
     let out = ssh.run(
@@ -434,6 +434,60 @@ pub fn run(
     Ok(out.lines().last().unwrap_or("").to_string())
 }
 
+pub fn sha256_hex(b: &[u8]) -> String {
+    crate::machine::hex(ring::digest::digest(&ring::digest::SHA256, b).as_ref())
+}
+
+/// This process's own executable, when it is a Linux build for `arch`.
+pub fn own_binary(arch: &str) -> Result<Vec<u8>> {
+    let b = std::fs::read("/proc/self/exe")
+        .map_err(|e| Error::invalid(format!("this control plane's own binary: {e}")))?;
+    match elf_arch(&b) {
+        Some(a) if a == arch => Ok(b),
+        Some(a) => Err(Error::invalid(format!(
+            "this control plane's binary is for {a}; the box is {arch}"
+        ))),
+        None => Err(Error::invalid(
+            "this control plane's binary is not a Linux executable",
+        )),
+    }
+}
+
+/// The binary to install: this process's own, a file given, or a release
+/// (checked against its SHA256SUMS); checked to be for `arch`.
+fn binary(o: &AddOptions, arch: &str, scratch: &Path, p: &Provision) -> Result<Vec<u8>> {
+    if o.self_binary {
+        p.log(&format!(
+            "using this control plane's own binary (isb {})",
+            env!("CARGO_PKG_VERSION")
+        ));
+        return own_binary(arch);
+    }
+    let b = match &o.isb_binary {
+        Some(f) => {
+            p.log(&format!("using {}", f.display()));
+            std::fs::read(f).map_err(|e| Error::invalid(format!("{}: {e}", f.display())))?
+        }
+        None => {
+            let ver = o
+                .version
+                .clone()
+                .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+            p.log(&format!("downloading isb v{ver} for {arch}"));
+            let dst = scratch.join("isb");
+            crate::machine::download_release(&ver, arch, scratch, &dst)?;
+            std::fs::read(&dst)?
+        }
+    };
+    match elf_arch(&b) {
+        Some(a) if a == arch => Ok(b),
+        Some(a) => Err(Error::invalid(format!(
+            "the isb binary is for {a}; the box is {arch}"
+        ))),
+        None => Err(Error::invalid("the isb binary is not a Linux executable")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,7 +495,8 @@ mod tests {
     #[test]
     fn names_and_targets_are_checked() {
         validate_name("hel-1").unwrap();
-        for bad in ["", "Local", "local", "1box", "a_b", &"a".repeat(33)] {
+        validate_name(&format!("vm-{}", "a".repeat(31))).unwrap();
+        for bad in ["", "Local", "local", "1box", "a_b", &"a".repeat(41)] {
             assert!(validate_name(bad).is_err(), "{bad}");
         }
         assert_eq!(
@@ -469,7 +524,7 @@ mod tests {
             &leaf,
             7443,
             &["198.51.100.1".into()],
-            22,
+            Some(22),
             true,
         );
         assert!(s.contains("echo \"abc  /tmp/isb-agent.x\" | sha256sum -c"));
@@ -485,10 +540,26 @@ mod tests {
             &leaf,
             7443,
             &[],
-            22,
+            Some(22),
             false,
         );
         assert!(!open.contains("ufw") && !open.contains("ingress"));
+        let vm = render_script(
+            "/tmp/isb-agent.x",
+            "abc",
+            "CA\n",
+            &leaf,
+            7443,
+            &["10.0.3.1".into()],
+            None,
+            false,
+        );
+        assert!(
+            vm.contains("ufw allow proto tcp from '10.0.3.1' to any port 7443")
+                && !vm.contains("/tcp\nufw allow proto"),
+            "a dedicated VM opens the agent port to the host only, and no SSH"
+        );
+        assert!(!vm.contains("ufw allow 22"));
         assert_eq!(
             elf_arch(b"\x7fELF\x02\x01\x01\0\0\0\0\0\0\0\0\0\x02\0\x3e\0"),
             Some("x86_64")
