@@ -434,7 +434,10 @@ impl Apps {
 
     /// Create an app (not deployed yet) and its webhook secret. Returns the
     /// app and that secret.
-    pub fn create(&self, org: &OrgId, spec: AppSpec) -> Result<(App, String)> {
+    pub fn create(&self, org: &OrgId, mut spec: AppSpec) -> Result<(App, String)> {
+        if let Source::Database(db) = &mut spec.source {
+            db.normalize(&spec.name);
+        }
         spec.validate()?;
         let _g = self.inner.edit.lock().unwrap();
         let proj = self.project_get(org, &spec.project)?;
@@ -458,12 +461,81 @@ impl Apps {
             next_deployment: 1,
             current: None,
         };
+        if let Source::Database(db) = &app.spec.source {
+            self.database_credentials(org, &app.spec, db)?;
+        }
         let secret = git::random_hex(32);
         self.inner
             .secrets
             .set(org, &app.spec.webhook_secret(), secret.as_bytes())?;
         self.save(org, &app)?;
         Ok((app, secret))
+    }
+
+    /// A database's passwords, generated unless they exist (a database
+    /// re-created over its kept volume needs the passwords that volume was
+    /// initialized with), and its connection URL.
+    fn database_credentials(
+        &self,
+        org: &OrgId,
+        spec: &AppSpec,
+        db: &super::DatabaseSource,
+    ) -> Result<()> {
+        use super::database as d;
+        let mut names = vec![d::password_secret(&spec.name)];
+        if db.engine.has_root_password() {
+            names.push(d::root_password_secret(&spec.name));
+        }
+        for n in &names {
+            match self.inner.secrets.inspect(org, n) {
+                Ok(_) => {}
+                Err(e) if e.is_not_found() => {
+                    self.inner
+                        .secrets
+                        .set(org, n, git::random_hex(16).as_bytes())?;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        let (pw, _) = self.inner.secrets.get(org, &names[0])?;
+        let pw = String::from_utf8(pw).map_err(|_| Error::invalid("the password is not text"))?;
+        let url = d::internal_url(spec, db, pw.trim());
+        let current = self
+            .inner
+            .secrets
+            .get(org, &d::url_secret(&spec.name))
+            .ok()
+            .map(|(v, _)| v);
+        if current.as_deref() != Some(url.as_bytes()) {
+            self.inner
+                .secrets
+                .set(org, &d::url_secret(&spec.name), url.as_bytes())?;
+        }
+        Ok(())
+    }
+
+    /// The org's secret store (backups read destination credentials and
+    /// database passwords from it).
+    pub fn secrets(&self) -> &Arc<Secrets> {
+        &self.inner.secrets
+    }
+
+    /// The incus client the apps run on.
+    pub fn client(&self) -> &Client {
+        &self.inner.client
+    }
+
+    /// The stack controller (events, definitions).
+    pub fn controller(&self) -> &Controller {
+        &self.inner.ctl
+    }
+
+    /// Wait (up to the deploy timeout) for an app's service to converge at
+    /// its current revision: `(converged, why not)`.
+    pub fn wait_converged(&self, org: &OrgId, name: &str) -> Result<(bool, String)> {
+        let app = self.get(org, name)?;
+        let q = crate::stack::qualified(org, &app.spec.stack()?);
+        self.wait_service(&q, name)
     }
 
     /// Secrets an app names must exist (a typo is better caught now than
@@ -505,6 +577,24 @@ impl Apps {
             return Err(Error::invalid(
                 "an app's name, project and environment are fixed; create a new app instead",
             ));
+        }
+        let mut spec = spec;
+        match (&app.spec.source, &mut spec.source) {
+            (Source::Database(old), Source::Database(new)) => {
+                new.normalize(name);
+                if old.engine != new.engine || old.database != new.database || old.user != new.user
+                {
+                    return Err(Error::invalid(
+                        "a database's engine, database and user are fixed (they live in its data volume); restore a backup into a new database instead",
+                    ));
+                }
+            }
+            (Source::Database(_), _) | (_, Source::Database(_)) => {
+                return Err(Error::invalid(
+                    "an app cannot become a database or stop being one; create a new app",
+                ));
+            }
+            _ => {}
         }
         spec.validate()?;
         self.check_secrets(org, &spec)?;
@@ -879,17 +969,16 @@ impl Apps {
                 let (image, digest) = match &app.spec.source {
                     Source::Image(i) => {
                         log.line(&format!("image {i}"));
-                        match (self.inner.digest)(i) {
-                            Some(d) => {
-                                let pinned = super::pin(i, &d).unwrap_or_else(|| i.clone());
-                                log.line(&format!("resolved to {pinned}"));
-                                (pinned, Some(d))
-                            }
-                            None => {
-                                log.line("no digest found; deploying by tag");
-                                (i.clone(), None)
-                            }
-                        }
+                        self.resolve(i, log)
+                    }
+                    Source::Database(db) => {
+                        let i = db.image();
+                        log.line(&format!(
+                            "database {} {}: image {i}",
+                            db.engine,
+                            db.version()
+                        ));
+                        self.resolve(&i, log)
                     }
                     Source::Git(g) => {
                         let creds = self.credentials(org, &g.auth)?;
@@ -967,6 +1056,21 @@ impl Apps {
         app.current = Some(dep.id);
         self.save(org, &app)?;
         Ok(())
+    }
+
+    /// An image reference pinned to its current digest, when one is found.
+    fn resolve(&self, i: &str, log: &mut DeployLog) -> (String, Option<String>) {
+        match (self.inner.digest)(i) {
+            Some(d) => {
+                let pinned = super::pin(i, &d).unwrap_or_else(|| i.to_string());
+                log.line(&format!("resolved to {pinned}"));
+                (pinned, Some(d))
+            }
+            None => {
+                log.line("no digest found; deploying by tag");
+                (i.to_string(), None)
+            }
+        }
     }
 
     /// The stack definition for `file`, with its secrets bound.

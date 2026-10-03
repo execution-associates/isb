@@ -164,10 +164,10 @@ pub struct Event {
     /// What happened, for consumers that act on events (notifications):
     /// dotted, `<subject>.<outcome>`. In use: `deploy.succeeded`,
     /// `deploy.failed`, `health.unhealthy`, `health.recovered`,
-    /// `backup.succeeded`, `backup.failed`, `job.succeeded`, `job.failed`,
-    /// `cert.issued`, `cert.failed`, `preview.created`, `preview.removed`
-    /// (a preview's deploys are `deploy.*` under its own stack). Most events
-    /// have none.
+    /// `backup.succeeded`, `backup.failed`, `restore.succeeded`,
+    /// `restore.failed`, `job.succeeded`, `job.failed`, `cert.issued`,
+    /// `cert.failed`, `preview.created`, `preview.removed` (a preview's
+    /// deploys are `deploy.*` under its own stack). Most events have none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
 }
@@ -1078,6 +1078,10 @@ pub(crate) struct Inst {
 }
 
 impl Inst {
+    pub(crate) fn is_running(&self) -> bool {
+        self.running()
+    }
+
     fn running(&self) -> bool {
         self.status.eq_ignore_ascii_case("running")
     }

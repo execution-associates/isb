@@ -31,10 +31,12 @@
 
 pub mod app;
 pub mod auth;
+pub mod backup;
 pub mod balance;
 pub mod build;
 pub mod client;
 pub mod compose;
+pub mod cron;
 pub mod daemon;
 pub mod discovery;
 pub mod error;
@@ -44,6 +46,7 @@ pub mod foreground;
 pub mod idmap;
 pub mod ingress;
 pub mod interp;
+pub mod jobs;
 pub mod lock;
 pub mod machine;
 pub mod metrics;
@@ -53,6 +56,7 @@ pub mod org;
 pub mod plan;
 pub mod registry;
 pub mod rpc;
+pub mod s3;
 pub mod sandbox;
 pub mod secrets;
 pub mod server;

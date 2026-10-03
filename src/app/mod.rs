@@ -22,6 +22,7 @@
 //! sources/<app>/repo, known_hosts           (git checkouts)
 //! ```
 
+pub mod database;
 pub mod deploy;
 pub mod env;
 pub mod forge;
@@ -40,6 +41,7 @@ use crate::error::{Error, Result};
 use crate::org::OrgId;
 use crate::spec::{NamedVolumeSpec, SandboxSpec, SecretDef};
 
+pub use database::{DatabaseSource, Engine};
 pub use deploy::{Apps, BuildFn, DigestFn};
 pub use env::{EnvFile, EnvValue};
 pub use git::{GitAuth, GitSource};
@@ -111,6 +113,8 @@ pub enum Source {
     /// `ghcr:org/app:tag`, a local alias).
     Image(String),
     Git(GitSource),
+    /// A database engine's official image (docs/databases.md).
+    Database(DatabaseSource),
 }
 
 /// How a git source becomes an image.
@@ -268,6 +272,7 @@ impl AppSpec {
                     "a git source needs `build` (e.g. {builder: {type: railpack}})",
                 ));
             }
+            (Source::Database(db), _) => database::validate(self, db)?,
         }
         if self.replicas > 100 {
             return Err(Error::invalid("replicas: at most 100"));
@@ -399,6 +404,14 @@ pub fn compose_takes_domains() -> bool {
 /// Render `spec` running `image` as its stack service. `notes` gets what
 /// was left out and why.
 pub fn render(spec: &AppSpec, image: &str, notes: &mut Vec<String>) -> Result<Rendered> {
+    let effective;
+    let spec = match &spec.source {
+        Source::Database(db) => {
+            effective = database::effective(spec, db);
+            &effective
+        }
+        _ => spec,
+    };
     let mut environment = serde_json::Map::new();
     let mut secrets = BTreeMap::new();
     for (k, v) in spec.env.vars() {

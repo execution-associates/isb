@@ -204,6 +204,15 @@ minime only runs binaries downloaded from our CI runs.
 - **`dev-base` is gone from titan** (image alias and its source container),
   found 2026-10-03; cause unknown. lasso and isb's tests default to it.
   Agents since build sandboxes from `images:ubuntu/24.04` + mise.
+- **Databases** (P4.1) are apps with a `database` source; credentials are
+  org secrets `db.<n>.*` that outlive the database (the engine reads them
+  only when its data directory is first made). Dumps run inside the
+  database's own instance; the daemon streams them to S3 (SigV4 in Rust), so
+  the org needs no route to the bucket. Loopback/link-local backup
+  endpoints only from the local CLI or a platform admin.
+- **Scheduler** (P4.2): one thread for jobs and backups; cron is isb's own
+  parser, UTC or a fixed offset only; a missed slot runs once at startup if
+  within `missed_grace` (1h).
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
@@ -334,10 +343,10 @@ minime only runs binaries downloaded from our CI runs.
 
 ## Phase 4: day 2
 
-- [~] (subagent p4.1) P4.1 Database templates (Postgres, MySQL/MariaDB, Redis, MongoDB) with
+- [~] (a4c2bfd, ebb3f44: verified on titan with RustFS as the S3 store; MongoDB 8 cannot start on kernel ≥ 6.19; hcloud run pending) P4.1 Database templates (Postgres, MySQL/MariaDB, Redis, MongoDB) with
   credentials as secrets and scheduled backups to S3-compatible destinations;
   restore. **Verify:** backup and restore a Postgres on the hcloud box.
-- [~] (subagent p4.1) P4.2 Scheduled jobs (cron) per service/org. **Verify:** a job runs on
+- [x] (a4c2bfd, ebb3f44) P4.2 Scheduled jobs (cron) per service/org. **Verify:** a job runs on
   schedule and its logs are visible.
 - [x] (6d71ea9) P4.3 Notifications (Slack, Discord, Telegram, email, webhook) on deploy,
   failure, health, backup events. **Verify:** a webhook receives events.

@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -24,6 +24,11 @@ use crate::client::{Client, Reply, encode_segment};
 use crate::error::{Error, Result};
 
 type Ws = WebSocket<UnixStream>;
+
+/// Output chunks a command may run ahead of its reader.
+const EVENTS_QUEUED: usize = 256;
+/// Input chunks queued for a command's stdin.
+const STDIN_QUEUED: usize = 16;
 
 /// Where the command's stdin comes from.
 #[derive(Debug, Clone, Default)]
@@ -295,7 +300,7 @@ pub(crate) fn build_request(
 pub struct ExecStream {
     events: Receiver<ExecEvent>,
     control: Arc<Mutex<Option<Ws>>>,
-    stdin_tx: Option<Sender<Option<Vec<u8>>>>,
+    stdin_tx: Option<SyncSender<Option<Vec<u8>>>>,
     waiter: Option<JoinHandle<Result<i32>>>,
     stop: Arc<AtomicBool>,
     tty: bool,
@@ -306,7 +311,7 @@ pub struct ExecStream {
 #[derive(Clone)]
 pub struct ExecController {
     control: Arc<Mutex<Option<Ws>>>,
-    stdin_tx: Option<Sender<Option<Vec<u8>>>>,
+    stdin_tx: Option<SyncSender<Option<Vec<u8>>>>,
     tty: bool,
 }
 
@@ -482,7 +487,7 @@ fn is_would_block(e: &tungstenite::Error) -> bool {
 }
 
 /// Read one output websocket to the end, forwarding binary frames.
-fn pump_output(mut ws: Ws, tx: Sender<ExecEvent>, stderr: bool) {
+fn pump_output(mut ws: Ws, tx: SyncSender<ExecEvent>, stderr: bool) {
     loop {
         match ws.read() {
             Ok(Message::Binary(b)) => {
@@ -558,22 +563,29 @@ pub(crate) fn start_with_timeout(
 
     let control_ws = client.websocket(&operation, &secret("control")?)?;
     let control = Arc::new(Mutex::new(Some(control_ws)));
-    let (tx, rx) = channel::<ExecEvent>();
+    // Bounded both ways, so a slow reader (a backup streaming to S3) or a
+    // fast writer (a restore) holds the command back instead of buffering
+    // its whole output or input in memory.
+    let (tx, rx) = sync_channel::<ExecEvent>(EVENTS_QUEUED);
     let stop = Arc::new(AtomicBool::new(false));
     let mut readers: Vec<JoinHandle<()>> = Vec::new();
     let mut stdin_tx = None;
 
     // The stdin source, as a channel of chunks (None = EOF), fed by a thread.
-    let (in_tx, in_rx) = channel::<Option<Vec<u8>>>();
+    let (in_tx, in_rx) = sync_channel::<Option<Vec<u8>>>(STDIN_QUEUED);
     match stdin {
         Stdin::Null => {
             let _ = in_tx.send(None);
         }
         Stdin::Bytes(b) => {
-            for c in b.chunks(64 * 1024) {
-                let _ = in_tx.send(Some(c.to_vec()));
-            }
-            let _ = in_tx.send(None);
+            std::thread::spawn(move || {
+                for c in b.chunks(64 * 1024) {
+                    if in_tx.send(Some(c.to_vec())).is_err() {
+                        return;
+                    }
+                }
+                let _ = in_tx.send(None);
+            });
         }
         Stdin::Piped => stdin_tx = Some(in_tx),
         Stdin::Inherit => {
@@ -735,7 +747,7 @@ pub(crate) fn start_with_timeout(
 
 /// Forward fd 0 until EOF, or until `stop` is set. Polls so that an inherited
 /// stdin that never reaches EOF cannot keep anything alive.
-fn forward_fd0(tx: Sender<Option<Vec<u8>>>, stop: Arc<AtomicBool>) {
+fn forward_fd0(tx: SyncSender<Option<Vec<u8>>>, stop: Arc<AtomicBool>) {
     use rustix::event::{PollFd, PollFlags, poll};
     let stdin = std::io::stdin();
     let mut buf = vec![0u8; 64 * 1024];

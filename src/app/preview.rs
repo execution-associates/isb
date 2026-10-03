@@ -174,7 +174,7 @@ impl PreviewSettings {
                     .unwrap_or(&g.reference)
                     .to_string(),
             ],
-            Source::Image(_) => vec![],
+            Source::Image(_) | Source::Database(_) => vec![],
         }
     }
 

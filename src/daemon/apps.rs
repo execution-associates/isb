@@ -64,6 +64,12 @@ pub fn app_json(org: &OrgId, a: &App) -> Value {
         "domains_served".into(),
         json!(crate::app::compose_takes_domains()),
     );
+    if let crate::app::Source::Database(db) = &a.spec.source {
+        o.insert(
+            "connection".into(),
+            crate::app::database::connection(&a.spec, db, org, None),
+        );
+    }
     v
 }
 
