@@ -21,7 +21,9 @@ tools. It listens in two places:
   `GET /api/v1/openapi.json` describes the REST surface, `GET /api/v1/tools`
   lists the tools, `/healthz` answers without auth, and the identity
   endpoints (sign-in, invitations, API tokens) are under `/api/v1/auth/*`
-  ([auth.md](auth.md)).
+  ([auth.md](auth.md)). Every other `GET` is the **web UI**, embedded in the
+  binary: sign-in, invitations, accounts and a live dashboard, built on the
+  same API ([web.md](web.md)). It never answers an API path.
 
 `--listen` refuses anything but a loopback address: put a tunnel (or a
 reverse proxy) in front of it, never an open port.

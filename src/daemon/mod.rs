@@ -67,8 +67,9 @@ pub struct ServeConfig {
     pub open_signup: bool,
 }
 
-/// The identity endpoints over `<state>/isb.db`. Provider client secrets
-/// not in the environment are read from the default org's secrets.
+/// The identity endpoints over `<state>/isb.db`, and the web UI. Provider
+/// client secrets not in the environment are read from the default org's
+/// secrets.
 fn auth_routes(
     cfg: &ServeConfig,
     store: Arc<AuthStore>,
@@ -102,7 +103,15 @@ fn auth_routes(
         },
     )?;
     eprintln!("isb serve: identity store {}", path.display());
-    Ok(Arc::new(api).router())
+    if !crate::web::BUILT {
+        eprintln!(
+            "isb serve: this binary was built without the web UI (a placeholder page is served)"
+        );
+    }
+    // The identity endpoints first, then the web UI, which answers every
+    // other non-API GET.
+    let (auth, web) = (Arc::new(api).router(), crate::web::routes());
+    Ok(Arc::new(move |r| auth(r).or_else(|| web(r))))
 }
 
 struct Daemon {

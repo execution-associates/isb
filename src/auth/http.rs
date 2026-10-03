@@ -404,12 +404,20 @@ impl AuthApi {
             .iter()
             .map(|(o, r)| json!({"org": o, "role": r}))
             .collect();
+        // The orgs this caller can open: every org for a platform admin
+        // (unless the credential is an org token), else its memberships.
+        let orgs: Vec<OrgId> = if p.platform_admin {
+            self.store.list_orgs()?
+        } else {
+            p.orgs.iter().map(|(o, _)| o.clone()).collect()
+        };
         Ok(Response::json(
             200,
             &json!({
                 "user": p.user,
                 "platform_admin": p.platform_admin,
                 "memberships": memberships,
+                "orgs": orgs,
                 "auth": p.kind,
             }),
         ))

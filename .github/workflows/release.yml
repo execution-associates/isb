@@ -45,7 +45,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      # The web UI is embedded at build time (build.rs); ISB_WEB_REQUIRED
+      # makes a missing web/dist a build error, so a release never ships
+      # the placeholder page.
+      - uses: oven-sh/setup-bun@v2
+      - name: build the web UI
+        working-directory: web
+        run: bun install --frozen-lockfile && bun run build
       - run: cargo build --release --locked --target ${{ matrix.target }}
+        env:
+          ISB_WEB_REQUIRED: "1"
       - name: check the binary is static and runs
         if: runner.os == 'Linux'
         run: |

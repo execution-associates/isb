@@ -159,6 +159,13 @@ fn setup_needs_the_setup_token_once() {
         v["memberships"][0],
         json!({"org": "default", "role": "owner"})
     );
+    // A platform admin sees every org, members or not.
+    t.api
+        .store
+        .ensure_org(&OrgId::new("zeta").unwrap())
+        .unwrap();
+    let (_, v, _) = t.get("me", &[("Cookie", &cookie)]);
+    assert_eq!(v["orgs"], json!(["default", "zeta"]));
 }
 
 #[test]
@@ -366,6 +373,8 @@ fn tokens_over_http() {
         json!({"kind": "api_token", "id": 1, "org": "default"})
     );
     assert_eq!(v["platform_admin"], false);
+    // An org token sees only its org.
+    assert_eq!(v["orgs"], json!(["default"]));
     let (st, v, _) = t.call(req(
         "POST",
         "/api/v1/auth/tokens",
