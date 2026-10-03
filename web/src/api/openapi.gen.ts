@@ -1944,6 +1944,186 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/monitor_checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Uptime monitor history
+         * @description A monitor's history over a range (1h, 24h default, 7d, 30d, 90d): buckets of [at, checks, ok, uptime %, p50, p95 ms], the uptime over the range, and the newest raw checks (limit, default 100, at most 500). Raw checks are kept 7 days, hourly rollups 90.
+         */
+        post: operations["monitor_checks"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/monitor_create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create an uptime monitor
+         * @description Watch something users reach: an HTTP(S) URL (status range, keyword present or absent, headers from secrets, certificate expiry), a TCP port, or an app by reference (its served domain, or its own endpoint). Checked every interval from this daemon; failure_threshold failures in a row make it down (monitor.down to notification channels), recovery_threshold successes up again (monitor.up, with the downtime). URLs a member types are held to the platform's address policy.
+         */
+        post: operations["monitor_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/monitor_delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete an uptime monitor
+         * @description Remove a monitor and its history. Deleting an app's own monitor (app-<name>) adds the app to the org's exclusions so it does not come back.
+         */
+        post: operations["monitor_delete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/monitor_get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get an uptime monitor
+         * @description One monitor as monitor_list shows it, with its last 20 incidents and checks.
+         */
+        post: operations["monitor_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/monitor_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List uptime monitors
+         * @description The org's monitors with status (up, down, pending, paused), last check, uptime over 24h/7d/30d, latency p50/p95 (24h), 24 hourly uptime bars and the last 30 latencies; `down` (how many are down), the org's recent incidents, and its settings (auto_monitors, exclude_apps).
+         */
+        post: operations["monitor_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/monitor_pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pause an uptime monitor
+         * @description Stop checking a monitor (its history stays).
+         */
+        post: operations["monitor_pause"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/monitor_resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume an uptime monitor
+         * @description Check a paused monitor again, from the next second.
+         */
+        post: operations["monitor_resume"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/monitor_settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Uptime monitor settings
+         * @description The org's monitoring settings: auto_monitors (every app with a served domain gets its own monitor, app-<name>; default true) and exclude_apps (apps that do not). Pass a field to change it; returns the settings.
+         */
+        post: operations["monitor_settings"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/monitor_update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update an uptime monitor
+         * @description Change a monitor's fields (others are kept; null puts one back to its default). The name and the app-owned flag cannot change. Its check counts start afresh.
+         */
+        post: operations["monitor_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/notification_channel_create": {
         parameters: {
             query?: never;
@@ -8592,6 +8772,448 @@ export interface operations {
                     step?: number;
                     /** @description Unix seconds (default now). */
                     to?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    monitor_checks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    limit?: number;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @enum {string} */
+                    range?: "1h" | "24h" | "7d" | "30d" | "90d";
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    monitor_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description app: the app's name. */
+                    app?: string;
+                    /** @description monitor.cert_expiring this many days before an HTTPS certificate expires (default 14, 0 never). */
+                    cert_expiry_days?: number;
+                    /** @description app: which of its domains (default: the first one served). */
+                    domain?: string;
+                    /** @description Codes that count as up: 200-399 (default), 200,204, 200-299,301. */
+                    expected_status?: string;
+                    /** @description Failed checks in a row that make it down (default 2). */
+                    failure_threshold?: number;
+                    /** @description Follow up to 5 redirects (default false: a 3xx is judged as is). */
+                    follow_redirects?: boolean;
+                    /** @description Request headers: [{"name": "Accept", "value": "text/html"}, {"name": "CF-Access-Client-Secret", "secret": "CF_SECRET"}]; a secret is an org secret's name, read at check time. */
+                    headers?: Record<string, never>[];
+                    /** @description tcp: a host name or address. */
+                    host?: string;
+                    /** @description Seconds between checks (default 60). */
+                    interval?: number;
+                    /** @description The body (its first 256 KiB) must contain this. */
+                    keyword?: string;
+                    /** @description The body must not contain this. */
+                    keyword_absent?: string;
+                    /**
+                     * @description Default GET.
+                     * @enum {string}
+                     */
+                    method?: "GET" | "HEAD";
+                    /** @description [a-z0-9-], a letter first, at most 63. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description app: the path to request (default: the domain's path). */
+                    path?: string;
+                    paused?: boolean;
+                    /** @description tcp: the port. */
+                    port?: number;
+                    /** @description Successful checks in a row that make it up again (default 2). */
+                    recovery_threshold?: number;
+                    /** @description Seconds a check may take (default 10, under the interval). */
+                    timeout?: number;
+                    /**
+                     * @description http (a URL), tcp (host and port), or app (an app by name: its served domain's public URL, else its own endpoint; it follows the app)
+                     * @enum {string}
+                     */
+                    type: "http" | "tcp" | "app";
+                    /** @description http: the URL (http:// or https://). */
+                    url?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    monitor_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    monitor_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    monitor_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    monitor_pause: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    monitor_resume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    monitor_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    auto_monitors?: boolean;
+                    exclude_apps?: string[];
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    monitor_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description app: the app's name. */
+                    app?: string;
+                    /** @description monitor.cert_expiring this many days before an HTTPS certificate expires (default 14, 0 never). */
+                    cert_expiry_days?: number;
+                    /** @description app: which of its domains (default: the first one served). */
+                    domain?: string;
+                    /** @description Codes that count as up: 200-399 (default), 200,204, 200-299,301. */
+                    expected_status?: string;
+                    /** @description Failed checks in a row that make it down (default 2). */
+                    failure_threshold?: number;
+                    /** @description Follow up to 5 redirects (default false: a 3xx is judged as is). */
+                    follow_redirects?: boolean;
+                    /** @description Request headers: [{"name": "Accept", "value": "text/html"}, {"name": "CF-Access-Client-Secret", "secret": "CF_SECRET"}]; a secret is an org secret's name, read at check time. */
+                    headers?: Record<string, never>[];
+                    /** @description tcp: a host name or address. */
+                    host?: string;
+                    /** @description Seconds between checks (default 60). */
+                    interval?: number;
+                    /** @description The body (its first 256 KiB) must contain this. */
+                    keyword?: string;
+                    /** @description The body must not contain this. */
+                    keyword_absent?: string;
+                    /**
+                     * @description Default GET.
+                     * @enum {string}
+                     */
+                    method?: "GET" | "HEAD";
+                    /** @description [a-z0-9-], a letter first, at most 63. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description app: the path to request (default: the domain's path). */
+                    path?: string;
+                    paused?: boolean;
+                    /** @description tcp: the port. */
+                    port?: number;
+                    /** @description Successful checks in a row that make it up again (default 2). */
+                    recovery_threshold?: number;
+                    /** @description Seconds a check may take (default 10, under the interval). */
+                    timeout?: number;
+                    /**
+                     * @description http (a URL), tcp (host and port), or app (an app by name: its served domain's public URL, else its own endpoint; it follows the app)
+                     * @enum {string}
+                     */
+                    type?: "http" | "tcp" | "app";
+                    /** @description http: the URL (http:// or https://). */
+                    url?: string;
                 };
             };
         };

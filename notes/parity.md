@@ -15,7 +15,7 @@ endpoint has neither a tool nor a documented reason in the
 
 | Category | Count |
 |---|---|
-| Tools in the web UI and MCP | 133 |
+| Tools in the web UI and MCP | 142 |
 | Account tools, the web UI through the identity endpoints | 17 |
 | Tools for MCP and the CLI only | 18 |
 | Identity endpoints with a tool | 18 |
@@ -122,13 +122,16 @@ a person on the web does not need it.
 | Build an image, follow it, list builds | *MCP/CLI only*: a person's builds happen inside an app's deploy (Deployments shows the build log); building an image without deploying it is a pipeline step | `build_run`, `build_logs`, `build_list` |
 | The org's images in the local registry, retention | *MCP/CLI only*: images are an implementation detail of deploys (`registry:APP:TAG`); retention is operator work | `registry_list`, `registry_gc` |
 
-### Notifications and metrics
+### Notifications, uptime and metrics
 
 | Capability | Web UI | MCP |
 |---|---|---|
 | Channels: list, create, change, delete, test; deliveries | Notifications | `notification_channel_list`, `notification_channel_create`, `notification_channel_update`, `notification_channel_delete`, `notification_test`, `notification_deliveries` |
 | One channel | Shown in the Notifications list | `notification_channel_get` |
 | Platform notification settings | Notifications (platform admins) | `notification_settings` |
+| Uptime monitors: list, create, change, pause, resume, delete | Uptime; each app's Monitoring tab | `monitor_list`, `monitor_create`, `monitor_update`, `monitor_pause`, `monitor_resume`, `monitor_delete` |
+| One monitor and its history | Uptime, a monitor's page | `monitor_get`, `monitor_checks` |
+| Apps' own monitors | Uptime, Apps' own monitors | `monitor_settings` |
 | Metrics history | App, Monitoring | `metrics_query` |
 
 ### Orgs, the dashboard and servers

@@ -123,7 +123,7 @@ export interface History {
 export const RANGES = ["24h", "7d", "30d", "90d"] as const;
 export type Range = (typeof RANGES)[number];
 
-/** A monitor tool. They are newer than web/openapi.json, so untyped. */
+/** A monitor tool, with the arguments the forms build. */
 export const callMonitor = <R>(tool: `monitor_${string}`, args: Record<string, unknown>, org: string) => callTool<R, typeof tool>(tool, args, org);
 
 export const ukeys = {

@@ -7153,6 +7153,779 @@
         "x-isb-tool": "metrics_query"
       }
     },
+    "/api/v1/tools/monitor_checks": {
+      "post": {
+        "description": "A monitor's history over a range (1h, 24h default, 7d, 30d, 90d): buckets of [at, checks, ok, uptime %, p50, p95 ms], the uptime over the range, and the newest raw checks (limit, default 100, at most 500). Raw checks are kept 7 days, hourly rollups 90.",
+        "operationId": "monitor_checks",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "limit": {
+                    "maximum": 500,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "range": {
+                    "enum": [
+                      "1h",
+                      "24h",
+                      "7d",
+                      "30d",
+                      "90d"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Uptime monitor history",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "monitor_checks"
+      }
+    },
+    "/api/v1/tools/monitor_create": {
+      "post": {
+        "description": "Watch something users reach: an HTTP(S) URL (status range, keyword present or absent, headers from secrets, certificate expiry), a TCP port, or an app by reference (its served domain, or its own endpoint). Checked every interval from this daemon; failure_threshold failures in a row make it down (monitor.down to notification channels), recovery_threshold successes up again (monitor.up, with the downtime). URLs a member types are held to the platform's address policy.",
+        "operationId": "monitor_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "app": {
+                    "description": "app: the app's name.",
+                    "type": "string"
+                  },
+                  "cert_expiry_days": {
+                    "description": "monitor.cert_expiring this many days before an HTTPS certificate expires (default 14, 0 never).",
+                    "maximum": 365,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "domain": {
+                    "description": "app: which of its domains (default: the first one served).",
+                    "type": "string"
+                  },
+                  "expected_status": {
+                    "description": "Codes that count as up: 200-399 (default), 200,204, 200-299,301.",
+                    "type": "string"
+                  },
+                  "failure_threshold": {
+                    "description": "Failed checks in a row that make it down (default 2).",
+                    "maximum": 10,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "follow_redirects": {
+                    "description": "Follow up to 5 redirects (default false: a 3xx is judged as is).",
+                    "type": "boolean"
+                  },
+                  "headers": {
+                    "description": "Request headers: [{\"name\": \"Accept\", \"value\": \"text/html\"}, {\"name\": \"CF-Access-Client-Secret\", \"secret\": \"CF_SECRET\"}]; a secret is an org secret's name, read at check time.",
+                    "items": {
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "host": {
+                    "description": "tcp: a host name or address.",
+                    "type": "string"
+                  },
+                  "interval": {
+                    "description": "Seconds between checks (default 60).",
+                    "maximum": 86400,
+                    "minimum": 30,
+                    "type": "integer"
+                  },
+                  "keyword": {
+                    "description": "The body (its first 256 KiB) must contain this.",
+                    "type": "string"
+                  },
+                  "keyword_absent": {
+                    "description": "The body must not contain this.",
+                    "type": "string"
+                  },
+                  "method": {
+                    "description": "Default GET.",
+                    "enum": [
+                      "GET",
+                      "HEAD"
+                    ],
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "[a-z0-9-], a letter first, at most 63.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "path": {
+                    "description": "app: the path to request (default: the domain's path).",
+                    "type": "string"
+                  },
+                  "paused": {
+                    "type": "boolean"
+                  },
+                  "port": {
+                    "description": "tcp: the port.",
+                    "maximum": 65535,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "recovery_threshold": {
+                    "description": "Successful checks in a row that make it up again (default 2).",
+                    "maximum": 10,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "timeout": {
+                    "description": "Seconds a check may take (default 10, under the interval).",
+                    "maximum": 60,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "type": {
+                    "description": "http (a URL), tcp (host and port), or app (an app by name: its served domain's public URL, else its own endpoint; it follows the app)",
+                    "enum": [
+                      "http",
+                      "tcp",
+                      "app"
+                    ],
+                    "type": "string"
+                  },
+                  "url": {
+                    "description": "http: the URL (http:// or https://).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "type"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Create an uptime monitor",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "monitor_create"
+      }
+    },
+    "/api/v1/tools/monitor_delete": {
+      "post": {
+        "description": "Remove a monitor and its history. Deleting an app's own monitor (app-<name>) adds the app to the org's exclusions so it does not come back.",
+        "operationId": "monitor_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Delete an uptime monitor",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "monitor_delete"
+      }
+    },
+    "/api/v1/tools/monitor_get": {
+      "post": {
+        "description": "One monitor as monitor_list shows it, with its last 20 incidents and checks.",
+        "operationId": "monitor_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Get an uptime monitor",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "monitor_get"
+      }
+    },
+    "/api/v1/tools/monitor_list": {
+      "post": {
+        "description": "The org's monitors with status (up, down, pending, paused), last check, uptime over 24h/7d/30d, latency p50/p95 (24h), 24 hourly uptime bars and the last 30 latencies; `down` (how many are down), the org's recent incidents, and its settings (auto_monitors, exclude_apps).",
+        "operationId": "monitor_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List uptime monitors",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "monitor_list"
+      }
+    },
+    "/api/v1/tools/monitor_pause": {
+      "post": {
+        "description": "Stop checking a monitor (its history stays).",
+        "operationId": "monitor_pause",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Pause an uptime monitor",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "monitor_pause"
+      }
+    },
+    "/api/v1/tools/monitor_resume": {
+      "post": {
+        "description": "Check a paused monitor again, from the next second.",
+        "operationId": "monitor_resume",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Resume an uptime monitor",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "monitor_resume"
+      }
+    },
+    "/api/v1/tools/monitor_settings": {
+      "post": {
+        "description": "The org's monitoring settings: auto_monitors (every app with a served domain gets its own monitor, app-<name>; default true) and exclude_apps (apps that do not). Pass a field to change it; returns the settings.",
+        "operationId": "monitor_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "auto_monitors": {
+                    "type": "boolean"
+                  },
+                  "exclude_apps": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Uptime monitor settings",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "monitor_settings"
+      }
+    },
+    "/api/v1/tools/monitor_update": {
+      "post": {
+        "description": "Change a monitor's fields (others are kept; null puts one back to its default). The name and the app-owned flag cannot change. Its check counts start afresh.",
+        "operationId": "monitor_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "app": {
+                    "description": "app: the app's name.",
+                    "type": "string"
+                  },
+                  "cert_expiry_days": {
+                    "description": "monitor.cert_expiring this many days before an HTTPS certificate expires (default 14, 0 never).",
+                    "maximum": 365,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "domain": {
+                    "description": "app: which of its domains (default: the first one served).",
+                    "type": "string"
+                  },
+                  "expected_status": {
+                    "description": "Codes that count as up: 200-399 (default), 200,204, 200-299,301.",
+                    "type": "string"
+                  },
+                  "failure_threshold": {
+                    "description": "Failed checks in a row that make it down (default 2).",
+                    "maximum": 10,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "follow_redirects": {
+                    "description": "Follow up to 5 redirects (default false: a 3xx is judged as is).",
+                    "type": "boolean"
+                  },
+                  "headers": {
+                    "description": "Request headers: [{\"name\": \"Accept\", \"value\": \"text/html\"}, {\"name\": \"CF-Access-Client-Secret\", \"secret\": \"CF_SECRET\"}]; a secret is an org secret's name, read at check time.",
+                    "items": {
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "host": {
+                    "description": "tcp: a host name or address.",
+                    "type": "string"
+                  },
+                  "interval": {
+                    "description": "Seconds between checks (default 60).",
+                    "maximum": 86400,
+                    "minimum": 30,
+                    "type": "integer"
+                  },
+                  "keyword": {
+                    "description": "The body (its first 256 KiB) must contain this.",
+                    "type": "string"
+                  },
+                  "keyword_absent": {
+                    "description": "The body must not contain this.",
+                    "type": "string"
+                  },
+                  "method": {
+                    "description": "Default GET.",
+                    "enum": [
+                      "GET",
+                      "HEAD"
+                    ],
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "[a-z0-9-], a letter first, at most 63.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "path": {
+                    "description": "app: the path to request (default: the domain's path).",
+                    "type": "string"
+                  },
+                  "paused": {
+                    "type": "boolean"
+                  },
+                  "port": {
+                    "description": "tcp: the port.",
+                    "maximum": 65535,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "recovery_threshold": {
+                    "description": "Successful checks in a row that make it up again (default 2).",
+                    "maximum": 10,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "timeout": {
+                    "description": "Seconds a check may take (default 10, under the interval).",
+                    "maximum": 60,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "type": {
+                    "description": "http (a URL), tcp (host and port), or app (an app by name: its served domain's public URL, else its own endpoint; it follows the app)",
+                    "enum": [
+                      "http",
+                      "tcp",
+                      "app"
+                    ],
+                    "type": "string"
+                  },
+                  "url": {
+                    "description": "http: the URL (http:// or https://).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Update an uptime monitor",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "monitor_update"
+      }
+    },
     "/api/v1/tools/notification_channel_create": {
       "post": {
         "description": "Add a notification channel to the org: a destination (webhook, Slack, Discord, Telegram, email) and rules choosing which events it hears about. Only the org's own events reach it. Its secrets must exist.",
