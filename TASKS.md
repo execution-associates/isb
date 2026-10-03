@@ -257,6 +257,12 @@ minime only runs binaries downloaded from our CI runs.
 - **CLI wart:** `isb db create` takes the app project as `--project`, which
   clashes with the global incus `--project`; `-P/--project-name` errors.
   Untangle when the CLI flags get a pass.
+- **Bug: daemon and CLI disagree on the socket without XDG_RUNTIME_DIR.**
+  `isb serve` as a system unit (root, no runtime dir) listens on
+  `/tmp/isb-0/serve.sock`; the CLI over ssh (pam sets `/run/user/0`) looks
+  in `/run/user/0/isb/`. Workaround on isb-test: `RuntimeDirectory=isb` +
+  `ISB_SERVE_SOCKET=/run/isb/serve.sock`. Fix: one fallback order shared by
+  both, and `isb serve install` for system units.
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
