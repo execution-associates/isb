@@ -387,11 +387,6 @@ impl Manager {
             return Ok(());
         }
         let oi = self.org_settings(&def.org, true)?;
-        if oi.tunnel && def.org.is_legacy_default() {
-            return Err(Error::invalid(
-                "the default org cannot use a Cloudflare tunnel",
-            ));
-        }
         for r in &routes {
             if !r.auto && !domain::allowed(&r.host, &oi.domains) {
                 return Err(Error::invalid(not_allowed(&r.host, &def.org, &oi.domains)));
@@ -437,17 +432,13 @@ impl Manager {
                 }
             }
         }
-        let oi = if org.is_legacy_default() {
-            OrgIngress::default()
-        } else {
-            let info = crate::org::get(&self.client, org)?;
-            OrgIngress {
-                domains: info.domains,
-                tunnel: info.ingress == crate::org::INGRESS_CLOUDFLARE_TUNNEL,
-                account: info.cloudflare_account,
-                zone: info.cloudflare_zone,
-                subnet: info.subnet,
-            }
+        let info = crate::org::get(&self.client, org)?;
+        let oi = OrgIngress {
+            domains: info.domains,
+            tunnel: info.ingress == crate::org::INGRESS_CLOUDFLARE_TUNNEL,
+            account: info.cloudflare_account,
+            zone: info.cloudflare_zone,
+            subnet: info.subnet,
         };
         self.state
             .lock()
@@ -543,13 +534,6 @@ impl Manager {
                             if !r.auto && !domain::allowed(&r.host, &oi.domains) {
                                 let why = not_allowed(&r.host, &d.org, &oi.domains);
                                 refuse(&mut refused, &r.host, &r.path, why);
-                            } else if oi.tunnel && d.org.is_default() {
-                                refuse(
-                                    &mut refused,
-                                    &r.host,
-                                    &r.path,
-                                    "the default org cannot use a Cloudflare tunnel".into(),
-                                );
                             } else {
                                 routes.push(r);
                             }
@@ -564,7 +548,7 @@ impl Manager {
         // Tunnel listeners, one per tunnel org with an address.
         let mut tunnels = Vec::new();
         for (o, oi) in &orgs {
-            if !oi.tunnel || o.is_default() {
+            if !oi.tunnel {
                 continue;
             }
             if let Some((gw, subnet)) = oi.subnet.as_deref().and_then(gateway) {
@@ -679,7 +663,7 @@ impl Manager {
         let Some(ctl) = self.ctl.get() else { return };
         let mut status: BTreeMap<OrgId, TunnelStatus> = self.state.lock().unwrap().tunnels.clone();
         for (org, oi) in orgs {
-            if !oi.tunnel || org.is_default() {
+            if !oi.tunnel {
                 continue;
             }
             let ts = status.entry(org.clone()).or_insert_with(|| TunnelStatus {

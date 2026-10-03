@@ -343,9 +343,6 @@ impl Workspaces {
     }
 
     fn gateway(&self, org: &OrgId) -> Option<(Ipv4Addr, (u32, u32))> {
-        if org.is_legacy_default() {
-            return None;
-        }
         let info = crate::org::get(&self.client, org).ok()?;
         gateway(info.subnet.as_deref()?)
     }

@@ -53,19 +53,10 @@ export function SettingsPage() {
         <FormError>{errorMessage(info.error)}</FormError>
       ) : o ? (
         <div className="grid gap-6">
-          {isDefault && (
-            <div className="flex items-start gap-3 rounded-xl border bg-muted/40 px-4 py-3 text-[13px] leading-relaxed text-muted-foreground">
-              <Info className="mt-0.5 size-4 shrink-0" />
-              <p>
-                The <span className="font-medium text-foreground">default</span> org is incus' own default project. It
-                predates orgs, so it has no quota, bridge or egress rules of its own, and it can't be deleted.
-              </p>
-            </div>
-          )}
           {o.placement && !(isDefault && o.placement.kind === "local") && <PlacementPanel o={o} />}
-          <LimitsPanel org={org} o={o} editable={platform && !isDefault} />
-          {!isDefault && <NetworkPanel o={o} />}
-          {!isDefault && <EgressPanel org={org} o={o} editable={platform} />}
+          <LimitsPanel org={org} o={o} editable={platform} />
+          <NetworkPanel o={o} />
+          <EgressPanel org={org} o={o} editable={platform} />
           {platform && !isDefault && <DangerPanel org={org} o={o} />}
         </div>
       ) : null}

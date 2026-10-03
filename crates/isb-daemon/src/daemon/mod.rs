@@ -30,6 +30,7 @@ pub mod apps;
 pub mod audit;
 pub mod builds;
 pub mod data;
+mod default_org;
 mod notify;
 mod orgs;
 pub mod policy;
@@ -272,33 +273,11 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         .map_err(|e| Error::invalid(format!("isb serve needs incusd: {e}")))?;
     let store = Store::open(&cfg.state_dir)?;
     open_dns_path(&cfg.state_dir);
-    // Where the default org lives: a real org (`isb-default`) on a fresh
-    // host, the incus default project where workloads predate isb's orgs.
-    // Decided before anything maps the default org to a project.
+    // The default org is the incus project `isb-default`, made here when
+    // it is missing. A server's agent has no default org of its own.
     if cfg.agent.is_none() {
-        let default = crate::org::OrgId::default_org();
-        let has_state = store.load_all()?.iter().any(|d| d.org.is_default())
-            || crate::app::org_root(&cfg.state_dir, &default)
-                .join("apps")
-                .read_dir()
-                .is_ok_and(|mut d| d.next().is_some());
-        match crate::org::adopt_default(
-            &client,
-            &crate::org::OrgOptions::default(),
-            has_state,
-            &mut |l| eprintln!("isb serve: default org: {l}"),
-        ) {
-            Ok(true) => eprintln!(
-                "isb serve: the default org is the incus project {} (its own network and service names)",
-                crate::org::DEFAULT_ORG_PROJECT
-            ),
-            Ok(false) => {}
-            Err(e) => {
-                eprintln!("isb serve: WARNING: could not make the default org a real org: {e}")
-            }
-        }
+        default_org::ensure(&client, &store);
     }
-    crate::org::resolve_default(&client);
     let secrets_config = crate::secrets::SecretsConfig::load(&cfg.secrets_config)?;
     let opened = crate::secrets::Secrets::open(&cfg.state_dir, &cfg.keys, &secrets_config)?;
     for n in &opened.notes {

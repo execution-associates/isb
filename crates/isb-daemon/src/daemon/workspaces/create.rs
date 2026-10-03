@@ -85,12 +85,7 @@ pub(super) fn token_role(r: Option<Role>) -> Result<Role> {
 
 /// The call's own checks, before anything is looked up: the workspace it
 /// describes, without its home placed or its token minted.
-fn checked(org: &OrgId, a: CreateArgs, c: &Caller) -> Result<Workspace> {
-    if org.is_legacy_default() {
-        return Err(Error::invalid(
-            "the default org on this host is incus' default project, not an org of its own; create the workspace in an org (isb org create)",
-        ));
-    }
+fn checked(a: CreateArgs, c: &Caller) -> Result<Workspace> {
     let name = a.name.clone().unwrap_or_else(|| ws::DEFAULT_NAME.into());
     ws::check_name(&name)?;
     let user = a.user.clone().unwrap_or_else(|| ws::DEFAULT_USER.into());
@@ -275,7 +270,7 @@ pub(super) fn workspace_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value
     if a.image.as_deref().is_none_or(|i| i.trim().is_empty()) {
         a.image = Some(images::default_for(&d.workspaces.oc(&org)));
     }
-    let mut w = checked(&org, a, c)?;
+    let mut w = checked(a, c)?;
     let wsm = d.workspaces.clone();
     let _g = wsm.lock.lock().unwrap_or_else(|e| e.into_inner());
     let settings = wsm.store.settings(&org)?;

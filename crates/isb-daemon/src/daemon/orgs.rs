@@ -79,11 +79,6 @@ impl Settings {
                 .clone()
                 .ok_or_else(|| Error::invalid("org is required"))?,
         )?;
-        if o.is_legacy_default() {
-            return Err(Error::invalid(
-                "the default org on this host is incus' default project; it has no settings",
-            ));
-        }
         Ok(o)
     }
 
@@ -455,12 +450,12 @@ mod tests {
     }
 
     #[test]
-    fn the_default_org_has_no_settings() {
+    fn the_default_org_has_settings_like_any_other() {
         let s = Settings {
             org: Some("default".into()),
             ..Default::default()
         };
-        assert!(s.org().is_err());
+        assert!(s.org().unwrap().is_default());
         assert!(Settings::default().org().is_err());
     }
 

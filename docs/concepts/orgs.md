@@ -86,23 +86,15 @@ all trust. `org_get` says so as `placement.isolation`: `shared-kernel` here,
 Org `acme` is the incus project `isb-acme` (config `user.isb.org=acme`), its
 bridge `isbbr<hash>` and its network ACL `isb-acme`.
 
-The `default` org depends on the host:
+The `default` org is an org like any other: the incus project
+`isb-default`, with its own bridge, ACL and service names. `isb serve`
+creates it when it starts and it is missing, so `isb serve install` leaves a
+host with one. It cannot be removed.
 
-- **A fresh host** (incus' `default` project holds no instances, and isb has
-  no default-org stacks or apps when `isb serve` first starts): the daemon
-  makes it a real org, the incus project `isb-default` with its own bridge,
-  ACL and service names, like any other. Multi-app templates work there.
-  incus' own `default` project is then not an org: plain `isb create` and
-  `isb up` (no `--org`) still put sandboxes there, and the TUI still shows
-  them to local callers.
-- **A host whose incus `default` project already held workloads:** the
-  `default` org *is* incus' `default` project, so everything that was there
-  keeps working where it is, without any of what follows: no restrictions,
-  no org network, no service names and no workspace. Apps that reach each
-  other by name (multi-app templates) need another org there.
-
-`isb org ls` shows which: the default org's project is `isb-default` or
-`default`.
+incus' own `default` project is never an org. Plain `isb create` and `isb up`
+without `--org` put sandboxes there, outside every org, and the TUI and the
+superadmin's Host page show them; `--org default` puts them in the default
+org.
 
 The project is **restricted**, so incus itself refuses what would reach the
 host:

@@ -190,9 +190,7 @@ pub fn run_with(
     let reg = crate::registry::Registry::shared(base)?;
     let vm = req.untrusted;
     let oc = crate::org::client(base, &req.org);
-    if !req.org.is_legacy_default() {
-        crate::org::get(base, &req.org)?;
-    }
+    crate::org::get(base, &req.org)?;
     log(&format!(
         "building {}/{}:{} with {} in a {}",
         req.org,

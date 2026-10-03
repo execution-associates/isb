@@ -178,12 +178,7 @@ host setup. While the daemon is down the last records stay as they were, and
 a restarted daemon keeps them until a replica of the service is back in
 rotation.
 
-Not in a `default` org that is incus' own `default` project on `incusbr0`
-([What an org is in incus](orgs.md#what-an-org-is-in-incus)): isb does not
-manage that network, so its stacks get no service names; reach a replica
-there by instance name, or the service through its published port.
-
-`isb up` (no daemon) gets no service names either. Its services reach each
+`isb up` (no daemon) gets no service names. Its services reach each
 other by instance name, `<project>-<service>` (the default
 `container_name`), which incus' DNS serves as `<project>-<service>.<org>.isb`
 in an org (`.incus` in incus' default project) and through the search domain

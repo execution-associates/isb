@@ -263,20 +263,16 @@ fn inputs_are_checked() {
     let w = val(&p.apps[1]);
     assert_eq!(w["domains"][0]["host"], "stats.example.com");
     assert_eq!(w["env"]["BASE_URL"], "https://stats.example.com/");
-    // Multi-app templates need an org with service names.
-    assert!(
-        plan(
-            &t,
-            &params(
-                "default",
-                &[("admin_email", "a@b.co"), ("domain", "s.example.com")]
-            ),
-            &c
-        )
-        .unwrap_err()
-        .to_string()
-        .contains("default org")
-    );
+    // The default org is an org like any other, service names included.
+    plan(
+        &t,
+        &params(
+            "default",
+            &[("admin_email", "a@b.co"), ("domain", "s.example.com")],
+        ),
+        &c,
+    )
+    .unwrap();
 }
 
 #[test]

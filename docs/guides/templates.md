@@ -68,10 +68,8 @@ What happens:
    detected).
 2. **Apps** are named `<name>-<key>` for each app of the template; the main
    app is just `<name>`. Apps reach each other by service name,
-   `<app>.<project>-<env>` ([service discovery](../concepts/stacks.md#service-discovery));
-   since a host's legacy `default` org has no service names
-   ([Orgs](../concepts/orgs.md#what-an-org-is-in-incus)), a template with
-   more than one app needs a real org there.
+   `<app>.<project>-<env>` ([service discovery](../concepts/stacks.md#service-discovery)),
+   in every org, the default org included.
 3. **Secrets** go into the org's store, labelled `isb.template` and
    `isb.template.instance`:
    - each secret variable as `tpl.<name>.<var>`;

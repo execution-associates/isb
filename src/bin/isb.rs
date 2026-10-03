@@ -90,7 +90,10 @@ struct Global {
     #[arg(long, global = true, env = "INCUS_PROJECT")]
     project: Option<String>,
 
-    /// The org to work in: its incus project (`isb org ls`).
+    /// The org to work in: its incus project, `isb-<org>` (`isb org ls`).
+    /// Without it, `isb create` and `isb up` make plain sandboxes in incus'
+    /// `default` project, outside every org; `--org default` is the
+    /// default org, `isb-default`.
     #[arg(long, global = true, env = "ISB_ORG")]
     org: Option<String>,
 
@@ -423,10 +426,6 @@ impl Ctx {
             .org
             .as_deref()
             .and_then(|o| isb::org::OrgId::new(o).ok());
-        if org.as_ref().is_some_and(|o| o.is_default()) {
-            // Which project the default org is depends on the host.
-            isb::org::resolve_default(&c);
-        }
         let org_project = org.map(|o| o.incus_project());
         if let Some(p) = self
             .global

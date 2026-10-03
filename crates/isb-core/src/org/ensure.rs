@@ -331,8 +331,7 @@ fn set_default_profile(base: &Client, h: &Client, org: &OrgId, opts: &OrgOptions
     Ok(())
 }
 
-/// Create an org, or bring an existing one in line with `opts`. A legacy
-/// default org (the incus default project) has no settings. The project's
+/// Create an org, or bring an existing one in line with `opts`. The project's
 /// disk paths are `opts.bind_roots` plus the host-folder workspace homes
 /// recorded on it ([`allow_home`]), so rewriting the bind roots never
 /// drops a home.
@@ -342,12 +341,6 @@ pub fn ensure(
     opts: &OrgOptions,
     report: &mut dyn FnMut(&str),
 ) -> Result<OrgInfo> {
-    resolve_default(base);
-    if org.is_legacy_default() {
-        return Err(Error::invalid(
-            "the default org on this host is incus' default project (it held workloads before isb's orgs); it has no settings",
-        ));
-    }
     let h = host(base);
     let project = org.incus_project();
     let existing = h.get_opt(&format!("/1.0/projects/{}", encode_segment(&project)))?;

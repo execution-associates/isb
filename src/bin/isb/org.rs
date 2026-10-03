@@ -366,7 +366,6 @@ pub(crate) fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
                     "names      {}",
                     match &o.dns_dir {
                         Some(d) => format!("<service>.<stack>.{}.isb (from {d})", o.name),
-                        None if o.name.is_legacy_default() => "instances only (the default org is incus' default project here)".to_string(),
                         None => "instances only (service names are off: run `sudo isb host setup`, then `isb org create` again)".to_string(),
                     }
                 );

@@ -18,8 +18,7 @@
 //! dnsmasq runs as the `incus` user, so the root directory is owned by the
 //! daemon's user with group `incus` and the setgid bit (`isb host setup`
 //! makes it): what the daemon writes there is readable by dnsmasq and by
-//! nobody else. A legacy default org (incus' own default project) has no isb
-//! bridge and no discovery.
+//! nobody else.
 
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -40,9 +39,9 @@ pub fn root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(DEFAULT_ROOT))
 }
 
-/// The org's hosts directory, `None` for the default org.
-pub fn org_dir(org: &OrgId) -> Option<PathBuf> {
-    (!org.is_legacy_default()).then(|| root().join(org.as_str()))
+/// The org's hosts directory.
+pub fn org_dir(org: &OrgId) -> PathBuf {
+    root().join(org.as_str())
 }
 
 /// The `raw.dnsmasq` line that points an org's dnsmasq at its directory.
@@ -54,9 +53,7 @@ pub fn raw_dnsmasq(dir: &Path) -> String {
 /// ours to write. `Ok(None)` means discovery is off on this host (no `isb
 /// host setup`).
 pub fn prepare_org(org: &OrgId) -> Result<Option<PathBuf>> {
-    let Some(dir) = org_dir(org) else {
-        return Ok(None);
-    };
+    let dir = org_dir(org);
     let root = root();
     if !root.is_dir() || rustix::fs::access(&root, rustix::fs::Access::WRITE_OK).is_err() {
         return Ok(None);
@@ -87,9 +84,7 @@ pub fn prepare_org(org: &OrgId) -> Result<Option<PathBuf>> {
 
 /// Delete an org's hosts directory (after its network is gone).
 pub fn remove_org(org: &OrgId) {
-    if let Some(dir) = org_dir(org) {
-        let _ = std::fs::remove_dir_all(dir);
-    }
+    let _ = std::fs::remove_dir_all(org_dir(org));
 }
 
 /// `rwxr-s---` under a group-only root, `rwxr-sr-x` under a world-readable
@@ -248,11 +243,5 @@ mod tests {
         prune(d.path(), &[("shop".into(), "web".into())]);
         assert!(p.exists());
         assert!(!d.path().join("old.db").exists());
-    }
-
-    #[test]
-    fn default_org_has_no_directory() {
-        assert_eq!(org_dir(&OrgId::default_org()), None);
-        assert!(prepare_org(&OrgId::default_org()).unwrap().is_none());
     }
 }

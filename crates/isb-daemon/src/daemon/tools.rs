@@ -55,8 +55,8 @@ pub(super) fn overview_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Res
             };
             let stacks: Vec<_> = d.ctl.list().into_iter().filter(|s| sees(&s.org)).collect();
             // Only isb's orgs: incus may hold other tools' projects too. Plain
-            // `isb create` sandboxes in incus' default project, where it is
-            // not an org on this host, are shown to local callers (the TUI).
+            // `isb create` sandboxes in incus' default project, which is no
+            // org, are shown to local callers (the TUI).
             let sandboxes: Vec<&crate::metrics::InstanceSample> = snap
                 .instances
                 .values()

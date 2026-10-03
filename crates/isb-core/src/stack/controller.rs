@@ -401,14 +401,13 @@ impl Controller {
         let defs = c.inner.store.load_all()?;
         // Service names of stacks removed while no daemon ran.
         for def in &defs {
-            if let Some(dir) = crate::discovery::org_dir(&def.org) {
-                let keep: Vec<(String, String)> = defs
-                    .iter()
-                    .filter(|d| d.org == def.org)
-                    .flat_map(|d| d.file.services.keys().map(|s| (d.name.clone(), s.clone())))
-                    .collect();
-                crate::discovery::prune(&dir, &keep);
-            }
+            let dir = crate::discovery::org_dir(&def.org);
+            let keep: Vec<(String, String)> = defs
+                .iter()
+                .filter(|d| d.org == def.org)
+                .flat_map(|d| d.file.services.keys().map(|s| (d.name.clone(), s.clone())))
+                .collect();
+            crate::discovery::prune(&dir, &keep);
         }
         for def in defs {
             eprintln!("isb serve: resuming stack {}", def.name);
@@ -1434,7 +1433,7 @@ impl Worker {
     /// Delete this service's instances and routes, then leave.
     fn teardown(&mut self, def: &StackDef, volumes: bool) {
         // The name goes first, whoever published it.
-        if let Some(dir) = crate::discovery::org_dir(&self.org).filter(|d| d.is_dir()) {
+        if let Some(dir) = Some(crate::discovery::org_dir(&self.org)).filter(|d| d.is_dir()) {
             if let Err(e) =
                 crate::discovery::publish(&dir, &self.org, &self.stack, &self.service, &[])
             {
@@ -2312,12 +2311,10 @@ impl Worker {
     }
 
     /// Publish the in-rotation replicas' addresses as the service's name
-    /// (see [`crate::discovery`]). Nothing to do in the default org, or in an
-    /// org created without service names.
+    /// (see [`crate::discovery`]). Nothing to do in an org created without
+    /// service names.
     fn sync_dns(&mut self) {
-        let Some(dir) = crate::discovery::org_dir(&self.org) else {
-            return;
-        };
+        let dir = crate::discovery::org_dir(&self.org);
         let mut ips: Vec<IpAddr> = self
             .rt
             .values()

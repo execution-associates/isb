@@ -151,7 +151,7 @@ function InstancesTab() {
         <Stat icon={<Boxes />} label="Instances" value={inv.data ? inv.data.instances.length : null} hint={inv.data ? `${running} running` : undefined} />
         <Stat icon={<HardDrive />} label="Not isb's" value={inv.data ? inv.data.instances.filter((i) => !i.org && !i.managed).length : null} hint="outside an org, unlabelled" />
       </div>
-      <Panel title="Projects" count={inv.data ? projects.length : undefined} description="Incus projects; an isb org is the project isb-<org> (the default org may be incus' default project).">
+      <Panel title="Projects" count={inv.data ? projects.length : undefined} description="Incus projects; an isb org is the project isb-<org>, the default org included; incus' own default project holds plain sandboxes and is no org.">
         {inv.isLoading ? (
           <RowsSkeleton />
         ) : (

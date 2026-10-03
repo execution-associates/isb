@@ -1334,7 +1334,7 @@ fn translate_inner(meta: &Meta, compose: &str, toml_text: &str, tx: &mut Tx) -> 
         return None;
     }
     if apps.len() > 1 {
-        tx.note("its services reach each other as <app>.<project>-<env> (an org's service names), so it needs a real org (not a host's legacy default org)");
+        tx.note("its services reach each other as <app>.<project>-<env> (an org's service names)");
     }
     let main = toml
         .domains

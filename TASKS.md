@@ -279,13 +279,12 @@ minime only runs binaries downloaded from our CI runs.
   in `/run/user/0/isb/`. Workaround on isb-test: `RuntimeDirectory=isb` +
   `ISB_SERVE_SOCKET=/run/isb/serve.sock`. Fix: one fallback order shared by
   both, and `isb serve install` for system units.
-- **The default org is a real org (`isb-default`) on a fresh host**, made
-  by the daemon at first start when incus' `default` project is empty and
-  isb has no default-org stacks/apps; hosts with prior workloads there
-  (titan, isb-test) keep the legacy mapping. Resolved once per process
-  (`org::resolve_default`); `OrgId::is_legacy_default` marks what the legacy
-  one lacks (network, service names, settings). Verified: Ghost + MySQL
-  from the template in the default org of a fresh cx23 (2026-10-03).
+- **The default org is always a real org (`isb-default`)**, created by
+  `isb serve` at start when missing (`org::ensure_default`); incus' own
+  `default` project is never an org and holds only plain `isb create` /
+  `isb up` sandboxes. Default-org stacks found with instances in incus'
+  `default` project get a startup warning, nothing more (remove and
+  redeploy them).
 - **Service names need dnsmasq to reach the DNS root**: a root daemon (or
   agent) keeps state in `/var/lib/isb` (0700) around `/var/lib/isb/dns`, so
   names never resolved there; `isb serve` now makes those dirs 0711.
