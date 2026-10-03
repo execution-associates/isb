@@ -6,6 +6,7 @@ import { day2Routes } from "@/day2-routes";
 import { Home, RequireAuth } from "@/components/app-shell";
 import { AuthLayout } from "@/components/auth-layout";
 import { Button } from "@/components/ui/button";
+import { TextureLayer } from "@/components/texture-layer";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AccountPage } from "@/pages/account";
@@ -85,6 +86,7 @@ export function App() {
           </Routes>
         </BrowserRouter>
         <Toaster position="bottom-right" richColors={false} />
+        <TextureLayer />
       </TooltipProvider>
     </QueryClientProvider>
   );

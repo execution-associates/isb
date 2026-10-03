@@ -23,7 +23,7 @@ export function AuthLayout({
   footer?: ReactNode;
 }) {
   return (
-    <div className="grid min-h-svh bg-background lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+    <div data-shell="auth" className="grid min-h-svh bg-background lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
       <aside className="auth-panel relative hidden overflow-hidden border-r border-white/10 bg-neutral-950 text-neutral-50 lg:flex lg:flex-col lg:justify-between lg:px-12 lg:py-10 xl:px-16">
         <div aria-hidden className="auth-grid absolute inset-0" />
         <div

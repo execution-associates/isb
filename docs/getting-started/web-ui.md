@@ -14,7 +14,11 @@ address (or the public URL in front of it) in a browser.
 Four themes: Execution Associates (the default, dark, in the colours and
 type of executionassociates.com), light, dark and system. The choice is kept
 per browser, from the account menu, the command palette or the sign-in
-pages. The UI works down to phone width.
+pages. The Execution Associates theme has a film grain and a dithered glow
+behind the page, like the site's; under the theme list, Texture is On,
+Subtle or Off (for busy displays or a quieter page), and it is only drawn
+behind the page, never under tables, logs or the terminal. The UI works down
+to phone width.
 
 ## Signing in
 

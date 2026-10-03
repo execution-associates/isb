@@ -157,7 +157,7 @@ export function EmptyState({
   compact?: boolean;
 }) {
   return (
-    <div className={cn("flex flex-col items-center text-center", compact ? "gap-2 px-6 py-8" : "gap-3 px-6 py-12")}>
+    <div data-slot="empty-state" className={cn("flex flex-col items-center text-center", compact ? "gap-2 px-6 py-8" : "gap-3 px-6 py-12")}>
       <div
         className={cn(
           "flex items-center justify-center rounded-xl border bg-gradient-to-b from-muted/40 to-muted shadow-xs",

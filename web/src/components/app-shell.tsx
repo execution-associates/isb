@@ -10,7 +10,7 @@ import { deploymentPath } from "@/apps/use-deploy";
 import { Lockup, Logo, Wordmark } from "@/components/brand";
 import { CommandPaletteProvider, SECTIONS, usePalette } from "@/components/command-palette";
 import { StatusDot } from "@/components/status";
-import { THEME_ICONS, THEMES } from "@/components/theme-toggle";
+import { TextureItems, THEME_ICONS, THEMES } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -75,7 +75,7 @@ function FatalError({ error }: { error: unknown }) {
 
 function ShellSkeleton() {
   return (
-    <div className="flex min-h-svh bg-sidebar">
+    <div data-shell="app" className="flex min-h-svh bg-sidebar">
       <div className="hidden w-60 space-y-3 p-3 md:block">
         <Skeleton className="h-9 w-36" />
         <Skeleton className="h-11" />
@@ -86,7 +86,7 @@ function ShellSkeleton() {
           ))}
         </div>
       </div>
-      <div className="m-2 flex-1 space-y-4 rounded-xl border bg-background p-8 md:ml-0">
+      <div data-shell-panel className="m-2 flex-1 space-y-4 rounded-xl border bg-background p-8 md:ml-0">
         <Skeleton className="h-7 w-48" />
         <Skeleton className="h-4 w-80" />
         <Skeleton className="h-40" />
@@ -107,6 +107,7 @@ function OrgMark({ name, className }: { name: string; className?: string }) {
   for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
   return (
     <span
+      data-print
       className={cn("flex shrink-0 items-center justify-center rounded-md text-xs font-semibold text-white uppercase shadow-xs", className)}
       style={{ background: `linear-gradient(135deg, oklch(0.62 0.13 ${h}), oklch(0.5 0.13 ${(h + 40) % 360}))` }}
       aria-hidden
@@ -289,6 +290,7 @@ function UserMenu({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>
+            {theme === "ea" && <TextureItems />}
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         {!ambientSuperadmin(me) && (
@@ -425,7 +427,7 @@ export function AppShell({ me }: { me: Me }) {
   }, [pathname]);
   return (
     <CommandPaletteProvider me={me}>
-      <div className="min-h-svh bg-sidebar md:grid md:grid-cols-[15rem_minmax(0,1fr)]">
+      <div data-shell="app" className="min-h-svh bg-sidebar md:grid md:grid-cols-[15rem_minmax(0,1fr)]">
         <aside className="hidden md:block">
           <div className="sticky top-0 h-svh">
             <SidebarContent me={me} />
@@ -438,7 +440,7 @@ export function AppShell({ me }: { me: Me }) {
             <SidebarContent me={me} onNavigate={() => setOpen(false)} />
           </SheetContent>
         </Sheet>
-        <div className="flex min-h-svh min-w-0 flex-col bg-background md:my-2 md:mr-2 md:min-h-[calc(100svh-1rem)] md:rounded-xl md:border md:shadow-sm">
+        <div data-shell-panel className="flex min-h-svh min-w-0 flex-col bg-background md:my-2 md:mr-2 md:min-h-[calc(100svh-1rem)] md:rounded-xl md:border md:shadow-sm">
           <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b bg-background/85 px-3 backdrop-blur-md supports-[backdrop-filter]:bg-background/70 md:rounded-t-xl md:px-6">
             <Button variant="ghost" size="icon-sm" className="-ml-1 md:hidden" onClick={() => setOpen(true)} aria-label="Open navigation">
               <Menu />
@@ -509,7 +511,7 @@ function TopRight({ me }: { me: Me }) {
  */
 export function PageHeader({ title, description, actions, icon }: { title: ReactNode; description?: ReactNode; actions?: ReactNode; icon?: ReactNode }) {
   return (
-    <div className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-start sm:justify-between">
+    <div data-slot="page-header" className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-start sm:justify-between">
       <div className="flex min-w-0 items-start gap-3.5">
         {icon}
         <div className="min-w-0 space-y-1">
