@@ -1,6 +1,6 @@
 // The workspace's Terminal tab: several shells side by side as tabs, each
-// its own websocket (GET /orgs/<org>/api/v1/terminal?workspace=NAME, or
-// ?sandbox=NAME for one of the org's sandboxes). Tabs stay mounted while
+// its own websocket (GET /orgs/<org>/api/v1/terminal?instance=NAME, the workspace
+// or one of the org's sandboxes). Tabs stay mounted while
 // another is shown, so switching never ends a session; closing a tab does.
 // Loaded on demand: xterm is the biggest thing on this page.
 import { Box, Plus, SquareTerminal, X } from "lucide-react";

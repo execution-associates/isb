@@ -105,7 +105,8 @@ export function instanceTerminalUrl(
   cols: number,
   rows: number,
 ): string {
-  const q = new URLSearchParams({ [target.kind]: target.name, cols: String(cols), rows: String(rows) });
+  // instance=: the daemon opens the workspace as its user, in its home.
+  const q = new URLSearchParams({ instance: target.name, cols: String(cols), rows: String(rows) });
   return `${loc.protocol === "https:" ? "wss" : "ws"}://${loc.host}/orgs/${encodeURIComponent(org)}/api/v1/terminal?${q}`;
 }
 
@@ -117,6 +118,22 @@ export function inWorkspaceEnv(ws: { name: string; connect: { url: string | null
     `ISB_WORKSPACE=${ws.name}`,
     `ISB_TOKEN=$(cat ${ws.connect.token_path})`,
   ].join("\n");
+}
+
+/** The SSH host name `isb ssh-config` gives an org's instance. */
+export function sshHost(org: string, name: string): string {
+  return `${name}.${org}.isb`;
+}
+
+/** Setting up SSH (and herdr) to the workspace from a laptop: a key on the
+ * isb account, the Host block from `isb workspace ssh-config`, then ssh. */
+export function sshSteps(org: string, name: string, url: string): { title: string; code: string }[] {
+  const host = sshHost(org, name);
+  return [
+    { title: "Once: your public key on your isb account", code: `isb key add ~/.ssh/id_ed25519.pub --url ${url}` },
+    { title: "The Host block (Include it from ~/.ssh/config)", code: `isb --org ${org} workspace ssh-config --url ${url} -o ~/.config/isb/ssh_config` },
+    { title: "Then ssh, scp, editors and herdr", code: `ssh ${host}\nherdr machine add ${host} --label ${org}/${name}` },
+  ];
 }
 
 /** The daemon's refusal of a disruptive call without confirm, minus the instruction meant for agents. */

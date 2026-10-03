@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeTab, envProblems, inWorkspaceEnv, expiresIn, expiringSoon, human, idleLabel, instanceTerminalUrl, sessionsNotice, sizeProblem, statusTone, tabsFor } from "./util";
+import { activeTab, envProblems, inWorkspaceEnv, expiresIn, expiringSoon, human, idleLabel, instanceTerminalUrl, sessionsNotice, sizeProblem, sshHost, sshSteps, statusTone, tabsFor } from "./util";
 
 describe("workspace helpers", () => {
   it("formats durations as the daemon does", () => {
@@ -30,10 +30,10 @@ describe("workspace helpers", () => {
 
   it("builds terminal URLs for the workspace and sandboxes", () => {
     expect(instanceTerminalUrl({ protocol: "https:", host: "isb.example.com" }, "acme", { kind: "workspace", name: "workspace" }, 80, 24)).toBe(
-      "wss://isb.example.com/orgs/acme/api/v1/terminal?workspace=workspace&cols=80&rows=24",
+      "wss://isb.example.com/orgs/acme/api/v1/terminal?instance=workspace&cols=80&rows=24",
     );
     expect(instanceTerminalUrl({ protocol: "http:", host: "localhost:5173" }, "acme", { kind: "sandbox", name: "try-1" }, 100, 30)).toBe(
-      "ws://localhost:5173/orgs/acme/api/v1/terminal?sandbox=try-1&cols=100&rows=30",
+      "ws://localhost:5173/orgs/acme/api/v1/terminal?instance=try-1&cols=100&rows=30",
     );
   });
 
@@ -57,5 +57,14 @@ describe("workspace helpers", () => {
     expect(sessionsNotice("Stopping workspace in org acme ends every session on it (2 web terminal(s)). If that is intended, call again with confirm: true.")).toBe(
       "Stopping workspace in org acme ends every session on it (2 web terminal(s)).",
     );
+  });
+});
+
+describe("ssh steps", () => {
+  it("names the host as isb ssh-config does and gives the herdr line", () => {
+    const s = sshSteps("acme", "workspace", "https://isb.example.com");
+    expect(sshHost("acme", "workspace")).toBe("workspace.acme.isb");
+    expect(s[1].code).toBe("isb --org acme workspace ssh-config --url https://isb.example.com -o ~/.config/isb/ssh_config");
+    expect(s[2].code).toContain("herdr machine add workspace.acme.isb --label acme/workspace");
   });
 });

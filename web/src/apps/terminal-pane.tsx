@@ -1,5 +1,5 @@
 // A web terminal: xterm.js over the daemon's terminal websocket
-// (GET /orgs/<org>/api/v1/terminal?app=|workspace=|sandbox=, docs/web.md).
+// (GET /orgs/<org>/api/v1/terminal?app=|instance=, docs/web.md).
 // The app page's Terminal tab and the workspace's terminals use it; what to
 // open is the caller's `url`.
 import "@xterm/xterm/css/xterm.css";

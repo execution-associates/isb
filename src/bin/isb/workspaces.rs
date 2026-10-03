@@ -131,6 +131,28 @@ pub enum WorkspaceCmd {
         #[arg(long)]
         sandbox_idle: Option<String>,
     },
+    /// SSH's stdio to the workspace over isb serve's websocket: the
+    /// ProxyCommand `isb workspace ssh-config` writes (`isb ssh-proxy`
+    /// for the org's workspace; docs/ssh.md).
+    Ssh {
+        /// The workspace (default: the org's).
+        #[arg(long)]
+        name: Option<String>,
+        /// Whose isb SSH keys to let in, for the local socket.
+        #[arg(long = "as")]
+        keys_of: Option<String>,
+        #[command(flatten)]
+        remote: super::ssh::RemoteArgs,
+    },
+    /// The `Host` block for the org's workspace (`isb ssh-config` for it),
+    /// so plain ssh, scp, editors and `herdr machine add` reach it.
+    SshConfig {
+        /// The workspace (default: the org's).
+        #[arg(long)]
+        name: Option<String>,
+        #[command(flatten)]
+        args: super::ssh::ConfigArgs,
+    },
     /// The org's sandboxes, with creator, age, expiry and resources.
     Sandboxes {
         #[arg(long)]
@@ -146,6 +168,34 @@ pub enum WorkspaceCmd {
         #[arg(long)]
         idle_timeout: Option<String>,
     },
+}
+
+/// The org and instance of the org's workspace (the one named, else its
+/// only one), asked of isb serve where ssh will reach it.
+fn workspace_target(
+    org: &Option<String>,
+    name: Option<String>,
+    remote: &super::ssh::RemoteArgs,
+) -> Result<(String, String)> {
+    let o = org
+        .clone()
+        .or_else(|| std::env::var("ISB_ORG").ok().filter(|o| !o.is_empty()))
+        .unwrap_or_else(|| "default".into());
+    if let Some(n) = name {
+        isb::workspace::check_name(&n)?;
+        return Ok((o, n));
+    }
+    let v = remote
+        .clone()
+        .or_env()
+        .remote()?
+        .call_tool(&o, "workspace_get", json!({}))?;
+    match v["workspace"]["name"].as_str() {
+        Some(n) => Ok((o, n.to_string())),
+        None => Err(isb::Error::Invalid(format!(
+            "org {o} has no workspace: isb workspace create --image dev-base"
+        ))),
+    }
 }
 
 fn with_org(org: &Option<String>, mut args: Value) -> Value {
@@ -432,6 +482,25 @@ pub fn workspace(org: &Option<String>, cmd: WorkspaceCmd) -> Result<u8> {
             }
             table(rows);
             Ok(0)
+        }
+        WorkspaceCmd::Ssh {
+            name,
+            keys_of,
+            remote,
+        } => {
+            let (o, w) = workspace_target(org, name, &remote)?;
+            super::ssh::proxy(&None, &format!("{o}/{w}"), keys_of, &remote)
+        }
+        WorkspaceCmd::SshConfig { name, mut args } => {
+            if !args.targets.is_empty() {
+                return Err(isb::Error::Invalid(
+                    "isb workspace ssh-config takes --name, not instances (isb ssh-config does)"
+                        .into(),
+                ));
+            }
+            let (o, w) = workspace_target(org, name, &args.remote)?;
+            args.targets = vec![format!("{o}/{w}")];
+            super::ssh::config(&None, args)
         }
         WorkspaceCmd::Extend {
             sandbox,
