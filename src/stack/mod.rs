@@ -108,6 +108,24 @@ impl StackDef {
         Ok(format!("{:08x}", h.finish() as u32))
     }
 
+    /// Names of the org's stored secrets (top-level `external: true`) that
+    /// the stack's services use: what `isb secret rm` must not pull out
+    /// from under it.
+    pub fn store_secrets(&self) -> std::collections::BTreeSet<String> {
+        self.file
+            .services
+            .values()
+            .flat_map(|s| s.secrets.iter())
+            .filter_map(|r| {
+                self.file
+                    .secrets
+                    .get(&r.source)
+                    .and_then(|d| d.store_name(&r.source))
+                    .map(String::from)
+            })
+            .collect()
+    }
+
     pub fn service(&self, service: &str) -> Result<&SandboxSpec> {
         self.file
             .services
@@ -308,6 +326,22 @@ mod tests {
         let mut b = def(y);
         b.secrets.insert("k".into(), "Yg==".into());
         assert_ne!(a.revision("web").unwrap(), b.revision("web").unwrap());
+    }
+
+    #[test]
+    fn store_secrets_are_the_used_external_ones() {
+        let d = def(concat!(
+            "secrets:\n",
+            "  a: {external: true}\n",
+            "  b: {external: true, name: db.password}\n",
+            "  c: {environment: C}\n",
+            "  unused: {external: true}\n",
+            "services:\n",
+            "  web: {image: x, secrets: [a, c]}\n",
+            "  db: {image: x, secrets: [{source: b, target: pw}]}\n",
+        ));
+        let s: Vec<String> = d.store_secrets().into_iter().collect();
+        assert_eq!(s, ["a", "db.password"]);
     }
 
     #[test]

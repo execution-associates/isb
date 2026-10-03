@@ -7,9 +7,11 @@
 //!   and Cloudflare Access, held to [`policy::RemotePolicy`].
 //!
 //! The tools manage stacks (long-running, replicated, load-balanced
-//! services) and plain sandboxes (an isolated machine for an agent).
+//! services), plain sandboxes (an isolated machine for an agent), and each
+//! org's secrets ([`crate::secrets`]).
 
 pub mod policy;
+pub mod secrets;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -47,6 +49,10 @@ pub struct ServeConfig {
     pub policy: RemotePolicy,
     pub state_dir: PathBuf,
     pub interval: Duration,
+    /// Where the secrets key is looked for (and generated).
+    pub keys: crate::secrets::KeySources,
+    /// `~/.config/isb/secrets.toml`: break-glass recipients.
+    pub secrets_config: PathBuf,
 }
 
 struct Daemon {
@@ -54,6 +60,7 @@ struct Daemon {
     ctl: Controller,
     policy: RemotePolicy,
     state_dir: PathBuf,
+    secrets: Arc<crate::secrets::Secrets>,
 }
 
 /// Run the daemon until SIGINT/SIGTERM. Apps keep running when it stops.
@@ -62,12 +69,18 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         .server_info()
         .map_err(|e| Error::invalid(format!("isb serve needs incusd: {e}")))?;
     let store = Store::open(&cfg.state_dir)?;
+    let secrets_config = crate::secrets::SecretsConfig::load(&cfg.secrets_config)?;
+    let opened = crate::secrets::Secrets::open(&cfg.state_dir, &cfg.keys, &secrets_config)?;
+    for n in &opened.notes {
+        eprintln!("isb serve: {n}");
+    }
     let ctl = Controller::start(client.clone(), store, cfg.interval)?;
     let d = Arc::new(Daemon {
         client,
         ctl: ctl.clone(),
         policy: cfg.policy.clone(),
         state_dir: cfg.state_dir.clone(),
+        secrets: Arc::new(opened.secrets),
     });
     let registry = registry(d.clone())?;
     let mut listeners = vec![Listener::unix(&cfg.socket)];
@@ -414,6 +427,19 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
         write,
         sandbox_create
     );
+    let ctl = d.ctl.clone();
+    let in_use: secrets::InUse = Arc::new(move |org: &crate::org::OrgId, name: &str| {
+        // P1.1: stacks carry no org yet, so all of them are the default org's.
+        if !org.is_default() {
+            return Vec::new();
+        }
+        ctl.definitions()
+            .iter()
+            .filter(|def| def.store_secrets().contains(name))
+            .map(|def| def.name.clone())
+            .collect()
+    });
+    secrets::register(&mut r, d.secrets.clone(), in_use)?;
     tool!(
         "sandbox_list",
         "List sandboxes",
@@ -530,7 +556,8 @@ stacks (long-running services from a docker-compose-style file, with replicas, h
 rolling updates and a load balancer: stack_deploy, then stack_status) and sandboxes \
 (an isolated machine to run code in: sandbox_create, sandbox_exec, sandbox_remove). \
 Images: local incus aliases (dev-base), images:debian/12, or OCI images (docker:nginx:1.27, ghcr:org/app:tag). \
-Deploys return immediately; poll stack_status, or pass wait=true.";
+Deploys return immediately; poll stack_status, or pass wait=true. \
+Each org also has a secret store (secret_create, secret_set, secret_list; values are base64).";
 
 impl Daemon {
     /// May this caller touch this instance? Local callers: always. Remote:
@@ -634,6 +661,14 @@ fn stack_deploy(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
                 "secret {key:?} is not declared under top-level secrets"
             ))
         })?;
+        // P1.9/P1.10: resolve external, age and driver secrets from the
+        // org's store and the daemon's key, by name and version.
+        if def.file.is_none() && def.environment.is_none() {
+            return Err(Error::invalid(format!(
+                "secret {key:?}: stack_deploy does not deliver {} secrets; use an environment: or file: source",
+                def.source_kind()
+            )));
+        }
         let v = a
             .secrets
             .get(key)

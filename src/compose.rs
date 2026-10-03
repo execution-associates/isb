@@ -309,10 +309,9 @@ pub fn load_docs(
 /// and `mem_limit`.
 fn validate_services(file: &mut crate::spec::ComposeFile) -> std::result::Result<(), String> {
     for (key, def) in &file.secrets {
-        if def.file.is_some() == def.environment.is_some() {
-            return Err(format!(
-                "secret {key:?} needs exactly one of file or environment"
-            ));
+        def.validate().map_err(|e| format!("secret {key:?}: {e}"))?;
+        if def.external && def.name.is_none() {
+            crate::secrets::validate_name(key).map_err(|e| format!("external secret: {e}"))?;
         }
     }
     let names: Vec<String> = file.services.keys().cloned().collect();
@@ -912,6 +911,45 @@ mod tests {
         load_docs(&docs, Path::new("/tmp/My Project"), None, &|k| {
             env.get(k).cloned()
         })
+    }
+
+    #[test]
+    fn secret_sources_are_validated() {
+        let svc = "services:\n  web: {image: x, secrets: [k]}\n";
+        for ok in [
+            "{file: ./k}",
+            "{environment: K}",
+            "{external: true}",
+            "{external: true, name: db.password}",
+            "{age: \"YWdl\"}",
+            "{driver: onepassword, name: \"op://vault/item/field\"}",
+        ] {
+            let doc = format!("secrets:\n  k: {ok}\n{svc}");
+            assert!(load_with(&[&doc], &[]).is_ok(), "{ok}");
+        }
+        for (bad, why) in [
+            ("{}", "exactly one"),
+            ("{file: ./k, environment: K}", "exactly one"),
+            ("{external: true, age: x}", "exactly one"),
+            ("{driver: onepassword}", "driver needs name"),
+            ("{environment: K, name: x}", "name goes with"),
+            ("{external: true, name: \"a/b\"}", "secret name"),
+            ("{age: \"  \"}", "age is empty"),
+            ("{vault: x}", "unknown field"),
+        ] {
+            let doc = format!("secrets:\n  k: {bad}\n{svc}");
+            let e = load_with(&[&doc], &[]).unwrap_err().to_string();
+            assert!(e.contains(why), "{bad}: {e}");
+        }
+        // An external secret's key is its store name unless `name` says.
+        let bad =
+            "secrets:\n  k/x: {external: true}\nservices:\n  web: {image: x, secrets: [k/x]}\n";
+        assert!(load_with(&[bad], &[]).is_err());
+        let p = load_with(&[&format!("secrets:\n  k: {{external: true}}\n{svc}")], &[]).unwrap();
+        assert_eq!(p.file.secrets["k"].store_name("k"), Some("k"));
+        // Not resolvable by `isb up` or the deploying client.
+        let e = p.secret_values().unwrap_err().to_string();
+        assert!(e.contains("external"), "{e}");
     }
 
     #[test]

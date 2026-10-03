@@ -282,11 +282,22 @@ class SandboxSpec(TypedDict, total=False):
 
 class SecretDef(TypedDict, total=False):
     """Where a secret's value comes from. Exactly one source."""
+    #: The value, age-encrypted to the daemon's recipients (`isb secret
+    #: encrypt`): ASCII-armored, or base64 of the binary format.
+    age: Optional[str]
+    #: Read through this secrets driver, from `name`.
+    driver: Optional[str]
     #: An environment variable of whoever deploys the file (`isb up`, or the
     #: client calling `isb stack deploy`).
     environment: Optional[str]
+    #: The secret already exists in the org's secret store (`isb secret
+    #: create`), under `name` (default: the key).
+    external: BoolOrString
     #: A host file holding the value (relative to the compose file).
     file: Optional[str]
+    #: With `external`: the store's name for it. With `driver`: the
+    #: driver's reference (a 1Password `op://` path, say).
+    name: Optional[str]
 
 
 class _SecretRefRequired(TypedDict):

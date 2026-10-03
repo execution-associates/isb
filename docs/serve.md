@@ -32,7 +32,9 @@ when you log out; the installer says so.
 
 The daemon's user needs the incus socket (usually the `incus-admin` group).
 Stack definitions are kept in `$XDG_STATE_HOME/isb/stacks/` (0600 files;
-they hold secret values), override with `--state-dir`.
+they hold secret values), override with `--state-dir`. The secret store is
+under `<state-dir>/orgs/`, encrypted to the daemon's age key, which it finds
+(or generates) at startup; see [secrets.md](secrets.md#the-daemons-key).
 
 ## Remote MCP through Cloudflare Tunnel and Access
 
@@ -138,6 +140,7 @@ directly.
 | `sandbox_list` | Instances, filtered by labels. |
 | `sandbox_exec` | Run argv in a sandbox: exit code, stdout, stderr (each capped at 256 KiB, keeping the end), optional stdin text and timeout (default 10m). |
 | `sandbox_remove` | Delete a sandbox (not a stack replica). |
+| `secret_create`, `secret_set`, `secret_get`, `secret_list`, `secret_inspect`, `secret_delete`, `secret_refresh`, `secret_reencrypt`, `secret_recipients` | An org's secret store; values base64. See [secrets.md](secrets.md). Remote callers reach every org's secrets, values included, unless `--deny-tools 'secret_*'`. |
 | `server_status` | Versions, and the balancer's routes with live counters. |
 | `overview` | Everything a dashboard shows in one call: host CPU and memory with history, every stack in detail, sandboxes with their CPU and memory, the latest event number. |
 | `events` | The event feed (deploys, rollouts, health changes, restarts, failures) after a `since` cursor, optionally waiting up to 30 s for one. |
