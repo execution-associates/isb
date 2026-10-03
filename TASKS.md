@@ -144,6 +144,19 @@ minime only runs binaries downloaded from our CI runs.
   is the trust boundary); the UI hides Reveal from members as a nicety only.
 - **Agents sharing this session's scratchpad use their own subdirectory**
   (`scratchpad/<task>/`): one agent deleted another's script there.
+- **Builds** (P2.2) run in the org's own project as unprivileged
+  containers (BuildKit works there without `security.nesting`, so projects
+  stay nesting-blocked and builds count against the org's quota and ACL);
+  `untrusted` always means a VM. The builder image is prepared only in
+  `isb-system`, where no org can tamper with it.
+- **Registry** (P2.3): one per host in the `isb-system` project, no NIC, a
+  unix socket inside plus a proxy on host 127.0.0.1:5480, so no org network
+  can reach it. Only the daemon pushes (OCI push in Rust; it never trusts
+  build output). `registry:APP[:TAG]` resolves in the caller's org, so
+  cross-org references are impossible; loopback `oci:` refs are refused.
+  Tags are pinned to digests at deploy (`StackDef.images`); retention keeps
+  deployed digests with `isb-keep-*` tags. No registry auth: host-local
+  processes can read and write every org's images.
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
@@ -240,11 +253,11 @@ minime only runs binaries downloaded from our CI runs.
 - [~] (07e8dfc: generic git + webhooks done; GitHub App and the hcloud push check remain) P2.1 Git sources: GitHub App (install, repo list, webhooks), generic git
   over HTTPS/SSH with deploy keys, GitLab/Gitea webhooks. **Verify:** push to
   a test repo deploys on the hcloud box.
-- [~] (subagent p2.2) P2.2 Builds in sandboxes: Railpack (and Nixpacks), Dockerfile,
+- [x] (5dbf468; buildpacks not supported: pack needs a docker daemon) P2.2 Builds in sandboxes: Railpack (and Nixpacks), Dockerfile,
   buildpacks; each build in a fresh isb sandbox (VM for untrusted), logs
   streamed, build cache volume per app. **Verify:** a Node, a Python and a
   Dockerfile app build and run.
-- [~] (subagent p2.2) P2.3 Local OCI registry as an isb service; builds push, incus pulls;
+- [x] (5dbf468) P2.3 Local OCI registry as an isb service; builds push, incus pulls;
   image retention. **Verify:** deploy pulls from the local registry; rollback
   to a previous image.
 - [x] (0486011; Let's Encrypt cert verified on a cx23 in nbg1; live Cloudflare Tunnel check waits on Stephan's go-ahead) P2.4 Ingress: embedded edge proxy (Caddy) with ACME, `domains:` per

@@ -58,6 +58,11 @@ pub struct StackDef {
     /// did not change (a moved image tag, say).
     #[serde(default)]
     pub force: BTreeMap<String, u64>,
+    /// The digest each `registry:` image resolved to at deploy time, by
+    /// service: a moved tag is a new revision, and a rollback runs exactly
+    /// what ran before.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub images: BTreeMap<String, String>,
     /// Unix seconds.
     pub deployed_at: u64,
     /// Who deployed it (an Access identity, or `local`).
@@ -145,6 +150,12 @@ impl StackDef {
             }
         }
         h.write(&self.force.get(service).copied().unwrap_or(0).to_le_bytes());
+        // Only when there is one, so stacks without registry images keep
+        // their revisions.
+        if let Some(d) = self.images.get(service) {
+            h.write(b"image");
+            h.write(d.as_bytes());
+        }
         Ok(format!("{:08x}", h.finish() as u32))
     }
 
@@ -158,6 +169,18 @@ impl StackDef {
             .filter(|(k, _)| used.contains(*k))
             .map(|(_, b)| b.name.clone())
             .collect()
+    }
+
+    /// A service's image as its instances get it: a `registry:` tag pinned
+    /// to the digest it named at deploy time ([`StackDef::images`]).
+    pub fn instance_image(&self, service: &str, image: &str) -> String {
+        let (Some(r), Some(d)) = (image.strip_prefix("registry:"), self.images.get(service)) else {
+            return image.to_string();
+        };
+        match crate::registry::ImageRef::parse(r) {
+            Ok(r) if r.digest.is_none() => format!("registry:{}", r.pinned(d).render()),
+            _ => image.to_string(),
+        }
     }
 
     pub fn service(&self, service: &str) -> Result<&SandboxSpec> {
@@ -366,6 +389,7 @@ mod tests {
             base_dir: "/".into(),
             secrets: BTreeMap::new(),
             force: BTreeMap::new(),
+            images: BTreeMap::new(),
             deployed_at: 0,
             deployed_by: String::new(),
             previous: None,

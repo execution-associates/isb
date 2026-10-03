@@ -203,6 +203,11 @@ directly.
 | `app_create`, `app_get`, `app_list`, `app_update`, `app_delete` | Apps: an image or a repository with a builder, plus env, domains, volumes, ports, replicas, port, health check, resources, command. |
 | `app_deploy`, `app_rollback`, `app_deployments`, `app_deployment_log` | Deployments: queue one (`wait` blocks), go back to an earlier one's image and settings, the history, a deployment's log from an offset. |
 | `app_env_get`, `app_env_set`, `app_webhook`, `app_deploy_key` | An app's environment as `.env` text; its webhook path and secret (`rotate`); a new SSH deploy key. |
+| `build_run` | Start a build of a host directory (`app`, `context`, `builder`, `dockerfile`, `target`, `args`, `tag`, `untrusted`, `timeout`) into the org's registry repository; returns an id. Remote callers: `context` under a `--bind-root`. See [builds.md](builds.md). |
+| `build_logs` | A build's state and log lines from `since`, waiting up to 30 s for more; `image` and `digest` when it succeeded. |
+| `build_list` | The org's recent builds. |
+| `registry_list` | The org's images in the local registry: apps, tags, digests, push times. |
+| `registry_gc` | Registry retention (platform admins): keep the newest `keep` tags per app and whatever deployed stacks run or would roll back to. |
 | `server_status` | Versions, and the balancer's routes with live counters. |
 | `ingress_status` | The ingress: listeners, CA, the Caddy process, every routed domain (URL, certificate state, upstreams), conflicts and refusals, and each tunnel org's cloudflared ([ingress.md](ingress.md)). Shows the caller's orgs. |
 | `org_get` | One org: limits and per-instance defaults, bridge and subnet, egress exceptions, bind roots, service-name domain, and instance, stack and member counts. Members of the org. |

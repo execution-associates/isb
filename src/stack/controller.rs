@@ -567,6 +567,9 @@ impl Controller {
     /// What deploying `def` would change, without deploying it.
     pub fn plan(&self, def: &StackDef) -> Result<Vec<DeployChange>> {
         self.validate(def)?;
+        let mut def = def.clone();
+        self.pin_images(&mut def)?;
+        let def = &def;
         let old = self
             .inner
             .stacks
@@ -585,7 +588,8 @@ impl Controller {
     /// every service must resolve (image source, paths, ports).
     pub fn validate(&self, def: &StackDef) -> Result<()> {
         validate_stack_name(&def.name)?;
-        let host = crate::sandbox::host_facts(&self.inner.client)?;
+        // In the org's project, which is what `registry:` images resolve in.
+        let host = crate::sandbox::host_facts(&crate::org::client(&self.inner.client, &def.org))?;
         for (svc, spec) in &def.file.services {
             let mut s = instance_spec(def, svc, spec, 1, "0000")?;
             s.name = Some(instance_name(&def.name, svc, 1, "0000")?);
@@ -600,6 +604,7 @@ impl Controller {
     /// itself happens in the background.
     pub fn deploy(&self, mut def: StackDef) -> Result<Vec<DeployChange>> {
         self.validate(&def)?;
+        self.pin_images(&mut def)?;
         let _g = self.inner.edit.lock().unwrap();
         let old = self
             .inner
@@ -766,8 +771,31 @@ impl Controller {
         cur.service(service)?;
         let mut def = (*cur).clone();
         *def.force.entry(service.to_string()).or_insert(0) += 1;
+        // A moved tag is what a redeploy is usually for.
+        self.pin_images(&mut def)?;
         self.inner.store.save(&def)?;
         self.apply(Arc::new(def));
+        Ok(())
+    }
+
+    /// Resolve every `registry:` image given by tag to the digest the tag
+    /// names now, in the stack's org (a digest in the file only has to
+    /// exist there).
+    fn pin_images(&self, def: &mut StackDef) -> Result<()> {
+        def.images.clear();
+        for (svc, spec) in &def.file.services {
+            let Some(r) = spec.image.strip_prefix("registry:") else {
+                continue;
+            };
+            let r = crate::registry::ImageRef::parse(r)?;
+            let reg = crate::registry::Registry::shared(&self.inner.client)?;
+            // A digest is checked too, so a typo (or another org's digest)
+            // fails the deploy rather than the rollout.
+            let d = reg.resolve(&def.org, &r)?;
+            if r.digest.is_none() {
+                def.images.insert(svc.clone(), d);
+            }
+        }
         Ok(())
     }
 
@@ -925,6 +953,7 @@ fn instance_spec(
     rev: &str,
 ) -> Result<SandboxSpec> {
     let mut s = spec.clone();
+    s.image = def.instance_image(service, &spec.image);
     s.restart = Some(RestartMode::Always);
     s.ports.retain(|p| p.bind == PortBind::Guest);
     s.domains.clear();
@@ -2293,6 +2322,7 @@ mod tests {
             base_dir: "/".into(),
             secrets: BTreeMap::new(),
             force: BTreeMap::new(),
+            images: BTreeMap::new(),
             deployed_at: 0,
             deployed_by: String::new(),
             previous: None,

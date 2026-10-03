@@ -41,7 +41,7 @@ isb stack rm NAME [--volumes]
 # orgs: incus projects with their own network (docs/orgs.md)
 isb org create NAME [--cpus N] [--memory M] [--bind-root DIR]... [--allow-egress CIDR[:PORTS[/tcp|udp]]]...
 isb org ls [--json] | show NAME [--json] | rm NAME [--force]
-sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run]   firewall for org bridges, service-name dir
+sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run]   firewall for org bridges, service-name dir, registry CA
 
 # secrets, per org, on the isb serve daemon (docs/secrets.md); all take --org ORG
 isb secret create NAME [FILE|-] [--driver D] [-l k=v]   value from FILE or stdin, never argv
@@ -69,6 +69,13 @@ isb app rollback NAME [ID] [-d]            a previous deployment's image and set
 isb app deployments NAME [--json] | logs NAME [ID] [-f]
 isb app env NAME | env-set NAME [FILE|-] [--deploy]   the environment as .env text
 isb app webhook NAME [--rotate] | deploy-key NAME
+
+# builds and the local registry, on the isb serve daemon (docs/builds.md); --org ORG
+isb build DIR --app APP [--tag T] [--builder railpack|nixpacks|dockerfile] [--dockerfile PATH]
+              [--target STAGE] [--arg K=V]... [--subdir DIR] [--untrusted] [--timeout D] [-d]
+                                           prints registry:APP:T@sha256:... for a compose image:
+isb registry setup [--port 5480] [--renew] the host's registry (directly on incus, not the daemon)
+isb registry ls [--json] | gc [--keep 10] [--dry-run]
 
 # identity for isb serve, on <state>/isb.db directly (docs/auth.md)
 isb user create EMAIL [--admin] [--name N]  password from the terminal, or stdin's first line

@@ -11,6 +11,7 @@
 //! machine for an agent), and each org's secrets ([`crate::secrets`]).
 
 pub mod apps;
+pub mod builds;
 mod orgs;
 pub mod policy;
 pub mod secrets;
@@ -161,6 +162,16 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         Some(_) => Some(auth_routes(&cfg, users.clone(), &secrets)?),
         None => None,
     };
+    // The local registry, when set up: this daemon pushes to it and keeps
+    // its push index under the state directory.
+    match crate::registry::Registry::open(&client, Some(&cfg.state_dir)) {
+        Ok(Some(r)) => {
+            eprintln!("isb serve: local registry {}", r.info().url());
+            crate::registry::install(Arc::new(r));
+        }
+        Ok(None) => {}
+        Err(e) => eprintln!("isb serve: WARNING: local registry: {e}"),
+    }
     // The ingress follows rotation from the first replica the controller
     // resumes, so it exists before the controller does.
     let ingress = match &cfg.ingress {
@@ -266,6 +277,7 @@ const PLATFORM_TOOLS: &[&str] = &[
     "org_create",
     "org_update",
     "org_delete",
+    "registry_gc",
 ];
 
 /// Read-only tools that span orgs: any signed-in user, filtered to their
@@ -874,6 +886,14 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             bindings,
         },
     )?;
+    builds::register(
+        &mut r,
+        builds::Ctx {
+            client: d.client.clone(),
+            policy: d.policy.clone(),
+            ctl: d.ctl.clone(),
+        },
+    )?;
     tool!(
         "sandbox_list",
         "List sandboxes",
@@ -996,7 +1016,8 @@ const INSTRUCTIONS: &str = "isb runs incus containers and VMs on this host. Two 
 stacks (long-running services from a docker-compose-style file, with replicas, health checks, \
 rolling updates and a load balancer: stack_deploy, then stack_status) and sandboxes \
 (an isolated machine to run code in: sandbox_create, sandbox_exec, sandbox_remove). \
-Images: local incus aliases (dev-base), images:debian/12, or OCI images (docker:nginx:1.27, ghcr:org/app:tag). \
+Images: local incus aliases (dev-base), images:debian/12, OCI images (docker:nginx:1.27, ghcr:org/app:tag), \
+or the org's own builds in the local registry (registry:APP:TAG; build_run makes them, registry_list lists them). \
 Deploys return immediately; poll stack_status, or pass wait=true. \
 Each org also has a secret store (secret_create, secret_set, secret_list; values are base64). \
 Apps (Dokploy-style): project_create, then app_create (an image, or a repository with a builder), \
@@ -1141,6 +1162,7 @@ fn stack_deploy(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         base_dir: base,
         secrets: BTreeMap::new(),
         force: BTreeMap::new(),
+        images: BTreeMap::new(),
         deployed_at: now_secs(),
         deployed_by: caller_name(c),
         previous: None,

@@ -664,6 +664,7 @@ mod tests {
             base_dir: "/".into(),
             secrets: Default::default(),
             force: Default::default(),
+            images: Default::default(),
             deployed_at: 0,
             deployed_by: String::new(),
             previous: None,

@@ -165,6 +165,8 @@ pub fn host_facts(client: &Client) -> Result<HostFacts> {
         path_map: HostFacts::detect_path_map(),
         initial_copy,
         shared_root: shared_root(),
+        org: crate::org::OrgId::from_incus_project(client.project_name()),
+        registry: crate::registry::info(client)?.map(|i| i.addr),
     })
 }
 

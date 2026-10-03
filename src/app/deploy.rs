@@ -982,6 +982,7 @@ impl Apps {
             base_dir: base,
             secrets,
             force: BTreeMap::new(),
+            images: BTreeMap::new(),
             deployed_at: crate::stack::now_secs(),
             deployed_by: by.into(),
             previous: None,

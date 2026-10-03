@@ -50,6 +50,10 @@ toml = { version = "1", default-features = false, features = ["parse", "serde", 
 rusqlite = { version = "0.40", features = ["bundled"] }
 argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
 
+# The local registry's TLS: an isb CA and the registry's certificate, on ring.
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
+time = { version = "0.3", default-features = false, features = ["std"] }
+
 # macOS has no /proc: process info, host stats and peer credentials come from
 # libproc, mach and getpeereid.
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -801,6 +801,7 @@ impl Manager {
             base_dir: self.dir.clone(),
             secrets: BTreeMap::new(),
             force: BTreeMap::new(),
+            images: BTreeMap::new(),
             deployed_at: crate::stack::now_secs(),
             deployed_by: TUNNEL_DEPLOYER.into(),
             previous: None,

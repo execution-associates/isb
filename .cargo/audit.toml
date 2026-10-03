@@ -3,4 +3,5 @@
 [advisories]
 ignore = [
     "RUSTSEC-2023-0071", # rsa via age's ssh feature: isb never decrypts or signs with RSA keys
+    "RUSTSEC-2026-0009", # time via rcgen: the fix needs a newer Rust than the 1.85 MSRV; isb never parses RFC 2822 with it
 ]
