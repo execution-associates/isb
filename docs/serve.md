@@ -33,6 +33,14 @@ tools. It listens in two places:
 `--listen` refuses anything but a loopback address: put a tunnel (or a
 reverse proxy) in front of it, never an open port.
 
+A daemon can be the **control plane** for other hosts: `isb server add`
+bootstraps one over SSH, `isb org create --server` places an org on it, and
+every call for that org (on all of the surfaces above) is forwarded to that
+server's agent over mutual TLS after this daemon has authenticated,
+authorized and audited it. `isb serve --agent` is that agent: no identity
+store, web UI or `--listen`, only an mTLS listener that admits the control
+plane's client certificate. See [servers.md](servers.md).
+
 ## Signing in, and what callers may reach
 
 Every HTTP caller is an isb user. **The org is the trust boundary**: a member
@@ -61,6 +69,8 @@ org. API tokens can be narrowed with scopes (`read`, `deploy`, `admin`,
   org's members.
 - `audit_list` shows an org's owners and admins their org's entries and
   platform admins everything; `audit_verify` is for platform admins.
+- The `server_*` tools are for platform admins. A call for an org placed on
+  a server is judged here, then again by the server's agent.
 - The unix socket is the daemon's own user and reaches everything.
 - Every call that changes something, every refusal, every secret read,
   sign-in, webhook delivery and terminal session is recorded in the audit
@@ -272,6 +282,7 @@ directly.
 | `audit_list` | The audit log, filtered (actor, action and target globs, outcome, surface, time) and paged; an org's owners and admins see their org, platform admins everything ([audit.md](audit.md)). |
 | `audit_verify` | Walk the audit log's and the history's hash chains. Platform admins. |
 | `history_query` | The history ([history.md](history.md)): controller events, incus lifecycle events in every project with their requestor, audit rows and markers, merged; filter by org, object, kind, source, actor, time; `correlate` links incus changes to the audit row that likely caused them. Members see their orgs; host-level rows are for platform admins. |
+| `server_add`, `server_list`, `server_show`, `server_remove`, `server_rotate_cert` | The servers orgs can be placed on: bootstrap one over SSH, list them with their health and orgs, show one, forget one (refused while it holds orgs), issue its agent a new certificate. Platform admins. See [servers.md](servers.md). |
 
 `stack_deploy` also takes `dry_run: true`, which returns the per-service
 changes without deploying. `isb tui` ([tui.md](tui.md)) is built on
@@ -313,3 +324,6 @@ prior `initialize`, and there is no session id.
 | `--audit-all` | `ISB_AUDIT_ALL` | off: read-only tool calls are not recorded (secret reads and refusals always are) |
 | `--history-retention` | `ISB_HISTORY_RETENTION` | `365d`: how long history rows are kept ([history.md](history.md)) |
 | `--history-max-rows` | `ISB_HISTORY_MAX_ROWS` | `5000000`: past it, the oldest history rows go first |
+| `--agent` | `ISB_AGENT` | off: run as a server's agent for a control plane ([servers.md](servers.md)), with the two below |
+| `--agent-listen` | `ISB_AGENT_LISTEN` | the agent's mTLS address, e.g. `0.0.0.0:7443` (any address: the client certificate is the gate) |
+| `--agent-tls` | `ISB_AGENT_TLS` | the agent's TLS directory: `ca.crt`, `tls.crt`, `tls.key` |

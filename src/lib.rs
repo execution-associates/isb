@@ -62,6 +62,7 @@ pub mod s3;
 pub mod sandbox;
 pub mod secrets;
 pub mod server;
+pub mod servers;
 pub mod shorthand;
 pub mod spec;
 pub mod stack;

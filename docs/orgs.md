@@ -11,6 +11,7 @@ isb org create NAME [--cpus N] [--memory 16GiB] [--disk 100GiB] [--instances N]
                     [--bind-root DIR]... [--allow-egress DEST]...
                     [--allow-domain SUFFIX]... [--ingress caddy|cloudflare-tunnel]
                     [--cloudflare-account ID] [--cloudflare-zone ID]
+                    [--server SERVER]
 isb org ls [--json]
 isb org show NAME [--json]
 isb org rm NAME [--force]
@@ -20,6 +21,13 @@ sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run] [--public-ingress
 `isb org create` on an existing org updates it to the flags given. `system`
 is not an org name: the incus project `isb-system` holds isb's own services
 (the local registry).
+
+`--server SERVER` creates the org on another host instead, one the local
+daemon (a control plane) placed there with `isb server add`
+([servers.md](servers.md)). The org's project, network and workloads then
+live on that server, and every call for it goes there; `isb org show` and
+`isb org rm` find it through the daemon. An org is placed once: it does not
+move between servers.
 
 An org's builds ([builds.md](builds.md)) run in its own project too, as
 ordinary unprivileged containers (or VMs for untrusted source) that count
@@ -34,9 +42,9 @@ web UI's org Settings and Platform pages use them:
 | Tool | Who | Does |
 |---|---|---|
 | `org_get` | the org's members | limits, defaults, network, egress, bind roots, service-name domain (`<org>.isb`), counts |
-| `org_list` | platform admins | every org |
-| `org_create` | platform admins | `isb org create` without `--bind-root` |
-| `org_update` | platform admins | limits, per-instance defaults, egress exceptions |
+| `org_list` | platform admins | every org, each with the `server` it runs on (`local` for this daemon) |
+| `org_create` | platform admins | `isb org create` without `--bind-root`; `server` places it on a server |
+| `org_update` | platform admins | limits, per-instance defaults, egress exceptions (a different `server` is refused) |
 | `org_delete` | platform admins | `isb org rm`, refused while stacks are deployed in the org |
 
 Limits and egress exceptions are what keep one org from the others and from

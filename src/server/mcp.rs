@@ -388,6 +388,15 @@ pub struct Audited<'a> {
 /// Records what happened; it must not fail the call.
 pub type Audit = Arc<dyn Fn(&Audited) + Send + Sync>;
 
+/// Runs an admitted call elsewhere (a control plane forwarding it to the
+/// server that holds the org): `Some` is its outcome, `None` runs the tool
+/// here. Called after authorization and before the audit record.
+pub type Route = Arc<
+    dyn Fn(&Tool, &Value, &Caller, &crate::audit::Origin) -> Option<crate::Result<Value>>
+        + Send
+        + Sync,
+>;
+
 /// What the embedder plugs into every listener.
 #[derive(Clone, Default)]
 pub struct Hooks {
@@ -398,6 +407,8 @@ pub struct Hooks {
     pub terminal: Option<super::terminal::Terminal>,
     /// Hears every tool call on every surface, and terminal sessions.
     pub audit: Option<Audit>,
+    /// Forwards calls for orgs placed on another server.
+    pub route: Option<Route>,
 }
 
 /// Where a request came from, for the audit log: the surface (`cli` over
@@ -616,7 +627,15 @@ impl Endpoint {
             }
         };
         let kept = self.hooks.audit.as_ref().map(|_| args.clone());
-        let r = run(tool, args, caller);
+        let routed = self
+            .hooks
+            .route
+            .as_ref()
+            .and_then(|f| f(tool, &args, caller, origin));
+        let r = match routed {
+            Some(r) => r,
+            None => run(tool, args, caller),
+        };
         if let (Some(a), Some(kept)) = (&self.hooks.audit, &kept) {
             a(&Audited {
                 caller,
@@ -1577,6 +1596,7 @@ mod tests {
                 Err(Error::NotFound("no such app".into()))
             })),
             audit: None,
+            route: None,
         };
         ep
     }

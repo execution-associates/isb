@@ -41,6 +41,12 @@ isb stack rm NAME [--volumes]
 # orgs: incus projects with their own network (docs/orgs.md)
 isb org create NAME [--cpus N] [--memory M] [--bind-root DIR]... [--allow-egress CIDR[:PORTS[/tcp|udp]]]...
 isb org ls [--json] | show NAME [--json] | rm NAME [--force]
+isb org create NAME --server SERVER [--cpus N] [--memory M] [--allow-egress ...]   on a server, through the daemon
+
+# servers a control plane places orgs on (docs/servers.md); platform admins, through the daemon
+isb server add NAME --ssh USER@HOST --key FILE [--port 22] [--address A] [--agent-port 7443]
+               [--allow-from CIDR]... [--isb-binary FILE] [--isb-version V] [--public-ingress]
+isb server ls [--json] | show NAME | rm NAME | rotate-cert NAME
 sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run]   firewall for org bridges, service-name dir, registry CA
 
 # secrets, per org, on the isb serve daemon (docs/secrets.md); all take --org ORG

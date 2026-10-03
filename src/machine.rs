@@ -646,7 +646,7 @@ pub(crate) fn fetch(url: &str, limit: u64) -> Result<Vec<u8>> {
 }
 
 /// Download the release tarball, check it against SHA256SUMS, unpack the binary.
-fn download_release(version: &str, arch: &str, dir: &Path, dst: &Path) -> Result<()> {
+pub(crate) fn download_release(version: &str, arch: &str, dir: &Path, dst: &Path) -> Result<()> {
     let asset = release_asset(version, arch);
     let base = format!("{RELEASES}/v{version}");
     let sums =

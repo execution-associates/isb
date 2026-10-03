@@ -19,6 +19,7 @@ mod orgs;
 pub mod policy;
 pub mod previews;
 pub mod secrets;
+mod servers;
 pub mod templates;
 mod terminal;
 
@@ -83,6 +84,19 @@ pub struct ServeConfig {
     /// How long, and how many, history rows are kept.
     pub history_retention: Duration,
     pub history_max_rows: i64,
+    /// Run as a server's agent for a control plane (docs/servers.md): an
+    /// mTLS listener instead of the identity store, web UI and `--listen`.
+    pub agent: Option<AgentConfig>,
+}
+
+/// `isb serve --agent`.
+#[derive(Debug, Clone)]
+pub struct AgentConfig {
+    /// `host:port` on any address; only the control plane's client
+    /// certificate gets through.
+    pub listen: String,
+    /// `ca.crt`, `tls.crt`, `tls.key` from the control plane.
+    pub tls_dir: PathBuf,
 }
 
 /// The identity endpoints over `<state>/isb.db`, and the web UI. Provider
@@ -152,6 +166,9 @@ struct Daemon {
     /// Databases' backups and scheduled jobs.
     data: data::Ctx,
     audit: Arc<crate::audit::AuditLog>,
+    /// The servers orgs can be placed on (a control plane; `None` on an
+    /// agent).
+    servers: Option<Arc<crate::servers::Servers>>,
 }
 
 /// Run the daemon until SIGINT/SIGTERM. Apps keep running when it stops.
@@ -201,9 +218,18 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
             ""
         }
     );
+    if cfg.agent.is_some() && cfg.listen.is_some() {
+        return Err(Error::invalid(
+            "--agent serves its control plane only: drop --listen (users reach the control plane)",
+        ));
+    }
     let auth = match &cfg.listen {
         Some(_) => Some(auth_routes(&cfg, users.clone(), &secrets, &audit_log)?),
         None => None,
+    };
+    let servers = match &cfg.agent {
+        None => Some(crate::servers::Servers::open(&cfg.state_dir)?),
+        Some(_) => None,
     };
     // The local registry, when set up: this daemon pushes to it and keeps
     // its push index under the state directory.
@@ -286,21 +312,59 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
             backups,
         },
         audit: audit_log.clone(),
+        servers: servers.clone(),
     });
+    if let Some(s) = &servers {
+        s.start(ctl.clone());
+    }
     let registry = registry(d.clone())?;
     let mut hooks = hooks(d.clone(), users.clone(), cfg.allow_unauthenticated);
     hooks.audit = Some(audit::hook(audit_log.clone(), cfg.audit_all));
+    if servers.is_some() {
+        hooks.route = Some(servers::route(d.clone()));
+    }
+    // Webhooks carry their own credential (a signature), and come from
+    // senders that hold no session; a control plane hands those for orgs on
+    // servers to the server.
+    let webhooks = {
+        let w = apps::webhook_routes(apps.clone());
+        let w = match &servers {
+            Some(s) => servers::forward_webhooks(w, s.clone()),
+            None => w,
+        };
+        audit::audited_webhooks(w, audit_log.clone())
+    };
     let mut listeners = vec![Listener::unix(&cfg.socket).hooks(hooks.clone())];
+    if let Some(ac) = &cfg.agent {
+        let tls = crate::servers::pki::agent_server_config(&ac.tls_dir)?;
+        let state = Arc::new(servers::AgentState {
+            orgs: Arc::new(crate::servers::store::AgentOrgs::open(&cfg.state_dir)?),
+            tls: Arc::new(std::sync::RwLock::new(tls)),
+            tls_dir: ac.tls_dir.clone(),
+        });
+        eprintln!(
+            "isb serve: agent for a control plane; orgs placed here: {}",
+            state
+                .orgs
+                .list()
+                .iter()
+                .map(|o| o.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        listeners.push(servers::agent_listener(
+            d.clone(),
+            &hooks,
+            &ac.listen,
+            state,
+            webhooks.clone(),
+        ));
+    }
     if let Some(addr) = &cfg.listen {
         let mut l = Listener::tcp(addr.clone())
             .policy(cfg.remote_tools.clone())
             .hooks(hooks)
-            // Webhooks carry their own credential (a signature), and come
-            // from senders that hold no session.
-            .public_routes(audit::audited_webhooks(
-                apps::webhook_routes(apps.clone()),
-                audit_log.clone(),
-            ));
+            .public_routes(webhooks);
         if let Some(r) = auth {
             l = l.routes(r);
         }
@@ -332,6 +396,9 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         json!({"version": env!("CARGO_PKG_VERSION")}),
     ));
     recorder.shutdown();
+    if let Some(s) = &servers {
+        s.shutdown();
+    }
     notifier.shutdown();
     scheduler.shutdown();
     ctl.shutdown();
@@ -423,6 +490,11 @@ const PLATFORM_TOOLS: &[&str] = &[
     "template_catalog_add",
     "template_catalog_remove",
     "audit_verify",
+    "server_add",
+    "server_list",
+    "server_show",
+    "server_remove",
+    "server_rotate_cert",
 ];
 
 /// Read-only tools that span orgs: any signed-in user, filtered to their
@@ -519,6 +591,7 @@ fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate:
         events: Some(events),
         terminal: Some(term),
         audit: None,
+        route: None,
     }
 }
 
@@ -1201,6 +1274,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
     )?;
     audit::register(&mut r, d.audit.clone())?;
     audit::register_history(&mut r, d.audit.clone())?;
+    servers::register(&mut r, d.clone())?;
     Ok(r)
 }
 

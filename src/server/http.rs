@@ -216,7 +216,14 @@ impl Shutdown {
 pub enum HttpListener {
     Tcp(TcpListener),
     Unix(UnixSocket),
+    /// TLS with client certificates (an `isb serve --agent` listener): any
+    /// address, since the handshake is the gate.
+    Tls(TcpListener, TlsConfig),
 }
+
+/// A TLS server config that can be swapped while serving (certificate
+/// rotation); each connection takes the one current when it arrives.
+pub type TlsConfig = Arc<std::sync::RwLock<Arc<rustls::ServerConfig>>>;
 
 /// A unix listener that removes its socket file on drop, but only while the
 /// file is still the one it bound, so a successor's socket is never deleted.
@@ -294,9 +301,22 @@ impl HttpListener {
         }))
     }
 
+    /// Bind `addr` (any address) for TLS. Only for a config that requires
+    /// client certificates: nothing else stands between it and the network.
+    pub fn bind_tls(addr: &str, config: TlsConfig) -> Result<Self> {
+        let a = addr
+            .to_socket_addrs()
+            .map_err(|e| Error::invalid(format!("listen address {addr:?}: {e}")))?
+            .next()
+            .ok_or_else(|| Error::invalid(format!("listen address {addr:?} does not resolve")))?;
+        let l = TcpListener::bind(a)?;
+        l.set_nonblocking(true)?;
+        Ok(HttpListener::Tls(l, config))
+    }
+
     pub fn local_addr(&self) -> Option<SocketAddr> {
         match self {
-            HttpListener::Tcp(l) => l.local_addr().ok(),
+            HttpListener::Tcp(l) | HttpListener::Tls(l, _) => l.local_addr().ok(),
             HttpListener::Unix(_) => None,
         }
     }
@@ -308,7 +328,9 @@ impl HttpListener {
             tv_nsec: timeout.subsec_nanos() as _,
         };
         let r = match self {
-            HttpListener::Tcp(l) => poll(&mut [PollFd::new(l, PollFlags::IN)], Some(&ts)),
+            HttpListener::Tcp(l) | HttpListener::Tls(l, _) => {
+                poll(&mut [PollFd::new(l, PollFlags::IN)], Some(&ts))
+            }
             HttpListener::Unix(u) => {
                 poll(&mut [PollFd::new(&u.listener, PollFlags::IN)], Some(&ts))
             }
@@ -363,6 +385,10 @@ impl HttpServer {
             }
             let accepted = match &listener {
                 HttpListener::Tcp(l) => l.accept().map(|(s, a)| Conn::Tcp(s, a)),
+                HttpListener::Tls(l, c) => l.accept().map(|(s, a)| {
+                    let cfg = c.read().unwrap_or_else(|p| p.into_inner()).clone();
+                    Conn::Tls(s, a, cfg)
+                }),
                 HttpListener::Unix(u) => u.listener.accept().map(|(s, _)| Conn::Unix(s)),
             };
             let conn = match accepted {
@@ -409,6 +435,31 @@ impl HttpServer {
 enum Conn {
     Tcp(TcpStream, SocketAddr),
     Unix(UnixStream),
+    Tls(TcpStream, SocketAddr, Arc<rustls::ServerConfig>),
+}
+
+/// A server-side TLS connection, as a [`Duplex`].
+struct TlsConn(rustls::StreamOwned<rustls::ServerConnection, TcpStream>);
+
+impl Read for TlsConn {
+    fn read(&mut self, b: &mut [u8]) -> std::io::Result<usize> {
+        self.0.read(b)
+    }
+}
+
+impl Write for TlsConn {
+    fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+        self.0.write(b)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
+
+impl Duplex for TlsConn {
+    fn set_read_timeout(&mut self, t: Option<Duration>) -> std::io::Result<()> {
+        self.0.sock.set_read_timeout(t)
+    }
 }
 
 impl Conn {
@@ -434,6 +485,10 @@ impl Conn {
                 refuse(&mut s);
                 let _ = s.shutdown(NetShutdown::Write);
             }
+            // No TLS session yet to say it in: just close.
+            Conn::Tls(s, _, _) => {
+                let _ = s.shutdown(NetShutdown::Both);
+            }
             Conn::Unix(mut s) => {
                 let _ = s.set_nonblocking(true);
                 refuse(&mut s);
@@ -452,6 +507,29 @@ impl Conn {
                 let mut s = s;
                 handle(&mut s, Peer::Tcp(addr), limits, handler);
                 let _ = s.shutdown(NetShutdown::Write);
+            }
+            Conn::Tls(s, addr, cfg) => {
+                let _ = s.set_nonblocking(false);
+                let _ = s.set_nodelay(true);
+                let _ = s.set_read_timeout(Some(limits.read_timeout));
+                let _ = s.set_write_timeout(Some(limits.write_timeout));
+                let Ok(conn) = rustls::ServerConnection::new(cfg) else {
+                    return;
+                };
+                let mut t = TlsConn(rustls::StreamOwned::new(conn, s));
+                // The handshake (and the client certificate check) first,
+                // bounded by the socket timeouts.
+                while t.0.conn.is_handshaking() {
+                    if let Err(e) = t.0.conn.complete_io(&mut t.0.sock) {
+                        eprintln!("isb serve: TLS handshake from {addr}: {e}");
+                        let _ = t.0.sock.shutdown(NetShutdown::Both);
+                        return;
+                    }
+                }
+                handle(&mut t, Peer::Tcp(addr), limits, handler);
+                t.0.conn.send_close_notify();
+                let _ = t.0.flush();
+                let _ = t.0.sock.shutdown(NetShutdown::Write);
             }
             Conn::Unix(s) => {
                 let _ = s.set_nonblocking(false);

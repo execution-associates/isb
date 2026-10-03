@@ -235,6 +235,15 @@ minime only runs binaries downloaded from our CI runs.
   probes made ~48 rows/min per stack otherwise); ~1,800 rows/day on titan,
   ~1.5 KB/row, 365 days or 5M rows. Members see their org's controller and
   incus rows; host objects are platform-admin only.
+- **Servers** (P5.1/P5.2): the control plane authorizes and audits, then
+  forwards to the agent's `/orgs/<org>/...` over mTLS with its statement of
+  the caller, and the agent authorizes again (org pinned twice; an agent
+  refuses orgs not placed on it). Dedicated CA: agents get serverAuth-only
+  certs, the control plane a clientAuth-only one, so no agent can call
+  another. Server events are copied into the control plane's feed (only for
+  orgs placed there). An org is placed once; the default org is local. The
+  SSH key is used only for bootstrap. A remote org's secrets and history
+  live on its server; `audit_list` stays on the control plane.
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
@@ -383,10 +392,10 @@ minime only runs binaries downloaded from our CI runs.
 
 ## Phase 5: scale-out
 
-- [~] (subagent p5.1) P5.1 Remote servers: add a server (SSH bootstrap installs incus + isb
+- [x] (7ccde1f, 838011d; verified on a cx23 in nbg1, 13 min) P5.1 Remote servers: add a server (SSH bootstrap installs incus + isb
   agent), mTLS between control plane and agent, health. **Verify:** the
   hcloud box joins titan's (or a test) control plane.
-- [~] (subagent p5.1) P5.2 Placement: orgs on servers; MCP/REST calls proxied to the owning
+- [x] (7ccde1f, 838011d) P5.2 Placement: orgs on servers; MCP/REST calls proxied to the owning
   server; secrets delivered only to servers that run their consumers.
   **Verify:** deploy to an org placed on the hcloud box from titan's UI.
 - [x] (8423ecc, f48d234, 39d4158, cabc357, bf41199) P5.3 Audit log and finer roles. **Verify:** actions appear in the log
