@@ -160,7 +160,9 @@ pub struct Event {
     /// dotted, `<subject>.<outcome>`. In use: `deploy.succeeded`,
     /// `deploy.failed`, `health.unhealthy`, `health.recovered`,
     /// `backup.succeeded`, `backup.failed`, `job.succeeded`, `job.failed`,
-    /// `cert.issued`, `cert.failed`. Most events have none.
+    /// `cert.issued`, `cert.failed`, `preview.created`, `preview.removed`
+    /// (a preview's deploys are `deploy.*` under its own stack). Most events
+    /// have none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
 }

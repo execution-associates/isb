@@ -1686,8 +1686,15 @@ mod tests {
         assert_eq!(d.status, Status::Failed, "{d:?}");
         let (log, _, done) = ap.preview_log(&org, "web", 1, 1, 0).unwrap();
         assert!(done && log.contains("refs/pull/1/head"), "{log}");
-        // Synchronize: the same preview, a second deployment.
+        // Synchronize to the commit it has (Gitea sends one after opening):
+        // nothing; to a new one: the same preview, a second deployment.
         let (st, v) = send(&pr("synchronize", 1, "acme/web", "main"));
+        assert_eq!(st, 200, "{v}");
+        assert!(v["ignored"].as_str().unwrap().contains("already"), "{v}");
+        let moved = String::from_utf8(pr("synchronize", 1, "acme/web", "main"))
+            .unwrap()
+            .replace(&"a".repeat(40), &"b".repeat(40));
+        let (st, v) = send(moved.as_bytes());
         assert_eq!((st, v["deployment"].as_u64()), (202, Some(2)), "{v}");
         ap.preview_wait(&org, "web", 1, 2, Duration::from_secs(60))
             .unwrap();

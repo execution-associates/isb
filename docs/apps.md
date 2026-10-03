@@ -59,6 +59,7 @@ token deploys an app.
 | `healthcheck` | A compose `healthcheck`. Without one, a running replica is in rotation. |
 | `resources` | `{cpus, memory}` per replica. |
 | `command` | argv, or a line split like a shell would. |
+| `previews` | Preview deployments per pull request: see [previews.md](previews.md). |
 
 Changing a setting (`app_update`, a JSON merge patch where `null` clears a
 field; `isb app update NAME -f patch.yaml`) takes effect at the next deploy.
@@ -198,8 +199,9 @@ and stored as the org secret `app.<app>.webhook`. `isb app webhook NAME`
 
 - A missing or wrong signature, an unknown org or an unknown app all answer
   401 and do nothing, so the endpoint reveals nothing about what exists.
-- `ping` answers 200. Other events (issues, pull requests) answer 200 and are
-  ignored. A delivery id seen before (`X-GitHub-Delivery`, ...) is ignored.
+- `ping` answers 200. Pull (merge) request events drive the app's
+  [previews](previews.md) when it has them on. Other events (issues,
+  comments) answer 200 and are ignored. A delivery id seen before (`X-GitHub-Delivery`, ...) is ignored.
 - A push deploys a git app only when its ref matches the app's `ref`: branch
   `main` matches `refs/heads/main` (or a tag `main`), a full `refs/...` ref
   matches only itself, and a pinned SHA never deploys from a push. A branch
@@ -234,6 +236,7 @@ serves that path ahead of its Access check, since each request is signed).
 <state>/apps/projects/<project>.json          (<state>/orgs/<org>/apps/... in other orgs)
 <state>/apps/<app>/app.json
 <state>/apps/<app>/deployments/<id>.json, <id>.log
+<state>/apps/<app>/previews/<n>/preview.json, deployments/<id>.json, <id>.log
 <state>/sources/<app>/repo, known_hosts
 ```
 

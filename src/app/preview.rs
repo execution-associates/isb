@@ -395,6 +395,9 @@ pub enum Requested {
     /// The app has `max` previews already.
     Limit(u32),
     Removing,
+    /// A sync naming the commit the preview already has (Gitea sends one
+    /// right after opening).
+    Unchanged(String),
 }
 
 /// A teardown: state dir, org, app, pull request.
@@ -621,23 +624,27 @@ impl super::Apps {
         let name = &app.spec.name;
         let n = pr.number;
         let ignored = |why: String| (200, json!({"ignored": why}));
-        let Some(s) = app.spec.previews.as_ref().filter(|s| s.enabled) else {
-            return ignored(format!("previews are off for app {name}"));
-        };
         if provider == Provider::Generic {
             return ignored("pull requests need a forge's signature, not ?token=".into());
         }
+        // A closed request's preview goes even if previews were turned off
+        // since it was made.
+        if let PrAction::Close { merged } = pr.action {
+            if self.preview_get(org, name, n).is_err() {
+                return ignored(format!("pull request {n} has no preview"));
+            }
+            let why = if merged { "merged" } else { "closed" };
+            return match self.preview_remove(org, name, n, why, false) {
+                Ok(()) => (202, json!({"preview": n, "removing": true})),
+                Err(e) => (500, json!({"error": "preview", "message": e.to_string()})),
+            };
+        }
+        let Some(s) = app.spec.previews.as_ref().filter(|s| s.enabled) else {
+            return ignored(format!("previews are off for app {name}"));
+        };
         match pr.action {
-            PrAction::Other => ignored(format!("pull request {n}: {}", pr.raw_action)),
-            PrAction::Close { merged } => {
-                if self.preview_get(org, name, n).is_err() {
-                    return ignored(format!("pull request {n} has no preview"));
-                }
-                let why = if merged { "merged" } else { "closed" };
-                match self.preview_remove(org, name, n, why, false) {
-                    Ok(()) => (202, json!({"preview": n, "removing": true})),
-                    Err(e) => (500, json!({"error": "preview", "message": e.to_string()})),
-                }
+            PrAction::Other | PrAction::Close { .. } => {
+                ignored(format!("pull request {n}: {}", pr.raw_action))
             }
             PrAction::Open | PrAction::Sync => {
                 let bases = s.bases(&app.spec);
@@ -701,6 +708,9 @@ impl super::Apps {
                             "app {name} has its {max} previews already (previews.max)"
                         ))
                     }
+                    Ok(Requested::Unchanged(sha)) => ignored(format!(
+                        "the preview of pull request {n} is at {sha} already"
+                    )),
                     Ok(Requested::Removing) => {
                         ignored(format!("the preview of pull request {n} is being removed"))
                     }
@@ -735,6 +745,13 @@ impl super::Apps {
             let now = crate::stack::now_secs();
             let (mut p, created) = match self.preview_get(org, name, n) {
                 Ok(p) if p.removing => return Ok(Requested::Removing),
+                Ok(p)
+                    if pr.action == PrAction::Sync
+                        && pr.head_sha.is_some()
+                        && p.head_sha == pr.head_sha =>
+                {
+                    return Ok(Requested::Unchanged(p.head_sha.unwrap_or_default()));
+                }
                 Ok(p) => (p, false),
                 Err(e) if e.is_not_found() => {
                     let live = self
@@ -1481,7 +1498,7 @@ impl super::Apps {
         }
     }
 
-    /// Run [`Apps::previews_upkeep`] every five minutes (the daemon).
+    /// Run [`Self::previews_upkeep`] every five minutes (the daemon).
     pub fn start_preview_upkeep(&self) {
         let me = self.clone();
         std::thread::spawn(move || {

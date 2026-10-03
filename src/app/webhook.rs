@@ -105,15 +105,17 @@ pub fn verify(
     query_token: Option<&str>,
     body: &[u8],
 ) -> Result<Provider, Refusal> {
+    // Gitea and Forgejo also send GitHub's header: theirs decides, so the
+    // sender is known for what follows (pull request refs, status API).
+    if let Some(sig) = header("x-gitea-signature").or_else(|| header("x-forgejo-signature")) {
+        return hmac_ok(secret, body, sig.trim())
+            .then_some(Provider::Gitea)
+            .ok_or(Refusal::Invalid);
+    }
     if let Some(sig) = header("x-hub-signature-256") {
         let hex = sig.trim().strip_prefix("sha256=").ok_or(Refusal::Invalid)?;
         return hmac_ok(secret, body, hex)
             .then_some(Provider::GitHub)
-            .ok_or(Refusal::Invalid);
-    }
-    if let Some(sig) = header("x-gitea-signature").or_else(|| header("x-forgejo-signature")) {
-        return hmac_ok(secret, body, sig.trim())
-            .then_some(Provider::Gitea)
             .ok_or(Refusal::Invalid);
     }
     if let Some(tok) = header("x-gitlab-token") {
@@ -357,6 +359,12 @@ mod tests {
         assert_eq!(verify(SECRET, &gitea, None, body), Ok(Provider::Gitea));
         let forgejo = headers(&[("X-Forgejo-Signature", &sig)]);
         assert_eq!(verify(SECRET, &forgejo, None, body), Ok(Provider::Gitea));
+        // Gitea sends GitHub's header too; it is still Gitea.
+        let both = headers(&[
+            ("X-Gitea-Signature", &sig),
+            ("X-Hub-Signature-256", &format!("sha256={sig}")),
+        ]);
+        assert_eq!(verify(SECRET, &both, None, body), Ok(Provider::Gitea));
         let gl = headers(&[("X-Gitlab-Token", "It's a Secret to Everybody")]);
         assert_eq!(verify(SECRET, &gl, None, body), Ok(Provider::GitLab));
         let gl_bad = headers(&[("X-Gitlab-Token", "It's a Secret to Everybod")]);
