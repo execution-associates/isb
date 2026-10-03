@@ -5,13 +5,19 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * isb's design tokens. Neutrals carry a faint cool tint (hue 260); the one
- * brand colour is emerald. Status colours are semantic and used
- * only through `lib/status.ts`: success (running, done), info (building,
- * deploying), warning (degraded), destructive (failed), and the neutrals
- * (queued, stopped).
+ * isb's design tokens, in three themes: light (:root), dark (.dark) and
+ * Execution Associates (:root.ea, the default; see lib/theme.ts). In light
+ * and dark, neutrals carry a faint cool tint (hue 260) and the one brand
+ * colour is emerald. Status colours are semantic and used only through
+ * `lib/status.ts`: success (running, done), info (building, deploying),
+ * warning (degraded), destructive (failed), and the neutrals (queued,
+ * stopped).
  */
 :root {
+  --app-font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --app-font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  /* Page titles; the same face as the text except in the EA theme. */
+  --app-font-display: var(--app-font-sans);
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.2 0.012 260);
@@ -87,9 +93,66 @@
   --terminal-border: oklch(1 0 0 / 8%);
 }
 
+/*
+ * Execution Associates: executionassociates.com's palette and type ("one
+ * evening on the coast"). The site is dark only, so this theme is too: <html>
+ * carries `dark` as well, and this block (more specific than `.dark`)
+ * replaces its colours. The site's colours, for reference:
+ *   ink #1B0A2C, ink-deep #12071F, ink-2 #240934, white #FDF6FA,
+ *   peach #FEBE75 (focus, hover), glow #F099BF, magenta #DD519B,
+ *   coral #F78478, violet #774CA7, indigo #28286D;
+ *   text is white at 86%, muted text white at 68%, rules white at 14%.
+ * Peach is the site's focus colour, so it is the ring here; the brand colour
+ * (active navigation, switches, meters) is glow pink, which no status colour
+ * is near. Warning sits further toward yellow than usual so it never reads
+ * as peach. Contrast (WCAG 2.1 AA) is checked for every pairing the UI uses.
+ */
+:root.ea {
+  --app-font-sans: "Geist Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --app-font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --app-font-display: "Archivo Variable", "Geist Variable", "Helvetica Neue", Arial, sans-serif;
+  /* The site's corners are square; 4px keeps controls from looking unfinished. */
+  --radius: 0.25rem;
+  --background: oklch(0.193 0.066 303.8); /* ink */
+  --foreground: oklch(0.95 0.012 335);
+  --card: oklch(0.215 0.072 305);
+  --card-foreground: oklch(0.95 0.012 335);
+  --popover: oklch(0.235 0.074 305);
+  --popover-foreground: oklch(0.95 0.012 335);
+  --primary: oklch(0.98 0.009 341.8); /* white: the site's solid button */
+  --primary-foreground: oklch(0.193 0.066 303.8);
+  --secondary: oklch(0.267 0.06 306.4);
+  --secondary-foreground: oklch(0.95 0.012 335);
+  --muted: oklch(0.248 0.062 305.9);
+  --muted-foreground: oklch(0.76 0.024 317);
+  --accent: oklch(0.275 0.062 306);
+  --accent-foreground: oklch(0.98 0.009 341.8);
+  --destructive: oklch(0.7 0.18 22);
+  --border: oklch(0.98 0.009 341.8 / 14%);
+  --input: oklch(0.98 0.009 341.8 / 38%);
+  --ring: oklch(0.845 0.117 68.8); /* peach */
+  --brand: oklch(0.781 0.114 352.3); /* glow */
+  --brand-foreground: oklch(0.193 0.066 303.8);
+  --success: oklch(0.8 0.14 160);
+  --info: oklch(0.76 0.12 258);
+  --warning: oklch(0.86 0.15 90);
+  --sidebar: oklch(0.161 0.05 302.6); /* ink-deep */
+  --sidebar-foreground: oklch(0.93 0.012 330);
+  --sidebar-primary: oklch(0.98 0.009 341.8);
+  --sidebar-primary-foreground: oklch(0.193 0.066 303.8);
+  --sidebar-accent: oklch(0.225 0.058 305);
+  --sidebar-accent-foreground: oklch(0.98 0.009 341.8);
+  --sidebar-border: oklch(0.98 0.009 341.8 / 9%);
+  --sidebar-ring: oklch(0.845 0.117 68.8);
+  --shadow-color: 275 70% 3%;
+  --terminal: oklch(0.135 0.042 303);
+  --terminal-border: oklch(0.98 0.009 341.8 / 9%);
+}
+
 @theme inline {
-  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-sans: var(--app-font-sans);
+  --font-mono: var(--app-font-mono);
+  --font-display: var(--app-font-display);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -165,6 +228,10 @@
     font-feature-settings: "cv11", "ss01", "ss03";
     text-rendering: optimizeLegibility;
   }
+  /* Those are Inter's stylistic sets; Geist's are different letters. */
+  html.ea body {
+    font-feature-settings: normal;
+  }
   code, kbd, samp, pre, .font-mono {
     font-feature-settings: "calt" 0, "liga" 0;
   }
@@ -197,18 +264,86 @@
 }
 
 /*
- * The EXA monogram: one white-on-transparent raster used as a mask and
- * filled with the current text colour, so it reads on light and dark
- * without a second asset. <Logo> (components/brand.tsx) sets the colour.
+ * The EXA monogram and the full Execution Associates wordmark: white-on-
+ * transparent rasters (downscaled from executionassociates.com's own files)
+ * used as masks and filled with the current text colour, so each reads on
+ * every theme without a second asset. <Logo> and <Lockup>
+ * (components/brand.tsx) set the colour and size.
  */
-.exa-mark {
+.exa-mark,
+.exa-lockup {
   background-color: currentColor;
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+}
+.exa-mark {
   mask-image: image-set(
     url("./assets/brand/exa-mark@1x.png") 1x,
     url("./assets/brand/exa-mark@2x.png") 2x,
     url("./assets/brand/exa-mark@3x.png") 3x
   );
-  mask-position: center;
-  mask-repeat: no-repeat;
-  mask-size: contain;
+}
+.exa-lockup {
+  aspect-ratio: 1074 / 332;
+  mask-image: image-set(
+    url("./assets/brand/exa-lockup@1x.png") 1x,
+    url("./assets/brand/exa-lockup@2x.png") 2x,
+    url("./assets/brand/exa-lockup@3x.png") 3x
+  );
+}
+
+/*
+ * xterm paints its viewport black whatever its theme says, which hid the
+ * panel's terminal colour behind a black box; let the panel show through.
+ */
+.bg-terminal .xterm .xterm-viewport {
+  background-color: transparent !important;
+}
+
+/* ---- Execution Associates theme: what tokens alone cannot say ---- */
+
+/* Archivo, widened as the site sets its headings. */
+html.ea .font-display {
+  font-stretch: 112%;
+  letter-spacing: -0.012em;
+}
+/* Section labels in the sidebar: the site's wide, tracked overline. */
+html.ea .eyebrow {
+  font-family: var(--app-font-display);
+  font-stretch: 125%;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+}
+/*
+ * Fields and outline buttons: the site's barely-there fill. `--input` is
+ * bright enough for a 3:1 border, too bright to fill a box with.
+ */
+html.ea :is([data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"], [data-slot="button"][data-variant="outline"]) {
+  background-color: rgb(253 246 250 / 0.045);
+}
+html.ea [data-slot="button"][data-variant="outline"]:hover {
+  background-color: rgb(253 246 250 / 0.09);
+}
+/* The solid button warms to peach on hover, as the site's does. */
+html.ea [data-slot="button"][data-variant="default"]:hover {
+  background-color: var(--ring);
+}
+/* The sign-in panel: the site's coast at night instead of the grid. */
+html.ea .auth-panel {
+  background:
+    linear-gradient(180deg, rgb(18 7 31 / 0.55) 0%, rgb(18 7 31 / 0.25) 45%, rgb(18 7 31 / 0.7) 100%),
+    url("./assets/brand/ea-night.webp") center bottom / cover no-repeat,
+    #1b0a2c;
+  border-color: rgb(253 246 250 / 0.1);
+}
+html.ea .auth-grid,
+html.ea .auth-glow {
+  display: none;
+}
+html.ea .auth-accent {
+  color: #febe75;
+}
+html.ea .auth-muted {
+  color: rgb(253 246 250 / 0.78);
 }

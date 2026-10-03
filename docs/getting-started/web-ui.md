@@ -11,7 +11,10 @@ needs nothing installed, and does nothing the API does not: the UI hides
 what your role may not do, and the server decides. Open the listener's
 address (or the public URL in front of it) in a browser.
 
-Light, dark and system themes; it works down to phone width.
+Four themes: Execution Associates (the default, dark, in the colours and
+type of executionassociates.com), light, dark and system. The choice is kept
+per browser, from the account menu, the command palette or the sign-in
+pages. The UI works down to phone width.
 
 ## Signing in
 
@@ -40,7 +43,8 @@ next request would sign it in again). See [superadmins](../concepts/access.md#su
 
 ## Finding your way
 
-- **The sidebar**: an org switcher (the orgs you can open: your
+- **The sidebar**: the Execution Associates wordmark and `isb`, which go
+  home, an org switcher (the orgs you can open: your
   memberships, or every org for a platform admin; switching keeps the
   section you are in), a search button, the selected org's sections (**Org**:
   Overview, Projects, Workspace, Templates, Backups, Notifications;
