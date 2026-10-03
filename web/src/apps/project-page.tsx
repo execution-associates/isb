@@ -35,11 +35,13 @@ import {
   serviceOf,
   type StackDetail,
   useApps,
+  useIngress,
   useLatestDeployments,
   useProjects,
   useStack,
 } from "./api";
 import { AppStateBadge, ConfirmDialog, Crumbs, DeploymentBadge, EmptyState, QueryError, TabLinks } from "./components";
+import { autoHostLabel, ingressOff } from "./domains";
 import { useOrgLive } from "./live";
 import { NewAppDialog } from "./new-app-dialog";
 import { NewEnvironmentDialog } from "./project-dialogs";
@@ -280,12 +282,13 @@ const REPLICA_TONE: Record<AppState, Tone> = {
 function ServiceCard({ org, app: a, stack, deployments }: { org: string; app: App; stack: StackDetail | null | undefined; deployments: Deployment[] }) {
   const o = encodeURIComponent(org);
   const svc = serviceOf(stack, a.name);
+  const off = ingressOff(useIngress(org).data);
   const last = deployments[0];
   const state = appState(svc, last);
   const src = sourceOf(a, deployments.find((d) => d.id === a.current_deployment) ?? last);
   const Icon = KIND_ICON[src.kind];
   const urls = (svc?.domains ?? []).map((d) => d.url).filter(Boolean) as string[];
-  const pending = urls.length ? [] : (a.domains ?? []).map((d) => (d.host === "auto" ? "generated name" : String(d.host)));
+  const pending = urls.length ? [] : (a.domains ?? []).map((d) => (off ? autoHostLabel(String(d.host), undefined, true) : d.host === "auto" ? "generated name" : String(d.host)));
   const to = `/orgs/${o}/apps/${a.name}`;
 
   return (
@@ -331,7 +334,9 @@ function ServiceCard({ org, app: a, stack, deployments }: { org: string; app: Ap
             {urls.length > 1 && <span className="shrink-0">+{urls.length - 1}</span>}
           </span>
         ) : pending.length > 0 ? (
-          <span className="truncate">{pending.join(", ")}</span>
+          <span className={cn("truncate", off && "text-warning")} title={off ? "No ingress: domains aren't served" : undefined}>
+            {pending.join(", ")}
+          </span>
         ) : (
           <span>{src.kind === "database" ? "Internal only" : "No domain"}</span>
         )}

@@ -6,7 +6,9 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
-import { keys, useApps, useProjects } from "@/apps/api";
+import { keys, useApps, useIngress, useProjects } from "@/apps/api";
+import { ingressOff } from "@/apps/domains";
+import { NoIngressNotice } from "@/apps/ingress-notice";
 import { Crumbs, EmptyState, QueryError, Section } from "@/apps/components";
 import { openDeployment } from "@/apps/use-deploy";
 import { nameProblem } from "@/apps/util";
@@ -391,7 +393,7 @@ function DeployForm({ org, detail }: { org: string; detail: TemplateDetail }) {
       )}
 
       <FormError>{error}</FormError>
-      {plan && <PlanView answer={plan} />}
+      {plan && <PlanView org={org} answer={plan} />}
 
       <Card className="flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
         <p className="min-w-0 text-[13px] leading-relaxed text-muted-foreground">
@@ -518,8 +520,9 @@ function VariableField({ v, value, error, onChange }: { v: Variable; value: stri
 
 const SOURCE_TONE: Record<PlannedVar["source"], Tone> = { given: "neutral", generated: "info", default: "muted", computed: "muted" };
 
-function PlanView({ answer }: { answer: DeployAnswer }) {
+function PlanView({ org, answer }: { org: string; answer: DeployAnswer }) {
   const p: Plan = answer.plan;
+  const off = ingressOff(useIngress(org).data) && p.apps.some((a) => a.domains?.length);
   const blocked = !!answer.error || !!answer.conflicts?.length;
   return (
     <Section
@@ -534,6 +537,7 @@ function PlanView({ answer }: { answer: DeployAnswer }) {
       actions={blocked ? <StatusBadge tone="danger">Blocked</StatusBadge> : <StatusBadge tone="success">Ready to deploy</StatusBadge>}
     >
       <div className="grid grid-cols-[minmax(0,1fr)] gap-5 text-sm">
+        <NoIngressNotice off={off} />
         {answer.error && (
           <Alert variant="destructive" className="border-destructive/40 bg-destructive/5">
             <CircleAlert />

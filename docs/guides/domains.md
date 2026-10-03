@@ -54,6 +54,12 @@ Hostnames are DNS names (no IP addresses, no `.isb`, `.incus` or
 wildcards. A wildcard covers one label: `*.example.com` serves
 `a.example.com`, not `a.b.example.com`.
 
+Without an ingress (`isb serve` with none of `--ingress-http`,
+`--ingress-https` or `--ingress-tunnels`) domains are saved but not served.
+The web UI says so wherever domains are listed or edited, with `auto` shown as
+"auto (not served: no ingress)", and `app_create` and `app_update` answer with
+a `warning` when the app has domains. `app_get` reports `ingress_enabled`.
+
 Domains are not part of a service's revision: adding or changing them
 reroutes without replacing an instance.
 

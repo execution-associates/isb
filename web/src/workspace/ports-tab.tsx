@@ -7,6 +7,7 @@ import { ExternalLink, Globe, Loader2, Plus, Radio, Trash2 } from "lucide-react"
 import { type FormEvent, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog, QueryError } from "@/apps/components";
+import { NoIngressNotice } from "@/apps/ingress-notice";
 import { Empty, Panel } from "@/components/confirm";
 import { StatusBadge } from "@/components/status";
 import { Button } from "@/components/ui/button";
@@ -37,7 +38,7 @@ async function openPreview(org: string, ws: string, port: number) {
   }
 }
 
-function AddPort({ org, ws, ingress }: { org: string; ws: string; ingress: boolean }) {
+function AddPort({ org, ws, ingress }: { org: string; ws: string; ingress: boolean | undefined }) {
   const qc = useQueryClient();
   const [port, setPort] = useState("");
   const [host, setHost] = useState("");
@@ -61,6 +62,7 @@ function AddPort({ org, ws, ingress }: { org: string; ws: string; ingress: boole
   };
   return (
     <form onSubmit={submit} className="flex flex-wrap items-end gap-2 border-t px-5 py-4">
+      {ingress === false && <NoIngressNotice off className="basis-full" />}
       <div className="grid gap-1">
         <Label htmlFor="port-new" className="text-xs text-muted-foreground">
           Port
@@ -167,7 +169,7 @@ export function PortsTab({ org, ws }: { org: string; ws: Workspace }) {
             ))}
           </ul>
         )}
-        <AddPort org={org} ws={ws.name} ingress={!!q.data?.ingress} />
+        <AddPort org={org} ws={ws.name} ingress={q.data?.ingress} />
       </Panel>
       <ConfirmDialog
         open={removing !== null}

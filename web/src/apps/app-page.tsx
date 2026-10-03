@@ -13,7 +13,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { canWrite } from "@/lib/admin";
 import { errorMessage } from "@/lib/messages";
 import { useMe } from "@/lib/session";
-import { type App, appState, type Deployment, finished, isGit, isNotFound, keys, serviceOf, useApp, useDeployments, useStack } from "./api";
+import { type App, appState, type Deployment, finished, isGit, isNotFound, keys, serviceOf, useApp, useDeployments, useIngress, useStack } from "./api";
+import { autoHostLabel, ingressOff, NO_INGRESS_WARNING } from "./domains";
 import { AdvancedTab } from "./app-advanced";
 import { DomainsTab } from "./app-domains";
 import { EnvironmentTab } from "./app-environment";
@@ -161,6 +162,7 @@ function AppHeader({ org, app, writer, viewing }: { org: string; app: App; write
       ? `${engineLabel(db.engine)} ${db.version ?? ""}`.trim()
       : imageName(app.source.image);
   const url = (svc?.domains ?? []).map((d) => d.url).find(Boolean);
+  const ingress = useIngress(org);
   const SourceIcon = isGit(app.source) ? GitBranch : db ? Database : Package;
 
   const start = async () => {
@@ -200,6 +202,12 @@ function AppHeader({ org, app, writer, viewing }: { org: string; app: App; write
               <Server className="size-3.5 shrink-0" />
               {svc ? `${svc.healthy}/${svc.replicas} healthy` : "not running"}
             </span>
+            {!url && ingressOff(ingress.data) && (app.domains ?? []).length > 0 && (
+              <span className="flex min-w-0 items-center gap-1.5 text-warning" title={NO_INGRESS_WARNING}>
+                <Globe className="size-3.5 shrink-0" />
+                <span className="truncate">{autoHostLabel(String(app.domains?.[0]?.host ?? ""), undefined, true)}</span>
+              </span>
+            )}
             {url && (
               <a href={url} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-1 font-medium text-foreground underline-offset-4 hover:underline">
                 <span className="truncate">{url.replace(/^https?:\/\//, "")}</span>

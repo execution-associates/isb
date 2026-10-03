@@ -74,6 +74,23 @@ pub fn app_json(org: &OrgId, a: &App) -> Value {
     v
 }
 
+/// What `app_create` and `app_update` answer with when the app has domains
+/// and the server runs without an ingress.
+pub const NO_INGRESS_WARNING: &str = "This server has no ingress, so domains aren't served. A platform admin starts isb serve with --ingress-https (or a Cloudflare Tunnel for the org).";
+
+/// Add `ingress_enabled` to an app as the tools show it, and return the
+/// warning when its domains will not be served.
+fn note_ingress(app: &mut Value, ingress: bool) -> Option<&'static str> {
+    let has_domains = app
+        .get("domains")
+        .and_then(Value::as_array)
+        .is_some_and(|d| !d.is_empty());
+    if let Some(o) = app.as_object_mut() {
+        o.insert("ingress_enabled".into(), json!(ingress));
+    }
+    (!ingress && has_domains).then_some(NO_INGRESS_WARNING)
+}
+
 const APP_PROPS: &str = r#"{
   "source": {"type": "object", "description": "Exactly one of {\"image\": \"docker:nginx:1.27\"} or {\"git\": {\"url\", \"ref\" (branch, tag or SHA; default main), \"subdir\", \"auth\": {\"token_secret\": NAME, \"username\"} | {\"ssh_key_secret\": NAME}, \"submodules\": false}}."},
   "build": {"type": "object", "description": "Git sources only: {\"builder\": {\"type\": \"railpack\" | \"nixpacks\" | \"dockerfile\" (path, target) | \"buildpacks\" (builder)}, \"args\": {K: V}, \"untrusted\": true (build in a VM)}."},
@@ -187,7 +204,7 @@ fn finish(ap: &Apps, org: &OrgId, a: &DeployArgs, id: u64) -> Result<Value> {
     Ok(json!({"deployment": d.summary()}))
 }
 
-pub fn register(r: &mut Registry, apps: Apps) -> Result<()> {
+pub fn register(r: &mut Registry, apps: Apps, ingress: bool) -> Result<()> {
     let ann = Ann {
         ro: json!({"readOnlyHint": true, "openWorldHint": false}),
         destructive: json!({"destructiveHint": true, "openWorldHint": false}),
@@ -202,10 +219,10 @@ pub fn register(r: &mut Registry, apps: Apps) -> Result<()> {
     environment_list_tool(r, &apps, &ann)?;
     environment_delete_tool(r, &apps, &ann)?;
 
-    app_create_tool(r, &apps, &ann)?;
-    app_get_tool(r, &apps, &ann)?;
-    app_list_tool(r, &apps, &ann)?;
-    app_update_tool(r, &apps, &ann)?;
+    app_create_tool(r, &apps, &ann, ingress)?;
+    app_get_tool(r, &apps, &ann, ingress)?;
+    app_list_tool(r, &apps, &ann, ingress)?;
+    app_update_tool(r, &apps, &ann, ingress)?;
     app_delete_tool(r, &apps, &ann)?;
 
     app_deploy_tool(r, &apps, &ann)?;
@@ -380,7 +397,7 @@ fn environment_delete_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<(
     Ok(())
 }
 
-fn app_create_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
+fn app_create_tool(r: &mut Registry, apps: &Apps, ann: &Ann, ingress: bool) -> Result<()> {
     tool!(
         r,
         apps,
@@ -389,7 +406,7 @@ fn app_create_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
         "Create an application in a project's environment: an image or a git source (built by a builder), plus its env, domains, volumes, ports, replicas, port, health check, resources and command. Returns the app and its webhook secret (POST <webhook> with it to deploy). Nothing runs until app_deploy (or deploy=true).",
         obj(create_props(), &["name", "project", "source"]),
         ann.write,
-        |ap: &Apps, mut a: Value, c: &Caller| -> Result<Value> {
+        move |ap: &Apps, mut a: Value, c: &Caller| -> Result<Value> {
             let org = org_of(&a)?;
             let deploy = a.get("deploy").and_then(Value::as_bool).unwrap_or(false);
             if let Some(o) = a.as_object_mut() {
@@ -398,7 +415,12 @@ fn app_create_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
             }
             let spec: AppSpec = args(a)?;
             let (app, secret) = ap.create(&org, spec)?;
-            let mut out = json!({"app": app_json(&org, &app), "webhook_secret": secret});
+            let mut aj = app_json(&org, &app);
+            let warning = note_ingress(&mut aj, ingress);
+            let mut out = json!({"app": aj, "webhook_secret": secret});
+            if let Some(w) = warning {
+                out["warning"] = json!(w);
+            }
             if deploy {
                 let d = ap.deploy(&org, &app.spec.name, trigger(c), &caller_name(c), None)?;
                 out["deployment"] = d.summary();
@@ -409,7 +431,7 @@ fn app_create_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
     Ok(())
 }
 
-fn app_get_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
+fn app_get_tool(r: &mut Registry, apps: &Apps, ann: &Ann, ingress: bool) -> Result<()> {
     tool!(
         r,
         apps,
@@ -418,16 +440,18 @@ fn app_get_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
         "An app's settings, stack, service name, current deployment and webhook path. Secrets in its env show as {secret: NAME}, never values.",
         obj(json!({"name": {"type": "string"}}), &["name"]),
         ann.ro,
-        |ap: &Apps, a: Value, _c: &Caller| -> Result<Value> {
+        move |ap: &Apps, a: Value, _c: &Caller| -> Result<Value> {
             let org = org_of(&a)?;
             let a: Named = args(a)?;
-            Ok(app_json(&org, &ap.get(&org, &a.name)?))
+            let mut v = app_json(&org, &ap.get(&org, &a.name)?);
+            note_ingress(&mut v, ingress);
+            Ok(v)
         }
     );
     Ok(())
 }
 
-fn app_list_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
+fn app_list_tool(r: &mut Registry, apps: &Apps, ann: &Ann, ingress: bool) -> Result<()> {
     tool!(
         r,
         apps,
@@ -439,7 +463,7 @@ fn app_list_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
             &[]
         ),
         ann.ro,
-        |ap: &Apps, a: Value, _c: &Caller| -> Result<Value> {
+        move |ap: &Apps, a: Value, _c: &Caller| -> Result<Value> {
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields)]
             struct A {
@@ -460,7 +484,11 @@ fn app_list_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
                         .as_ref()
                         .is_none_or(|e| *e == x.spec.environment)
                 })
-                .map(|x| app_json(&org, &x))
+                .map(|x| {
+                    let mut v = app_json(&org, &x);
+                    note_ingress(&mut v, ingress);
+                    v
+                })
                 .collect();
             Ok(json!({"apps": apps}))
         }
@@ -468,7 +496,7 @@ fn app_list_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
     Ok(())
 }
 
-fn app_update_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
+fn app_update_tool(r: &mut Registry, apps: &Apps, ann: &Ann, ingress: bool) -> Result<()> {
     tool!(
         r,
         apps,
@@ -477,7 +505,7 @@ fn app_update_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
         "Change an app's settings: the fields given replace the current ones (a JSON merge patch: null clears a setting; objects merge). Name, project and environment are fixed. Takes effect at the next deploy (deploy=true queues one).",
         obj(update_props(), &["name"]),
         ann.write,
-        |ap: &Apps, mut a: Value, c: &Caller| -> Result<Value> {
+        move |ap: &Apps, mut a: Value, c: &Caller| -> Result<Value> {
             let org = org_of(&a)?;
             let deploy = a.get("deploy").and_then(Value::as_bool).unwrap_or(false);
             let name = a
@@ -491,7 +519,12 @@ fn app_update_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
                 o.remove("name");
             }
             let app = ap.update(&org, &name, &a)?;
-            let mut out = json!({"app": app_json(&org, &app)});
+            let mut aj = app_json(&org, &app);
+            let warning = note_ingress(&mut aj, ingress);
+            let mut out = json!({"app": aj});
+            if let Some(w) = warning {
+                out["warning"] = json!(w);
+            }
             if deploy {
                 let d = ap.deploy(&org, &name, trigger(c), &caller_name(c), None)?;
                 out["deployment"] = d.summary();
@@ -777,4 +810,25 @@ pub fn webhook_routes(apps: Apps) -> crate::server::Routes {
         }
         Some(Response::json(status, &body).header("Cache-Control", "no-store"))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn warns_about_domains_only_without_an_ingress() {
+        let with = json!({"domains": [{"host": "auto"}]});
+        let mut a = with.clone();
+        assert_eq!(note_ingress(&mut a, false), Some(NO_INGRESS_WARNING));
+        assert_eq!(a["ingress_enabled"], json!(false));
+        let mut a = with;
+        assert_eq!(note_ingress(&mut a, true), None);
+        assert_eq!(a["ingress_enabled"], json!(true));
+        // No domains, nothing to warn about.
+        let mut none = json!({"domains": []});
+        assert_eq!(note_ingress(&mut none, false), None);
+        let mut absent = json!({});
+        assert_eq!(note_ingress(&mut absent, false), None);
+    }
 }

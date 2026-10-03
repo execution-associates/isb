@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { domainFromSpec, domainToSpec, emptyDomain, hostProblem, matchStatuses, normalizePath, validateDomain, type DomainForm } from "./domains";
+import { autoHostLabel, ingressOff, NO_INGRESS_WARNING, domainFromSpec, domainToSpec, emptyDomain, hostProblem, matchStatuses, normalizePath, validateDomain, type DomainForm } from "./domains";
 import { analyzeEnv, missingSecrets } from "./envtext";
 import { concernsDeployment, deploymentLine, LogBuffer, LogFollower, parseAnsi, stripAnsi } from "./logstream";
 import { applyPatch, duration, mergePatch, nameProblem, parseKv, portProblem, shortDigest, terminalUrl, volumeProblem } from "./util";
@@ -273,5 +273,22 @@ describe("small helpers", () => {
     expect(appState(svc({ healthy: 1 }), dep("done"))).toBe("degraded");
     expect(appState(svc({ healthy: 0 }), dep("done"))).toBe("failing");
     expect(appState(svc({ replicas: 0, healthy: 0 }), dep("done"))).toBe("stopped");
+  });
+});
+
+describe("ingress warning", () => {
+  it("is off only when the ingress says enabled: false", () => {
+    expect(ingressOff({ enabled: false })).toBe(true);
+    expect(ingressOff({ enabled: true })).toBe(false);
+    expect(ingressOff(undefined)).toBe(false);
+  });
+  it("labels an auto host: the URL when served, not served when off", () => {
+    expect(autoHostLabel("auto", "https://web-shop.203-0-113-7.sslip.io/", false)).toBe("web-shop.203-0-113-7.sslip.io");
+    expect(autoHostLabel("auto", undefined, true)).toBe("auto (not served: no ingress)");
+    expect(autoHostLabel("shop.example.com", undefined, true)).toBe("shop.example.com (not served: no ingress)");
+    expect(autoHostLabel("auto", undefined, false)).toBe("Generated name");
+  });
+  it("says what to do about it", () => {
+    expect(NO_INGRESS_WARNING).toContain("--ingress-https");
   });
 });

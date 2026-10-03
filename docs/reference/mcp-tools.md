@@ -141,8 +141,8 @@ means every member of the org, *member* means members, admins and owners.
 | `project_delete` | member | A project with no apps. |
 | `environment_create`, `environment_list`, `environment_delete` | member (list: viewer) | A project's environments; one with apps cannot be deleted. Each runs its apps as the stack `<project>-<env>`. |
 | `app_create` | member | An app: an image or a git source with a builder, plus env, domains, volumes, files, ports, replicas, port, health check, resources, command, user, working directory, previews (`deploy: true` deploys it too). Returns the app and its webhook secret. |
-| `app_get`, `app_list` | viewer | Settings, stack, service name, current deployment, webhook path; env with `{secret: NAME}` references. |
-| `app_update` | member | A merge patch of settings (`null` clears one); takes effect at the next deploy (`deploy: true`). |
+| `app_get`, `app_list` | viewer | Settings, stack, service name, current deployment, webhook path, `ingress_enabled`; env with `{secret: NAME}` references. |
+| `app_update` | member | A merge patch of settings (`null` clears one); takes effect at the next deploy (`deploy: true`). The result has a `warning` when the app has domains and the server runs without an ingress. |
 | `app_delete` | member | Its service leaves the stack; records, checkout, webhook secret and deploy key go; named volumes are kept. |
 | `app_deploy` | member | Queue a deployment (`wait`, `timeout`). |
 | `app_rollback` | member | Queue a deployment of an earlier one's image and settings, without building (`deployment`, `wait`). |

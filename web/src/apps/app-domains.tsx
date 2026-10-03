@@ -6,7 +6,6 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import { Field, FormError } from "@/components/form";
 import { StatusBadge } from "@/components/status";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -21,14 +20,18 @@ import type { Tone } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { type App, serviceOf, useIngress, useStack } from "./api";
 import { ConfirmDialog, EmptyState } from "./components";
+import { NoIngressNotice } from "./ingress-notice";
 import {
   type DomainErrors,
   type DomainForm,
   type DomainStatus,
   domainFromSpec,
   domainToSpec,
+  autoHostLabel,
   emptyDomain,
+  ingressOff,
   matchStatuses,
+  NO_INGRESS_DEPLOY_HINT,
   previewUrl,
   validateDomain,
 } from "./domains";
@@ -56,6 +59,7 @@ const CERT: Record<string, [Tone, string]> = {
 export function DomainsTab({ org, app }: { org: string; app: App }) {
   const stack = useStack(org, app.stack);
   const ingress = useIngress(org);
+  const off = ingressOff(ingress.data);
   const writer = canWrite(useMe().data!, org);
   const { save, pending, error } = useAppUpdate(org, app.name);
   const qc = useQueryClient();
@@ -79,16 +83,7 @@ export function DomainsTab({ org, app }: { org: string; app: App }) {
 
   return (
     <div className="grid gap-4">
-      {ingress.data && !ingress.data.enabled && (
-        <Alert>
-          <Globe />
-          <AlertTitle>This server has no ingress</AlertTitle>
-          <AlertDescription>
-            Domains are saved with the app but not served until the server runs with an ingress (<span className="font-mono">--ingress-http</span>,{" "}
-            <span className="font-mono">--ingress-https</span> or <span className="font-mono">--ingress-tunnels</span>).
-          </AlertDescription>
-        </Alert>
-      )}
+      <NoIngressNotice off={off} />
       {writer && (dirty || unrouted) && (
         <div className="flex animate-fade-up flex-col gap-3 rounded-xl border border-info/25 bg-info/[0.06] px-4 py-3 sm:flex-row sm:items-center">
           <Rocket className="hidden size-4 shrink-0 text-info sm:block" />
@@ -140,6 +135,7 @@ export function DomainsTab({ org, app }: { org: string; app: App }) {
                 form={f}
                 status={matched[i]}
                 loading={stack.isLoading}
+                off={off}
                 appPort={app.port}
                 onEdit={writer ? () => setEditing({ index: i, form: f }) : undefined}
                 onRemove={writer ? () => setRemoving(i) : undefined}
@@ -155,6 +151,7 @@ export function DomainsTab({ org, app }: { org: string; app: App }) {
           appPort={app.port}
           others={forms.filter((_, i) => i !== editing.index)}
           deployed={!!app.current_deployment}
+          off={off}
           onClose={() => setEditing(null)}
           onSave={async (f, deploy) => {
             const next = editing.index === null ? [...forms, f] : forms.map((x, i) => (i === editing.index ? f : x));
@@ -189,6 +186,7 @@ function DomainRow({
   form,
   status,
   loading,
+  off,
   appPort,
   onEdit,
   onRemove,
@@ -196,6 +194,7 @@ function DomainRow({
   form: DomainForm;
   status: DomainStatus | undefined;
   loading: boolean;
+  off: boolean;
   appPort?: number;
   onEdit?: () => void;
   onRemove?: () => void;
@@ -211,7 +210,7 @@ function DomainRow({
     </>
   );
   const shown = (status?.url ?? previewUrl(form)).replace(/\/$/, "");
-  const [routeTone, routeLabel]: [Tone, string] = status ? (ROUTE[status.state] ?? ["neutral", status.state]) : ["muted", "Not routed yet"];
+  const [routeTone, routeLabel]: [Tone, string] = status ? (ROUTE[status.state] ?? ["neutral", status.state]) : off ? ["warning", "Not served"] : ["muted", "Not routed yet"];
   const [certTone, certLabel]: [Tone, string] = status ? (CERT[status.cert] ?? ["neutral", status.cert]) : ["neutral", ""];
   return (
     <li className="flex flex-col gap-3 px-5 py-4 transition-colors hover:bg-muted/30 sm:flex-row sm:items-center sm:gap-4">
@@ -238,7 +237,7 @@ function DomainRow({
             </a>
           ) : (
             <p className="truncate text-[15px] font-semibold tracking-tight">
-              {form.host === "auto" ? "Generated name" : form.host}
+              {autoHostLabel(form.host, undefined, off)}
               {form.path !== "/" ? <span className="text-muted-foreground">{form.path}</span> : ""}
             </p>
           )}
@@ -246,7 +245,7 @@ function DomainRow({
             <CornerDownRight className="size-3.5 shrink-0" />
             <span className="truncate">
               {target}
-              {form.host === "auto" ? " · auto (sslip.io)" : ""}
+              {form.host === "auto" && !off ? " · auto (sslip.io)" : ""}
               {form.www_redirect ? ` · www.${form.host} redirects here` : ""}
               {status?.upstreams && status.upstreams.length > 0 ? ` · ${status.upstreams.length} upstream${status.upstreams.length === 1 ? "" : "s"}` : ""}
             </span>
@@ -295,6 +294,7 @@ function DomainDialog({
   appPort,
   others,
   deployed,
+  off,
   onClose,
   onSave,
   pending,
@@ -305,6 +305,7 @@ function DomainDialog({
   appPort?: number;
   others: DomainForm[];
   deployed: boolean;
+  off: boolean;
   onClose: () => void;
   onSave: (f: DomainForm, deploy: boolean) => Promise<boolean>;
   pending: boolean;
@@ -339,6 +340,7 @@ function DomainDialog({
             submit(false);
           }}
         >
+          <NoIngressNotice off={off} />
           <FormError>{error}</FormError>
           <div className="grid items-start gap-4 sm:grid-cols-[minmax(0,1fr)_8rem]">
             <Field label="Host" error={show("host")} hint="app.example.com, *.example.com (if the org allows wildcards), or auto.">
@@ -410,6 +412,7 @@ function DomainDialog({
               </Button>
             )}
           </DialogFooter>
+          {deployed && off && <p className="-mt-2 text-right text-xs text-warning">{NO_INGRESS_DEPLOY_HINT}</p>}
         </form>
       </DialogContent>
     </Dialog>

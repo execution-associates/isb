@@ -136,6 +136,28 @@ export function previewUrl(f: DomainForm): string {
   return `${f.https ? "https" : "http"}://${host === AUTO ? "<generated>.sslip.io" : host}${p}`;
 }
 
+/** The state of the ingress as `ingress_status` reports it; undefined while unknown. */
+export function ingressOff(info: { enabled: boolean } | undefined): boolean {
+  return info?.enabled === false;
+}
+
+export const NO_INGRESS_TITLE = "This server has no ingress";
+export const NO_INGRESS_WARNING =
+  "This server has no ingress, so domains aren't served. A platform admin starts isb serve with --ingress-https (or a Cloudflare Tunnel for the org).";
+export const DOMAINS_DOC_URL = "https://github.com/execution-associates/isb/blob/main/docs/guides/domains.md";
+export const NO_INGRESS_DEPLOY_HINT = "Saves and deploys the app, but nothing serves this domain until the server runs an ingress.";
+
+/**
+ * What a domain row or header shows for a host: its live URL when it has
+ * one, "auto (not served: no ingress)" when the ingress is off.
+ */
+export function autoHostLabel(host: string, url: string | undefined, off: boolean): string {
+  const h = host.trim().toLowerCase();
+  if (url) return url.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  if (off) return `${h === AUTO ? AUTO : host} (not served: no ingress)`;
+  return h === AUTO ? "Generated name" : host;
+}
+
 /** A domain's live state from stack_status (src/ingress/mod.rs DomainStatus). */
 export interface DomainStatus {
   host: string;
