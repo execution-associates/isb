@@ -203,6 +203,9 @@ prior `initialize`, and there is no session id.
 | `--bind-root` | `ISB_SERVE_BIND_ROOTS` (comma-separated) | none |
 | `--publish-address` | `ISB_SERVE_PUBLISH_ADDRESSES` (comma-separated) | none: loopback only |
 | `--allow-privileged`, `--allow-raw`, `--any-instance` | `ISB_SERVE_ALLOW_PRIVILEGED`, `ISB_SERVE_ALLOW_RAW`, `ISB_SERVE_ANY_INSTANCE` | off |
-| `--public-url` | `ISB_PUBLIC_URL` | none: invitation and reset links are bare tokens |
+| `--public-url` | `ISB_PUBLIC_URL` | none: invitation and reset links are bare tokens, and provider sign-in and passkeys are off |
 | `--session-max-age` | `ISB_SESSION_MAX_AGE` | `30d` |
 | `--session-idle` | `ISB_SESSION_IDLE` | `7d` |
+| `--github-client-id`, `--google-client-id` | `ISB_GITHUB_CLIENT_ID`, `ISB_GOOGLE_CLIENT_ID` | off; secrets in `ISB_GITHUB_CLIENT_SECRET`, `ISB_GOOGLE_CLIENT_SECRET` or the default org's secrets ([auth.md](auth.md#signing-in-with-github-google-or-oidc)) |
+| `--oidc-issuer`, `--oidc-client-id`, `--oidc-name` | `ISB_OIDC_ISSUER`, `ISB_OIDC_CLIENT_ID`, `ISB_OIDC_NAME` | off; secret in `ISB_OIDC_CLIENT_SECRET` or the default org's secrets |
+| `--open-signup` | `ISB_OPEN_SIGNUP` | off: provider sign-up needs an invitation |

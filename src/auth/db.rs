@@ -97,6 +97,25 @@ const MIGRATIONS: &[&str] = &[
         used_at    INTEGER
     );
     ",
+    // 2: WebAuthn passkeys. `user_handle` is the random WebAuthn user id
+    // (the same for all of a user's passkeys); `public_key` is the COSE_Key.
+    "
+    CREATE TABLE passkeys (
+        id            INTEGER PRIMARY KEY,
+        credential_id BLOB NOT NULL UNIQUE,
+        user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user_handle   BLOB NOT NULL,
+        public_key    BLOB NOT NULL,
+        alg           INTEGER NOT NULL,
+        sign_count    INTEGER NOT NULL DEFAULT 0,
+        transports    TEXT NOT NULL DEFAULT '[]',
+        aaguid        TEXT NOT NULL DEFAULT '',
+        name          TEXT NOT NULL DEFAULT '',
+        created_at    INTEGER NOT NULL,
+        last_used     INTEGER
+    );
+    CREATE INDEX passkeys_user ON passkeys(user_id);
+    ",
 ];
 
 /// The schema version this build writes.
@@ -252,6 +271,32 @@ mod tests {
         drop(c);
         let e = open(&p).unwrap_err().to_string();
         assert!(e.contains("newer than this isb"), "{e}");
+    }
+
+    #[test]
+    fn upgrades_a_version_1_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("isb.db");
+        {
+            let c = Connection::open(&p).unwrap();
+            c.execute_batch(MIGRATIONS[0]).unwrap();
+            c.execute_batch(
+                "CREATE TABLE schema_version (version INTEGER NOT NULL);
+                 INSERT INTO schema_version VALUES (1);
+                 INSERT INTO users (email, created_at) VALUES ('a@x.io', 0);",
+            )
+            .unwrap();
+        }
+        let c = open(&p).unwrap();
+        assert_eq!(version(&c).unwrap(), SCHEMA_VERSION);
+        let n: i64 = c
+            .query_row("SELECT COUNT(*) FROM passkeys", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
+        let n: i64 = c
+            .query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
     }
 
     #[test]

@@ -389,6 +389,31 @@ struct ServeArgs {
     /// A browser session ends after this long unused.
     #[arg(long, env = "ISB_SESSION_IDLE", value_parser = dur, default_value = "7d")]
     session_idle: Duration,
+    /// GitHub OAuth app client id (secret: ISB_GITHUB_CLIENT_SECRET in the
+    /// environment, or a secret of that name in the default org).
+    #[arg(long, env = "ISB_GITHUB_CLIENT_ID")]
+    github_client_id: Option<String>,
+    /// GitHub Enterprise Server: its web URL (default https://github.com).
+    #[arg(long, env = "ISB_GITHUB_URL", hide = true)]
+    github_url: Option<String>,
+    /// GitHub Enterprise Server: its API URL (default https://api.github.com).
+    #[arg(long, env = "ISB_GITHUB_API_URL", hide = true)]
+    github_api_url: Option<String>,
+    /// Google OAuth client id (secret: ISB_GOOGLE_CLIENT_SECRET, as for GitHub).
+    #[arg(long, env = "ISB_GOOGLE_CLIENT_ID")]
+    google_client_id: Option<String>,
+    /// Generic OpenID Connect issuer (https://idp.example.com).
+    #[arg(long, env = "ISB_OIDC_ISSUER")]
+    oidc_issuer: Option<String>,
+    /// Generic OIDC client id (secret: ISB_OIDC_CLIENT_SECRET, as for GitHub).
+    #[arg(long, env = "ISB_OIDC_CLIENT_ID")]
+    oidc_client_id: Option<String>,
+    /// The generic OIDC button's label (default "SSO").
+    #[arg(long, env = "ISB_OIDC_NAME")]
+    oidc_name: Option<String>,
+    /// Let a verified provider email make an account without an invitation.
+    #[arg(long, env = "ISB_OPEN_SIGNUP")]
+    open_signup: bool,
 }
 
 #[derive(Subcommand)]
@@ -1571,6 +1596,19 @@ fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
             ..Default::default()
         },
         public_url: a.public_url.filter(|u| !u.is_empty()),
+        // Client secrets never come from argv, where `ps` would show them.
+        oauth: isb::auth::oauth::OAuthSettings {
+            github_client_id: a.github_client_id,
+            github_url: a.github_url,
+            github_api_url: a.github_api_url,
+            google_client_id: a.google_client_id,
+            oidc_issuer: a.oidc_issuer,
+            oidc_client_id: a.oidc_client_id,
+            oidc_name: a.oidc_name,
+            ..Default::default()
+        }
+        .secrets_from_env(),
+        open_signup: a.open_signup,
     };
     isb::daemon::serve(ctx.client(None), cfg)?;
     Ok(0)
