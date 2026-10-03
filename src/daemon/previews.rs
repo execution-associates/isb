@@ -21,6 +21,10 @@ fn trigger(c: &Caller) -> Trigger {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn register(r: &mut Registry, apps: Apps) -> Result<()> {
     let ro = json!({"readOnlyHint": true, "openWorldHint": false});
     let destructive = json!({"destructiveHint": true, "openWorldHint": false});

@@ -880,6 +880,12 @@ fn secret_env_name(var: &str) -> String {
 
 /// Render a template into what a deploy creates. Pure apart from the
 /// generators and `ctx`.
+#[allow(
+    clippy::too_many_lines,
+    clippy::cognitive_complexity,
+    clippy::excessive_nesting,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn plan(t: &Template, p: &Params, ctx: &Context) -> Result<Plan> {
     t.validate()?;
     crate::app::validate_app_name(&p.instance)

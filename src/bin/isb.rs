@@ -1330,6 +1330,10 @@ fn main() -> ExitCode {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
     match cmd {
         Cmd::Logs { service, lines, .. } => logs(ctx, &service, lines),
@@ -2145,6 +2149,10 @@ fn print_machine(st: &isb::machine::Status) {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
     use isb::daemon::{ServeConfig, policy::RemotePolicy};
     if cfg!(target_os = "macos") {
@@ -2355,6 +2363,10 @@ fn call(tool: &str, args: serde_json::Value, timeout: Duration) -> Result<serde_
 
 const SHORT: Duration = Duration::from_secs(60);
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn stack(ctx: &Ctx, cmd: StackCmd) -> Result<u8> {
     use serde_json::json;
     // Every stack tool takes the org; the global --org picks it.
@@ -2698,6 +2710,10 @@ fn registry_cmd(ctx: &Ctx, cmd: RegistryCmd) -> Result<u8> {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn secret(ctx: &Ctx, cmd: SecretCmd) -> Result<u8> {
     // The global --org picks the org; an explicit one matters for --all.
     let org_given = ctx.global.org.is_some();
@@ -3036,6 +3052,10 @@ fn ingress_status(json: bool) -> Result<u8> {
     Ok(0)
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
     use isb::org::{self, OrgId, OrgOptions};
     let c = ctx.client(Some("default"));
@@ -3406,6 +3426,10 @@ fn group_exists(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn host_setup(
     uplink: Option<String>,
     user: Option<String>,
@@ -3835,6 +3859,10 @@ fn read_password(prompt: &str) -> Result<String> {
     Ok(pw)
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn user_cmd(c: UserCmd) -> Result<u8> {
     match c {
         UserCmd::Create {
@@ -3966,6 +3994,10 @@ fn invite_cmd(org: &str, email: &str, role: &str, db: &AuthDb) -> Result<u8> {
     Ok(0)
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn token_cmd(c: TokenCmd) -> Result<u8> {
     match c {
         TokenCmd::Create {

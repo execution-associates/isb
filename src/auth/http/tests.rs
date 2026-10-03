@@ -439,6 +439,10 @@ fn tokens_over_http() {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn invitations_over_http() {
     let t = api();
     let root = t.setup();

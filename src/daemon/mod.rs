@@ -225,6 +225,10 @@ fn open_dns_path(state_dir: &std::path::Path) {
 }
 
 /// Run the daemon until SIGINT/SIGTERM. Apps keep running when it stops.
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     client
         .server_info()
@@ -811,6 +815,10 @@ fn caller_name(c: &Caller) -> String {
 }
 
 /// Build the tool registry.
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn registry(d: Arc<Daemon>) -> Result<Registry> {
     let mut r = Registry::new().instructions(INSTRUCTIONS);
     superadmin::register(&mut r, d.clone())?;
@@ -1473,6 +1481,10 @@ struct DeployArgs {
     timeout: Option<String>,
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn stack_deploy(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     let a: DeployArgs = args(a)?;
     crate::stack::validate_stack_name(&a.name)?;

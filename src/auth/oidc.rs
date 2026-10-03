@@ -169,6 +169,10 @@ pub fn truthy(v: Option<&Value>) -> bool {
 }
 
 /// Verify an ID token. See the module docs for what is checked.
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn verify_id_token(
     token: &str,
     keys: &[(Option<String>, Jwk)],

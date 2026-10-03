@@ -57,6 +57,10 @@ pub fn validate_key(k: &str) -> Result<()> {
 impl EnvFile {
     /// Parse `.env` text. `export KEY=v` is accepted; a later duplicate
     /// replaces the earlier value in place.
+    #[allow(
+        clippy::excessive_nesting,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     pub fn parse(text: &str) -> Result<EnvFile> {
         let mut f = EnvFile::default();
         let mut lines = text.lines().enumerate().peekable();

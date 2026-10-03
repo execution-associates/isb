@@ -83,3 +83,12 @@ opt-level = 3
 lto = "thin"
 codegen-units = 4
 strip = "debuginfo"
+
+# The legibility ratchet: thresholds live in clippy.toml, and CI denies
+# warnings. See docs/development.md.
+[lints.clippy]
+cognitive_complexity = "warn"
+too_many_lines = "warn"
+excessive_nesting = "warn"
+too_many_arguments = "warn"
+type_complexity = "warn"

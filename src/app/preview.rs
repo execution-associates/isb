@@ -1019,6 +1019,10 @@ impl super::Apps {
         self.pdep_save(org, n, dep)
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     fn preview_pipeline(
         &self,
         org: &OrgId,

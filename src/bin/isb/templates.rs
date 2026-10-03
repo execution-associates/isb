@@ -100,6 +100,11 @@ fn s(v: &Value) -> String {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    clippy::cognitive_complexity,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn template(org: &Option<String>, cmd: TemplateCmd) -> Result<u8> {
     let call_t = |tool: &str, args: Value, t: Duration| call(tool, with_org(org, args), t);
     match cmd {

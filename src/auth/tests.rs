@@ -246,6 +246,10 @@ fn only_hashes_are_stored() {
 }
 
 #[test]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn invitations() {
     let (s, t, [root, o, ..]) = seeded();
     let ocai = org("ocai");
@@ -333,6 +337,10 @@ fn invitations() {
 }
 
 #[test]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn api_tokens() {
     let (s, t, [root, o, _, m]) = seeded();
     let ocai = org("ocai");

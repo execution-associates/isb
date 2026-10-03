@@ -843,6 +843,10 @@ pub(crate) mod tests {
 
     type Reply = (u16, Vec<(String, String)>, Vec<u8>);
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     fn route(
         st: &mut Fake,
         method: &str,

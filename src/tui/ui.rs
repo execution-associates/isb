@@ -88,6 +88,10 @@ fn status_word<'a>(t: &Theme, state: &str) -> Vec<Span<'a>> {
 
 // ---- header -----------------------------------------------------------
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn header(f: &mut Frame, app: &App, area: Rect) {
     let t = &app.theme;
     let h = &app.ov.host;
@@ -1334,6 +1338,10 @@ mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     pub fn fixture() -> Overview {
         let rep = |n: u32, health: &str, rot: bool| Replica {
             name: format!("e2e-web-{n}-a{n}b{n}"),

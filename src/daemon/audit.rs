@@ -826,6 +826,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     fn tool_calls_are_audited_without_values() {
         let t = endpoint();
         // A write by an agent's token over REST.

@@ -265,6 +265,11 @@ fn create_ready_and_noop_ensure_keeps_watches() {
 
 /// Streaming, exit codes, argv fidelity, users, tty and stdin handling.
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    clippy::cognitive_complexity,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn exec_semantics() {
     if !enabled() {
         return;
@@ -491,6 +496,10 @@ fn cli_exec() {
 
 /// A named volume with an owner, and both proxy directions.
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn named_volume_owner_and_proxies() {
     if !enabled() {
         return;
@@ -773,6 +782,11 @@ fn stuck_operation_paths() {
 
 /// Compose: up, plan, exec a service, down, through the CLI.
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    clippy::cognitive_complexity,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn compose_cli() {
     if !enabled() {
         return;
@@ -1889,6 +1903,11 @@ impl Drop for GitDaemon {
 /// "built" by a stand-in builder; a signed webhook deploying it and a
 /// forged one refused.
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    clippy::cognitive_complexity,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn apps_deploy_edit_rollback_git_webhook() {
     if !enabled() {
         return;
@@ -2157,6 +2176,10 @@ fn curl(url: &str, resolve: &str, cacert: Option<&std::path::Path>) -> (u16, Str
 /// request, and removing the stack removes its routes. `ISB_CADDY_BIN`
 /// skips the download of the pinned Caddy.
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn ingress_routes_rolls_and_removes() {
     if !enabled() {
         return;

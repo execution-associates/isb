@@ -19,6 +19,10 @@ fn channel_json(c: &Channel) -> Value {
     serde_json::to_value(c).unwrap_or_default()
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn register(r: &mut Registry, n: Notifier, h: History, apps: Apps) -> Result<()> {
     let ro = json!({"readOnlyHint": true, "openWorldHint": false});
     let write = json!({"destructiveHint": false, "openWorldHint": false});

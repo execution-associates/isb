@@ -73,6 +73,10 @@ fn servers(d: &Daemon) -> Result<&Arc<Servers>> {
     })
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
     let ro = json!({"readOnlyHint": true, "openWorldHint": false});
     let destructive = json!({"destructiveHint": true, "openWorldHint": false});
@@ -431,6 +435,10 @@ fn org_other(
 
 /// Run a cross-org read here and on every server holding an org the
 /// caller sees, and merge the answers.
+#[allow(
+    clippy::excessive_nesting,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn fan_out(
     d: &Daemon,
     s: &Arc<Servers>,

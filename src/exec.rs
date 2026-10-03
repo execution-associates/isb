@@ -516,6 +516,10 @@ fn pump_output(mut ws: Ws, tx: SyncSender<ExecEvent>, stderr: bool) {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub(crate) fn start_with_timeout(
     client: &Client,
     instance: &str,

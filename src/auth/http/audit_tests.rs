@@ -118,6 +118,11 @@ fn cookie(r: &Response) -> String {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    clippy::cognitive_complexity,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn auth_events_are_audited() {
     let t = api();
     // First-run setup.

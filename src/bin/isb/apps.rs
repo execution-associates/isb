@@ -454,6 +454,10 @@ fn print_app(a: &Value) {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn app(org: &Option<String>, cmd: AppCmd) -> Result<u8> {
     let call = |tool: &str, args: Value| call(tool, with_org(org, args), SHORT);
     match cmd {
@@ -672,6 +676,10 @@ pub fn app(org: &Option<String>, cmd: AppCmd) -> Result<u8> {
     Ok(0)
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn previews(org: &Option<String>, cmd: PreviewCmd) -> Result<u8> {
     let call = |tool: &str, args: Value| call(tool, with_org(org, args), SHORT);
     match cmd {

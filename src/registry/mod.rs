@@ -211,6 +211,10 @@ pub fn host_ca_path(addr: &str) -> PathBuf {
 /// Create the registry, or bring it in line: the system project, its data
 /// volume, the TLS material (in `<state>/registry`), the container and its
 /// loopback proxy. Safe to run again; `renew` reissues the certificate.
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn setup(
     base: &Client,
     state: &Path,

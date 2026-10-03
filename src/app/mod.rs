@@ -403,6 +403,10 @@ pub fn compose_takes_domains() -> bool {
 
 /// Render `spec` running `image` as its stack service. `notes` gets what
 /// was left out and why.
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn render(spec: &AppSpec, image: &str, notes: &mut Vec<String>) -> Result<Rendered> {
     let effective;
     let spec = match &spec.source {

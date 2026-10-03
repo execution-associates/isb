@@ -84,6 +84,10 @@ pub fn run(
     out
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn migrate_file(
     store: &Store,
     secrets: &Secrets,

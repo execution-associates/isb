@@ -158,6 +158,10 @@ content = """
 "#;
 
 #[test]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn translates_a_multi_service_template() {
     let (t, r) = tr(PLAUSIBLE_LIKE, PLAUSIBLE_TOML);
     assert_eq!(r.status, Status::Notes, "{r:?}");

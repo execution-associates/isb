@@ -248,6 +248,10 @@ fn events_of(c: &Value) -> String {
         .join("; ")
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn notify(org: &Option<String>, cmd: NotifyCmd) -> Result<u8> {
     let call = |tool: &str, args: Value| call(tool, with_org(org, args), SHORT);
     match cmd {

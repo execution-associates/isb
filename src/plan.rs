@@ -559,6 +559,11 @@ pub fn memory_limit(m: &str) -> std::result::Result<String, String> {
 }
 
 /// Resolve a spec. `base` anchors relative bind paths.
+#[allow(
+    clippy::too_many_lines,
+    clippy::cognitive_complexity,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn resolve(
     spec: &SandboxSpec,
     defs: &VolumeDefs,
@@ -1242,6 +1247,11 @@ fn restart_needed(key: &str) -> bool {
 
 /// Diff desired against actual (`None`: the instance does not exist).
 /// `volumes_missing` lists named volumes (pool, name) that do not exist yet.
+#[allow(
+    clippy::too_many_lines,
+    clippy::cognitive_complexity,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn diff(
     desired: &Desired,
     actual: Option<&Actual>,

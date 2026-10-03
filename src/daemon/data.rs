@@ -85,6 +85,10 @@ pub fn database_json(org: &OrgId, a: &crate::app::App, password: Option<&str>) -
     v
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn register(r: &mut Registry, ctx: Ctx) -> Result<()> {
     let ro = json!({"readOnlyHint": true, "openWorldHint": false});
     let destructive = json!({"destructiveHint": true, "openWorldHint": false});

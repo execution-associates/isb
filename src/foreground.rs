@@ -73,6 +73,10 @@ enum Msg {
 /// them. Returns the exit code: the first failing command's status (0 if all
 /// succeeded), 128+N for signal N, 129 when a parent process went away, and
 /// 141 when stdout closed.
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn run(services: &[Service], opts: Options, report: &mut dyn FnMut(&str)) -> Result<u8> {
     let (tx, rx) = mpsc::channel::<Msg>();
 

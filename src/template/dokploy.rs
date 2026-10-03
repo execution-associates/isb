@@ -395,6 +395,10 @@ pub fn image_ref(image: &str) -> String {
 
 /// Compose `${VAR}` interpolation, against the template's `.env`, written
 /// as a native expression.
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn interpolate(
     s: &str,
     env: &BTreeMap<String, String>,
@@ -610,6 +614,10 @@ struct Toml {
     mounts: BTreeMap<String, String>,
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn parse_toml(text: &str, tx: &mut Tx) -> Option<Toml> {
     let t: toml::Table = match text.parse() {
         Ok(t) => t,
@@ -904,6 +912,10 @@ fn traefik_rule(rule: &str) -> Option<(Vec<String>, Option<String>)> {
 }
 
 /// Domains from a service's Traefik labels (already interpolated).
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn traefik_domains(
     svc: &str,
     labels: &[(String, String)],
@@ -1050,6 +1062,12 @@ pub fn translate(meta: &Meta, compose: &str, toml_text: &str) -> (Option<Templat
     )
 }
 
+#[allow(
+    clippy::too_many_lines,
+    clippy::cognitive_complexity,
+    clippy::excessive_nesting,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn translate_inner(meta: &Meta, compose: &str, toml_text: &str, tx: &mut Tx) -> Option<Template> {
     let toml = parse_toml(toml_text, tx)?;
     // Variables first: each Dokploy variable becomes a native one.

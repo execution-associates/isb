@@ -134,6 +134,10 @@ fn validation_catches_mistakes() {
 }
 
 #[test]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn renders_apps_and_secrets() {
     let t = Template::from_yaml(TWO).unwrap();
     let ep = no_entrypoint;

@@ -956,6 +956,10 @@ impl Apps {
         Ok(())
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     fn pipeline(
         &self,
         org: &OrgId,
@@ -1609,6 +1613,11 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::too_many_lines,
+        clippy::cognitive_complexity,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     fn apps_records_webhooks_and_queue() {
         let dir = tempfile::tempdir().unwrap();
         let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
@@ -1836,6 +1845,11 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::too_many_lines,
+        clippy::cognitive_complexity,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     fn previews_from_webhooks() {
         let dir = tempfile::tempdir().unwrap();
         let gate = Arc::new((Mutex::new(true), std::sync::Condvar::new()));

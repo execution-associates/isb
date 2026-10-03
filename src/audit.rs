@@ -698,6 +698,10 @@ impl AuditLog {
 
     /// Rows matching `q` that `vis` may see: newest first, or oldest first
     /// with `after` (for tailing).
+    #[allow(
+        clippy::too_many_lines,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     pub fn list(&self, q: &Query, vis: &Visibility) -> Result<Vec<Entry>> {
         let mut sql = format!("SELECT {COLS} FROM audit WHERE 1=1");
         let mut args: Vec<rusqlite::types::Value> = Vec::new();

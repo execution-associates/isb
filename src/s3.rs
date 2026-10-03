@@ -956,6 +956,11 @@ mod tests {
 
     /// A loopback S3 that records requests, stores objects, and answers the
     /// multipart calls. Checks every request's signature with the secret.
+    #[allow(
+        clippy::too_many_lines,
+        clippy::excessive_nesting,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     fn fake_s3(secret: &'static str) -> (String, Arc<Mutex<Vec<Seen>>>) {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = l.local_addr().unwrap();

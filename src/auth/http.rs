@@ -342,6 +342,10 @@ impl AuthApi {
     }
 
     /// What a state-changing request did, as audit rows (usually one).
+    #[allow(
+        clippy::too_many_lines,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     fn audit_entries(
         &self,
         req: &Request,

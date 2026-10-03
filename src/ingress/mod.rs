@@ -486,6 +486,11 @@ impl Manager {
     }
 
     /// Compute the routes and load them into Caddy when they changed.
+    #[allow(
+        clippy::too_many_lines,
+        clippy::excessive_nesting,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     fn apply_once(&self, last_cfg: &mut Option<Value>) -> Result<()> {
         let (defs, rotation, claims) = {
             let st = self.state.lock().unwrap();
@@ -661,6 +666,10 @@ impl Manager {
 
     /// Run each tunnel org's cloudflared stack, and sync its tunnel through
     /// the API when the org gave a token for it.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     fn tunnels(
         &self,
         orgs: &BTreeMap<OrgId, OrgIngress>,

@@ -141,6 +141,10 @@ fn new_build_id() -> String {
 }
 
 /// The build tools and the registry tools.
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn register(r: &mut Registry, ctx: Ctx) -> Result<()> {
     let ctx = Arc::new(ctx);
     let jobs = Arc::new(Jobs::default());
@@ -329,6 +333,10 @@ pub fn register(r: &mut Registry, ctx: Ctx) -> Result<()> {
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn build_run(ctx: &Ctx, jobs: &Arc<Jobs>, a: Value, c: &Caller) -> Result<Value> {
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]

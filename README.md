@@ -330,6 +330,10 @@ named `isb-test-*` and is removed afterwards, pass or fail. The incus socket is
 root-equivalent, so on a shared host build the test binaries in a sandbox
 without it (`cargo test --no-run`) and run them on the host.
 
+[docs/development.md](docs/development.md) covers the checks
+(`scripts/check.sh`), the ratchet that keeps functions and files small, and
+measuring compile time.
+
 ## License
 
 [MIT](LICENSE)

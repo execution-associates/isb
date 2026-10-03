@@ -1042,6 +1042,10 @@ mod tests {
     }
 
     /// A fake HTTP receiver answering each request with the next status.
+    #[allow(
+        clippy::excessive_nesting,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     fn receiver(statuses: Vec<u16>) -> (u16, std::thread::JoinHandle<Vec<String>>) {
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = l.local_addr().unwrap().port();

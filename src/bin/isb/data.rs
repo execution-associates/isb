@@ -469,6 +469,11 @@ fn confirm(question: &str) -> Result<bool> {
     Ok(matches!(line.trim(), "y" | "Y" | "yes"))
 }
 
+#[allow(
+    clippy::too_many_lines,
+    clippy::cognitive_complexity,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn backup(org: &Option<String>, cmd: BackupCmd) -> Result<u8> {
     let call = |tool: &str, args: Value| call(tool, with_org(org, args), SHORT);
     match cmd {
@@ -877,6 +882,10 @@ pub enum JobCmd {
     },
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn job(org: &Option<String>, cmd: JobCmd) -> Result<u8> {
     let call = |tool: &str, args: Value| call(tool, with_org(org, args), SHORT);
     match cmd {

@@ -1214,6 +1214,10 @@ impl Repeats {
 /// Follow incus' lifecycle events, in every project, until `stop`: each
 /// one recorded, reconnecting with backoff, and every stretch without a
 /// connection recorded as an `incus.gap`.
+#[allow(
+    clippy::excessive_nesting,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn watch_incus(client: crate::client::Client, rec: Arc<Recorder>, stop: Arc<AtomicBool>) {
     let mut repeats = Repeats::new(REPEAT_WINDOW);
     let mut down_since: Option<i64> = None;

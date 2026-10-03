@@ -145,6 +145,10 @@ pub fn needs_dns_challenge(host: &str, ca: &Ca) -> bool {
 }
 
 /// Caddy's whole config.
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn render(p: &Params, served: &[Served], tunnels: &[TunnelListener]) -> Value {
     let mut servers = serde_json::Map::new();
     let public: Vec<&Served> = served.iter().filter(|s| s.via == Via::Public).collect();
@@ -735,6 +739,10 @@ impl Edge {
     }
 
     /// Run Caddy until it exits (or we are stopped).
+    #[allow(
+        clippy::too_many_lines,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     fn run_once(&self) -> Result<()> {
         let cfg = self.desired.lock().unwrap().clone();
         self.write_config(&cfg)?;

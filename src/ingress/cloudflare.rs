@@ -350,6 +350,11 @@ mod tests {
         base: String,
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        clippy::excessive_nesting,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     fn fake() -> Fake {
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
         let base = format!("http://{}/client/v4", l.local_addr().unwrap());

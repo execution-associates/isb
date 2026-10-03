@@ -96,6 +96,10 @@ fn app_props() -> Value {
     serde_json::from_str(APP_PROPS).expect("APP_PROPS is JSON")
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn register(r: &mut Registry, apps: Apps) -> Result<()> {
     let ro = json!({"readOnlyHint": true, "openWorldHint": false});
     let destructive = json!({"destructiveHint": true, "openWorldHint": false});

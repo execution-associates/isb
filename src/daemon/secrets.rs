@@ -146,6 +146,10 @@ fn listing(stored: Vec<crate::secrets::SecretMeta>, used: Vec<Binding>) -> Resul
 }
 
 /// Register the secret tools.
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn register(r: &mut Registry, secrets: Arc<Secrets>, hooks: Hooks) -> Result<()> {
     let Hooks {
         in_use,

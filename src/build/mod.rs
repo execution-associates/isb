@@ -174,6 +174,10 @@ pub fn run(base: &Client, req: &BuildRequest, log: &mut dyn FnMut(&str)) -> Resu
 }
 
 /// [`run`] with explicit limits.
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn run_with(
     base: &Client,
     req: &BuildRequest,
@@ -738,6 +742,10 @@ static PREPARE: Mutex<()> = Mutex::new(());
 /// The builder image's alias, made from `builder-image.sh` when missing: in the
 /// `isb-system` project, never in an org (an org could otherwise tamper
 /// with an image every org builds with).
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn ensure_builder_image(
     base: &Client,
     vm: bool,

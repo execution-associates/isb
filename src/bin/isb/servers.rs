@@ -61,6 +61,10 @@ pub enum ServerCmd {
     RotateCert { name: String },
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 pub fn server(cmd: ServerCmd) -> Result<u8> {
     match cmd {
         ServerCmd::Add {

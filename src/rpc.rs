@@ -146,6 +146,10 @@ impl Server {
         }
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     fn dispatch(&self, req: &Request) -> Result<Value> {
         let id = &req.id;
         let p = &req.params;

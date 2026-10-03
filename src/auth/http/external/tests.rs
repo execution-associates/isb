@@ -60,6 +60,10 @@ fn get<'a>(q: &'a [(String, String)], k: &str) -> Option<&'a str> {
     q.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str())
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn fake(signer: Signer) -> Fake {
     let l = HttpListener::bind_tcp("127.0.0.1:0").unwrap();
     let url = format!("http://{}", l.local_addr().unwrap());

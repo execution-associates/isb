@@ -779,6 +779,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     fn rollups_retention_and_queries() {
         let dir = tempfile::tempdir().unwrap();
         let mut db = OrgDb::open(&dir.path().join("m.db")).unwrap();

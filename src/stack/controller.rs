@@ -1505,6 +1505,10 @@ impl Worker {
     }
 
     /// One reconcile pass.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     fn pass(&mut self, def: &Arc<StackDef>) -> Result<()> {
         let spec = def.service(&self.service)?.clone();
         let rev = def.revision(&self.service)?;
@@ -1703,6 +1707,10 @@ impl Worker {
     /// Replace the pending slots in batches. Ok(true) when every slot made
     /// it, Ok(false) when the rollout stopped (paused, rolled back, retrying).
     #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::excessive_nesting,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     fn roll(
         &mut self,
         def: &Arc<StackDef>,
@@ -1831,6 +1839,10 @@ impl Worker {
 
     /// Keep one instance running, set up after every boot, health-checked,
     /// and in or out of rotation.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     fn maintain(
         &mut self,
         def: &StackDef,
@@ -2340,6 +2352,10 @@ impl Worker {
         }
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "predates the lint ratchet; split it when next changed"
+    )]
     fn publish_status(&mut self, def: &StackDef) {
         // An address can change without a rotation change (a restart).
         self.sync_observer();
