@@ -4,15 +4,16 @@
 #
 #   scripts/build-times.sh                     # check build test clippy
 #   scripts/build-times.sh check release       # pick steps
-#   RUNS=3 scripts/build-times.sh check        # best of 3 per cell
+#   RUNS=1 scripts/build-times.sh check        # best of RUNS (default 3)
 #   LEAF=path/to/a.rs HUB=path/to/b.rs scripts/build-times.sh
 #
 # Steps: check (cargo check), build (debug build of the binary), test
 # (cargo test --no-run, every test target), clippy (--all-targets), release
 # (release build for x86_64-unknown-linux-musl, minutes per cell).
 #
-# Each step is warmed once untimed, then every cell appends a fresh
-# `const _: u32 = N;` to the file (a real code change, not a comment), times
+# Each step is warmed once untimed, then every cell appends
+# `const _: u32 = N;` to the file (a real code change, not a comment; the
+# first, untimed, adds the item and the timed ones change N), times
 # the command and restores the file (with a new mtime, so cargo rebuilds it). Prints a markdown table. Run it inside
 # the dev sandbox, never on a host holding credentials.
 set -euo pipefail
@@ -22,7 +23,7 @@ cd "$(dirname "$0")/.."
 first() { for p in "$@"; do [ -f "$p" ] && { echo "$p"; return; }; done; echo "none of: $*" >&2; exit 1; }
 LEAF=${LEAF:-$(first crates/isb-tui/src/ui.rs src/tui/ui.rs)}
 HUB=${HUB:-$(first crates/isb-core/src/org.rs src/org.rs)}
-RUNS=${RUNS:-1}
+RUNS=${RUNS:-3}
 MUSL=${MUSL:-x86_64-unknown-linux-musl}
 
 steps=("$@")
@@ -54,6 +55,12 @@ n=$(date +%s)
 time_edit() { # time_edit FILE CMD -> seconds (best of RUNS)
   local f=$1 cmd=$2 best="" b t0 t1 s
   b="$backup/$(echo "$f" | tr / _)"
+  # An untimed first edit adds the item; the timed ones change its value,
+  # like editing a function body.
+  n=$((n + 1))
+  cp "$b" "$f"
+  printf '\nconst _: u32 = %d;\n' "$n" >>"$f"
+  $cmd >/dev/null 2>&1 || { echo "failed: $cmd" >&2; exit 1; }
   for _ in $(seq "$RUNS"); do
     n=$((n + 1))
     cp "$b" "$f"
