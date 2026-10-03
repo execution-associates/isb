@@ -220,7 +220,7 @@ newest: they are kept while deployed and deleted otherwise.
 - No authentication: anything on the host that can open `127.0.0.1:5480` can
   read and write every org's images. Org sandboxes cannot (no route, and
   `bind: guest` ports are refused to remote callers and to org projects), but
-  host users and the default project's trusted local callers can.
+  host users and the trusted local callers of incus' `default` project can.
 - No external registries as push targets, no image signing, no
   vulnerability scanning.
 

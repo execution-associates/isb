@@ -45,6 +45,13 @@ The installer:
   `http://<listen>/healthz` to answer. If it does not, the error says to look
   at `journalctl --user -u isb.service`.
 
+Every start of `isb serve`, including the one the installer triggers, makes
+sure the `default` org exists (the incus project `isb-default`, which cannot
+be removed). If a default-org stack still has instances in incus' own
+`default` project, the daemon logs a warning: the controller recreates that
+stack in `isb-default` with new, empty volumes, and the old instances and
+volumes keep running in `default` until you delete them.
+
 It is idempotent: run it again after changing the env file or upgrading isb.
 The unit runs the binary that installed it, by its full path, so a version
 manager that keeps each version in its own directory (mise does) pins that

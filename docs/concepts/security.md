@@ -221,10 +221,11 @@ every project, including changes made outside isb, with who requested them.
 - **Anyone with the incus socket**, or in `incus-admin`, owns the host.
 - **The local registry has no authentication**: anything on the host that
   can open `127.0.0.1:5480` can read and write every org's images. Org
-  sandboxes cannot reach it; host users and the default project's trusted
-  local callers can.
-- **A `default` org that is incus' own `default` project** has no restricted
-  project, org network or service names; only isb's own checks apply to
+  sandboxes cannot reach it; host users and the trusted local callers of
+  incus' `default` project can.
+- **Plain sandboxes in incus' own `default` project** (`isb create` and
+  `isb up` without `--org`) belong to no org: that project is not restricted
+  and has no org network or service names, and only isb's own checks apply to
   remote callers there. Put tenants in orgs of their own.
 - **Members of an org see its secrets.** Give a contractor their own org, or
   a viewer role, or a scoped token.

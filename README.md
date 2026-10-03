@@ -66,7 +66,7 @@ To run the platform, install the daemon and deploy an app:
 
 ```console
 $ isb serve install                     # the daemon, as a systemd user service
-$ isb project create shop
+$ isb project create shop               # in the default org, which the daemon creates
 $ isb app create web --project shop --image docker:traefik/whoami -p 127.0.0.1:8080:80 --deploy
 ```
 

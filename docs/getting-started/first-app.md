@@ -72,8 +72,10 @@ $ isb org create acme --cpus 4 --memory 8GiB
 $ isb org show acme
 ```
 
-Every later command takes `--org acme` (or set `ISB_ORG=acme`). Without it
-you work in the `default` org. See [orgs](../concepts/orgs.md).
+Every later command takes `--org acme` (or set `ISB_ORG=acme`). Without it,
+platform commands work in the `default` org, which always exists once the
+daemon has started (the incus project `isb-default`). See
+[orgs](../concepts/orgs.md).
 
 ## 5. A project and an app
 
