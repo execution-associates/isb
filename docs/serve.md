@@ -7,14 +7,47 @@ tools. It listens in two places:
 - a **unix socket** (`$ISB_SERVE_SOCKET`, else `$XDG_RUNTIME_DIR/isb/serve.sock`;
   0600 in a 0700 directory) for the local `isb stack` CLI. Its callers are the
   daemon's own user and are trusted.
-- **loopback HTTP** (`--listen`, e.g. `127.0.0.1:8092`) at `/mcp` for remote
-  agents such as Claude or ChatGPT, reached through a Cloudflare Tunnel and
-  protected by Cloudflare Access. `/healthz` answers there without auth, and
-  the identity endpoints (users, sessions, invitations, API tokens) answer at
-  `/api/v1/auth/*`; see [auth.md](auth.md).
+- **loopback HTTP** (`--listen`, e.g. `127.0.0.1:8092`) for remote people and
+  agents, reached through a tunnel or reverse proxy. It serves the same tools
+  four ways:
 
-`--listen` refuses anything but a loopback address: remote access belongs
-behind the tunnel and an Access policy, never on an open port.
+  | Path | What |
+  |---|---|
+  | `/mcp` | MCP (Streamable HTTP); every tool takes an `org` argument |
+  | `/orgs/<org>/mcp` | MCP bound to one org: `org` is filled in, and any other value is refused |
+  | `POST /api/v1/tools/<tool>`, `/orgs/<org>/api/v1/tools/<tool>` | REST: the arguments as a JSON body; `{"result": ...}`, or `{"error", "message", "data"}` with a matching status (400, 401, 403, 404, 409, 500, 504) |
+  | `GET /api/v1/events` | server-sent events: deploys, rollouts, health and restarts in the caller's orgs; resumes from `Last-Event-ID` or `?since=` |
+
+  `GET /api/v1/openapi.json` describes the REST surface, `GET /api/v1/tools`
+  lists the tools, `/healthz` answers without auth, and the identity
+  endpoints (sign-in, invitations, API tokens) are under `/api/v1/auth/*`
+  ([auth.md](auth.md)).
+
+`--listen` refuses anything but a loopback address: put a tunnel (or a
+reverse proxy) in front of it, never an open port.
+
+## Signing in, and what callers may reach
+
+Every HTTP caller is an isb user. **The org is the trust boundary**: a member
+of an org (any role) fully administers that org's stacks, sandboxes and
+secrets, and nothing in any other org. Platform admins reach every org.
+
+- **API tokens** (`Authorization: Bearer isb_tok_...`, from `isb token create`
+  or the web UI) are how agents sign in. A token made for an org reaches only
+  that org, which is what an agent running inside the org should hold:
+  `isb token create agent --org ocai`, then point it at `/orgs/ocai/mcp`.
+- **Sessions** (the `isb_session` cookie from `POST /api/v1/auth/login`) are
+  how the web UI signs in. Cookie-authenticated writes must carry
+  `X-Isb-Csrf: 1`.
+- **Cloudflare Access** (optional; below) puts SSO in front of everything. An
+  Access identity whose email belongs to an isb user acts as that user; one
+  that does not gets "ask an org admin to invite you".
+- **Anonymous** calls are refused, unless `--allow-unauthenticated` (local
+  testing only).
+- `overview`, `events` and `stack_list` show only the caller's orgs.
+  `server_status` and re-encrypting every org's secrets are for platform
+  admins.
+- The unix socket is the daemon's own user and reaches everything.
 
 ## Install
 
@@ -93,11 +126,13 @@ Every call is logged to the daemon's stderr (the journal) with the caller's
 identity, the tool, its duration and whether it failed, never its arguments.
 Stacks record who deployed them (`deployed_by`).
 
-## What a remote caller may do
+## What a remote caller's specs may ask for
 
 The incus socket is root on the host. A remote caller is trusted to run
-workloads, not to own the host, so its requests are checked first. Refused
-unless the operator allows it:
+workloads, not to own the host. An org other than `default` is a restricted
+incus project, so incus itself refuses most of what follows
+([orgs.md](orgs.md)); the `default` org is incus' default project and is
+held to these checks by isb. Refused unless the operator allows it:
 
 | Refused | Allowed by |
 |---|---|
@@ -117,8 +152,6 @@ And always:
 - Relative paths resolve in `<state-dir>/files/<stack>` unless the caller
   names a `base_dir` inside a bind root.
 - A sandbox a remote caller creates is labelled `isb.owner=mcp:<identity>`.
-  Remote callers can reach only those and stack instances; any other instance
-  answers "not found".
 
 `--allow-tools` and `--deny-tools` (names or globs such as `sandbox_*`,
 comma-separated; deny wins) choose which tools remote callers see at all. The

@@ -2042,6 +2042,12 @@ fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
                 },
                 &mut rep,
             )?;
+            // The identity store keeps the org list memberships hang off.
+            open_auth(&AuthDb {
+                state_dir: std::env::var_os("ISB_SERVE_STATE_DIR").map(PathBuf::from),
+            })?
+            .ensure_org(&info.name)
+            .map_err(|e| Error::Invalid(e.to_string()))?;
             println!(
                 "{} (project {}, network {} {})",
                 info.name,
@@ -2115,7 +2121,14 @@ fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
             Ok(0)
         }
         OrgCmd::Rm { name, force } => {
-            org::remove(&c, &OrgId::new(name)?, force, &mut rep)?;
+            let id = OrgId::new(name)?;
+            org::remove(&c, &id, force, &mut rep)?;
+            // Memberships, invitations and tokens for it go with it.
+            open_auth(&AuthDb {
+                state_dir: std::env::var_os("ISB_SERVE_STATE_DIR").map(PathBuf::from),
+            })?
+            .delete_org(&id)
+            .map_err(|e| Error::Invalid(e.to_string()))?;
             Ok(0)
         }
     }

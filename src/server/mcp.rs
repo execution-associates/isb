@@ -35,6 +35,11 @@ pub enum Caller {
     /// Loopback TCP with Access validation explicitly turned off. Anyone who
     /// can reach the port.
     Unauthenticated { addr: SocketAddr },
+    /// A signed-in isb user: an API token, a session, or an Access identity
+    /// that maps to a user.
+    User {
+        principal: Arc<crate::auth::Principal>,
+    },
 }
 
 impl Caller {
@@ -46,6 +51,13 @@ impl Caller {
     pub fn identity(&self) -> Option<&Identity> {
         match self {
             Caller::Access(id) => Some(id),
+            _ => None,
+        }
+    }
+
+    pub fn principal(&self) -> Option<&crate::auth::Principal> {
+        match self {
+            Caller::User { principal } => Some(principal),
             _ => None,
         }
     }
@@ -61,6 +73,12 @@ impl std::fmt::Display for Caller {
             }
             Caller::Access(id) => f.write_str(id.name()),
             Caller::Unauthenticated { addr } => write!(f, "unauthenticated {addr}"),
+            Caller::User { principal } => match &principal.kind {
+                crate::auth::PrincipalKind::ApiToken { .. } => {
+                    write!(f, "{} (token)", principal.user.email)
+                }
+                _ => f.write_str(&principal.user.email),
+            },
         }
     }
 }
@@ -328,6 +346,37 @@ pub fn origin_is_local(origin: &str) -> bool {
     port_ok && (host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "[::1]")
 }
 
+/// Who is calling, from an API token or session (`Authorization: Bearer`, or
+/// the session cookie) or from a verified Access identity.
+pub type Authn = Arc<dyn Fn(&Request, Option<&Identity>) -> Authenticated + Send + Sync>;
+
+pub enum Authenticated {
+    /// No isb credential: fall back to the listener's own notion of caller.
+    None,
+    User(Arc<crate::auth::Principal>),
+    /// A credential was presented and is not valid.
+    Refused,
+}
+
+/// May `caller` run `tool` with these arguments? Returns the arguments to
+/// use (an org-scoped endpoint pins `org`), or the refusal, reported as a
+/// tool error. `scope` is the org of an `/orgs/<org>/...` endpoint.
+pub type Authorize = Arc<
+    dyn Fn(&Caller, &Tool, Value, Option<&crate::org::OrgId>) -> crate::Result<Value> + Send + Sync,
+>;
+
+/// The body of `GET /api/v1/events`: a stream of server-sent events for
+/// this caller, starting after `since` (from `?since=` or `Last-Event-ID`).
+pub type Events = Arc<dyn Fn(&Caller, u64) -> crate::Result<super::http::StreamFn> + Send + Sync>;
+
+/// What the embedder plugs into every listener.
+#[derive(Clone, Default)]
+pub struct Hooks {
+    pub authn: Option<Authn>,
+    pub authorize: Option<Authorize>,
+    pub events: Option<Events>,
+}
+
 /// One listener's view of the server: its tools, its gate, its health.
 pub(crate) struct Endpoint {
     pub registry: Arc<Registry>,
@@ -335,6 +384,7 @@ pub(crate) struct Endpoint {
     pub access: Option<Arc<AccessValidator>>,
     pub healthz: Healthz,
     pub routes: Option<super::Routes>,
+    pub hooks: Hooks,
 }
 
 fn rpc_error(id: Value, code: i64, message: impl Into<String>) -> Value {
@@ -353,18 +403,171 @@ impl Endpoint {
                 }
                 _ => Response::text(405, "method not allowed").header("Allow", "GET"),
             },
-            "/mcp" => {
-                let caller = match self.authenticate(req) {
-                    Ok(c) => c,
-                    Err(r) => return r,
-                };
-                match req.method.as_str() {
-                    "POST" => self.post(req, &caller),
-                    _ => Response::text(405, "method not allowed").header("Allow", "POST"),
+            "/mcp" => self.mcp(req, None),
+            "/api/v1/openapi.json" => Response::json(200, &self.openapi()),
+            "/api/v1/tools" => self.rest_list(req),
+            "/api/v1/events" => self.events(req),
+            p => {
+                if let Some(rest) = p.strip_prefix("/api/v1/tools/") {
+                    return self.rest_call(req, rest, None);
                 }
+                // /orgs/<org>/mcp and /orgs/<org>/api/v1/tools/<tool>
+                if let Some(rest) = p.strip_prefix("/orgs/") {
+                    if let Some((org, tail)) = rest.split_once('/') {
+                        let Ok(org) = crate::org::OrgId::new(org) else {
+                            return Response::text(404, "no such org");
+                        };
+                        if tail == "mcp" {
+                            return self.mcp(req, Some(&org));
+                        }
+                        if let Some(tool) = tail.strip_prefix("api/v1/tools/") {
+                            return self.rest_call(req, tool, Some(&org));
+                        }
+                    }
+                }
+                self.extra(req)
             }
-            _ => self.extra(req),
         }
+    }
+
+    fn mcp(&self, req: &Request, scope: Option<&crate::org::OrgId>) -> Response {
+        let caller = match self.authenticate(req) {
+            Ok(c) => c,
+            Err(r) => return r,
+        };
+        match req.method.as_str() {
+            "POST" => self.post(req, &caller, scope),
+            _ => Response::text(405, "method not allowed").header("Allow", "POST"),
+        }
+    }
+
+    /// The tool, if this listener offers it, with arguments the authorizer
+    /// accepted.
+    fn admit(
+        &self,
+        name: &str,
+        args: Value,
+        caller: &Caller,
+        scope: Option<&crate::org::OrgId>,
+    ) -> std::result::Result<(&Tool, Value), Admit> {
+        let tool = match self.registry.get(name) {
+            Some(t) if self.policy.allows(name) => t,
+            _ => return Err(Admit::Unknown),
+        };
+        let args = match &self.hooks.authorize {
+            Some(a) => a(caller, tool, args, scope).map_err(Admit::Refused)?,
+            None => args,
+        };
+        Ok((tool, args))
+    }
+
+    fn rest_list(&self, req: &Request) -> Response {
+        if req.method != "GET" {
+            return Response::text(405, "method not allowed").header("Allow", "GET");
+        }
+        if let Err(r) = self.authenticate(req) {
+            return r;
+        }
+        let tools: Vec<Value> = self
+            .registry
+            .tools()
+            .iter()
+            .filter(|t| self.policy.allows(&t.name))
+            .map(Tool::describe)
+            .collect();
+        Response::json(200, &json!({"tools": tools}))
+    }
+
+    /// `POST /api/v1/tools/<name>` with the arguments as the JSON body:
+    /// `{"result": ...}` on success, `{"error", "message", "data"}` with a
+    /// matching status otherwise.
+    fn rest_call(&self, req: &Request, name: &str, scope: Option<&crate::org::OrgId>) -> Response {
+        if req.method != "POST" {
+            return Response::text(405, "method not allowed").header("Allow", "POST");
+        }
+        let caller = match self.authenticate(req) {
+            Ok(c) => c,
+            Err(r) => return r,
+        };
+        let args: Value = if req.body.is_empty() {
+            json!({})
+        } else {
+            match serde_json::from_slice(&req.body) {
+                Ok(v @ Value::Object(_)) => v,
+                Ok(_) => return rest_error(400, "invalid", "the body must be a JSON object"),
+                Err(e) => return rest_error(400, "invalid", &format!("bad JSON: {e}")),
+            }
+        };
+        let (tool, args) = match self.admit(name, args, &caller, scope) {
+            Ok(x) => x,
+            Err(Admit::Unknown) => {
+                return rest_error(404, "not_found", &format!("unknown tool: {name}"));
+            }
+            Err(Admit::Refused(e)) => return error_response(&e),
+        };
+        match run(tool, args, &caller) {
+            Ok(v) => Response::json(200, &json!({"result": v})),
+            Err(e) => error_response(&e),
+        }
+    }
+
+    fn events(&self, req: &Request) -> Response {
+        if req.method != "GET" {
+            return Response::text(405, "method not allowed").header("Allow", "GET");
+        }
+        let caller = match self.authenticate(req) {
+            Ok(c) => c,
+            Err(r) => return r,
+        };
+        let Some(ev) = &self.hooks.events else {
+            return Response::text(404, "not found");
+        };
+        let since = req
+            .header("last-event-id")
+            .map(String::from)
+            .or_else(|| query_param(req, "since"))
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        match ev(&caller, since) {
+            Ok(f) => Response::stream(200, "text/event-stream", f),
+            Err(e) => error_response(&e),
+        }
+    }
+
+    /// An OpenAPI 3.1 document for the REST surface, generated from the
+    /// tool registry: one POST operation per tool this listener offers.
+    fn openapi(&self) -> Value {
+        let mut paths = serde_json::Map::new();
+        for t in self
+            .registry
+            .tools()
+            .iter()
+            .filter(|t| self.policy.allows(&t.name))
+        {
+            paths.insert(
+                format!("/api/v1/tools/{}", t.name),
+                json!({"post": {
+                    "operationId": t.name,
+                    "summary": t.title.clone().unwrap_or_else(|| t.name.clone()),
+                    "description": t.description,
+                    "requestBody": {"required": true, "content": {"application/json": {"schema": t.input_schema}}},
+                    "responses": {
+                        "200": {"description": "The tool's result", "content": {"application/json": {"schema": {"type": "object", "properties": {"result": {}}}}}},
+                        "default": {"description": "An error: {error, message, data}"},
+                    },
+                }}),
+            );
+        }
+        json!({
+            "openapi": "3.1.0",
+            "info": {"title": "isb", "version": env!("CARGO_PKG_VERSION")},
+            "components": {"securitySchemes": {
+                "token": {"type": "http", "scheme": "bearer", "description": "An API token (isb token create)"},
+                "session": {"type": "apiKey", "in": "cookie", "name": "isb_session"},
+            }},
+            "security": [{"token": []}, {"session": []}],
+            "paths": paths,
+        })
     }
 
     /// The embedder's routes. They authenticate their own callers, but sit
@@ -387,22 +590,71 @@ impl Endpoint {
     }
 
     fn authenticate(&self, req: &Request) -> std::result::Result<Caller, Response> {
+        let bearer = req.header("authorization").is_some();
+        let cookie = req.header("cookie").is_some_and(|c| {
+            c.split(';')
+                .any(|p| p.trim_start().starts_with("isb_session="))
+        });
+        // A cookie rides along on cross-site requests; a custom header does
+        // not without a CORS preflight, which isb never grants.
+        let csrf = || {
+            if !bearer && cookie && req.method != "GET" && req.header("x-isb-csrf") != Some("1") {
+                Err(rest_error(403, "forbidden", "missing X-Isb-Csrf header"))
+            } else {
+                Ok(())
+            }
+        };
+        let user = |id: Option<&Identity>| match &self.hooks.authn {
+            Some(a) => a(req, id),
+            None => Authenticated::None,
+        };
         if let Some(v) = &self.access {
             let token = req.header(ASSERTION_HEADER).unwrap_or("").trim();
             if token.is_empty() {
-                return Err(Response::text(401, "missing Cloudflare Access assertion"));
+                return Err(rest_error(
+                    401,
+                    "unauthorized",
+                    "missing Cloudflare Access assertion",
+                ));
             }
-            return match v.validate(token) {
-                Ok(id) => Ok(Caller::Access(id)),
+            let id = match v.validate(token) {
+                Ok(id) => id,
                 Err(d) => {
                     eprintln!("isb serve: refused {:?}: {d}", req.peer);
-                    Err(Response::text(401, "invalid Cloudflare Access assertion"))
+                    return Err(rest_error(
+                        401,
+                        "unauthorized",
+                        "invalid Cloudflare Access assertion",
+                    ));
                 }
             };
+            return match user(Some(&id)) {
+                Authenticated::User(p) => {
+                    csrf()?;
+                    Ok(Caller::User { principal: p })
+                }
+                Authenticated::Refused => {
+                    Err(rest_error(401, "unauthorized", "invalid credentials"))
+                }
+                Authenticated::None => Ok(Caller::Access(id)),
+            };
+        }
+        if bearer || cookie {
+            match user(None) {
+                Authenticated::User(p) => {
+                    csrf()?;
+                    return Ok(Caller::User { principal: p });
+                }
+                Authenticated::Refused => {
+                    return Err(rest_error(401, "unauthorized", "invalid credentials"));
+                }
+                // No authenticator: credentials mean nothing here.
+                Authenticated::None => {}
+            }
         }
         if let Some(o) = req.header("origin").filter(|o| !origin_is_local(o)) {
             eprintln!("isb serve: refused origin {o:?}");
-            return Err(Response::text(403, "origin not allowed"));
+            return Err(rest_error(403, "forbidden", "origin not allowed"));
         }
         Ok(match &req.peer {
             Peer::Unix { uid } => Caller::Local { uid: *uid },
@@ -410,7 +662,7 @@ impl Endpoint {
         })
     }
 
-    fn post(&self, req: &Request, caller: &Caller) -> Response {
+    fn post(&self, req: &Request, caller: &Caller, scope: Option<&crate::org::OrgId>) -> Response {
         // Clients vary in what they send here; note oddities, never refuse.
         if let Some(ct) = req
             .header("content-type")
@@ -434,11 +686,11 @@ impl Endpoint {
             Value::Array(items) => {
                 let out: Vec<Value> = items
                     .into_iter()
-                    .filter_map(|m| self.message(m, caller))
+                    .filter_map(|m| self.message(m, caller, scope))
                     .collect();
                 (!out.is_empty()).then_some(Value::Array(out))
             }
-            m => self.message(m, caller),
+            m => self.message(m, caller, scope),
         };
         match answer {
             Some(a) => Response::json(200, &a),
@@ -447,7 +699,12 @@ impl Endpoint {
     }
 
     /// Answer one JSON-RPC message; `None` for notifications and responses.
-    fn message(&self, m: Value, caller: &Caller) -> Option<Value> {
+    fn message(
+        &self,
+        m: Value,
+        caller: &Caller,
+        scope: Option<&crate::org::OrgId>,
+    ) -> Option<Value> {
         let Value::Object(mut o) = m else {
             return Some(rpc_error(Value::Null, INVALID_REQUEST, "invalid request"));
         };
@@ -481,13 +738,19 @@ impl Endpoint {
             ));
         }
         let params = o.remove("params").unwrap_or(Value::Null);
-        Some(match self.dispatch(&method, params, caller) {
+        Some(match self.dispatch(&method, params, caller, scope) {
             Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
             Err((code, msg)) => rpc_error(id, code, msg),
         })
     }
 
-    fn dispatch(&self, method: &str, params: Value, caller: &Caller) -> RpcResult {
+    fn dispatch(
+        &self,
+        method: &str,
+        params: Value,
+        caller: &Caller,
+        scope: Option<&crate::org::OrgId>,
+    ) -> RpcResult {
         let bad = |m: &str| Err((INVALID_PARAMS, m.to_string()));
         if !(params.is_null() || params.is_object()) {
             return bad("params must be an object");
@@ -533,29 +796,86 @@ impl Endpoint {
                     Some(_) => return bad("arguments must be an object"),
                 };
                 // A tool hidden by policy does not exist for this listener.
-                let tool = match self.registry.get(name) {
-                    Some(t) if self.policy.allows(name) => t,
-                    _ => return Err((INVALID_PARAMS, format!("unknown tool: {name}"))),
-                };
-                Ok(call(tool, args, caller))
+                match self.admit(name, args, caller, scope) {
+                    Ok((tool, args)) => Ok(call(tool, args, caller)),
+                    Err(Admit::Unknown) => Err((INVALID_PARAMS, format!("unknown tool: {name}"))),
+                    Err(Admit::Refused(e)) => Ok(tool_error(name, caller, &e)),
+                }
             }
             _ => Err((METHOD_NOT_FOUND, format!("method not found: {method}"))),
         }
     }
 }
 
-/// Run a tool and shape its outcome as an MCP tool result. Logged as one line
-/// without the arguments, which can carry secrets.
-fn call(tool: &Tool, args: Value, caller: &Caller) -> Value {
+enum Admit {
+    Unknown,
+    Refused(Error),
+}
+
+fn tool_error(name: &str, caller: &Caller, e: &Error) -> Value {
+    eprintln!("isb serve: {caller} called {name}: refused: {e}");
+    json!({
+        "content": [{"type": "text", "text": e.to_string()}],
+        "structuredContent": crate::rpc::error_json(e),
+        "isError": true,
+    })
+}
+
+fn rest_error(status: u16, code: &str, message: &str) -> Response {
+    Response::json(status, &json!({"error": code, "message": message}))
+}
+
+/// An isb error as a REST response, with the status its code implies.
+fn error_response(e: &Error) -> Response {
+    let mut v = crate::rpc::error_json(e);
+    let code = v["code"].as_str().unwrap_or("error").to_string();
+    let status = match code.as_str() {
+        "invalid" | "parse" | "interpolation" | "bad_request" => 400,
+        "forbidden" => 403,
+        "not_found" => 404,
+        "already_exists" => 409,
+        "request_timeout" | "operation_timeout" | "exec_timeout" | "not_ready" => 504,
+        _ => 500,
+    };
+    let message = v["message"].take();
+    let mut body = json!({"error": code, "message": message});
+    if let Some(d) = v.get("data").cloned() {
+        body["data"] = d;
+    }
+    Response::json(status, &body)
+}
+
+fn query_param(req: &Request, key: &str) -> Option<String> {
+    req.query.as_deref()?.split('&').find_map(|kv| {
+        let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
+        (k == key).then(|| v.to_string())
+    })
+}
+
+/// Run a tool, logged as one line without the arguments (which can carry
+/// secrets).
+fn run(tool: &Tool, args: Value, caller: &Caller) -> crate::Result<Value> {
     let started = Instant::now();
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         (tool.handler)(args, caller)
     }))
     .unwrap_or_else(|_| Err(Error::Protocol(format!("tool {} panicked", tool.name))));
     let ms = started.elapsed().as_millis();
+    match &r {
+        Ok(_) => eprintln!("isb serve: {caller} called {}: ok in {ms}ms", tool.name),
+        Err(e) => eprintln!(
+            "isb serve: {caller} called {}: error in {ms}ms: {e}",
+            tool.name
+        ),
+    }
+    r
+}
+
+/// Run a tool and shape its outcome as an MCP tool result.
+fn call(tool: &Tool, args: Value, caller: &Caller) -> Value {
+    let r = run(tool, args, caller);
     match r {
         Ok(v) => {
-            eprintln!("isb serve: {caller} called {}: ok in {ms}ms", tool.name);
             let text = serde_json::to_string_pretty(&v).unwrap_or_default();
             let structured = if v.is_object() {
                 v
@@ -568,17 +888,11 @@ fn call(tool: &Tool, args: Value, caller: &Caller) -> Value {
                 "isError": false,
             })
         }
-        Err(e) => {
-            eprintln!(
-                "isb serve: {caller} called {}: error in {ms}ms: {e}",
-                tool.name
-            );
-            json!({
-                "content": [{"type": "text", "text": e.to_string()}],
-                "structuredContent": crate::rpc::error_json(&e),
-                "isError": true,
-            })
-        }
+        Err(e) => json!({
+            "content": [{"type": "text", "text": e.to_string()}],
+            "structuredContent": crate::rpc::error_json(&e),
+            "isError": true,
+        }),
     }
 }
 
@@ -620,6 +934,7 @@ mod tests {
             access: access.map(Arc::new),
             healthz: Arc::new(|| (true, json!({"ok": true}))),
             routes: None,
+            hooks: Hooks::default(),
         }
     }
 
@@ -987,5 +1302,106 @@ mod tests {
         assert!(r.register(t("")).is_err());
         assert!(r.register(t(&"x".repeat(129))).is_err());
         assert!(r.register(t("ok.name-2")).is_ok());
+    }
+
+    /// An endpoint whose authorizer pins `org` for scoped calls and refuses
+    /// any org but "alpha", and whose events hook streams two lines.
+    fn hooked() -> Endpoint {
+        let mut ep = endpoint(ToolPolicy::default(), None);
+        ep.hooks = Hooks {
+            authn: None,
+            authorize: Some(Arc::new(|_c, _t, mut args, scope| {
+                if let Some(o) = scope {
+                    args["org"] = json!(o.as_str());
+                }
+                match args.get("org").and_then(Value::as_str) {
+                    Some("alpha") | None => Ok(args),
+                    Some(o) => Err(Error::Forbidden(format!("no access to org {o}"))),
+                }
+            })),
+            events: Some(Arc::new(|_c, since| {
+                Ok(Box::new(move |w: &mut dyn std::io::Write| {
+                    write!(w, "id: {}\ndata: {{}}\n\n", since + 1)
+                }))
+            })),
+        };
+        ep
+    }
+
+    #[test]
+    fn rest_calls_and_errors() {
+        let ep = hooked();
+        let call = |path: &str, body: &[u8]| {
+            let r = ep.handle(&req("POST", path, &[], body, local()));
+            (
+                r.status,
+                serde_json::from_slice::<Value>(&r.body).unwrap_or(Value::Null),
+            )
+        };
+        let (st, v) = call("/api/v1/tools/echo", br#"{"org":"alpha","x":1}"#);
+        assert_eq!(st, 200);
+        assert_eq!(v["result"]["args"]["x"], 1);
+        let (st, v) = call("/api/v1/tools/echo", br#"{"org":"beta"}"#);
+        assert_eq!((st, v["error"].as_str()), (403, Some("forbidden")));
+        let (st, _) = call("/api/v1/tools/missing", b"{}");
+        assert_eq!(st, 404);
+        let (st, v) = call("/api/v1/tools/stack_rm", b"{}");
+        assert_eq!((st, v["error"].as_str()), (404, Some("not_found")));
+        let (st, _) = call("/api/v1/tools/echo", b"[1]");
+        assert_eq!(st, 400);
+        // A scoped endpoint pins the org into the arguments.
+        let (st, v) = call("/orgs/alpha/api/v1/tools/echo", b"{}");
+        assert_eq!(
+            (st, v["result"]["args"]["org"].as_str()),
+            (200, Some("alpha"))
+        );
+        let (st, _) = call("/orgs/beta/api/v1/tools/echo", b"{}");
+        assert_eq!(st, 403);
+        let (st, _) = call("/orgs/Not_An_Org/api/v1/tools/echo", b"{}");
+        assert_eq!(st, 404);
+        let r = ep.handle(&req("GET", "/api/v1/openapi.json", &[], b"", local()));
+        let doc: Value = serde_json::from_slice(&r.body).unwrap();
+        assert!(doc["paths"]["/api/v1/tools/echo"]["post"].is_object());
+    }
+
+    #[test]
+    fn scoped_mcp_and_refusals_are_tool_errors() {
+        let ep = hooked();
+        let body = |org: Option<&str>| {
+            let mut args = json!({});
+            if let Some(o) = org {
+                args["org"] = json!(o);
+            }
+            serde_json::to_vec(&rpc(
+                "tools/call",
+                json!({"name": "echo", "arguments": args}),
+            ))
+            .unwrap()
+        };
+        let r = ep.handle(&req("POST", "/orgs/alpha/mcp", &[], &body(None), local()));
+        let v: Value = serde_json::from_slice(&r.body).unwrap();
+        assert_eq!(v["result"]["structuredContent"]["args"]["org"], "alpha");
+        let r = ep.handle(&req("POST", "/mcp", &[], &body(Some("beta")), local()));
+        let v: Value = serde_json::from_slice(&r.body).unwrap();
+        assert_eq!(v["result"]["isError"], true);
+        assert_eq!(v["result"]["structuredContent"]["code"], "forbidden");
+    }
+
+    #[test]
+    fn events_stream() {
+        let ep = hooked();
+        let r = ep.handle(&req(
+            "GET",
+            "/api/v1/events",
+            &[("Last-Event-ID", "41")],
+            b"",
+            local(),
+        ));
+        assert_eq!(r.get_header("content-type"), Some("text/event-stream"));
+        let mut out = Vec::new();
+        crate::server::http::write_response(&mut out, &r).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(!text.contains("Content-Length"), "{text}");
+        assert!(text.ends_with("id: 42\ndata: {}\n\n"), "{text}");
     }
 }

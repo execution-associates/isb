@@ -226,8 +226,15 @@ pub struct NewApiToken {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PrincipalKind {
-    Session { id: i64 },
-    ApiToken { id: i64, org: Option<OrgId> },
+    Session {
+        id: i64,
+    },
+    ApiToken {
+        id: i64,
+        org: Option<OrgId>,
+    },
+    /// A Cloudflare Access identity whose email is this user's.
+    Access,
 }
 
 /// An authenticated caller: who, how, and what they may reach. For an
@@ -280,7 +287,7 @@ impl Principal {
     pub fn session_id(&self) -> Option<i64> {
         match self.kind {
             PrincipalKind::Session { id } => Some(id),
-            PrincipalKind::ApiToken { .. } => None,
+            PrincipalKind::ApiToken { .. } | PrincipalKind::Access => None,
         }
     }
 }
@@ -858,6 +865,28 @@ impl AuthStore {
             s.idle_expires_at = self.idle_end(now, s.expires_at);
         }
         Ok(Some((user, s)))
+    }
+
+    /// The principal for a Cloudflare Access identity: the enabled user with
+    /// that email, with all their memberships.
+    pub fn principal_for_email(&self, email: &str) -> AuthResult<Option<Principal>> {
+        let Some(user) = self.user_by_email(email)? else {
+            return Ok(None);
+        };
+        if user.disabled {
+            return Ok(None);
+        }
+        let orgs = self
+            .memberships(user.id)?
+            .into_iter()
+            .map(|m| (m.org, m.role))
+            .collect();
+        Ok(Some(Principal {
+            platform_admin: user.platform_admin,
+            user,
+            kind: PrincipalKind::Access,
+            orgs,
+        }))
     }
 
     /// The principal behind a session token.

@@ -63,12 +63,10 @@ pub struct ServeConfig {
 }
 
 /// The identity endpoints over `<state>/isb.db`.
-fn auth_routes(cfg: &ServeConfig) -> Result<crate::server::Routes> {
+fn auth_routes(cfg: &ServeConfig, store: Arc<AuthStore>) -> Result<crate::server::Routes> {
     let path = crate::auth::db_path(&cfg.state_dir);
-    let store = AuthStore::open_with(&path, cfg.auth.clone())
-        .map_err(|e| Error::invalid(format!("open {}: {e}", path.display())))?;
     let api = AuthApi::new(
-        Arc::new(store),
+        store,
         ApiConfig {
             public_url: cfg.public_url.clone(),
             notifier: None,
@@ -98,10 +96,15 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     for n in &opened.notes {
         eprintln!("isb serve: {n}");
     }
-    // The identity endpoints ride on the TCP listener; open the database
-    // before anything starts, so a bad one fails startup cleanly.
+    // Open the identity store before anything starts, so a bad one fails
+    // startup cleanly. Its endpoints ride on the TCP listener.
+    let db = crate::auth::db_path(&cfg.state_dir);
+    let users = Arc::new(
+        AuthStore::open_with(&db, cfg.auth.clone())
+            .map_err(|e| Error::invalid(format!("open {}: {e}", db.display())))?,
+    );
     let auth = match &cfg.listen {
-        Some(_) => Some(auth_routes(&cfg)?),
+        Some(_) => Some(auth_routes(&cfg, users.clone())?),
         None => None,
     };
     let ctl = Controller::start(client.clone(), store, cfg.interval)?;
@@ -113,27 +116,20 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         secrets: Arc::new(opened.secrets),
     });
     let registry = registry(d.clone())?;
-    let mut listeners = vec![Listener::unix(&cfg.socket)];
+    let hooks = hooks(d.clone(), users.clone(), cfg.allow_unauthenticated);
+    let mut listeners = vec![Listener::unix(&cfg.socket).hooks(hooks.clone())];
     if let Some(addr) = &cfg.listen {
-        let mut l = Listener::tcp(addr.clone());
+        let mut l = Listener::tcp(addr.clone())
+            .policy(cfg.remote_tools.clone())
+            .hooks(hooks);
         if let Some(r) = auth {
             l = l.routes(r);
         }
-        listeners.push(match (&cfg.access, cfg.allow_unauthenticated) {
-            (Some((team, aud)), _) => l
-                .access(AccessValidator::new(team, aud)?)
-                .policy(cfg.remote_tools.clone()),
-            (None, true) => l
-                .allow_unauthenticated(true)
-                .policy(cfg.remote_tools.clone()),
-            (None, false) => {
-                // Health answers so the unit can be checked; no tool does.
-                eprintln!(
-                    "isb serve: remote MCP is off until CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD are set; {addr} serves /healthz and /api/v1/auth only"
-                );
-                l.allow_unauthenticated(true)
-                    .policy(ToolPolicy::from_lists("", "*"))
-            }
+        listeners.push(match &cfg.access {
+            Some((team, aud)) => l.access(AccessValidator::new(team, aud)?),
+            // Callers sign in with an API token or a session; the authorizer
+            // refuses anonymous ones unless --allow-unauthenticated.
+            None => l.allow_unauthenticated(true),
         });
     }
     let hd = d.clone();
@@ -152,6 +148,151 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     let r = crate::server::serve(listeners, registry, healthz);
     ctl.shutdown();
     r
+}
+
+/// Tools that reach across orgs: platform admins only.
+const PLATFORM_TOOLS: &[&str] = &["server_status"];
+
+/// Read-only tools that span orgs: any signed-in user, filtered to their
+/// orgs by the tool itself.
+const CROSS_ORG_READS: &[&str] = &["overview", "events", "stack_list"];
+
+/// The org a tool call names (`org`, default `default`).
+fn arg_org(args: &Value) -> Result<crate::org::OrgId> {
+    match args.get("org").and_then(Value::as_str) {
+        Some(o) => crate::org::OrgId::new(o),
+        None => Ok(crate::org::OrgId::default_org()),
+    }
+}
+
+/// The orgs a caller may see, or `None` for all of them.
+fn visible_orgs(c: &Caller) -> Option<Vec<crate::org::OrgId>> {
+    match c.principal() {
+        Some(p) if !p.platform_admin => Some(p.orgs.iter().map(|(o, _)| o.clone()).collect()),
+        _ => None,
+    }
+}
+
+/// Authentication and authorization for every listener.
+fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate::server::Hooks {
+    use crate::server::Authenticated;
+    let u = users.clone();
+    let authn: crate::server::mcp::Authn = Arc::new(move |req, id| {
+        if req.header("authorization").is_some()
+            || req
+                .header("cookie")
+                .is_some_and(|c| c.contains("isb_session="))
+        {
+            return match u.principal_from_request(req) {
+                Some(p) => Authenticated::User(Arc::new(p)),
+                None => Authenticated::Refused,
+            };
+        }
+        // Access vouches for the email; the isb account decides the orgs.
+        if let Some(email) = id.and_then(|i| i.email.as_deref()) {
+            if let Ok(Some(p)) = u.principal_for_email(email) {
+                return Authenticated::User(Arc::new(p));
+            }
+        }
+        Authenticated::None
+    });
+    let authorize: crate::server::mcp::Authorize = Arc::new(move |c, tool, mut args, scope| {
+        if let Some(org) = scope {
+            match args.get("org").and_then(Value::as_str) {
+                Some(o) if o != org.as_str() => {
+                    return Err(Error::Forbidden(format!(
+                        "this endpoint acts in org {org}, not {o}"
+                    )));
+                }
+                _ => args["org"] = json!(org.as_str()),
+            }
+        }
+        match c {
+            Caller::Local { .. } => Ok(args),
+            Caller::Unauthenticated { .. } if allow_anonymous => Ok(args),
+            Caller::Unauthenticated { .. } => Err(Error::Forbidden(
+                "sign in: send an API token as Authorization: Bearer (isb token create)".into(),
+            )),
+            Caller::Access(id) => Err(Error::Forbidden(format!(
+                "{} has no isb account; ask an org admin to invite you",
+                id.name()
+            ))),
+            Caller::User { principal: p } => {
+                if PLATFORM_TOOLS.contains(&tool.name.as_str()) && !p.platform_admin {
+                    return Err(Error::Forbidden(format!(
+                        "{} is for platform admins",
+                        tool.name
+                    )));
+                }
+                if tool.name == "secret_reencrypt"
+                    && args.get("all").and_then(Value::as_bool) == Some(true)
+                    && !p.platform_admin
+                {
+                    return Err(Error::Forbidden(
+                        "re-encrypting every org is for platform admins".into(),
+                    ));
+                }
+                if CROSS_ORG_READS.contains(&tool.name.as_str()) && scope.is_none() {
+                    return Ok(args);
+                }
+                let org = arg_org(&args)?;
+                if p.platform_admin || p.role_in(&org).is_some() {
+                    Ok(args)
+                } else {
+                    Err(Error::Forbidden(format!("no access to org {org}")))
+                }
+            }
+        }
+    });
+    let events: crate::server::mcp::Events = Arc::new(move |c, since| {
+        if let (Caller::Unauthenticated { .. }, false) = (c, allow_anonymous) {
+            return Err(Error::Forbidden("sign in to follow events".into()));
+        }
+        if let Caller::Access(id) = c {
+            return Err(Error::Forbidden(format!(
+                "{} has no isb account",
+                id.name()
+            )));
+        }
+        let orgs = visible_orgs(c);
+        let ctl = d.ctl.clone();
+        Ok(Box::new(move |w: &mut dyn std::io::Write| {
+            let mut since = since;
+            loop {
+                let (seq, evs) = ctl.wait_events(since, 200, Duration::from_secs(15));
+                let mut wrote = false;
+                for e in evs {
+                    if !event_visible(&orgs, &e.stack) {
+                        continue;
+                    }
+                    let data = serde_json::to_string(&e).unwrap_or_default();
+                    write!(w, "id: {}\nevent: {}\ndata: {data}\n\n", e.seq, e.level)?;
+                    wrote = true;
+                }
+                if !wrote {
+                    // Keeps proxies from closing an idle stream.
+                    w.write_all(b": keepalive\n\n")?;
+                }
+                w.flush()?;
+                since = seq.max(since);
+            }
+        }))
+    });
+    crate::server::Hooks {
+        authn: Some(authn),
+        authorize: Some(authorize),
+        events: Some(events),
+    }
+}
+
+/// Events name their stack `org/stack` (or just `stack` in the default org).
+fn event_visible(orgs: &Option<Vec<crate::org::OrgId>>, stack: &str) -> bool {
+    let Some(orgs) = orgs else { return true };
+    let org = stack
+        .split_once('/')
+        .map(|(o, _)| o)
+        .unwrap_or(crate::org::DEFAULT_ORG);
+    orgs.iter().any(|o| o.as_str() == org)
 }
 
 fn args<T: DeserializeOwned>(v: Value) -> Result<T> {
@@ -225,15 +366,26 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
         ro,
         |d: &Daemon, _a: Value, c: &Caller| -> Result<Value> {
             let snap = d.ctl.snapshot();
-            let stacks = d.ctl.list();
+            let orgs = visible_orgs(c);
+            let sees = |org: &str| {
+                orgs.as_ref()
+                    .is_none_or(|v| v.iter().any(|o| o.as_str() == org))
+            };
+            let stacks: Vec<_> = d.ctl.list().into_iter().filter(|s| sees(&s.org)).collect();
             // Only isb's orgs: incus may hold other tools' projects too.
             let sandboxes: Vec<&crate::metrics::InstanceSample> = snap
                 .instances
                 .values()
-                .filter(|i| crate::org::OrgId::from_incus_project(&i.project).is_some())
+                .filter(|i| {
+                    crate::org::OrgId::from_incus_project(&i.project)
+                        .is_some_and(|o| sees(o.as_str()))
+                })
                 .filter(|i| i.stack().is_none())
                 .filter(|i| {
-                    c.is_trusted() || d.policy.any_instance || i.labels.contains_key(LABEL_OWNER)
+                    c.is_trusted()
+                        || c.principal().is_some()
+                        || d.policy.any_instance
+                        || i.labels.contains_key(LABEL_OWNER)
                 })
                 .collect();
             let (seq, _) = d.ctl.events(u64::MAX, 0);
@@ -260,7 +412,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             &[]
         ),
         ro,
-        |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
+        |d: &Daemon, a: Value, c: &Caller| -> Result<Value> {
             #[derive(Deserialize)]
             struct A {
                 #[serde(default)]
@@ -268,6 +420,9 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
                 limit: Option<usize>,
                 #[serde(default)]
                 wait: u64,
+                #[serde(default)]
+                #[allow(dead_code)]
+                org: Option<String>,
             }
             let a: A = args(a)?;
             let (seq, events) = d.ctl.wait_events(
@@ -275,6 +430,11 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
                 a.limit.unwrap_or(200).min(1000),
                 Duration::from_secs(a.wait.min(30)),
             );
+            let orgs = visible_orgs(c);
+            let events: Vec<_> = events
+                .into_iter()
+                .filter(|e| event_visible(&orgs, &e.stack))
+                .collect();
             Ok(json!({"seq": seq, "events": events}))
         }
     );
@@ -284,8 +444,18 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
         "List deployed stacks with each service's replica, health and rollout state.",
         obj(json!({}), &[]),
         ro,
-        |d: &Daemon, _a: Value, _c: &Caller| -> Result<Value> {
-            Ok(json!({"stacks": d.ctl.list()}))
+        |d: &Daemon, _a: Value, c: &Caller| -> Result<Value> {
+            let orgs = visible_orgs(c);
+            let stacks: Vec<_> = d
+                .ctl
+                .list()
+                .into_iter()
+                .filter(|s| {
+                    orgs.as_ref()
+                        .is_none_or(|v| v.iter().any(|o| o.as_str() == s.org))
+                })
+                .collect();
+            Ok(json!({"stacks": stacks}))
         }
     );
     tool!(
@@ -632,7 +802,10 @@ impl Daemon {
     /// May this caller touch this instance? Local callers: always. Remote:
     /// only what isb serve manages, unless the operator allowed any.
     fn reachable(&self, c: &Caller, i: &SandboxInfo) -> bool {
+        // A signed-in user reaches everything in an org they belong to (the
+        // authorizer already checked the org): the org is the boundary.
         c.is_trusted()
+            || c.principal().is_some()
             || self.policy.any_instance
             || i.config.contains_key("user.isb.stack")
             || i.config.contains_key(&format!("user.{LABEL_OWNER}"))

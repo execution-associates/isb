@@ -32,7 +32,7 @@ use serde_json::Value;
 
 pub use access::{AccessValidator, Identity};
 pub use http::Shutdown;
-pub use mcp::{Caller, Registry, Tool, ToolHandler, ToolPolicy};
+pub use mcp::{Authenticated, Caller, Hooks, Registry, Tool, ToolHandler, ToolPolicy};
 
 use crate::error::{Error, Result};
 use http::{Handler, HttpListener, HttpServer, Limits};
@@ -64,6 +64,8 @@ pub struct Listener {
     pub allow_unauthenticated: bool,
     /// Paths other than `/healthz` and `/mcp`.
     pub routes: Option<Routes>,
+    /// Authentication and authorization the embedder supplies.
+    pub hooks: mcp::Hooks,
 }
 
 impl std::fmt::Debug for Listener {
@@ -94,10 +96,16 @@ impl Listener {
             policy: ToolPolicy::default(),
             allow_unauthenticated: false,
             routes: None,
+            hooks: mcp::Hooks::default(),
         }
     }
 
     /// Serve `routes` on this listener too.
+    pub fn hooks(mut self, h: mcp::Hooks) -> Self {
+        self.hooks = h;
+        self
+    }
+
     pub fn routes(mut self, r: Routes) -> Self {
         self.routes = Some(r);
         self
@@ -147,6 +155,10 @@ impl Listener {
             (ListenerKind::Tcp(a), Some(v)) => format!(
                 "http://{a}/mcp (Cloudflare Access: {}, {tools} tools)",
                 v.issuer()
+            ),
+            (ListenerKind::Tcp(a), None) if self.hooks.authorize.is_some() => format!(
+                "http://{a}/mcp ({tools} tools) without Cloudflare Access: callers sign in \
+                 with isb API tokens or sessions"
             ),
             (ListenerKind::Tcp(a), None) => format!(
                 "http://{a}/mcp ({tools} tools) WITHOUT Cloudflare Access: anything that \
@@ -200,7 +212,7 @@ pub fn serve_until(
             .filter(|t| l.policy.allows(&t.name))
             .count();
         let line = l.describe(tools);
-        if l.access.is_none() && !l.is_trusted() {
+        if l.access.is_none() && !l.is_trusted() && l.hooks.authorize.is_none() {
             eprintln!("isb serve: WARNING: {line}");
         } else {
             eprintln!("isb serve: listening on {line}");
@@ -211,6 +223,7 @@ pub fn serve_until(
             access: l.access.clone(),
             healthz: healthz.clone(),
             routes: l.routes.clone(),
+            hooks: l.hooks.clone(),
         };
         bound.push((sock, Arc::new(move |r: &http::Request| ep.handle(r))));
     }

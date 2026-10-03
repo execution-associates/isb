@@ -70,6 +70,11 @@ pub enum Error {
     #[error("{0}")]
     Invalid(String),
 
+    /// The caller may not do this (another org's resources, a platform-only
+    /// tool, or no isb account).
+    #[error("forbidden: {0}")]
+    Forbidden(String),
+
     /// Variable interpolation failed (unset variable, `${VAR:?message}`, bad syntax).
     #[error("interpolation: {0}")]
     Interpolation(String),
