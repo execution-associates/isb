@@ -43,8 +43,8 @@ pub struct ServiceInstall {
 pub fn install_user_service(opts: &ServiceOptions) -> Result<ServiceInstall> {
     if cfg!(target_os = "macos") {
         return Err(Error::invalid(
-            "installing the service is not supported on macOS yet (it needs a launchd agent); \
-             run `isb serve` in the foreground instead",
+            "on macOS isb serve runs in the isb machine; install the LaunchAgent that starts \
+             it with isb::machine::install_launch_agent (`isb serve install`)",
         ));
     }
     if !cfg!(target_os = "linux") {

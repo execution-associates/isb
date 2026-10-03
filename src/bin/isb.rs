@@ -18,7 +18,8 @@ use isb::{Client, Error, ExecOptions, Result, Stdin, Timeouts};
 /// Declarative incus sandboxes.
 ///
 /// Talks to incusd over its unix socket ($INCUS_SOCKET, else
-/// $INCUS_DIR/unix.socket, else /var/lib/incus/unix.socket).
+/// $INCUS_DIR/unix.socket, else /var/lib/incus/unix.socket; on macOS, the
+/// isb machine's ~/.isb/machine/isb/incus.sock).
 #[derive(Parser)]
 #[command(name = "isb", version, about, long_about = None, propagate_version = true)]
 struct Cli {
@@ -234,6 +235,9 @@ enum Cmd {
     /// One-time host preparation (needs root).
     #[command(subcommand)]
     Host(HostCmd),
+    /// macOS: the Lima VM that runs incus and isb serve for isb.
+    #[command(subcommand)]
+    Machine(MachineCmd),
     /// A live dashboard of stacks and sandboxes (`isb serve`'s view; with no
     /// daemon, sandboxes only).
     Tui,
@@ -291,10 +295,15 @@ struct ServeArgs {
 #[derive(Subcommand)]
 enum ServeAction {
     /// Install (or update) `isb serve` as a systemd user service and start it.
+    /// On macOS, where the daemon runs in the isb machine, install a
+    /// LaunchAgent that starts the machine at login instead.
     Install {
         /// The loopback address to serve on (default: the env file's, else 127.0.0.1:8092).
         #[arg(long)]
         listen: Option<String>,
+        /// macOS: the machine the LaunchAgent starts.
+        #[arg(long, default_value = isb::machine::DEFAULT_NAME)]
+        machine: String,
     },
 }
 
@@ -343,6 +352,61 @@ enum OrgCmd {
         name: String,
         #[arg(long)]
         force: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum MachineCmd {
+    /// Create and start the machine: Ubuntu 24.04 with incus, $HOME shared at
+    /// the same path, its sockets forwarded under ~/.isb/machine/NAME, and
+    /// isb serve running inside.
+    Init {
+        /// Machine name (also the Lima instance's).
+        #[arg(default_value = isb::machine::DEFAULT_NAME)]
+        name: String,
+        #[arg(long, default_value = "4")]
+        cpus: u32,
+        #[arg(long, default_value = "4GiB")]
+        memory: String,
+        /// The VM disk's maximum size (it grows as used).
+        #[arg(long, default_value = "10GiB")]
+        disk: String,
+        /// A Linux (musl) isb binary for the guest, instead of downloading
+        /// this version's release.
+        #[arg(long)]
+        isb_binary: Option<PathBuf>,
+        /// Deadline for the first boot (image download, incus install).
+        #[arg(long, value_parser = dur, default_value = "20m")]
+        timeout: Duration,
+    },
+    /// Start a stopped machine and wait until incus and isb serve answer.
+    Start {
+        #[arg(default_value = isb::machine::DEFAULT_NAME)]
+        name: String,
+    },
+    /// Stop the machine (sandboxes and stacks in it stop too).
+    Stop {
+        #[arg(default_value = isb::machine::DEFAULT_NAME)]
+        name: String,
+    },
+    /// Delete the machine, everything in it, and a LaunchAgent that starts it.
+    Rm {
+        #[arg(default_value = isb::machine::DEFAULT_NAME)]
+        name: String,
+    },
+    /// The machine's state, resources and sockets.
+    Status {
+        #[arg(default_value = isb::machine::DEFAULT_NAME)]
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// A shell in the machine, or a command: `isb machine ssh [NAME] -- CMD...`.
+    Ssh {
+        #[arg(default_value = isb::machine::DEFAULT_NAME)]
+        name: String,
+        #[arg(last = true)]
+        command: Vec<String>,
     },
 }
 
@@ -713,6 +777,12 @@ fn main() -> ExitCode {
         Ok(code) => ExitCode::from(code),
         Err(e) => {
             eprintln!("isb: {e}");
+            if cfg!(target_os = "macos") && matches!(e, Error::Connect { .. }) {
+                eprintln!(
+                    "isb: on macOS incus runs in the isb machine: `isb machine init` creates \
+                     it, `isb machine start` starts it"
+                );
+            }
             ExitCode::from(1)
         }
     }
@@ -725,6 +795,7 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         Cmd::Stack(s) => stack(ctx, s),
         Cmd::Org(o) => org(ctx, o),
         Cmd::Host(HostCmd::Setup { uplink, dry_run }) => host_setup(uplink, dry_run),
+        Cmd::Machine(m) => machine(ctx, m),
         Cmd::Tui => {
             isb::tui::run(ctx.client(None), isb::server::default_socket_path())?;
             Ok(0)
@@ -1348,9 +1419,129 @@ fn logs(ctx: &Ctx, service: &str, lines: usize) -> Result<u8> {
     Ok(0)
 }
 
+fn machine(ctx: &Ctx, cmd: MachineCmd) -> Result<u8> {
+    use isb::machine as m;
+    let log = |s: &str| {
+        if !ctx.global.quiet {
+            eprintln!("isb machine: {s}");
+        }
+    };
+    match cmd {
+        MachineCmd::Init {
+            name,
+            cpus,
+            memory,
+            disk,
+            isb_binary,
+            timeout,
+        } => {
+            let st = m::init(
+                &m::InitOptions {
+                    name,
+                    cpus,
+                    memory,
+                    disk,
+                    isb_binary,
+                    timeout,
+                },
+                &log,
+            )?;
+            print_machine(&st);
+        }
+        MachineCmd::Start { name } => {
+            m::start(&name)?;
+            log(&format!("{name} is running"));
+        }
+        MachineCmd::Stop { name } => m::stop(&name)?,
+        MachineCmd::Rm { name } => {
+            m::remove(&name)?;
+            log(&format!("removed {name}"));
+        }
+        MachineCmd::Status { name, json } => {
+            let st = m::status(&name)?;
+            if json {
+                print_json(&st);
+            } else {
+                print_machine(&st);
+            }
+        }
+        MachineCmd::Ssh { name, command } => {
+            use std::os::unix::process::CommandExt;
+            let err = m::shell_command(&name, &command)?.exec();
+            return Err(Error::Invalid(format!("limactl shell {name}: {err}")));
+        }
+    }
+    Ok(0)
+}
+
+fn print_machine(st: &isb::machine::Status) {
+    let gib = |b: Option<u64>| {
+        b.map(|b| format!("{:.1}GiB", b as f64 / (1u64 << 30) as f64))
+            .unwrap_or_else(|| "-".into())
+    };
+    let default = if st.default { " (default)" } else { "" };
+    println!("machine    {}{default}", st.name);
+    println!("state      {}", st.state);
+    println!(
+        "resources  {} cpus, {} memory, {} disk{}",
+        st.cpus.map(|c| c.to_string()).unwrap_or_else(|| "-".into()),
+        gib(st.memory_bytes),
+        gib(st.disk_bytes),
+        st.arch
+            .as_deref()
+            .map(|a| format!(", {a}"))
+            .unwrap_or_default()
+    );
+    let incus = match (&st.incus_version, &st.incus_error) {
+        (Some(v), _) => format!("incus {v}"),
+        (None, Some(e)) => format!("not answering ({e})"),
+        (None, None) => "not running".into(),
+    };
+    println!("incus      {} at {}", incus, st.incus_socket.display());
+    println!(
+        "isb serve  {} at {}, http://{}",
+        if st.serve_ok { "ok" } else { "not answering" },
+        st.serve_socket.display(),
+        st.serve_listen
+    );
+    if !st.default {
+        println!(
+            "use it with: export INCUS_SOCKET={} ISB_SERVE_SOCKET={}",
+            st.incus_socket.display(),
+            st.serve_socket.display()
+        );
+    }
+}
+
 fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
     use isb::daemon::{ServeConfig, policy::RemotePolicy};
-    if let Some(ServeAction::Install { listen }) = a.action {
+    if cfg!(target_os = "macos") {
+        let Some(ServeAction::Install { listen, machine }) = a.action else {
+            return Err(Error::Invalid(
+                "on macOS, isb serve runs inside the isb machine, next to incus: create it with \
+                 `isb machine init` (`isb machine status` shows its socket), and run \
+                 `isb serve install` to start the machine at login"
+                    .into(),
+            ));
+        };
+        if listen.is_some() {
+            return Err(Error::Invalid(format!(
+                "--listen: on macOS the daemon in the machine listens on {}",
+                isb::machine::SERVE_LISTEN
+            )));
+        }
+        let r = isb::machine::install_launch_agent(&machine)?;
+        println!(
+            "installed {} (runs {} machine start {})",
+            r.plist.display(),
+            r.exe.display(),
+            r.machine
+        );
+        println!("isb serve socket: {}", r.serve_socket.display());
+        println!("healthy at {}", r.health_url);
+        return Ok(0);
+    }
+    if let Some(ServeAction::Install { listen, .. }) = a.action {
         let r =
             isb::server::service::install_user_service(&isb::server::service::ServiceOptions {
                 listen,
@@ -1403,6 +1594,13 @@ fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
 fn call(tool: &str, args: serde_json::Value, timeout: Duration) -> Result<serde_json::Value> {
     let socket = isb::server::default_socket_path();
     isb::server::client::call_tool(&socket, tool, args, timeout).map_err(|e| match e {
+        Error::Io(_) | Error::Connect { .. } if cfg!(target_os = "macos") => {
+            Error::Invalid(format!(
+                "no isb serve on {} ({e}); it runs in the isb machine: `isb machine start`, \
+                 or `isb machine init` to create it",
+                socket.display()
+            ))
+        }
         Error::Io(_) | Error::Connect { .. } => Error::Invalid(format!(
             "no isb serve on {} ({e}); start it with `isb serve`, or install it with `isb serve install`",
             socket.display()

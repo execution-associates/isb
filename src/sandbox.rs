@@ -164,7 +164,18 @@ pub fn host_facts(client: &Client) -> Result<HostFacts> {
         pools,
         path_map: HostFacts::detect_path_map(),
         initial_copy,
+        shared_root: shared_root(),
     })
+}
+
+/// On macOS incusd runs in the `isb machine` VM, which sees only `$HOME`.
+fn shared_root() -> Option<String> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let home = std::env::var_os("HOME").filter(|h| !h.is_empty())?;
+    let p = std::path::PathBuf::from(home);
+    Some(p.canonicalize().unwrap_or(p).to_string_lossy().into_owned())
 }
 
 /// Resolve a spec against this host. Relative bind paths anchor at `base`.
