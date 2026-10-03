@@ -135,7 +135,8 @@ pub struct HistoryQuery {
     pub org: Option<String>,
     pub platform: bool,
     /// A name the row is about: an instance, image, volume, stack, app,
-    /// service. Substring, or the whole name with `exact`.
+    /// service. Substring, or the whole name with `exact`. Markers (gaps,
+    /// restarts) are kept, so a timeline shows when nothing was watching.
     pub object: Option<String>,
     pub exact: bool,
     /// Glob on the kind (`instance-*`, `deploy.*`) or the audit action.
@@ -464,13 +465,13 @@ impl AuditLog {
             if q.exact {
                 push(
                     &mut sql,
-                    " AND (' ' || objects || ' ') LIKE ? ESCAPE '\\'",
+                    " AND ((' ' || objects || ' ') LIKE ? ESCAPE '\\' OR source = 'marker')",
                     V::Text(format!("% {} %", like_escape(o))),
                 );
             } else {
                 push(
                     &mut sql,
-                    " AND objects LIKE ? ESCAPE '\\'",
+                    " AND (objects LIKE ? ESCAPE '\\' OR source = 'marker')",
                     V::Text(format!("%{}%", like_escape(o))),
                 );
             }
@@ -677,33 +678,41 @@ impl AuditLog {
             let q = Query {
                 org: it.org.clone(),
                 platform: it.org.is_none(),
+                // An audit row is written when its call returns, so a
+                // long call (a deploy that waits) lands after what it did.
                 since: Some(it.time - 120_000),
-                until: Some(it.time + 1),
+                until: Some(it.time + 120_000),
                 outcome: Some("ok".into()),
                 limit: Some(200),
                 ..Default::default()
             };
-            let cause = self.list(&q, av)?.into_iter().find(|e| {
-                let names: Vec<&str> = e
-                    .target
-                    .iter()
-                    .map(String::as_str)
-                    .chain(
-                        ["name", "app", "stack", "project", "service"]
-                            .iter()
-                            .filter_map(|k| e.details.get(*k).and_then(Value::as_str)),
-                    )
-                    .filter(|n| n.len() >= 2)
-                    .collect();
-                e.action != "audit_list" && names.iter().any(|n| inst.contains(n))
-            });
-            if let Some(e) = cause {
+            let mut related: Vec<Entry> = self
+                .list(&q, av)?
+                .into_iter()
+                .filter(|e| {
+                    let names: Vec<&str> = e
+                        .target
+                        .iter()
+                        .map(String::as_str)
+                        .chain(
+                            ["name", "app", "stack", "project", "service"]
+                                .iter()
+                                .filter_map(|k| e.details.get(*k).and_then(Value::as_str)),
+                        )
+                        .filter(|n| n.len() >= 2)
+                        .collect();
+                    e.action != "audit_list" && names.iter().any(|n| inst.contains(n))
+                })
+                .collect();
+            // The nearest call before the event, else the nearest after it.
+            related.sort_by_key(|e| (e.time > it.time, (it.time - e.time).abs()));
+            if let Some(e) = related.into_iter().next() {
                 it.inferred = Some(json!({
                     "audit_id": e.id,
                     "action": e.action,
                     "actor": e.actor,
                     "seconds_before": (it.time - e.time) as f64 / 1000.0,
-                    "why": "inferred: an audit row in the same org shortly before, naming this instance's stack or app",
+                    "why": "inferred by time and name: an audit row in the same org within two minutes (written when its call returned) naming this instance's stack or app",
                 }));
             }
         }
@@ -981,6 +990,28 @@ pub fn rfc3339_ms(s: &str) -> Option<i64> {
     Some(((days * 86400 + h * 3600 + mi * 60 + se) - offset * 60) * 1000 + ms)
 }
 
+/// Unix ms as `2026-10-03 09:45:24Z`.
+pub fn fmt_ms(ms: i64) -> String {
+    let secs = ms.div_euclid(1000);
+    let (days, rem) = (secs.div_euclid(86400), secs.rem_euclid(86400));
+    // Civil from days (Howard Hinnant).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!(
+        "{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
+}
+
 /// A marker row: what the daemon itself saw (started, stopped, a gap).
 pub fn marker(kind: &str, message: String, details: Value) -> NewRecord {
     NewRecord {
@@ -1195,7 +1226,11 @@ pub fn watch_incus(client: crate::client::Client, rec: Arc<Recorder>, stop: Arc<
                     let to = crate::audit::now_ms();
                     rec.record(marker(
                         "incus.gap",
-                        format!("incus events between {from} and {to} were not observed: {why}"),
+                        format!(
+                            "incus events between {} and {} were not observed: {why}",
+                            fmt_ms(from),
+                            fmt_ms(to)
+                        ),
                         json!({"from": from, "to": to, "reason": why}),
                     ));
                 }
@@ -1396,6 +1431,11 @@ mod tests {
 
     #[test]
     fn rfc3339() {
+        assert_eq!(fmt_ms(951_868_800_500), "2000-03-01 00:00:00Z");
+        assert_eq!(
+            fmt_ms(rfc3339_ms("2026-10-03T09:45:24Z").unwrap()),
+            "2026-10-03 09:45:24Z"
+        );
         assert_eq!(rfc3339_ms("1970-01-01T00:00:00Z"), Some(0));
         assert_eq!(rfc3339_ms("1970-01-01T00:00:01.5Z"), Some(1500));
         assert_eq!(rfc3339_ms("2000-03-01T00:00:00Z"), Some(951_868_800_000));

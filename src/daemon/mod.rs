@@ -371,8 +371,9 @@ fn history_start(
         rec.record(marker(
             "incus.gap",
             format!(
-                "incus events between {} and {now} were not observed: {reason}",
-                l.time
+                "incus events between {} and {} were not observed: {reason}",
+                crate::history::fmt_ms(l.time),
+                crate::history::fmt_ms(now),
             ),
             json!({"from": l.time, "to": now, "reason": reason}),
         ));

@@ -3619,11 +3619,17 @@ fn history_cmd(a: HistoryArgs) -> Result<u8> {
         let ms = i.time.rem_euclid(1000);
         let mut msg = i.message.clone().unwrap_or_default();
         if let Some(inf) = &i.inferred {
+            let s = inf["seconds_before"].as_f64().unwrap_or(0.0);
+            // A call is logged when it returns, so it can come after.
+            let when = if s >= 0.0 {
+                format!("logged {s:.0}s before")
+            } else {
+                format!("logged {:.0}s later", -s)
+            };
             msg = format!(
-                "{msg}[inferred: {} by {} {:.0}s before]",
+                "{msg}[inferred: {} by {}, {when}]",
                 inf["action"].as_str().unwrap_or(""),
                 inf["actor"].as_str().unwrap_or(""),
-                inf["seconds_before"].as_f64().unwrap_or(0.0)
             );
         }
         if msg.chars().count() > 90 {

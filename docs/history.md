@@ -73,10 +73,14 @@ any project isb does not manage.
 - **Retention**: rows older than `--history-retention` (default `365d`)
   are pruned at start and hourly, and past `--history-max-rows` (default
   5,000,000) the oldest go first. Pruning keeps the chain anchored.
-- **Disk use, measured on titan** (about 40 instances, other users'
-  sandboxes busy, one 2-replica test stack): see the numbers in the P5.3
-  report; a row is about 0.6 KB on disk, so the default bound is about 3 GB
-  at most.
+- **Disk use, measured on titan** (39 instances in several projects, other
+  people's sandboxes busy, one 2-replica test stack, 2026-10-03): without
+  folding, isb's own probes alone made about 48 rows a minute (about 70,000
+  a day for one small stack); with folding, 1.3 rows a minute over an
+  8-minute quiet stretch, plus one summary row per routine kind, instance
+  and program each hour, so a few thousand rows a day. A row takes about
+  1.5 KB on disk with its indexes and the WAL, so that is a few MB a day,
+  and the default bound (5,000,000 rows) caps the table at roughly 7 GB.
 
 ## Queries
 
@@ -104,13 +108,20 @@ isb history [--object NAME [--exact]] [--org ORG | --platform] [--source incus,a
 isb history --export [filters]       every match as JSON lines, oldest first
 ```
 
-For example, who deleted the `dev-base` alias and when:
+For example, who created and deleted an image alias, and when (markers
+are part of every object's timeline, so the stretches nobody watched show):
 
 ```text
-$ isb history --object dev-base --exact
-TIME                     SOURCE  ORG  KIND                 OBJECT    ACTOR    LEVEL  MESSAGE
-2026-10-03 09:38:58.512  incus   -    image-alias-deleted  dev-base  stephan
+$ isb history --object isbtest-p53-dev-base --exact
+TIME                     SOURCE  ORG  KIND                 OBJECT                ACTOR    LEVEL  MESSAGE
+2026-10-03 09:38:57.310  incus   -    image-alias-deleted  isbtest-p53-dev-base  stephan
+2026-10-03 09:38:56.248  incus   -    image-alias-created  isbtest-p53-dev-base  stephan
+2026-10-03 09:38:37.541  marker  -    serve.started                              isb      info   isb serve 0.7.0 started
 ```
+
+The incus requestor is the unix user behind the socket, so changes isb
+makes show its own user too (the daemon runs as one); the controller
+events and the inferred audit row say which were isb's.
 
 ## The web UI
 

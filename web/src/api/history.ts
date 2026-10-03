@@ -67,7 +67,7 @@ export function itemMatches(i: HistoryItem, f: HistoryFilters): boolean {
   if (f.source && !f.source.split(",").map((s) => s.trim()).includes(i.source)) return false;
   if (f.kind && !globRegExp(f.kind.trim()).test(i.kind)) return false;
   if (f.actor && !globRegExp(f.actor.trim()).test(i.actor ?? "")) return false;
-  if (f.object) {
+  if (f.object && i.source !== "marker") {
     const o = f.object.trim();
     const names = [i.object, ...Object.values(i.details ?? {}).filter((v) => typeof v === "string")] as (string | null)[];
     if (!names.some((n) => n && (f.exact ? n === o : n.includes(o)))) return false;
