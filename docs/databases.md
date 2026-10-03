@@ -109,6 +109,10 @@ writes, reads back and deletes a small object unless `--no-test`;
 host (loopback, link-local) is refused unless the local CLI or a platform
 admin creates it, so an org cannot point the daemon at host-local services.
 
+A backup can also take a named **volume** instead of a database
+(`--volume`): its snapshot is exported and streamed the same way, and it
+restores staged beside the volume ([volumes.md](volumes.md)).
+
 **Backups** (`backup_create`): a database, a destination, a cron schedule
 ([jobs.md](jobs.md#schedules)), `keep` (default 7), `compression` (`gzip`,
 the default; `zstd`; `none`), `timezone`, `enabled`. Each run:
@@ -171,7 +175,7 @@ backup logs --restore RUN`) and emit `restore.succeeded` or
 | `database_create` | A database app (`engine`, `version`, `database`, `user`, `publish`, `env`, `resources`), deployed unless `deploy: false`. |
 | `database_list`, `database_get` | Databases with connection details; `reveal` adds the password. |
 | `backup_destination_create`, `_list`, `_delete`, `_test` | Destinations. |
-| `backup_create`, `backup_update`, `backup_delete` | Backup schedules. |
+| `backup_create`, `backup_update`, `backup_delete` | Backup schedules (`database`, or `volume`: [volumes.md](volumes.md)). |
 | `backup_list` | Schedules with last and next run; with `name`, the backup's objects. |
 | `backup_run`, `backup_runs`, `backup_run_log` | Back up now (`wait`), the history, a run's log (`restore: true` for restores). |
 | `backup_restore` | Restore into `target` (`confirm`) or `new`. |

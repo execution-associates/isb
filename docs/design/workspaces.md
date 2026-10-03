@@ -146,16 +146,22 @@ stated in one place.
 
 ### W4. The home: snapshots, backups, restore
 
-- Scheduled snapshots of the home volume (incus volume snapshots), kept N.
-- Backups to the org's existing S3 destinations, on the backups page beside
-  databases.
-- **Restore is staged, never in place**: a snapshot or backup restores into a
-  new volume mounted at `/restore/<stamp>` inside the workspace, for its
-  owner to diff and copy. That is titan-iac's `ws-rollback.sh` rule, because
-  a second writer over a live home is how work is lost.
-- Application-consistent copies of agent state (SQLite under `~/.claude`,
-  herdr's `session.json`) are a hook the image provides
-  (`/etc/isb/pre-snapshot`), not something isb knows about.
+Ships generic over an org's named volumes ([volumes.md](../volumes.md)):
+scheduled and manual snapshots with retention, volume backups to the org's
+S3 destinations beside the databases', the `/etc/isb/pre-snapshot` hook,
+and staged restores into a new volume at `/restore/<stamp>` (titan-iac's
+`ws-rollback.sh` rule: never a second writer over a live home). The Volume
+panel (`web/src/volumes/volume-panel.tsx`) is self-contained. Left for the
+workspace:
+
+- Embed `<VolumePanel org name="<org>_workspace_home" />` as the workspace
+  page's Home tab, and point `isb workspace home ...` at the volume tools.
+- Give a new workspace a default snapshot schedule for its home (proposed:
+  hourly, keep 24), and say in the create form that the image's
+  `/etc/isb/pre-snapshot` makes agent state (SQLite under `~/.claude`,
+  herdr's `session.json`) consistent; isb knows nothing about it.
+- Rebuild keeps the home and its staged restores; deleting the workspace
+  asks what to do with both.
 
 ### W5. Workspace images
 

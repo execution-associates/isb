@@ -49,8 +49,8 @@ a shell would. `user`, `cwd` and extra `env` apply to the command.
 
 ## Schedules
 
-Jobs and [backups](databases.md#backups) share one scheduler thread in the
-daemon.
+Jobs, [backups](databases.md#backups) and [volume
+snapshots](volumes.md#snapshots) share one scheduler thread in the daemon.
 
 - Five fields, `minute hour day-of-month month day-of-week`: `*`, numbers,
   ranges `a-b`, steps `*/n`, `a-b/n`, `a/n`, lists `a,b`; month and weekday

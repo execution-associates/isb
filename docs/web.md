@@ -47,6 +47,11 @@ Each org has these sections:
 - **Templates** (`/orgs/ORG/templates`): the template catalog, what the org
   deployed from it, and for platform admins the catalogs (see
   [Day 2](#day-2-databases-backups-jobs-notifications-templates-previews)).
+- **Volumes** (`/orgs/ORG/volumes`, linked from Backups): the org's named
+  volumes; one volume's page is the **Volume panel** (`web/src/volumes/`):
+  snapshots with Snapshot now, the schedule and pre-snapshot hook, the
+  volume's backups with their files, and staged restores with Discard.
+  Admins and owners act; members and viewers read ([volumes.md](volumes.md)).
 - **Backups** (`/orgs/ORG/backups`): backup destinations, every database's
   backup schedules, and the restore history.
 - **Notifications** (`/orgs/ORG/notifications`): notification channels, their

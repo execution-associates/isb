@@ -494,6 +494,30 @@ minime only runs binaries downloaded from our CI runs.
   lands; the Connect panel (SSH config, herdr line) on the workspace page;
   terminal tabs and reattach in the UI; SSH to orgs placed on a server;
   Access credentials in `isb ssh-proxy`.
+- [x] (workspaces-home) W4 the home, generic over an org's named volumes:
+  snapshots now and on a schedule (`auto-*` pruned to keep, manual kept),
+  volume backups as `backup_*` with a `volume` (snapshot, temporary copy,
+  incus export compressed and streamed to S3, retention, run logs, beside
+  database backups), the `/etc/isb/pre-snapshot` hook (timeout, output in
+  the run log, `hook_required`), staged restores into a new volume mounted
+  at `/restore/<stamp>` (detached when the instance is stopped) and their
+  discard, `volume_*` tools, `isb volume snapshot|restore|restores|discard`,
+  the Volume panel and Volumes pages, admins-and-owners writes, org
+  projects allowing snapshots and exports (docs/volumes.md).
+  **Verified** on titan (scratch daemon, org `volh`, a dev-base instance
+  with a volume, RustFS as the S3 store): hook ran and its output logged; a
+  per-minute schedule pruned to keep 2 with the manual snapshot kept; a
+  5 s hook timeout reported and the snapshot taken, then refused with
+  `hook_required`; write, snapshot, change, staged restore, `diff -r`
+  showed the old file at `/restore/<stamp>` with ownership kept and the
+  live volume untouched; backup to RustFS, retention to 2, restore from the
+  bucket staged and diffed; restore while stopped left detached; discard
+  refused a volume that was not a staged restore; the UI restored a backup
+  file staged.
+- [ ] W4 follow-ups: the workspace's Home tab embeds the Volume panel on
+  `<org>_workspace_home` with a default schedule once W1 lands; volume
+  snapshots and backups for orgs placed on a server (tools forward, not
+  verified); a restore's byte count in its run record.
 
 ## Log
 

@@ -102,7 +102,9 @@ host:
 - the org's own bridge is the only network;
 - each instance gets its own uid range (`security.idmap.isolated`), and only
   the daemon's own uid may be mapped 1:1 (so `idmap: auto` keeps bind-mounted
-  files writable).
+  files writable);
+- snapshots and exports are allowed (`restricted.snapshots`,
+  `restricted.backups`): isb takes them for [volumes](volumes.md).
 
 `--cpus`, `--memory`, `--disk` and `--instances` limit the org as a whole.
 Once a project has limits, incus wants limits on every instance, so the org's

@@ -14,6 +14,8 @@ isb ls [--label k[=v]] [--json]            list, filtered by label
 isb inspect NAME [--json]
 isb exec NAME|SERVICE [-u USER] [-w DIR] [-e K=V] [-l] [-t|-T] [-n] [--timeout D] -- ARGV...
 isb volume create|ls|inspect|rm
+isb volume show NAME | snapshot create|ls|rm|schedule|runs|logs NAME   through isb serve, --org ORG (docs/volumes.md)
+isb volume restore NAME (--snapshot S | --backup B [--key K]) [--instance I] | restores [NAME] | discard NAME STAMP
 isb port add NAME SPEC [--name DEV] [--search N]   prints the listen address in use
 isb port get NAME DEV [KEY]                prints one property, default: listen
 isb port rm NAME DEV... | isb port ls NAME [--json]
@@ -94,7 +96,7 @@ isb backup dest create NAME --endpoint URL --bucket B [--region R] [--prefix P] 
               (--access-key ID | --access-key-secret S --secret-key-secret S) [--create-bucket] [--no-test]
                                            the secret key comes from $ISB_S3_SECRET_KEY or stdin
 isb backup dest ls [--json] | rm NAME | test NAME
-isb backup create NAME --database DB --destination D --schedule CRON [--keep N]
+isb backup create NAME (--database DB | --volume V) --destination D --schedule CRON [--keep N]
               [--compression gzip|zstd|none] [--timezone +HH:MM]
 isb backup update NAME [--schedule CRON] [--keep N] [--destination D] [--enable|--disable]
 isb backup ls [--json] | files NAME [--json] | rm NAME

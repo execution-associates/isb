@@ -52,7 +52,7 @@ token deploys an app.
 | `build` | Git sources only: `{builder: {type: railpack \| nixpacks \| dockerfile (path, target) \| buildpacks (builder)}, args: {K: V}, untrusted: true}`. `untrusted` (the default) builds in a VM. |
 | `env` | `.env` text, or a map `{KEY: value \| {secret: NAME}}`. |
 | `domains` | `[{host, path?, port?, https?, redirect?}]` for the ingress; `port` defaults to the app's `port`. |
-| `volumes` | Named volumes, `NAME:/path[:ro]`: the incus volume `<app>_<NAME>` (app names are unique per org), shared by the app's replicas. Host paths are not allowed. |
+| `volumes` | Named volumes, `NAME:/path[:ro]`: the incus volume `<app>_<NAME>` (app names are unique per org), shared by the app's replicas. Host paths are not allowed. Snapshots, backups and staged restores: [volumes.md](volumes.md). |
 | `ports` | Published host ports in compose syntax (`127.0.0.1:8080:80`), load-balanced over healthy replicas. |
 | `replicas` | Default 1. |
 | `port` | The port the app listens on. |
