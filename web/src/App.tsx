@@ -16,6 +16,7 @@ import { HostPage } from "@/pages/host";
 import { OrgHistoryPage } from "@/pages/history";
 import { OrgPage } from "@/pages/org";
 import { MembersPage } from "@/pages/org-members";
+import { McpHome, McpPage } from "@/pages/org-mcp";
 import { SecretsPage } from "@/pages/org-secrets";
 import { SettingsPage } from "@/pages/org-settings";
 import { ForgotPasswordPage, ResetPasswordPage } from "@/pages/password-reset";
@@ -66,6 +67,8 @@ export function App() {
               {appRoutes()}
               {day2Routes()}
               <Route path="/orgs/:org/members" element={<MembersPage />} />
+              <Route path="/orgs/:org/agents" element={<McpPage />} />
+              <Route path="/agents" element={<McpHome />} />
               <Route path="/orgs/:org/secrets" element={<SecretsPage />} />
               <Route path="/orgs/:org/settings" element={<SettingsPage />} />
               <Route path="/orgs/:org/history" element={<OrgHistoryPage />} />

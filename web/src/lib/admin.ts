@@ -60,6 +60,14 @@ export const ACCESS: { value: Access; label: string; hint: string }[] = [
   { value: "tools", label: "Only some tools", hint: "Tools whose names match, e.g. app_* stack_status." },
 ];
 
+/** Token lifetimes the UI offers. */
+export const EXPIRY = [
+  { value: "30d", label: "30 days" },
+  { value: "90d", label: "90 days" },
+  { value: "365d", label: "1 year" },
+  { value: "never", label: "Never" },
+];
+
 /** The scopes for a choice, or a problem with the tool list. */
 export function scopesFor(access: Access, tools: string): { scopes: string[] } | { error: string } {
   if (access === "full") return { scopes: [] };

@@ -21,7 +21,7 @@ of it) in a browser:
   memberships, or every org for a platform admin; switching keeps the
   section you are in), a search button, the selected org's sections (Org:
   Overview, Projects, Templates, Backups, Notifications; Manage: Members,
-  Secrets, Settings, History), Platform for platform admins, and your
+  MCP, Secrets, Settings, History), Platform for platform admins, and your
   account menu (account, theme, sign out). The page sits in a panel with a
   top bar that holds its breadcrumbs (the last two on a phone) and the
   state of the live event stream.
@@ -32,7 +32,7 @@ of it) in a browser:
   lists Deploy/Redeploy for each app (writers only), which opens the
   deployment live. `G` then a letter jumps to a section anywhere outside a
   text field: `G O` Overview, `G P` Projects, `G T` Templates, `G B`
-  Backups, `G N` Notifications, `G M` Members, `G S` Secrets, `G ,`
+  Backups, `G N` Notifications, `G M` Members, `G A` MCP, `G S` Secrets, `G ,`
   Settings, `G H` History. **Account** changes your password, links and
   unlinks providers, adds and deletes passkeys, makes and revokes API tokens
   (shown once), and lists your sessions.
@@ -58,6 +58,28 @@ Each org has these sections:
   out viewer, member and admin, only an owner touches an owner, and the
   last owner stays. Anyone can leave. A viewer sees the org but changes
   nothing; the server refuses what the UI still offers them.
+- **MCP** (`/orgs/ORG/agents`; `/orgs/ORG/mcp` is the endpoint itself):
+  how to connect an agent. The org endpoint's URL (`/orgs/ORG/mcp` on the
+  origin the page is open at), a form that makes an API token for the org
+  (name, Access, expiry; the server's rules: members, viewers with a
+  read-only reach, platform admins; not an accountless superadmin or a
+  narrowed token) and shows it once, and install snippets with copy
+  buttons for Claude Code (`claude mcp add` and `.mcp.json`), Codex
+  (`codex mcp add` and `config.toml`), Cursor and other `mcpServers`
+  clients, and a `curl` `tools/list` test. The snippets read the token
+  from `ISB_TOKEN`, and the token just made fills the `export` line. A
+  switch adds Cloudflare Access service token headers for an address
+  behind Access (on by default for one that is not localhost or the
+  tailnet). The tools the endpoint lists (`GET /api/v1/tools`) fold out
+  below, and a note says claude.ai and Claude Desktop connectors need
+  Access Managed OAuth ([serve.md](serve.md#remote-mcp-through-cloudflare-tunnel-and-access)).
+  A superadmin also sees the unbound `/mcp` endpoint, with a warning that
+  it is root on the host, and for each source (a token minted on the host
+  with `isb token create NAME --superadmin`, a `--superadmin-tailnet`
+  identity with the allow list and tailnet URL from `host_policy`, a
+  `--superadmin-access` identity) whether it is on and its snippets; the
+  web makes no superadmin token. `/agents` opens the remembered org's
+  page, or the superadmin part alone when there is no org.
 - **Secrets** (`/orgs/ORG/secrets`): the org's secrets with driver, version,
   update time, labels and the stacks using each, plus the driver references
   stacks read (refresh one to check it now). Create one or give it a new

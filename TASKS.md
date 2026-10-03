@@ -425,6 +425,11 @@ minime only runs binaries downloaded from our CI runs.
   **Verify:** end to end in the browser.
 - [x] (e7b84ec, d00c451) P3.4 Org admin: members, invitations, roles, API tokens, secrets editor,
   settings. **Verify:** invite a second user and sign in as them.
+- [x] P3.5 MCP page (`/orgs/ORG/agents`, `G A`): the org endpoint, a token
+  for the agent, install snippets (Claude Code, Codex, Cursor, curl), the
+  tool list, and for superadmins the `/mcp` endpoint and its sources.
+  **Verify:** the page's curl snippet lists the tools of a scratch daemon
+  with a token made the page's way; screenshots as owner and superadmin.
 
 ## Phase 4: day 2
 

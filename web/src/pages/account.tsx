@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fingerprint, KeyRound, Laptop, Link2, Loader2, LockKeyhole, Plus, Trash2, User } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { type ApiToken, auth, type Me } from "@/api/auth";
 import { ApiError } from "@/api/client";
@@ -17,7 +17,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ACCESS, type Access, describeScopes, scopesFor } from "@/lib/admin";
+import { ACCESS, type Access, describeScopes, EXPIRY, scopesFor } from "@/lib/admin";
 import { dateTime, describeAgent, relativeTime } from "@/lib/format";
 import { errorMessage, signInErrorMessage } from "@/lib/messages";
 import { useMe, useProviders } from "@/lib/session";
@@ -469,12 +469,6 @@ function Passkeys() {
   );
 }
 
-const EXPIRY = [
-  { value: "30d", label: "30 days" },
-  { value: "90d", label: "90 days" },
-  { value: "365d", label: "1 year" },
-  { value: "never", label: "Never" },
-];
 const PLATFORM = "__platform__";
 
 function Tokens({ me }: { me: Me }) {
@@ -583,7 +577,11 @@ function Tokens({ me }: { me: Me }) {
                 {created.info.org ? (
                   <>
                     Reaches org <span className="font-medium text-foreground">{created.info.org}</span>; its MCP endpoint
-                    is <code className="font-mono text-xs">/orgs/{created.info.org}/mcp</code>.
+                    is <code className="font-mono text-xs">/orgs/{created.info.org}/mcp</code> (see{" "}
+                    <Link to={`/orgs/${encodeURIComponent(created.info.org)}/agents`} className="text-foreground underline-offset-4 hover:underline" onClick={() => close(false)}>
+                      MCP
+                    </Link>
+                    ).
                   </>
                 ) : (
                   "A platform token: it reaches every org you can."

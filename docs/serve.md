@@ -58,6 +58,8 @@ org. API tokens can be narrowed with scopes (`read`, `deploy`, `admin`,
   or the web UI) are how agents sign in. A token made for an org reaches only
   that org, which is what an agent running inside the org should hold:
   `isb token create agent --org ocai`, then point it at `/orgs/ocai/mcp`.
+  The web UI's MCP page (`/orgs/ocai/agents`) makes the token and writes
+  the client configuration ([web.md](web.md)).
 - **Sessions** (the `isb_session` cookie from `POST /api/v1/auth/login`) are
   how the web UI signs in. Cookie-authenticated writes must carry
   `X-Isb-Csrf: 1`.
