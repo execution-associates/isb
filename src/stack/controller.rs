@@ -666,6 +666,9 @@ struct Worker {
     template: Option<(String, Desired)>,
     state: String,
     message: Option<String>,
+    /// `depends_on` was met once: from then on the service is reconciled
+    /// whatever its dependencies do.
+    deps_met: bool,
 }
 
 fn spawn_worker(inner: Arc<Inner>, stack: String, service: String, shared: Arc<WorkerShared>) {
@@ -684,6 +687,7 @@ fn spawn_worker(inner: Arc<Inner>, stack: String, service: String, shared: Arc<W
             template: None,
             state: "starting".into(),
             message: None,
+            deps_met: false,
         };
         w.run();
     });
@@ -716,7 +720,16 @@ impl Worker {
             };
             if remove {
                 self.teardown(&def, remove_volumes);
-                return;
+                // The service may have been deployed again meanwhile: then
+                // this worker carries on instead of leaving it unattended.
+                let mut ws = self.inner.workers.lock().unwrap();
+                let slot = self.shared.slot.lock().unwrap();
+                if slot.remove || self.shared.stop.load(Ordering::SeqCst) {
+                    ws.remove(&self.key());
+                    self.inner.status.lock().unwrap().remove(&self.key());
+                    return;
+                }
+                continue;
             }
             if let Err(e) = self.pass(&def) {
                 self.state = "failing".into();
@@ -758,8 +771,8 @@ impl Worker {
         if volumes {
             self.remove_volumes(def);
         }
-        self.inner.status.lock().unwrap().remove(&self.key());
-        self.inner.workers.lock().unwrap().remove(&self.key());
+        self.rt.clear();
+        self.template = None;
     }
 
     fn remove_volumes(&self, def: &StackDef) {
@@ -804,11 +817,14 @@ impl Worker {
         let oci = crate::plan::ImageSource::parse(&spec.image)?.is_oci();
         let probe = spec.health_probe().map_err(Error::invalid)?;
 
-        if let Some(msg) = self.waiting_for(&spec) {
-            self.state = "waiting".into();
-            self.message = Some(msg);
-            self.publish_status(def, &[]);
-            return Ok(());
+        if !self.deps_met {
+            if let Some(msg) = self.waiting_for(&spec) {
+                self.state = "waiting".into();
+                self.message = Some(msg);
+                self.publish_status(def, &[]);
+                return Ok(());
+            }
+            self.deps_met = true;
         }
         if self.template.as_ref().is_none_or(|(r, _)| *r != rev) {
             let mut s = instance_spec(def, &self.service, &spec, 1, &rev)?;
