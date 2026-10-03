@@ -56,8 +56,16 @@ nothing. Sparklines show the last minute or so: CPU as a percentage of one
 core (four busy cores read 400%), traffic as new connections per second
 through the balancer. `LB ⇄` marks a replica the balancer sends traffic to.
 
+The header's `disk` is the incus storage pools' used and total space (pools
+on one filesystem, such as several `dir` pools, count once), re-read every
+30 seconds; it needs a terminal at least 130 columns wide. A replica's `DISK`
+and a sandbox's `disk` are its root disk's usage, which only some storage
+drivers report (ZFS, Btrfs, LVM); on a `dir` pool they show `-` and are left
+out.
+
 Columns give way as the terminal narrows: image, revision and traffic in the
-service table, then IP, rotation and restarts in the replica table.
+service table, then IP, rotation and restarts, then disk, in the replica
+table.
 
 ## Keys
 

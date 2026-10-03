@@ -24,6 +24,8 @@ pub struct Host {
     pub cpu_history: Vec<f32>,
     pub mem_used: u64,
     pub mem_total: u64,
+    pub disk_used: u64,
+    pub disk_total: u64,
     pub load1: f32,
 }
 
@@ -99,6 +101,7 @@ pub struct Replica {
     pub cpu_pct: Option<f32>,
     pub cpu_history: Vec<f32>,
     pub mem_bytes: Option<u64>,
+    pub disk_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -147,6 +150,7 @@ pub struct Sandbox {
     pub cpu_pct: Option<f32>,
     pub cpu_history: Vec<f32>,
     pub mem_bytes: Option<u64>,
+    pub disk_bytes: Option<u64>,
     pub labels: std::collections::BTreeMap<String, String>,
     pub image: String,
     pub created_at: String,
@@ -195,6 +199,7 @@ impl From<InstanceSample> for Sandbox {
             cpu_pct: i.cpu_pct,
             cpu_history: i.cpu_history,
             mem_bytes: i.mem_bytes,
+            disk_bytes: i.disk_bytes,
             labels: i.labels,
             image: i.image,
             created_at: i.created_at,
@@ -212,6 +217,8 @@ impl From<HostSample> for Host {
             cpu_history: h.cpu_history,
             mem_used: h.mem_used,
             mem_total: h.mem_total,
+            disk_used: h.disk_used,
+            disk_total: h.disk_total,
             load1: h.load1,
         }
     }

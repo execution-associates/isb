@@ -1,13 +1,13 @@
-//! Live numbers for dashboards: the host's CPU and memory, and every
-//! instance's status, address, CPU and memory, each with a short history for
-//! sparklines.
+//! Live numbers for dashboards: the host's CPU, memory and storage, and
+//! every instance's status, address, CPU, memory and disk, each with a short
+//! history for sparklines.
 //!
 //! One `GET /1.0/instances?recursion=2` per sample. CPU is a rate, so it needs
 //! two samples: the first one reports none. Instance CPU is a percentage of
 //! one core, as `docker stats` shows it (four busy cores read 400%).
 
 use std::collections::{BTreeMap, VecDeque};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -27,6 +27,10 @@ pub struct HostSample {
     pub cpu_history: Vec<f32>,
     pub mem_used: u64,
     pub mem_total: u64,
+    /// incus storage pools, used and total bytes. Pools on one filesystem
+    /// (several `dir` pools, say) are counted once.
+    pub disk_used: u64,
+    pub disk_total: u64,
     pub load1: f32,
 }
 
@@ -41,6 +45,9 @@ pub struct InstanceSample {
     pub cpu_pct: Option<f32>,
     pub cpu_history: Vec<f32>,
     pub mem_bytes: Option<u64>,
+    /// The root disk's usage, where the storage driver reports it (ZFS,
+    /// Btrfs, LVM; not `dir`).
+    pub disk_bytes: Option<u64>,
     /// `user.*` config keys without the prefix, isb's own included.
     pub labels: BTreeMap<String, String>,
     pub image: String,
@@ -66,7 +73,13 @@ pub struct Sampler {
     hist: BTreeMap<String, VecDeque<f32>>,
     host_cpu: Option<(u64, u64)>,
     host_hist: VecDeque<f32>,
+    /// Pool usage moves slowly and costs a request per pool: refreshed every
+    /// [`POOLS_EVERY`].
+    pools: Option<(Instant, (u64, u64))>,
 }
+
+/// How often storage pool usage is re-read.
+const POOLS_EVERY: Duration = Duration::from_secs(30);
 
 fn push(h: &mut VecDeque<f32>, v: f32) {
     if h.len() == HISTORY {
@@ -97,6 +110,16 @@ impl Sampler {
             .collect();
         self.cpu.retain(|k, _| keys.contains(k));
         self.hist.retain(|k, _| keys.contains(k));
+        if self
+            .pools
+            .is_none_or(|(at, _)| now.duration_since(at) >= POOLS_EVERY)
+        {
+            // Storage is a nicety: a pool that cannot be read leaves the
+            // last numbers in place rather than failing the sample.
+            if let Ok(p) = pools(client) {
+                self.pools = Some((now, p));
+            }
+        }
         Ok((self.host(), out))
     }
 
@@ -163,6 +186,11 @@ impl Sampler {
             cpu_pct,
             cpu_history: h.iter().copied().collect(),
             mem_bytes: state["memory"]["usage"].as_u64().filter(|_| running),
+            // -1 (or 0) when the driver cannot tell.
+            disk_bytes: state["disk"]["root"]["usage"]
+                .as_i64()
+                .filter(|u| *u > 0)
+                .map(|u| u as u64),
             name,
             status,
             kind,
@@ -196,9 +224,44 @@ impl Sampler {
             h.mem_total = total;
             h.mem_used = total.saturating_sub(avail);
         }
+        if let Some((_, (used, total))) = self.pools {
+            h.disk_used = used;
+            h.disk_total = total;
+        }
         h.load1 = sys::load1().unwrap_or(0.0);
         h
     }
+}
+
+/// Used and total bytes over every storage pool.
+fn pools(client: &Client) -> Result<(u64, u64)> {
+    let names = client.get("/1.0/storage-pools")?;
+    let mut spaces = Vec::new();
+    for url in names
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+    {
+        let name = url.rsplit('/').next().unwrap_or_default();
+        let r = client.get(&format!("/1.0/storage-pools/{name}/resources"))?;
+        spaces.push((
+            r["space"]["used"].as_u64().unwrap_or(0),
+            r["space"]["total"].as_u64().unwrap_or(0),
+        ));
+    }
+    Ok(sum_pools(spaces))
+}
+
+/// Pools that share a filesystem report the same total: count it once (with
+/// the larger used, as their reads are a moment apart).
+fn sum_pools(spaces: Vec<(u64, u64)>) -> (u64, u64) {
+    let mut by_total: BTreeMap<u64, u64> = BTreeMap::new();
+    for (used, total) in spaces.into_iter().filter(|(_, t)| *t > 0) {
+        let u = by_total.entry(total).or_default();
+        *u = (*u).max(used);
+    }
+    (by_total.values().sum(), by_total.keys().sum())
 }
 
 /// Host counters from /proc.
@@ -431,5 +494,24 @@ mod tests {
         let b = s.instance(&inst(1_500_000_000), t0 + std::time::Duration::from_secs(1));
         assert!((b.cpu_pct.unwrap() - 50.0).abs() < 0.1, "{b:?}");
         assert_eq!(b.cpu_history.len(), 2);
+        assert_eq!(b.disk_bytes, None, "no disk state: unknown");
+    }
+
+    #[test]
+    fn disk_usage() {
+        let mut s = Sampler::new();
+        let inst = |usage: i64| {
+            json!({"name": "a", "status": "Stopped", "type": "container",
+                   "state": {"disk": {"root": {"usage": usage, "total": 0}}}})
+        };
+        // Reported for stopped instances too; `dir` pools say -1.
+        assert_eq!(
+            s.instance(&inst(5 << 20), Instant::now()).disk_bytes,
+            Some(5 << 20)
+        );
+        assert_eq!(s.instance(&inst(-1), Instant::now()).disk_bytes, None);
+        // Two `dir` pools on one filesystem count once; a second disk adds.
+        assert_eq!(sum_pools(vec![(60, 100), (61, 100)]), (61, 100));
+        assert_eq!(sum_pools(vec![(60, 100), (5, 50), (0, 0)]), (65, 150));
     }
 }

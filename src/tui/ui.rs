@@ -177,6 +177,20 @@ fn header(f: &mut Frame, app: &App, area: Rect) {
                 t.bold(),
             ),
         ]);
+        // An older daemon sends no storage numbers: leave it out.
+        if h.disk_total > 0 && area.width >= 130 {
+            stats.extend([
+                Span::styled("   disk ", t.dim()),
+                Span::styled(
+                    bar(h.disk_used as f64 / h.disk_total as f64, 10),
+                    t.accent(),
+                ),
+                Span::styled(
+                    format!(" {}/{}", bytes(h.disk_used), bytes(h.disk_total)),
+                    t.bold(),
+                ),
+            ]);
+        }
     }
     if area.width >= 120 {
         stats.push(Span::styled(format!("   load {:.1}", h.load1), t.dim()));
@@ -660,6 +674,7 @@ struct ReplicaCols {
     status: bool,
     spark: bool,
     mem: bool,
+    disk: bool,
     ip: bool,
     lb: bool,
 }
@@ -670,6 +685,7 @@ impl ReplicaCols {
             status: w >= 60,
             spark: w >= 76,
             mem: w >= 66,
+            disk: w >= 84,
             ip: w >= 92,
             lb: w >= 100,
         }
@@ -686,6 +702,9 @@ impl ReplicaCols {
         }
         v.push(Constraint::Length(if self.spark { 16 } else { 5 }));
         if self.mem {
+            v.push(Constraint::Length(6));
+        }
+        if self.disk {
             v.push(Constraint::Length(6));
         }
         if self.lb {
@@ -706,6 +725,9 @@ impl ReplicaCols {
         v.push("CPU");
         if self.mem {
             v.push("MEM");
+        }
+        if self.disk {
+            v.push("DISK");
         }
         if self.lb {
             v.extend(["LB", "↻"]);
@@ -765,6 +787,12 @@ fn replica_row<'a>(t: &Theme, r: &Replica, c: &ReplicaCols) -> Row<'a> {
     if c.mem {
         cells.push(Cell::from(Span::styled(
             r.mem_bytes.map(bytes).unwrap_or_else(|| "-".into()),
+            t.fg(),
+        )));
+    }
+    if c.disk {
+        cells.push(Cell::from(Span::styled(
+            r.disk_bytes.map(bytes).unwrap_or_else(|| "-".into()),
             t.fg(),
         )));
     }
@@ -837,6 +865,9 @@ fn sandbox(f: &mut Frame, app: &App, s: &Sandbox, area: Rect) {
                 t.bold(),
             )],
         ));
+    }
+    if let Some(d) = s.disk_bytes {
+        lines.push(kv("disk", vec![Span::styled(bytes(d), t.bold())]));
     }
     lines.push(kv(
         "created",
@@ -1321,6 +1352,7 @@ mod tests {
             cpu_pct: Some(n as f32 * 3.0),
             cpu_history: (0..20).map(|i| ((i * n) % 7) as f32).collect(),
             mem_bytes: Some(80 * 1024 * 1024 + n as u64 * 3_000_000),
+            disk_bytes: Some(410 * 1024 * 1024 + n as u64 * 1_000_000),
         };
         Overview {
             isb: "0.7.0".into(),
@@ -1331,6 +1363,8 @@ mod tests {
                 cpu_history: (0..30).map(|i| (i % 9) as f32 * 4.0).collect(),
                 mem_used: 18 * 1024 * 1024 * 1024,
                 mem_total: 251 * 1024 * 1024 * 1024,
+                disk_used: 588 * 1024 * 1024 * 1024,
+                disk_total: 902 * 1024 * 1024 * 1024,
                 load1: 2.4,
             },
             stacks: vec![
@@ -1433,6 +1467,7 @@ mod tests {
                     cpu_pct: Some(140.0),
                     cpu_history: (0..30).map(|i| (i % 6) as f32 * 30.0).collect(),
                     mem_bytes: Some(4 * 1024 * 1024 * 1024),
+                    disk_bytes: Some(12 * 1024 * 1024 * 1024),
                     labels: [("owner".to_string(), "me".to_string())].into(),
                     created_at: "2026-10-03T01:00:00Z".into(),
                 },
@@ -1522,6 +1557,8 @@ mod tests {
         assert!(s.contains("rolling out"), "{s}");
         assert!(s.contains("ConnectionRefusedError"), "{s}");
         assert!(s.contains("restarting its app"), "{s}");
+        assert!(s.contains("disk ") && s.contains("588G/902G"), "{s}");
+        assert!(s.contains("DISK") && s.contains("411M"), "{s}");
 
         a.focus = Focus::Sidebar;
         a.sel = 2;
@@ -1529,6 +1566,7 @@ mod tests {
         dump("sandbox-100x30", &s);
         assert!(s.contains("build-box"), "{s}");
         assert!(s.contains("system container"), "{s}");
+        assert!(s.contains("12G"), "{s}");
 
         a.sel = 1;
         let s = render(&a, 80, 24);

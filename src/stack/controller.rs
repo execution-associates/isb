@@ -59,6 +59,8 @@ pub struct InstanceStatus {
     pub cpu_pct: Option<f32>,
     pub cpu_history: Vec<f32>,
     pub mem_bytes: Option<u64>,
+    /// Root disk usage, where the storage driver reports it.
+    pub disk_bytes: Option<u64>,
 }
 
 /// A published port served by the balancer.
@@ -2256,6 +2258,7 @@ impl Worker {
                     cpu_pct: m.and_then(|m| m.cpu_pct),
                     cpu_history: m.map(|m| m.cpu_history.clone()).unwrap_or_default(),
                     mem_bytes: m.and_then(|m| m.mem_bytes),
+                    disk_bytes: m.and_then(|m| m.disk_bytes),
                 }
             })
             .collect();
