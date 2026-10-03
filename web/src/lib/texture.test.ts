@@ -57,8 +57,8 @@ describe("public/theme.js", () => {
 });
 
 // The texture is theme styling only: the page never draws it over content.
-describe("ea-texture.css", () => {
-  const css = readFileSync(new URL("../ea-texture.css", import.meta.url), "utf8");
+describe.each(["ea-texture.css", "ea-gradients.css"])("%s", (file) => {
+  const css = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
   it("scopes every rule to the EA theme", () => {
     const body = css.replace(/\/\*[\s\S]*?\*\//g, "").replace(/@media[^{]*\{/g, "");
     const stray: string[] = [];

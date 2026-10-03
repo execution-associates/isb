@@ -18,6 +18,7 @@
  * All of it is scoped to `html.ea`; light and dark are untouched.
  */
 @import "./ea-ramps.css";
+@import "./ea-gradients.css";
 
 html.ea {
   --ea-peach: #febe75;
