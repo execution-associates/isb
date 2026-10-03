@@ -132,7 +132,7 @@ function InstancesTab() {
     return all
       .filter((i) => !project || i.project === project)
       .filter((i) => words.every((w) => [i.name, i.project, i.org, i.stack, i.owner, i.image, i.status, ...i.addresses].some((f) => f?.toLowerCase().includes(w))))
-      .sort((a, b) => a.project.localeCompare(b.project) || a.name.localeCompare(b.name));
+      .toSorted((a, b) => a.project.localeCompare(b.project) || a.name.localeCompare(b.name));
   }, [inv.data, q, project]);
   if (inv.error)
     return (
@@ -231,7 +231,7 @@ function InstancesTab() {
 
 function ProjectChip({ label, count, org, active, onClick }: { label: string; count: number; org?: string | null; active: boolean; onClick: () => void }) {
   return (
-    <button
+    <button type="button"
       onClick={onClick}
       aria-pressed={active}
       className={

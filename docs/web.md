@@ -338,8 +338,23 @@ cd web
 bun install --frozen-lockfile
 bun run build        # typecheck, then web/dist
 bun run test         # vitest
-bun run lint         # tsc
+bun run lint         # tsc, then oxlint
+bun run oxlint       # oxlint alone (well under a second)
 ```
+
+[oxlint](https://oxc.rs/docs/guide/usage/linter) checks correctness and
+suspicious code, React and its hooks (`rules-of-hooks`, `exhaustive-deps`),
+accessibility, imports (`no-cycle`, `no-duplicates`), vitest and promises; it
+has no style or size rules. `web/.oxlintrc.json` holds the configuration, with
+a reason beside every rule it turns off or tunes. Warnings fail the run, and so
+does a disable comment that no longer suppresses anything. An inline disable
+names its rule and says why after `--`:
+
+```ts
+// oxlint-disable-next-line react/refs -- the follower is a mutable buffer; `bump` re-renders after every change to it
+```
+
+CI runs `bun run lint`, `bun run test` and `bun run build`.
 
 `cargo build` embeds `web/dist` in the binary: `build.rs` writes a table of
 `include_bytes!` for every file in it, so the binary reads nothing from disk

@@ -118,7 +118,7 @@ export default function TerminalTab({ org, app }: { org: string; app: App }) {
       </Card>
     );
   }
-  const slots = [...svc.instances].sort((a, b) => a.slot - b.slot);
+  const slots = [...svc.instances].toSorted((a, b) => a.slot - b.slot);
   const live = state.kind === "open" || state.kind === "connecting";
   const tone: Tone = state.kind === "open" ? "success" : state.kind === "connecting" ? "info" : state.kind === "closed" ? "muted" : "neutral";
   const stateLabel = state.kind === "open" ? "Connected" : state.kind === "connecting" ? "Connecting" : state.kind === "closed" ? "Disconnected" : "Not connected";

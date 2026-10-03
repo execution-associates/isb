@@ -125,7 +125,7 @@ export function DeploymentsTab({ org, app }: { org: string; app: App }) {
       </Card>
       <ConfirmDialog
         open={rollback !== null}
-        onOpenChange={(o) => !o && setRollback(null)}
+        onOpenChange={(open) => !open && setRollback(null)}
         destructive={false}
         title={`Roll back to deployment #${rollback?.id}?`}
         description={

@@ -75,7 +75,7 @@ function capitalize(s: string): string {
 export function safeNext(next: string | null | undefined): string {
   if (!next) return "/";
   if (!next.startsWith("/") || next.startsWith("//")) return "/";
-  // eslint-disable-next-line no-control-regex
+  // eslint-disable-next-line no-control-regex -- refuses control characters in a redirect target
   if (/[\\\s\u0000-\u001f\u007f]/.test(next)) return "/";
   return next;
 }

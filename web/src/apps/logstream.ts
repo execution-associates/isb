@@ -102,7 +102,7 @@ export interface Span {
 
 const COLORS = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"];
 
-// eslint-disable-next-line no-control-regex
+// eslint-disable-next-line no-control-regex -- matches ANSI escape sequences
 const CSI = /\x1b\[([0-9;]*)([A-Za-z])/g;
 
 /** Split a line into styled spans; non-colour escape sequences are dropped. */
@@ -140,12 +140,12 @@ export function parseAnsi(line: string): Span[] {
       else if (c === 38 || c === 48) i += codes[i + 1] === 5 ? 2 : codes[i + 1] === 2 ? 4 : 0;
     }
   }
-  // eslint-disable-next-line no-control-regex
+  // eslint-disable-next-line no-control-regex -- strips ANSI escape sequences
   emit(line.slice(last).replace(/\x1b[^a-zA-Z]*[a-zA-Z]?/g, ""));
   return out;
 }
 
 export function stripAnsi(s: string): string {
-  // eslint-disable-next-line no-control-regex
+  // eslint-disable-next-line no-control-regex -- strips ANSI escape sequences
   return s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
 }

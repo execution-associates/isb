@@ -124,12 +124,12 @@ export interface DeployAnswer {
  * the answer has no first deployment (an older daemon, or its queueing
  * failed and the background run retries).
  */
-export function followOf(r: DeployAnswer): { app: string; id: number; then: string[] } | null {
+export function followOf(r: DeployAnswer): { app: string; id: number; next: string[] } | null {
   const f = r.first_deployment;
   if (!f) return null;
   const order = r.deploying ?? r.plan.order;
   const at = order.indexOf(f.app);
-  return { app: f.app, id: f.id, then: at < 0 ? order.filter((a) => a !== f.app) : order.slice(at + 1) };
+  return { app: f.app, id: f.id, next: at < 0 ? order.filter((a) => a !== f.app) : order.slice(at + 1) };
 }
 
 export interface TemplateInstance {
@@ -203,7 +203,7 @@ export function filterTemplates(all: TemplateSummary[], query: string, tag: stri
 export function tagCounts(all: TemplateSummary[]): [string, number][] {
   const m = new Map<string, number>();
   for (const t of all) for (const g of t.tags) m.set(g, (m.get(g) ?? 0) + 1);
-  return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  return [...m.entries()].toSorted((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 
 export const varLabel = (v: Variable) => v.label || v.name.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());

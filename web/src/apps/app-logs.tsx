@@ -62,7 +62,7 @@ export function LogsTab({ org, app }: { org: string; app: App }) {
     );
   }
   const instances = Object.entries(logs.data ?? {});
-  const slots = [...svc.instances].sort((a, b) => a.slot - b.slot);
+  const slots = [...svc.instances].toSorted((a, b) => a.slot - b.slot);
   const byName = new Map(slots.map((i) => [i.name, i]));
   const replicaOptions = [
     { value: "all", label: "All replicas" },

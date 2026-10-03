@@ -191,7 +191,7 @@ export function LogView({
               className="w-28 bg-transparent text-xs text-zinc-100 outline-none placeholder:text-zinc-500 sm:w-40"
             />
             {q && <span className="shrink-0 tabular-nums">{shown.length}</span>}
-            <button
+            <button type="button"
               className="rounded p-0.5 hover:bg-white/10"
               aria-label="Close find"
               onClick={() => {

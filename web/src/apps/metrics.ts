@@ -77,8 +77,8 @@ export function toGrid(series: MetricSeries[], from: number, to: number, step: n
   const n = Math.max(1, Math.ceil((to - start) / s));
   const times = Array.from({ length: n }, (_, i) => start + i * s);
   const lines: Line[] = series.map((x) => {
-    const sum = new Array<number>(n).fill(0);
-    const cnt = new Array<number>(n).fill(0);
+    const sum = Array.from({ length: n }, () => 0);
+    const cnt = Array.from({ length: n }, () => 0);
     for (const [t, v] of x.points) {
       const i = Math.floor((t - start) / s);
       if (i < 0 || i >= n || !Number.isFinite(v)) continue;

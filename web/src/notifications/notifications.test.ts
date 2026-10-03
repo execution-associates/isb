@@ -13,7 +13,7 @@ describe("notification rules", () => {
 
   it("reads saved globs into checkboxes", () => {
     expect(selectedKinds(["*"]).size).toBe(ALL_KINDS.length);
-    expect([...selectedKinds(["deploy.*", "health.unhealthy"])].sort()).toEqual(["deploy.failed", "deploy.succeeded", "health.unhealthy"]);
+    expect([...selectedKinds(["deploy.*", "health.unhealthy"])].toSorted()).toEqual(["deploy.failed", "deploy.succeeded", "health.unhealthy"]);
     expect([...selectedKinds(["*.failed"])].every((k) => k.endsWith(".failed"))).toBe(true);
   });
 
@@ -43,7 +43,8 @@ describe("channel providers", () => {
   it("builds each provider and names its secrets", () => {
     const w = providerOf("webhook", { ...f, url_secret: "HOOK", signing_secret: "KEY" });
     expect(w).toEqual({ provider: { type: "webhook", url_secret: "HOOK", signing_secret: "KEY" } });
-    if ("provider" in w) expect(providerSecrets(w.provider)).toEqual(["HOOK", "KEY"]);
+    if (!("provider" in w)) throw new Error("expected a provider");
+    expect(providerSecrets(w.provider)).toEqual(["HOOK", "KEY"]);
     expect(providerOf("slack", f)).toEqual({ error: expect.stringMatching(/secret/) });
     expect(providerOf("telegram", { ...f, token_secret: "TG" })).toEqual({ error: expect.stringMatching(/chat id/) });
   });

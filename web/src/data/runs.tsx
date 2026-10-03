@@ -178,6 +178,7 @@ export function useRunLog(fetchChunk: (offset: number) => Promise<LogReply>, key
       inflight = true;
       clearTimeout(timer);
       try {
+        // oxlint-disable-next-line eslint/no-unmodified-loop-condition -- the effect's cleanup sets `stop` while an await is pending
         for (let i = 0; i < 50 && !stop; i++) {
           const at = f.offset;
           const r = await fetchRef.current(at);
@@ -209,6 +210,7 @@ export function useRunLog(fetchChunk: (offset: number) => Promise<LogReply>, key
   }, [key]);
 
   const pull = useCallback(() => pullRef.current(), []);
+  // oxlint-disable-next-line react/refs -- the follower is a mutable buffer; `bump` re-renders after every change to it
   return { lines: follower.current.buf.lines, partial: follower.current.buf.partial, finished: follower.current.finished, error, run, pull };
 }
 

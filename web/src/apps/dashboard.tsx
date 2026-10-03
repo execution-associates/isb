@@ -430,7 +430,7 @@ const TRIGGER: Record<Deployment["trigger"], [typeof Boxes, string]> = {
 };
 
 function triggerOf(d: Deployment): [typeof Boxes, string] {
-  if (/^local\(/.test(d.by)) return [Terminal, "CLI"];
+  if (d.by.startsWith("local(")) return [Terminal, "CLI"];
   return TRIGGER[d.trigger] ?? [Rocket, d.trigger];
 }
 
@@ -439,7 +439,7 @@ function RecentDeployments({ org, apps, deps, loading }: { org: string; apps: Ap
   const info = new Map(apps.map((a) => [a.name, a]));
   const recent = [...deps.values()]
     .flat()
-    .sort((a, b) => b.created_at - a.created_at)
+    .toSorted((a, b) => b.created_at - a.created_at)
     .slice(0, 8);
   return (
     <Card className="gap-0 overflow-hidden py-0">

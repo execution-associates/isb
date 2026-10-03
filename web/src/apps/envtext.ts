@@ -203,7 +203,7 @@ export function analyzeEnv(text: string): EnvAnalysis {
       vars.set(key, value);
     }
   }
-  return { lines, problems, vars, secrets: [...secrets].sort() };
+  return { lines, problems, vars, secrets: [...secrets].toSorted() };
 }
 
 /** The secret names `text` refers to that are not in `known`. */

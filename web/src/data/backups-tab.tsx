@@ -59,9 +59,10 @@ export function BackupsTab({ org, app }: { org: string; app: { name: string } })
   const list = backups.data ?? [];
   // Restores whose target is this database, or that came from its backups.
   const mine = new Set(list.map((b) => b.backup.name));
-  const restoreRuns = (restores.data ?? []).filter(
-    (r) => r.detail?.target === app.name || (typeof r.detail?.key === "string" && [...mine].some((b) => (r.detail?.key as string).includes(`/${b}/`))),
-  );
+  const restoreRuns = (restores.data ?? []).filter((r) => {
+    const key = r.detail?.key;
+    return r.detail?.target === app.name || (typeof key === "string" && [...mine].some((b) => key.includes(`/${b}/`)));
+  });
 
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-6">

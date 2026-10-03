@@ -80,8 +80,8 @@ describe("following a template deploy", () => {
     ({ ref: "builtin/x", plan: { order: ["x-db", "x-cache", "x"] } as DeployAnswer["plan"], first_deployment: first, deploying }) as DeployAnswer;
 
   it("opens the first app's deployment and chains the rest in order", () => {
-    expect(followOf(answer({ app: "x-db", id: 4 }))).toEqual({ app: "x-db", id: 4, then: ["x-cache", "x"] });
-    expect(followOf(answer({ app: "x-db", id: 4 }, ["x-db", "x"]))).toEqual({ app: "x-db", id: 4, then: ["x"] });
+    expect(followOf(answer({ app: "x-db", id: 4 }))).toEqual({ app: "x-db", id: 4, next: ["x-cache", "x"] });
+    expect(followOf(answer({ app: "x-db", id: 4 }, ["x-db", "x"]))).toEqual({ app: "x-db", id: 4, next: ["x"] });
   });
 
   it("falls back when no deployment was queued", () => {

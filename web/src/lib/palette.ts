@@ -64,7 +64,7 @@ export function filterCommands<C extends Command>(commands: C[], query: string, 
   return commands
     .map((c, i) => ({ c, i, s: scoreCommand(query, c) }))
     .filter((x) => x.s > 0)
-    .sort((a, b) => b.s - a.s || a.i - b.i)
+    .toSorted((a, b) => b.s - a.s || a.i - b.i)
     .slice(0, limit)
     .map((x) => x.c);
 }

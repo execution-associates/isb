@@ -44,7 +44,7 @@ import { duration, imageName, shortDigest, shortSha } from "./util";
 function useFollow(org: string, app: string, id: number) {
   const qc = useQueryClient();
   const seed = qc.getQueryData<Deployment>(keys.deployment(org, app, id));
-  const follow = useMemo(() => new DeploymentFollow(seed), [org, app, id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const follow = useMemo(() => new DeploymentFollow(seed), [org, app, id]); // eslint-disable-line react-hooks/exhaustive-deps -- a new follower per deployment; the cached record only seeds it
   const [, bump] = useReducer((n: number) => n + 1, 0);
   const [error, setError] = useState<unknown>(null);
   const inflight = useRef(false);
@@ -181,7 +181,7 @@ export function DeploymentPage({ org, app, id }: { org: string; app: App; id: nu
   const [rollback, setRollback] = useState<number | null>(null);
   const o = encodeURIComponent(org);
   const d = follow.record;
-  const openedAt = useMemo(() => Date.now(), [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const openedAt = useMemo(() => Date.now(), [id]); // eslint-disable-line react-hooks/exhaustive-deps -- the clock restarts when the page moves to another deployment
 
   // A template deploys its apps one after another: when this one is done,
   // follow the next as soon as its deployment is queued.

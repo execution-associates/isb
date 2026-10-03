@@ -4,7 +4,7 @@
   var t = null;
   try {
     t = localStorage.getItem("isb-theme");
-  } catch (e) {
+  } catch {
     /* storage blocked */
   }
   var dark = t === "dark" || (t !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);

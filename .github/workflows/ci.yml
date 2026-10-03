@@ -14,9 +14,9 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
-  # The web UI (web/): typecheck, unit tests and the production build that
-  # release binaries embed. Rust jobs below build without it (a placeholder
-  # page), so they never need bun.
+  # The web UI (web/): typecheck and oxlint (`bun run lint`), unit tests and
+  # the production build that release binaries embed. Rust jobs below build
+  # without it (a placeholder page), so they never need bun.
   web:
     name: web UI
     runs-on: ubuntu-latest

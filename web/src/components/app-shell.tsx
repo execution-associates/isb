@@ -123,7 +123,7 @@ function OrgSwitcher({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
+        <button type="button"
           className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none data-[state=open]:bg-sidebar-accent"
           aria-label="Switch org"
         >
@@ -217,7 +217,7 @@ function UserMenu({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
+        <button type="button"
           className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none data-[state=open]:bg-sidebar-accent"
           aria-label="Account menu"
         >
@@ -308,7 +308,7 @@ function SearchButton({ className }: { className?: string }) {
   const open = usePalette();
   const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
   return (
-    <button
+    <button type="button"
       onClick={() => open(true)}
       className={cn(
         "flex h-8 w-full items-center gap-2 rounded-md border bg-background px-2.5 text-[13px] text-muted-foreground shadow-xs transition-colors hover:border-foreground/15 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",

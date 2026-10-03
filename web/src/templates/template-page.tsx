@@ -289,8 +289,8 @@ function DeployForm({ org, detail }: { org: string; detail: TemplateDetail }) {
       // Marks the click, so the deployment page can measure the time to its first log line.
       performance.mark("isb:deploy-click");
       const r = await callTool<DeployAnswer>("template_deploy", args(), org);
-      const apps = r.deploying ?? r.instance?.apps ?? r.plan.order;
-      toast.success(apps.length > 1 ? `Deploying ${apps.length} apps: ${apps.join(", ")}` : `Deploying ${apps[0] ?? name}`);
+      const deployed = r.deploying ?? r.instance?.apps ?? r.plan.order;
+      toast.success(deployed.length > 1 ? `Deploying ${deployed.length} apps: ${deployed.join(", ")}` : `Deploying ${deployed[0] ?? name}`);
       const f = followOf(r);
       if (f) {
         // The first app's deployment is queued already: open its live log at
@@ -301,7 +301,7 @@ function DeployForm({ org, detail }: { org: string; detail: TemplateDetail }) {
           navigate,
           org,
           { id: f.id, app: f.app, trigger: "api", by: me?.user.email ?? "", status: "queued", created_at: Date.now() },
-          f.then,
+          f.next,
         );
         return;
       }

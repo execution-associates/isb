@@ -32,7 +32,7 @@ export function MonitoringTab({ org, app }: { org: string; app: App }) {
   const svc = serviceOf(stack.data, app.name);
   const [range, setRange] = useState<RangeId>("1h");
   const [split, setSplit] = useState<"sum" | "split">("sum");
-  const instances = [...(svc?.instances ?? [])].sort((a, b) => a.slot - b.slot) as InstanceDetail[];
+  const instances = [...(svc?.instances ?? [])].toSorted((a, b) => a.slot - b.slot) as InstanceDetail[];
 
   if (stack.error) return <QueryError error={stack.error} />;
   const cpuNow = instances.reduce((n, i) => n + (i.cpu_pct ?? 0), 0);

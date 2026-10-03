@@ -48,7 +48,7 @@ function useSeed<T>(seed: () => T, dep: unknown): [T, (v: T) => void, () => void
   const key = JSON.stringify(dep);
   useEffect(() => {
     setV(seed());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-seeds only when the serialized dependency changes; `seed` is a fresh closure every render
   }, [key]);
   return [v, setV, () => setV(seed())];
 }
@@ -379,7 +379,7 @@ function ScaleSection({ org, app, writer }: Props) {
       toast.success(`Saved: ${n} replica${n === 1 ? "" : "s"} from the first deploy`);
     }
   };
-  const instances = [...(svc?.instances ?? [])].sort((a, b) => a.slot - b.slot);
+  const instances = [...(svc?.instances ?? [])].toSorted((a, b) => a.slot - b.slot);
   return (
     <Section
       title="Scale"

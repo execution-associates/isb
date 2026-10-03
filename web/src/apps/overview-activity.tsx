@@ -117,7 +117,7 @@ const VERBS: Record<string, string> = {
 /** `local(uid 1000)` is the CLI on the server. */
 export function actorLabel(a: string | null | undefined): string | undefined {
   if (!a || a === "isb") return undefined;
-  if (/^local\(/.test(a)) return "CLI on the server";
+  if (a.startsWith("local(")) return "CLI on the server";
   return a;
 }
 
@@ -162,7 +162,7 @@ function auditEntry(i: HistoryItem): ActivityEntry | null {
   } else {
     before = `Changed ${parts.join(" ")}`;
   }
-  if (/^secret/.test(action)) kind = kind === "update" ? "secret" : kind;
+  if (action.startsWith("secret")) kind = kind === "update" ? "secret" : kind;
   if (failed) kind = "warn";
   return { ...base, kind, before: subject ? `${before} ` : before, subject };
 }

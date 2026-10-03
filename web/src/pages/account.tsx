@@ -705,7 +705,7 @@ function Sessions() {
         <ListSkeleton />
       ) : (
         <ul className="divide-y">
-          {[...(list.data?.sessions ?? [])].sort((a, b) => Number(b.current) - Number(a.current) || b.last_seen - a.last_seen).map((s) => (
+          {(list.data?.sessions ?? []).toSorted((a, b) => Number(b.current) - Number(a.current) || b.last_seen - a.last_seen).map((s) => (
             <Row
               key={s.id}
               icon={<Laptop />}

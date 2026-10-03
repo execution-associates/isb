@@ -238,26 +238,25 @@ function Palette({ me, org, close }: { me: Me; org: string | null; close: () => 
 
   let n = -1;
   return (
-    <div
-      onKeyDown={(e) => {
-        if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
-          e.preventDefault();
-          setIndex((i) => move(i, 1, flat.length));
-        } else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) {
-          e.preventDefault();
-          setIndex((i) => move(i, -1, flat.length));
-        } else if (e.key === "Enter") {
-          e.preventDefault();
-          run(flat[index]);
-        }
-      }}
-    >
+    <div>
       <div className="flex items-center gap-3 border-b px-4">
         <Search className="size-4 shrink-0 text-muted-foreground" />
         <input
           autoFocus
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
+              e.preventDefault();
+              setIndex((i) => move(i, 1, flat.length));
+            } else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) {
+              e.preventDefault();
+              setIndex((i) => move(i, -1, flat.length));
+            } else if (e.key === "Enter") {
+              e.preventDefault();
+              run(flat[index]);
+            }
+          }}
           placeholder={known ? `Search ${org}: pages, projects, apps…` : "Search pages and actions…"}
           aria-label="Search"
           role="combobox"
@@ -283,6 +282,7 @@ function Palette({ me, org, close }: { me: Me; org: string | null; close: () => 
               const active = at === index;
               const Icon = i.icon;
               return (
+                // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/interactive-supports-focus -- focus stays on the combobox, which drives the options by aria-activedescendant and its own keys
                 <div
                   key={i.id}
                   id={`palette-${i.id}`}

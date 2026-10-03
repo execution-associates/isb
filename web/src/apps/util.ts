@@ -49,7 +49,7 @@ export function percent(p: number | null | undefined): string {
 /** JSON with object keys sorted, so key order never makes two values differ. */
 export function stableJson(v: unknown): string {
   return JSON.stringify(v, (_k, x) =>
-    x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : x,
+    x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : x,
   );
 }
 

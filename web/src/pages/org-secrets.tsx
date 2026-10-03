@@ -656,7 +656,9 @@ function RevealDialog({ org, name, onClose }: { org: string; name: string | null
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
     if (!value) return;

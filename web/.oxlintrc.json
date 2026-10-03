@@ -1,0 +1,64 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  // Correctness and suspicious code, React and its hooks, accessibility,
+  // imports, tests and promises. No style or size rules: formatting is not
+  // what this is for.
+  "plugins": ["eslint", "typescript", "unicorn", "oxc", "react", "jsx-a11y", "import", "vitest", "promise"],
+  "env": { "browser": true, "es2024": true },
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error"
+  },
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/exhaustive-deps": "error",
+    "import/no-cycle": "error",
+    "import/no-duplicates": "error",
+    "eslint/eqeqeq": ["error", "smart"],
+    "typescript/ban-ts-comment": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-non-null-asserted-nullish-coalescing": "error",
+    "react/button-has-type": "error",
+    "react/jsx-no-target-blank": "error",
+    "react/jsx-no-script-url": "error",
+    "react/no-danger": "error",
+    "promise/no-return-in-finally": "error",
+    "promise/param-names": "error",
+    "unicorn/no-document-cookie": "error",
+
+    // The automatic JSX runtime (tsconfig "jsx": "react-jsx") needs no React in scope.
+    "react/react-in-jsx-scope": "off",
+    // A render-prop function passed as a prop (`detail={(r) => …}`) is called, not mounted.
+    "react/no-unstable-nested-components": ["error", { "allowAsProps": true }],
+    // React Compiler rules. The app is not compiled by it, and these flag deliberate patterns:
+    // Date.now() in render for relative times, and effects that reset a dialog's form when it
+    // opens or re-seed local edits from server data.
+    "react/purity": "off",
+    "react/set-state-in-effect": "off",
+    "react/preserve-manual-memoization": "off",
+    // The compiler's dependency checks duplicate react/exhaustive-deps, and count a dependency
+    // used only as a trigger (scroll to top on a new pathname) as an error.
+    "react/memo-dependencies": "off",
+    "react/exhaustive-effect-dependencies": "off",
+    // Side-effect imports are for stylesheets and fonts.
+    "import/no-unassigned-import": ["error", { "allow": ["**/*.css", "@fontsource-variable/**"] }],
+    // Focusing a dialog's first field, or the only field of a sign-in page, is the intended flow.
+    "jsx-a11y/no-autofocus": "off",
+    // Segmented controls are buttons with role="radio", charts are SVGs with role="img", meters are
+    // styled divs: valid ARIA, where the suggested native element would not render as designed.
+    "jsx-a11y/prefer-tag-over-role": "off",
+    // A scrollable log is focusable so the keyboard can scroll it.
+    "jsx-a11y/no-noninteractive-tabindex": ["error", { "roles": ["tabpanel", "log"] }],
+    // A datalist's <option value> needs no label (the rule's defaults, plus option).
+    "jsx-a11y/control-has-associated-label": ["error", { "ignoreElements": ["audio", "canvas", "embed", "input", "textarea", "tr", "video", "option"] }],
+    // Where a small helper is declared is style.
+    "unicorn/consistent-function-scoping": "off",
+    // EventSource and WebSocket handlers are set once on objects the module creates and owns.
+    "unicorn/prefer-add-event-listener": "off",
+    // Vitest's expect takes a message as its second argument.
+    "vitest/valid-expect": ["error", { "maxArgs": 2 }],
+    // Tables of rejected inputs assert that they throw; messages are asserted where they matter.
+    "vitest/require-to-throw-message": "off"
+  },
+  "ignorePatterns": ["dist", "src/api/openapi.gen.ts"]
+}

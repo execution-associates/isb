@@ -417,7 +417,7 @@ function Row({ i, showOrg, open, fresh, onToggle }: { i: HistoryItem; showOrg: b
           </span>
           {(i.message || i.actor) && (
             <span className={cn("hidden truncate text-xs text-muted-foreground sm:block", !i.message && "lg:hidden")}>
-              {[i.message, i.actor && <span className="lg:hidden">{i.actor}</span>].filter(Boolean).map((x, n) => (
+              {[i.message, i.actor && <span key="actor" className="lg:hidden">{i.actor}</span>].filter(Boolean).map((x, n) => (
                 <Fragment key={n}>
                   {n > 0 && <span className="lg:hidden"> · </span>}
                   {x}
@@ -509,10 +509,10 @@ function scalar(v: unknown): string {
 
 function Details({ i }: { i: HistoryItem }) {
   const rows: [string, ReactNode][] = [
-    ["Time", <span className="tabular-nums">{dateTime(i.time / 1000)}</span>],
+    ["Time", <span key="time" className="tabular-nums">{dateTime(i.time / 1000)}</span>],
     ["Source", SOURCE_LABEL[i.source] ?? i.source],
     ["Org", i.org ?? "host level"],
-    ["What", <code className="font-mono text-xs">{i.kind}</code>],
+    ["What", <code key="what" className="font-mono text-xs">{i.kind}</code>],
   ];
   if (i.object)
     rows.push([
