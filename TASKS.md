@@ -111,6 +111,12 @@ minime only runs binaries downloaded from our CI runs.
   - The app layer renders apps to ordinary stacks: an org's project +
     environment is one stack (`<project>-<env>`), each app one service in
     it, so service names (`<app>.<project>-<env>`) work between apps.
+- **Web UI is embedded by `build.rs` as an `include_bytes!` table** (no
+  crate). Without `web/dist` the binary serves a placeholder;
+  `ISB_WEB_REQUIRED=1` (set by releases) makes that a build error, so plain
+  `cargo build` never needs bun. The UI uses only the public API (REST
+  tools, `/api/v1/auth/*`, SSE). CSP forbids inline scripts. Tokens in links
+  ride in the URL fragment.
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
@@ -172,10 +178,10 @@ minime only runs binaries downloaded from our CI runs.
   argon2id passwords, sessions with secure cookies, first-run admin setup,
   invitations, roles (platform admin; org admin/member), API tokens (hashed,
   org-scoped). **Verify:** unit tests + login over HTTP.
-- [~] (97da457; browser verify with the P3.1 sign-in pages) P1.5 OAuth/OIDC: GitHub, Google, generic OIDC (discovery, PKCE),
+- [!] (97da457; needs Stephan to register GitHub/Google OAuth apps for the live check) P1.5 OAuth/OIDC: GitHub, Google, generic OIDC (discovery, PKCE),
   account linking by verified email. **Verify:** GitHub login end to end in a
   browser against the hcloud box.
-- [~] (97da457; browser verify with the P3.1 sign-in pages) P1.6 Passkeys (WebAuthn): register and sign in. **Verify:** browser on
+- [x] (97da457, 9f568c6: passkey register + sign-in in lasso's browser with a CDP virtual authenticator) P1.6 Passkeys (WebAuthn): register and sign in. **Verify:** browser on
   minime (Touch ID or a virtual authenticator via CDP).
 - [x] (platform) P1.7 REST + SSE API generated from the tool registry: `/api/v1/<tool>`,
   OpenAPI document, `/api/v1/events` SSE, auth by session or token; MCP keeps
@@ -225,7 +231,7 @@ minime only runs binaries downloaded from our CI runs.
 
 ## Phase 3: web UI
 
-- [~] (subagent p3.1) P3.1 Scaffold: React + Vite + Tailwind + shadcn, bun build, embedded in
+- [x] (9f568c6) P3.1 Scaffold: React + Vite + Tailwind + shadcn, bun build, embedded in
   the binary, served by `isb serve`; auth pages (sign in with SSO, GitHub,
   Google, email/password, passkey; create account; lost password).
   **Verify:** sign-in flows in the browser.
