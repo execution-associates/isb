@@ -307,7 +307,7 @@
     },
     "/api/v1/tools/app_deployment_log": {
       "post": {
-        "description": "A deployment's log (git, build and rollout lines) from byte `offset`. Returns the text, the offset to ask from next, and whether the deployment has finished: poll until done. The same lines stream on the events feed as level `log`.",
+        "description": "A deployment's log (git, build and rollout lines) from byte `offset`. Returns the text, the offset to ask from next, whether the deployment has finished, and its record (status, image, commit, timings; read before the text, so a finished record means the text is complete): poll until done. The same lines stream on the events feed as level `log`.",
         "operationId": "app_deployment_log",
         "requestBody": {
           "content": {
@@ -3534,6 +3534,10 @@
                   "org": {
                     "description": "The new org's name: [a-z0-9-], starts with a letter.",
                     "type": "string"
+                  },
+                  "server": {
+                    "description": "Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers.",
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -3747,6 +3751,10 @@
                   },
                   "org": {
                     "description": "The org.",
+                    "type": "string"
+                  },
+                  "server": {
+                    "description": "Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers.",
                     "type": "string"
                   }
                 },
@@ -5078,6 +5086,267 @@
         "summary": "Set a secret"
       }
     },
+    "/api/v1/tools/server_add": {
+      "post": {
+        "description": "Platform admins: make a Linux box (Ubuntu/Debian, x86_64 or aarch64) a server orgs can be placed on. Over SSH (root or passwordless sudo) it installs incus from Zabbly's stable channel and the isb binary (checksum checked), runs `isb host setup`, issues the agent a certificate from this control plane's CA and starts `isb serve --agent` as a systemd unit; with allow_from it closes the box's firewall to SSH and the agent port from those addresses. The SSH key is used for this only. Takes minutes on a fresh box.",
+        "operationId": "server_add",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "address": {
+                    "description": "What this control plane dials (default: the SSH host).",
+                    "type": "string"
+                  },
+                  "agent_port": {
+                    "description": "The agent's mTLS port (default 7443).",
+                    "maximum": 65535,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "allow_from": {
+                    "description": "Addresses or CIDRs that may reach the agent port (this control plane's egress address); the box's firewall then allows only SSH and these.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "isb_binary": {
+                    "description": "A Linux isb binary on this host to install (local CLI only); default the release of this version.",
+                    "type": "string"
+                  },
+                  "key": {
+                    "description": "Private key file on this host (local CLI only).",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "[a-z0-9-], a letter first.",
+                    "type": "string"
+                  },
+                  "public_ingress": {
+                    "description": "Serve the server's orgs' domains on its own ports 80 and 443 (opened in its firewall).",
+                    "type": "boolean"
+                  },
+                  "ssh": {
+                    "description": "user@host",
+                    "type": "string"
+                  },
+                  "ssh_key": {
+                    "description": "The private key itself (kept only for the bootstrap).",
+                    "type": "string"
+                  },
+                  "ssh_port": {
+                    "maximum": 65535,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "version": {
+                    "description": "The isb release to install (default this daemon's).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "ssh"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Add a server"
+      }
+    },
+    "/api/v1/tools/server_list": {
+      "post": {
+        "description": "Platform admins: the servers orgs can be placed on, with their health (up, unreachable, unknown), last heartbeat (versions, CPU, memory, disk) and the orgs on each.",
+        "operationId": "server_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {},
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List servers"
+      }
+    },
+    "/api/v1/tools/server_remove": {
+      "post": {
+        "description": "Platform admins: forget a server. Refused while orgs are placed on it (delete them first). The agent keeps running on the box until it is stopped there (systemctl disable --now isb-agent).",
+        "operationId": "server_remove",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Remove a server"
+      }
+    },
+    "/api/v1/tools/server_rotate_cert": {
+      "post": {
+        "description": "Platform admins: issue the server's agent a new certificate (and key) over the current mTLS connection; the agent switches to it for new connections, and the control plane checks it does.",
+        "operationId": "server_rotate_cert",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Rotate a server's certificate"
+      }
+    },
+    "/api/v1/tools/server_show": {
+      "post": {
+        "description": "Platform admins: one server: address, port, how it was bootstrapped, its certificate's fingerprint and expiry, health with the last heartbeat, and its orgs.",
+        "operationId": "server_show",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Show a server"
+      }
+    },
     "/api/v1/tools/server_status": {
       "post": {
         "description": "isb's version, incus' version, and the load balancer's routes with their backends and counters.",
@@ -5769,7 +6038,7 @@
     },
     "/api/v1/tools/template_deploy": {
       "post": {
-        "description": "Deploy a template into a project environment as apps (made if missing): <name>-<app> per app (the main app just <name>), generated passwords and keys stored as org secrets tpl.<name>.<var>, then each app deployed in dependency order. dry_run=true returns the plan (apps, secrets by name, variables, URLs, notes) and changes nothing. Returns at once unless wait=true.",
+        "description": "Deploy a template into a project environment as apps (made if missing): <name>-<app> per app (the main app just <name>), generated passwords and keys stored as org secrets tpl.<name>.<var>, then each app deployed in dependency order. dry_run=true returns the plan (apps, secrets by name, variables, URLs, notes) and changes nothing. Returns at once unless wait=true, with the first app's queued deployment as first_deployment {app, id} so its log can be followed from the first line.",
         "operationId": "template_deploy",
         "requestBody": {
           "content": {

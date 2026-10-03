@@ -119,12 +119,12 @@ function Progress({ d, reached, git }: { d: Deployment; reached: DeploymentFollo
   const states = stepStates(d.status, reached);
   const labels: Record<(typeof STEPS)[number], string> = { queued: "Queued", building: buildStepLabel(d, git), deploying: "Roll out", done: "Live" };
   return (
-    <ol className="flex items-center gap-1.5" aria-label="Progress">
+    <ol className="flex items-start gap-1.5 sm:items-center" aria-label="Progress">
       {STEPS.map((s, i) => {
         const st = states[s];
         const Icon = STEP_ICON[st];
         return (
-          <li key={s} className="flex min-w-0 flex-1 items-center gap-1.5">
+          <li key={s} className="flex min-w-0 flex-1 flex-col items-center gap-1 sm:flex-row sm:gap-1.5">
             <span
               className={cn(
                 "flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px] transition-colors",
@@ -137,9 +137,9 @@ function Progress({ d, reached, git }: { d: Deployment; reached: DeploymentFollo
             >
               {st === "waiting" ? <span className="size-1.5 rounded-full bg-current" /> : <Icon className={cn("size-3", st === "current" && "animate-spin")} strokeWidth={2.5} />}
             </span>
-            <span className={cn("truncate text-xs font-medium", st === "waiting" || st === "skipped" ? "text-muted-foreground" : "text-foreground")}>{labels[s]}</span>
+            <span className={cn("truncate text-[11px] font-medium sm:text-xs", st === "waiting" || st === "skipped" ? "text-muted-foreground" : "text-foreground")}>{labels[s]}</span>
             {i < STEPS.length - 1 && (
-              <span className={cn("h-px min-w-3 flex-1 rounded-full", st === "done" ? "bg-success/50" : "bg-border")} aria-hidden />
+              <span className={cn("hidden h-px min-w-3 flex-1 rounded-full sm:block", st === "done" ? "bg-success/50" : "bg-border")} aria-hidden />
             )}
           </li>
         );
@@ -262,8 +262,8 @@ export function DeploymentPage({ org, app, id }: { org: string; app: App; id: nu
             </div>
           </div>
           <Progress d={d} reached={follow.reached} git={git} />
-          <dl className="grid grid-cols-1 gap-x-6 gap-y-3 border-t pt-4 text-sm sm:grid-cols-3">
-            <div className="min-w-0">
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-3 border-t pt-4 text-sm sm:grid-cols-3">
+            <div className="col-span-2 min-w-0 sm:col-span-1">
               <dt className="text-xs text-muted-foreground">Source</dt>
               <dd className="mt-0.5 flex min-w-0 items-center gap-1.5">
                 {d.commit ? (

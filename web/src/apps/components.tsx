@@ -1,6 +1,6 @@
 // Building blocks shared by the app pages.
 import { ChevronRight, CircleAlert, Loader2 } from "lucide-react";
-import { Fragment, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 import type { StreamState } from "@/api/events";
 import { FormError } from "@/components/form";
@@ -93,8 +93,9 @@ export function CrumbTrail({ items, className }: { items: Crumb[]; className?: s
   return (
     <nav aria-label="Breadcrumb" className={cn("flex min-w-0 items-center gap-1 text-sm text-muted-foreground", className)}>
       {items.map((it, i) => (
-        <Fragment key={i}>
-          {i > 0 && <ChevronRight className="size-3.5 shrink-0 opacity-50" />}
+        // On phones only the last two crumbs show; the rest are a tap away in the menu.
+        <span key={i} className={cn("min-w-0 items-center gap-1", i < items.length - 2 ? "hidden sm:flex" : "flex", i === items.length - 1 ? "shrink" : "shrink-[3]")}>
+          {i > 0 && <ChevronRight className={cn("size-3.5 shrink-0 opacity-50", i === items.length - 2 && "hidden sm:block")} />}
           {it.to && i < items.length - 1 ? (
             <Link to={it.to} className="truncate rounded-sm transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none">
               {it.label}
@@ -104,7 +105,7 @@ export function CrumbTrail({ items, className }: { items: Crumb[]; className?: s
               {it.label}
             </span>
           )}
-        </Fragment>
+        </span>
       ))}
     </nav>
   );

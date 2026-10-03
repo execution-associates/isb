@@ -19,8 +19,21 @@ of it) in a browser:
   mailer is configured) and `/reset-password#TOKEN` sets the new password.
 - **Signed in**: a sidebar with an org switcher (the orgs you can open: your
   memberships, or every org for a platform admin; switching keeps the
-  section you are in), the selected org's sections, and your account menu
-  (account, theme, sign out). **Account** changes your password, links and
+  section you are in), a search button, the selected org's sections (Org:
+  Overview, Projects, Templates, Backups, Notifications; Manage: Members,
+  Secrets, Settings, History), Platform for platform admins, and your
+  account menu (account, theme, sign out). The page sits in a panel with a
+  top bar that holds its breadcrumbs (the last two on a phone) and the
+  state of the live event stream.
+- **Command palette** (⌘K or Ctrl+K, or `/`): every section, project
+  environment and app of the org, the other orgs, platform pages, account,
+  theme and sign out, matched as you type (a word that starts with what
+  you typed ranks first; letters in order still match). Typing "deploy"
+  lists Deploy/Redeploy for each app (writers only), which opens the
+  deployment live. `G` then a letter jumps to a section anywhere outside a
+  text field: `G O` Overview, `G P` Projects, `G T` Templates, `G B`
+  Backups, `G N` Notifications, `G M` Members, `G S` Secrets, `G ,`
+  Settings, `G H` History. **Account** changes your password, links and
   unlinks providers, adds and deletes passkeys, makes and revokes API tokens
   (shown once), and lists your sessions.
 
@@ -87,6 +100,29 @@ The UI hides what a role may not do; the server decides ([auth.md](auth.md),
 
 Light, dark and system themes; it works down to phone width.
 
+### Design system
+
+- **Tokens** (`web/src/index.css`): neutrals with a faint cool tint, the
+  logo's emerald as the one brand colour (active navigation, switches,
+  focus rings), and semantic status colours: success (running, done),
+  info (building, deploying), warning (degraded), destructive (failed);
+  queued and stopped are neutral. Log panels use a dark terminal surface
+  in both themes.
+- **Status** goes through `lib/status.ts` (status to tone, tone to
+  classes) and `<StatusBadge>`/`<StatusDot>` (`components/status.tsx`); a
+  pulsing dot means in progress or live. No page picks status colours by
+  hand.
+- **Type**: Inter for text and JetBrains Mono for identifiers and logs
+  (both SIL OFL 1.1, Latin subsets served from the binary); page titles
+  20-24 px semibold, section titles 15 px, body 13-14 px, numbers tabular.
+- **Patterns**: a page header (title with badges, one-line description,
+  actions that wrap under it on phones), breadcrumbs declared by the page
+  and drawn in the top bar, settings sections with their own Save, empty
+  states that name the next action, skeletons shaped like what loads,
+  typed confirmation for destructive actions, toasts for outcomes.
+- **Motion** is short and optional: content fades up as it appears, live
+  dots pulse; `prefers-reduced-motion` turns animation off.
+
 ## Projects and apps
 
 The pages over [apps](apps.md), Dokploy's layout:
@@ -118,10 +154,28 @@ An app's tabs:
   some are not routed yet and offers the deploy.
 - **Deployments**: the last 30 with status, trigger and caller, commit or
   image and digest, and duration; Roll back on earlier successful ones.
-  A deployment's page follows its log live: each log line on the event
-  feed pulls the new text by offset, so nothing shows twice; it follows
-  the end while you are at the bottom and pauses when you scroll up. A
-  failure is shown above the log with what to do next.
+  A deployment's page follows it live: its status and stage (Queued, then
+  Build, Pull or Restore, Roll out, Live) change in place, the clock
+  ticks, and the log streams from its first line. Each log line or status
+  change on the event feed pulls the new text by offset together with the
+  deployment's record (`app_deployment_log` answers both), so nothing shows
+  twice and status never lags the text; a quiet feed still gets a pull
+  every 3 seconds. The log has ANSI colours, error lines marked, find,
+  wrap, copy and download, and follows the end while you are at the
+  bottom (scrolling up pauses it; Follow resumes). When it ends, a success
+  panel links the app's URL (and offers to roll back to it once it is no
+  longer current), and a failure panel says which step failed and offers
+  Deploy again, Roll back to the last good deployment and a link to it. A
+  rail lists the recent deployments.
+- **Deploying opens the deployment at once**: Deploy, Redeploy, Roll back
+  (here, on a deployment or in the palette) and "New app" with "deploy
+  right away" put the queued deployment's record in the page's cache and
+  open its page in the same frame, which reads the log immediately. A
+  deployment started elsewhere (a webhook push, a teammate, an agent)
+  shows as a live bar under the app's header (stage, clock, newest log
+  line) and as a toast with **Watch** anywhere in the org; on the
+  Deployments tab it opens by itself, and a finished deployment's page
+  moves on to the newer one.
 - **Logs**: the replicas' recent output (`stack_logs`), per replica or all,
   refreshed every 5 seconds.
 - **Monitoring**: the metrics history (`metrics_query`,
@@ -212,7 +266,11 @@ what an event in its org touches.
   it, generated ones left empty to be generated, secret ones as password
   fields. **Preview plan** is a dry run (apps in order, where each value
   came from, the secrets it creates, URLs, anything in the way);
-  **Deploy** creates the apps and opens the main app's deployments. What
+  **Deploy** creates the apps and opens the first app's deployment live
+  (`template_deploy` queues it before answering and returns it as
+  `first_deployment`); when it is done, the page moves on to the next
+  app's deployment as it is queued, in dependency order (`?then=` in the
+  address). What
   the org deployed is listed with its apps and URLs, and removing an
   instance deletes its apps and `tpl.NAME.*` secrets. Platform admins
   manage catalogs there too (add a directory or https URL in isb's or

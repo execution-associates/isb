@@ -79,7 +79,9 @@ export function CommandPaletteProvider({ me, children }: { me: Me; children: Rea
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      // In the web terminal Ctrl+K belongs to the shell (kill to end of line).
+      const inTerminal = !!(e.target as HTMLElement | null)?.closest?.(".xterm");
+      if ((e.metaKey || (e.ctrlKey && !inTerminal)) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setOpen((o) => !o);
         return;
