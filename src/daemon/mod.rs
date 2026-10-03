@@ -113,7 +113,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         ctl: ctl.clone(),
         policy: cfg.policy.clone(),
         state_dir: cfg.state_dir.clone(),
-        secrets: Arc::new(opened.secrets),
+        secrets: Arc::new(with_external_drivers(opened.secrets, &cfg.state_dir)?),
     });
     let registry = registry(d.clone())?;
     let hooks = hooks(d.clone(), users.clone(), cfg.allow_unauthenticated);
@@ -148,6 +148,28 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     let r = crate::server::serve(listeners, registry, healthz);
     ctl.shutdown();
     r
+}
+
+/// The external secret drivers, each reading its credentials from the org's
+/// own `local` secrets.
+fn with_external_drivers(
+    secrets: crate::secrets::Secrets,
+    state_dir: &std::path::Path,
+) -> Result<crate::secrets::Secrets> {
+    use crate::secrets::{Driver, local::LocalDriver, onepassword};
+    let local = Arc::new(LocalDriver::new(state_dir, secrets.keyring().clone()));
+    let token: onepassword::TokenSource =
+        Arc::new(move |org| match local.get(org, onepassword::TOKEN_SECRET) {
+            Ok((v, _)) => Ok(Some(
+                String::from_utf8(v)
+                    .map_err(|_| Error::invalid("the 1Password token is not text"))?
+                    .trim()
+                    .to_string(),
+            )),
+            Err(e) if e.is_not_found() => Ok(None),
+            Err(e) => Err(e),
+        });
+    secrets.with_driver(Arc::new(onepassword::OnePasswordDriver::new(token)))
 }
 
 /// Tools that reach across orgs: platform admins only.

@@ -172,7 +172,7 @@ minime only runs binaries downloaded from our CI runs.
 - [~] (subagent p1.9) P1.10 Inline `age:` secrets in compose, `{secret: name}` env delivery
   (unit env file; OCI incus config), external-driver refresh polling.
   **Verify:** integration test for each delivery path.
-- [~] (orchestrator) P1.11 `onepassword` driver (via `op` service account token stored as a
+- [x] (platform) P1.11 `onepassword` driver (via `op` service account token stored as a
   local secret, or titan's broker). **Verify:** against a titan vault.
 - [~] (subagent p1.9) P1.12 Secret tools on MCP/REST (`secret_list|get|set|delete`), org-scoped;
   `isb serve install` creates the systemd credential (Linux) / keychain-backed

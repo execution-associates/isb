@@ -13,6 +13,7 @@
 pub mod inline;
 pub mod keys;
 pub mod local;
+pub mod onepassword;
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -233,8 +234,16 @@ impl Secrets {
 
     /// The driver holding a secret, and its metadata.
     fn holder(&self, org: &OrgId, name: &str) -> Result<(&Arc<dyn Driver>, SecretMeta)> {
-        validate_name(name)?;
+        // A name with a `/` is a reference into an external store
+        // (`vault/item/field`): only external drivers can hold it.
+        let reference = name.contains('/');
+        if !reference {
+            validate_name(name)?;
+        }
         for d in &self.drivers {
+            if reference && d.name() == local::DRIVER {
+                continue;
+            }
             match d.inspect(org, name) {
                 Ok(m) => return Ok((d, m)),
                 Err(Error::NotFound(_)) => {}

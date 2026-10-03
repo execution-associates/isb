@@ -55,6 +55,27 @@ key or a break-glass key.
 `isb secret refresh NAME` re-reads a secret from its source; for `local` it is
 a no-op.
 
+### `onepassword`
+
+Values that live in 1Password, read with the 1Password CLI (`op`, from
+`$ISB_OP_BIN` or `$PATH`) and the org's own service-account token. Read-only:
+manage the values in 1Password.
+
+- Give the org its token once, as a `local` secret named `onepassword-token`:
+  `printf %s "$TOKEN" | isb --org ocai secret create onepassword-token -`.
+  Each org uses only its own token, and an org without one is refused.
+- Refer to a value as `vault/item/field` (or `vault/item/section/field`): the
+  `op://` path without its scheme. When an item's title contains a `/`, use
+  its ID (`op item list --vault V --format json`).
+  `isb --org ocai secret get k8s-ocai/smtp/password` reads one.
+- A name with a `/` in it is always such a reference; `local` names never
+  contain one.
+- The version is the 1Password item's version, which moves on every edit to
+  the item, so the daemon's refresh notices a rotation.
+- The token reaches `op` through the environment of that one child process,
+  never its arguments, and nothing else from the daemon's environment goes
+  with it.
+
 ## The daemon's key
 
 Values are encrypted to the daemon's own age (X25519) identity. It is looked
