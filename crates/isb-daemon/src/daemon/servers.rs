@@ -17,6 +17,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use super::accounts::TOOLS as ACCOUNTS;
 use super::{Daemon, PLATFORM_TOOLS, arg_org, args, audit, authorize_class, visible_orgs};
 use crate::error::{Error, Result};
 use crate::org::OrgId;
@@ -432,10 +433,10 @@ enum Way {
 }
 
 fn decide(name: &str, a: &Value, placement: &dyn Fn(&OrgId) -> Option<String>) -> Way {
-    if name.starts_with("server_") || LOCAL_ONLY.contains(&name) {
-        return Way::Here;
-    }
-    if name == "secret_reencrypt" && a.get("all").and_then(Value::as_bool) == Some(true) {
+    let all = name == "secret_reencrypt" && a.get("all").and_then(Value::as_bool) == Some(true);
+    // Account tools use the control plane's identity store.
+    if name.starts_with("server_") || LOCAL_ONLY.contains(&name) || all || ACCOUNTS.contains(&name)
+    {
         return Way::Here;
     }
     match name {

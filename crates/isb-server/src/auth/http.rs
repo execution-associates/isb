@@ -31,7 +31,7 @@ use serde_json::{Value, json};
 use super::oauth::{Provider, ProviderConfig};
 use super::secret::{self, TokenKind};
 use super::webauthn::RelyingParty;
-use super::{AuthError, AuthStore, LoginMeta, NewSession, Principal, PrincipalKind, Role};
+use super::{AuthError, AuthStore, LoginMeta, NewSession, Principal, Role, ops};
 use crate::org::OrgId;
 use crate::server::http::{Peer, Request, Response};
 
@@ -675,61 +675,15 @@ impl AuthApi {
     }
 
     fn me(&self, p: &Principal) -> Result<Response, AuthError> {
-        let memberships: Vec<Value> = p
-            .orgs
-            .iter()
-            .map(|(o, r)| json!({"org": o, "role": r}))
-            .collect();
-        // The orgs this caller can open: every org for a platform admin
-        // (unless the credential is an org token), else its memberships.
-        let orgs: Vec<OrgId> = if p.platform_admin {
-            self.store.list_orgs()?
-        } else {
-            p.orgs.iter().map(|(o, _)| o.clone()).collect()
-        };
-        // A superadmin: where its power comes from, and whether it has an
-        // isb account (sessions, passkeys and tokens of its own).
-        let superadmin = match &p.kind {
-            PrincipalKind::Superadmin { source } => json!({
-                "source": source.label(),
-                "via": source,
-                "account": p.user.id > 0,
-            }),
-            _ => Value::Null,
-        };
-        Ok(Response::json(
-            200,
-            &json!({
-                "user": p.user,
-                "platform_admin": p.platform_admin,
-                "memberships": memberships,
-                "orgs": orgs,
-                "auth": p.kind,
-                "superadmin": superadmin,
-            }),
-        ))
+        Ok(Response::json(200, &ops::me(&self.store, p)?))
     }
 
     fn sessions(&self, p: &Principal) -> Result<Response, AuthError> {
-        let current = p.session_id();
-        let list: Vec<Value> = self
-            .store
-            .list_sessions(p.user.id)?
-            .into_iter()
-            .map(|s| {
-                let mut v = serde_json::to_value(&s).unwrap_or_default();
-                v["current"] = json!(Some(s.id) == current);
-                v
-            })
-            .collect();
-        Ok(Response::json(200, &json!({"sessions": list})))
+        Ok(Response::json(200, &ops::sessions(&self.store, p)?))
     }
 
     fn delete_session(&self, p: &Principal, id: &str) -> Result<Response, AuthError> {
-        let id = parse_id(id)?;
-        if !self.store.revoke_session(p.user.id, id)? {
-            return Err(AuthError::NotFound(format!("session {id}")));
-        }
+        ops::revoke_session(&self.store, p, parse_id(id)?)?;
         Ok(Response::new(204))
     }
 
@@ -744,36 +698,9 @@ impl AuthApi {
             role: Option<Role>,
         }
         let b: B = body(req)?;
-        let role = b.role.unwrap_or(Role::Member);
-        match p.max_grant(&b.org) {
-            Some(max) if role <= max => {}
-            Some(_) => {
-                return Err(AuthError::Forbidden(format!(
-                    "you cannot invite someone as {role} in org {}",
-                    b.org
-                )));
-            }
-            None => {
-                return Err(AuthError::Forbidden(format!(
-                    "inviting to org {} needs owner or admin",
-                    b.org
-                )));
-            }
-        }
-        let n = self.store.create_invitation(
-            (p.user.id > 0).then_some(p.user.id),
-            &b.org,
-            &b.email,
-            role,
-        )?;
-        Ok(Response::json(
-            201,
-            &json!({
-                "invitation": n.invitation,
-                "token": n.token,
-                "link": self.link("invite", &n.token),
-            }),
-        ))
+        let public = self.cfg.public_url.as_deref();
+        let v = ops::invite(&self.store, p, &b.org, &b.email, b.role, public)?;
+        Ok(Response::json(201, &v))
     }
 
     fn inspect_invitation(&self, req: &Request) -> Result<Response, AuthError> {
@@ -836,108 +763,23 @@ impl AuthApi {
     // ---- API tokens ----
 
     fn tokens(&self, p: &Principal) -> Result<Response, AuthError> {
-        let list = self.store.list_api_tokens(p.user.id)?;
-        // An org token sees only its org's tokens.
-        let list: Vec<_> = match &p.kind {
-            PrincipalKind::ApiToken { org: Some(o), .. } => list
-                .into_iter()
-                .filter(|t| t.org.as_ref() == Some(o))
-                .collect(),
-            _ => list,
-        };
-        Ok(Response::json(200, &json!({"tokens": list})))
+        Ok(Response::json(200, &ops::tokens(&self.store, p, None)?))
     }
 
     fn create_token(&self, req: &Request, p: &Principal) -> Result<Response, AuthError> {
-        #[derive(Deserialize)]
-        struct B {
-            name: String,
-            #[serde(default)]
-            org: Option<OrgId>,
-            /// `90d`, `12h`; absent or null never expires.
-            #[serde(default)]
-            expires: Option<String>,
-            /// `read`, `deploy`, `admin`, `tool:GLOB`; empty: the role's reach.
-            #[serde(default)]
-            scopes: Vec<String>,
-            /// Never honoured here: refused, so nobody mistakes the token
-            /// they get for one.
-            #[serde(default)]
-            superadmin: bool,
-        }
-        let b: B = body(req)?;
-        // Minted on the host only, so a stolen HTTP credential (a
-        // superadmin's included) cannot mint a durable one.
-        if b.superadmin {
-            return Err(AuthError::Forbidden(
-                "superadmin tokens are minted on the host only: isb token create NAME --superadmin"
-                    .into(),
-            ));
-        }
-        if p.user.id <= 0 {
-            return Err(AuthError::Forbidden(
-                "a superadmin without an isb account has no tokens of its own".into(),
-            ));
-        }
-        // Judged by what the caller can reach, not what the user can: an org
-        // token cannot mint a token for another org or a platform token.
-        match &b.org {
-            Some(o) if !(p.platform_admin || p.role_in(o).is_some()) => {
-                return Err(AuthError::Forbidden(format!(
-                    "you are not a member of org {o}"
-                )));
-            }
-            None if !p.platform_admin => {
-                return Err(AuthError::Forbidden(
-                    "a token without an org needs a platform admin; pass an org".into(),
-                ));
-            }
-            _ => {}
-        }
-        let expires = b
-            .expires
-            .filter(|s| !s.trim().is_empty())
-            .map(|s| crate::parse_duration(&s).map_err(AuthError::Invalid))
-            .transpose()?;
-        let t = self.store.create_api_token_scoped(
-            p.user.id,
-            b.org.as_ref(),
-            &b.name,
-            expires,
-            &b.scopes,
-        )?;
-        Ok(Response::json(
-            201,
-            &json!({"token": t.token, "info": t.info}),
-        ))
+        let v = ops::create_token(&self.store, p, body(req)?)?;
+        Ok(Response::json(201, &v))
     }
 
     fn delete_token(&self, p: &Principal, id: &str) -> Result<Response, AuthError> {
-        let id = parse_id(id)?;
-        let t = self.store.api_token(id)?;
-        let mine = t.user_id == p.user.id
-            && match &p.kind {
-                PrincipalKind::ApiToken { org: Some(o), .. } => t.org.as_ref() == Some(o),
-                _ => true,
-            };
-        let org_admin = t.org.as_ref().is_some_and(|o| p.can_manage_members(o));
-        if !(mine || org_admin || p.platform_admin) {
-            // Indistinguishable from a token that does not exist.
-            return Err(AuthError::NotFound(format!("token {id}")));
-        }
-        self.store.revoke_api_token(id)?;
+        ops::revoke_token(&self.store, p, parse_id(id)?)?;
         Ok(Response::new(204))
     }
 
     // ---- SSH keys ----
 
     fn ssh_keys(&self, p: &Principal) -> Result<Response, AuthError> {
-        let list = if p.user.id > 0 {
-            self.store.list_ssh_keys(p.user.id)?
-        } else {
-            Vec::new()
-        };
-        Ok(Response::json(200, &json!({"ssh_keys": list})))
+        Ok(Response::json(200, &ops::ssh_keys(&self.store, p)?))
     }
 
     fn add_ssh_key(&self, req: &Request, p: &Principal) -> Result<Response, AuthError> {
@@ -947,25 +789,13 @@ impl AuthApi {
             #[serde(default)]
             name: Option<String>,
         }
-        if p.user.id <= 0 {
-            return Err(AuthError::Forbidden(
-                "a superadmin without an isb account has no SSH keys of its own".into(),
-            ));
-        }
         let b: B = body(req)?;
-        let k = self.store.add_ssh_key(
-            p.user.id,
-            &b.public_key,
-            b.name.as_deref().filter(|n| !n.trim().is_empty()),
-        )?;
-        Ok(Response::json(201, &json!({"ssh_key": k})))
+        let v = ops::add_ssh_key(&self.store, p, &b.public_key, b.name.as_deref())?;
+        Ok(Response::json(201, &v))
     }
 
     fn delete_ssh_key(&self, p: &Principal, id: &str) -> Result<Response, AuthError> {
-        let id = parse_id(id)?;
-        if !self.store.delete_ssh_key(p.user.id, id)? {
-            return Err(AuthError::NotFound(format!("SSH key {id}")));
-        }
+        ops::delete_ssh_key(&self.store, p, parse_id(id)?)?;
         Ok(Response::new(204))
     }
 
@@ -1042,196 +872,59 @@ impl AuthApi {
         org: &OrgId,
         rest: &[&str],
     ) -> Result<Response, AuthError> {
-        let m = req.method.as_str();
-        // Members see who else is in their org; changing it needs more.
-        if p.role_in(org).is_none() && !p.platform_admin {
-            return Err(AuthError::NotFound(format!("org {org}")));
-        }
-        let manage = || -> Result<(), AuthError> {
-            if p.can_manage_members(org) {
-                Ok(())
-            } else {
-                Err(AuthError::Forbidden(format!(
-                    "managing org {org} needs owner or admin"
-                )))
-            }
-        };
-        match (m, rest) {
-            ("GET", ["members"]) => {
-                let list: Vec<Value> = self
-                    .store
-                    .list_members(org)?
-                    .into_iter()
-                    .map(|(u, r)| {
-                        let last = self.store.last_active(u.id)?;
-                        Ok(json!({"user": u, "role": r, "last_active": last}))
-                    })
-                    .collect::<Result<_, AuthError>>()?;
-                Ok(Response::json(200, &json!({"members": list})))
-            }
+        let s = &self.store;
+        match (req.method.as_str(), rest) {
+            ("GET", ["members"]) => Ok(Response::json(200, &ops::members(s, p, org)?)),
             ("PUT", ["members", uid]) => {
-                manage()?;
                 #[derive(Deserialize)]
                 struct B {
                     role: Role,
                 }
                 let uid = parse_id(uid)?;
                 let b: B = body(req)?;
-                self.check_role_change(p, org, uid, b.role)?;
-                self.store.set_member(org, uid, b.role)?;
-                Ok(Response::json(
-                    200,
-                    &json!({"user_id": uid, "role": b.role}),
-                ))
+                Ok(Response::json(200, &ops::set_role(s, p, org, uid, b.role)?))
             }
             ("DELETE", ["members", uid]) => {
-                let uid = parse_id(uid)?;
-                // Anyone may leave; removing others needs the right to manage.
-                if uid != p.user.id {
-                    manage()?;
-                    self.check_role_change(p, org, uid, Role::Member)?;
-                }
-                if !self.store.remove_member(org, uid)? {
-                    return Err(AuthError::NotFound(format!("member {uid}")));
-                }
+                ops::remove_member(s, p, org, parse_id(uid)?)?;
                 Ok(Response::new(204))
             }
-            ("GET", ["invitations"]) => {
-                manage()?;
-                let list = self.store.list_invitations(org)?;
-                Ok(Response::json(200, &json!({"invitations": list})))
-            }
+            ("GET", ["invitations"]) => Ok(Response::json(200, &ops::invitations(s, p, org)?)),
             ("DELETE", ["invitations", id]) => {
-                manage()?;
-                let id = parse_id(id)?;
-                if !self.store.revoke_invitation(org, id)? {
-                    return Err(AuthError::NotFound(format!("invitation {id}")));
-                }
+                ops::revoke_invitation(s, p, org, parse_id(id)?)?;
                 Ok(Response::new(204))
             }
-            ("GET", ["tokens"]) => {
-                manage()?;
-                // With who holds each: a platform admin's token in an org
-                // they are not a member of has no member row to name it.
-                let list: Vec<Value> = self
-                    .store
-                    .list_org_api_tokens(org)?
-                    .into_iter()
-                    .map(|t| {
-                        let u = self.store.user(t.user_id)?;
-                        let mut v = serde_json::to_value(&t).unwrap_or_default();
-                        v["user"] = json!({"id": u.id, "email": u.email, "name": u.name});
-                        Ok(v)
-                    })
-                    .collect::<Result<_, AuthError>>()?;
-                Ok(Response::json(200, &json!({"tokens": list})))
+            ("GET", ["tokens"]) => Ok(Response::json(200, &ops::org_tokens(s, p, org)?)),
+            _ => {
+                // Nobody outside the org learns which paths exist.
+                ops::visible_org(p, org)?;
+                Ok(org_405(rest))
             }
-            _ => Ok(org_405(rest)),
         }
     }
 
     // ---- platform administration ----
 
-    fn platform_admin(&self, p: &Principal) -> Result<(), AuthError> {
-        if p.platform_admin {
-            Ok(())
-        } else {
-            Err(AuthError::Forbidden("this is for platform admins".into()))
-        }
-    }
-
     /// Every user, with their orgs and when they were last active.
     fn admin_users(&self, p: &Principal) -> Result<Response, AuthError> {
-        self.platform_admin(p)?;
-        let list: Vec<Value> = self
-            .store
-            .list_users()?
-            .into_iter()
-            .map(|u| {
-                let memberships = self.store.memberships(u.id)?;
-                let last = self.store.last_active(u.id)?;
-                let mut v = serde_json::to_value(&u).unwrap_or_default();
-                v["memberships"] = json!(memberships);
-                v["last_active"] = json!(last);
-                Ok(v)
-            })
-            .collect::<Result<_, AuthError>>()?;
-        Ok(Response::json(200, &json!({"users": list})))
+        Ok(Response::json(200, &ops::users(&self.store, p)?))
     }
 
-    /// Disable or enable a user, or make or unmake a platform admin. Nobody
-    /// does either to themselves, and the platform keeps an enabled admin.
     fn admin_user_update(
         &self,
         req: &Request,
         p: &Principal,
         id: &str,
     ) -> Result<Response, AuthError> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct B {
-            #[serde(default)]
-            disabled: Option<bool>,
-            #[serde(default)]
-            platform_admin: Option<bool>,
-        }
-        self.platform_admin(p)?;
         let id = parse_id(id)?;
-        let b: B = body(req)?;
-        let u = self.store.user(id)?;
-        let demoting = b.disabled == Some(true) || b.platform_admin == Some(false);
-        if demoting && id == p.user.id {
-            return Err(AuthError::Forbidden(
-                "you cannot disable yourself or drop your own platform admin role; ask another platform admin".into(),
-            ));
-        }
-        if demoting && u.platform_admin && self.store.other_platform_admins(id)? == 0 {
-            return Err(AuthError::Conflict(format!(
-                "{} is the last enabled platform admin; make someone else one first",
-                u.email
-            )));
-        }
-        if let Some(a) = b.platform_admin {
-            self.store.set_platform_admin(id, a)?;
-        }
-        if let Some(d) = b.disabled {
-            self.store.set_disabled(id, d)?;
-        }
-        let u = self.store.user(id)?;
-        Ok(Response::json(200, &json!({"user": u})))
-    }
-
-    /// Only an owner (or platform admin) touches an owner or makes one; an
-    /// admin manages members and admins.
-    fn check_role_change(
-        &self,
-        p: &Principal,
-        org: &OrgId,
-        target: i64,
-        new: Role,
-    ) -> Result<(), AuthError> {
-        let max = p.max_grant(org).unwrap_or(Role::Member);
-        let current = self
-            .store
-            .memberships(target)?
-            .into_iter()
-            .find(|m| &m.org == org)
-            .map(|m| m.role);
-        if new > max || current.is_some_and(|c| c > max) {
-            return Err(AuthError::Forbidden(format!(
-                "only an owner can change an owner, or make one, in org {org}"
-            )));
-        }
-        Ok(())
+        let b: ops::UserChange = body(req)?;
+        Ok(Response::json(
+            200,
+            &ops::update_user(&self.store, p, id, &b)?,
+        ))
     }
 
     fn link(&self, page: &str, token: &str) -> Option<String> {
-        // The token goes in the fragment, which browsers never send to a
-        // server or put in a Referer.
-        self.cfg
-            .public_url
-            .as_deref()
-            .map(|u| format!("{}/{page}#{token}", u.trim_end_matches('/')))
+        ops::link(self.cfg.public_url.as_deref(), page, token)
     }
 }
 

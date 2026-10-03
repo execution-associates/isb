@@ -214,6 +214,7 @@ fn row_org(action: &str, args: &Value) -> Option<String> {
     if super::PLATFORM_TOOLS.contains(&action)
         || super::CROSS_ORG_READS.contains(&action)
         || super::superadmin::TOOLS.contains(&action)
+        || super::accounts::USER_TOOLS.contains(&action)
         || action.starts_with("superadmin.")
     {
         return named.and_then(|o| crate::org::OrgId::new(o).ok().map(|o| o.to_string()));

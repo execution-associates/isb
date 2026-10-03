@@ -26,8 +26,10 @@ macro_rules! tool {
     }};
 }
 
+mod accounts;
 pub mod apps;
 pub mod audit;
+mod authorize;
 pub mod builds;
 pub mod data;
 mod default_org;
@@ -64,6 +66,7 @@ use crate::sandbox::{EnsureOptions, Sandbox, SandboxInfo};
 use crate::server::{AccessValidator, Caller, Listener, Registry, Tool, ToolPolicy};
 use crate::spec::{ComposeFile, SandboxSpec};
 use crate::stack::{Controller, StackDef, Store, now_secs};
+use authorize::{CROSS_ORG_READS, PLATFORM_TOOLS, arg_org, authorize_class};
 use policy::RemotePolicy;
 use tools::Ann;
 
@@ -226,6 +229,8 @@ struct Daemon {
     /// Each org's workspace, its token and its bridge listener; the
     /// sandbox reaper.
     workspaces: Arc<workspaces::Workspaces>,
+    /// Where users reach isb, for invitation links.
+    public_url: Option<String>,
 }
 
 /// dnsmasq (as `incus`) reads service names from the DNS root. When that
@@ -452,6 +457,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         host: superadmin::host_summary(&cfg, &gate),
         catalogs: Arc::new(crate::template::catalog::Catalogs::new(&cfg.state_dir)),
         workspaces: workspaces.clone(),
+        public_url: cfg.public_url.clone(),
     });
     if let Some(s) = &servers {
         s.start(ctl.clone());
@@ -653,38 +659,6 @@ fn with_external_drivers(
     secrets.with_driver(Arc::new(onepassword::OnePasswordDriver::new(token)))
 }
 
-/// Tools that reach across orgs: platform admins only.
-const PLATFORM_TOOLS: &[&str] = &[
-    "server_status",
-    "org_list",
-    "org_create",
-    "org_update",
-    "org_delete",
-    "registry_gc",
-    "notification_settings",
-    "template_catalog_add",
-    "template_catalog_remove",
-    "audit_verify",
-    "server_add",
-    "server_list",
-    "server_show",
-    "server_remove",
-    "server_rotate_cert",
-    "server_provision_get",
-];
-
-/// Read-only tools that span orgs: any signed-in user, filtered to their
-/// orgs by the tool itself.
-const CROSS_ORG_READS: &[&str] = &["overview", "events", "stack_list", "ingress_status"];
-
-/// The org a tool call names (`org`, default `default`).
-fn arg_org(args: &Value) -> Result<crate::org::OrgId> {
-    match args.get("org").and_then(Value::as_str) {
-        Some(o) => crate::org::OrgId::new(o),
-        None => Ok(crate::org::OrgId::default_org()),
-    }
-}
-
 /// The orgs a caller may see, or `None` for all of them.
 fn visible_orgs(c: &Caller) -> Option<Vec<crate::org::OrgId>> {
     match c.principal() {
@@ -793,81 +767,6 @@ fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate:
 fn bearer(req: &crate::server::http::Request) -> Option<&str> {
     let (scheme, token) = req.header("authorization")?.trim().split_once(' ')?;
     scheme.eq_ignore_ascii_case("bearer").then(|| token.trim())
-}
-
-/// May `c` call `tool` (of class `cls`) with `args`? The arguments to use
-/// (an org-bound endpoint pins `org`), or the refusal. A token's scopes
-/// narrow what its role allows; a viewer runs read-only tools only.
-fn authorize_class(
-    c: &Caller,
-    tool: &str,
-    cls: audit::Class,
-    mut args: Value,
-    scope: Option<&crate::org::OrgId>,
-    allow_anonymous: bool,
-) -> Result<Value> {
-    if let Some(org) = scope {
-        match args.get("org").and_then(Value::as_str) {
-            Some(o) if o != org.as_str() => {
-                return Err(Error::Forbidden(format!(
-                    "this endpoint acts in org {org}, not {o}"
-                )));
-            }
-            _ => args["org"] = json!(org.as_str()),
-        }
-    }
-    match c {
-        Caller::Local { .. } | Caller::Superadmin(_) => Ok(args),
-        _ if superadmin::TOOLS.contains(&tool) => Err(Error::Forbidden(format!(
-            "{tool} is for superadmins (the unix socket, a superadmin token, or a listed tailnet or Access identity)"
-        ))),
-        Caller::Unauthenticated { .. } if allow_anonymous => Ok(args),
-        Caller::Unauthenticated { .. } => Err(Error::Forbidden(
-            "sign in: send an API token as Authorization: Bearer (isb token create)".into(),
-        )),
-        Caller::Access(id) => Err(Error::Forbidden(format!(
-            "{} has no isb account; ask an org admin to invite you",
-            id.name()
-        ))),
-        Caller::User { principal: p } => {
-            if !audit::scope_allows(p.scopes(), tool, cls) {
-                return Err(Error::Forbidden(format!(
-                    "this token's scopes ({}) do not cover {tool}",
-                    p.scopes().join(", ")
-                )));
-            }
-            if PLATFORM_TOOLS.contains(&tool) && !p.platform_admin {
-                return Err(Error::Forbidden(format!("{} is for platform admins", tool)));
-            }
-            if tool == "secret_reencrypt"
-                && args.get("all").and_then(Value::as_bool) == Some(true)
-                && !p.platform_admin
-            {
-                return Err(Error::Forbidden(
-                    "re-encrypting every org is for platform admins".into(),
-                ));
-            }
-            if (CROSS_ORG_READS.contains(&tool) && scope.is_none())
-                || tool == "audit_list"
-                || tool == "history_query"
-            {
-                // They filter to what the caller may see themselves.
-                return Ok(args);
-            }
-            let org = arg_org(&args)?;
-            if p.platform_admin {
-                return Ok(args);
-            }
-            match p.role_in(&org) {
-                None => Err(Error::Forbidden(format!("no access to org {org}"))),
-                Some(_) if cls.read_only => Ok(args),
-                Some(_) if p.can_admin_org(&org) => Ok(args),
-                Some(r) => Err(Error::Forbidden(format!(
-                    "{tool} changes things or reads secrets; a {r} in org {org} only reads"
-                ))),
-            }
-        }
-    }
 }
 
 /// Events name their stack `org/stack` (or just `stack` in the default org).
@@ -1004,6 +903,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
     servers::register(&mut r, d.clone())?;
     ssh::register(&mut r, d.clone())?;
     workspaces::register(&mut r, d.clone())?;
+    accounts::register(&mut r, d.clone())?;
     Ok(r)
 }
 

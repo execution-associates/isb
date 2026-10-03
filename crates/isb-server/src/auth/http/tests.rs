@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use serde_json::{Value, json};
 
 use super::*;
+use crate::auth::PrincipalKind;
 use crate::auth::tests::{fast_config, store};
 
 const PW: &str = "correct horse battery";
@@ -381,8 +382,14 @@ fn tokens_over_http() {
         &[("Authorization", &bearer)],
         Some(json!({"name": "child", "org": "default"})),
     ));
-    assert_eq!(st, 201, "{v}");
-    // An org token cannot mint a platform token or reach another org.
+    // A token cannot mint tokens, even for its own org with its own reach
+    // (a copy would outlive the token's revocation).
+    assert_eq!(st, 403, "{v}");
+    assert!(
+        v["message"].as_str().unwrap().contains("cannot mint"),
+        "{v}"
+    );
+    // Nor a platform token, nor one for another org.
     let (st, _, _) = t.call(req(
         "POST",
         "/api/v1/auth/tokens",
@@ -410,7 +417,7 @@ fn tokens_over_http() {
     assert_eq!(st, 401);
     // List and revoke.
     let (_, v, _) = t.get("tokens", &[("Cookie", &cookie)]);
-    assert_eq!(v["tokens"].as_array().unwrap().len(), 2);
+    assert_eq!(v["tokens"].as_array().unwrap().len(), 1);
     let (st, _, _) = t.call(req(
         "DELETE",
         "/api/v1/auth/tokens/1",
