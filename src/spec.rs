@@ -77,6 +77,12 @@ pub struct SecretDef {
     /// Read through this secrets driver, from `name`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub driver: Option<String>,
+
+    /// With `driver`: how often `isb serve` checks the driver for a new
+    /// version (`30m`, `1h`; default 1h). A new version rolls the services
+    /// using it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh: Option<String>,
 }
 
 impl SecretDef {
@@ -110,12 +116,35 @@ impl SecretDef {
         if self.age.as_deref().is_some_and(|a| a.trim().is_empty()) {
             return Err("age is empty".into());
         }
+        if let Some(r) = &self.refresh {
+            if self.driver.is_none() {
+                return Err("refresh goes with driver".into());
+            }
+            let d = flex::parse_duration(r).map_err(|e| format!("refresh: {e}"))?;
+            if d < std::time::Duration::from_secs(10) {
+                return Err(format!("refresh {r:?}: at least 10s"));
+            }
+        }
         Ok(())
     }
 
     /// The store name of an `external` secret declared under `key`.
     pub fn store_name<'a>(&'a self, key: &'a str) -> Option<&'a str> {
         self.external.then(|| self.name.as_deref().unwrap_or(key))
+    }
+
+    /// How often a driver-backed secret is checked for a new version.
+    pub fn refresh_interval(&self) -> std::time::Duration {
+        self.refresh
+            .as_deref()
+            .and_then(|r| flex::parse_duration(r).ok())
+            .unwrap_or(DEFAULT_SECRET_REFRESH)
+    }
+
+    /// Resolved where the deployer stands (`file`, `environment`), rather
+    /// than from the org's store and the daemon's key.
+    pub fn is_client_side(&self) -> bool {
+        self.file.is_some() || self.environment.is_some()
     }
 
     /// The source kind, for messages.
@@ -133,6 +162,113 @@ impl SecretDef {
         } else {
             "none"
         }
+    }
+}
+
+/// How often `isb serve` checks a driver-backed secret by default.
+pub const DEFAULT_SECRET_REFRESH: std::time::Duration = std::time::Duration::from_secs(3600);
+
+/// A service's environment: plain values, and variables whose value is a
+/// top-level secret (`KEY: {secret: NAME}`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Environment {
+    /// `KEY: VALUE`: instance config (`environment.KEY`).
+    pub vars: BTreeMap<String, String>,
+    /// `KEY: {secret: NAME}`: variable to top-level secret key.
+    pub secrets: BTreeMap<String, String>,
+}
+
+impl Environment {
+    pub fn is_empty(&self) -> bool {
+        self.vars.is_empty() && self.secrets.is_empty()
+    }
+}
+
+/// The plain values, so `spec.env` reads as the map it mostly is.
+impl std::ops::Deref for Environment {
+    type Target = BTreeMap<String, String>;
+    fn deref(&self) -> &Self::Target {
+        &self.vars
+    }
+}
+
+impl std::ops::DerefMut for Environment {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.vars
+    }
+}
+
+impl<'a> IntoIterator for &'a Environment {
+    type Item = (&'a String, &'a String);
+    type IntoIter = std::collections::btree_map::Iter<'a, String, String>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.vars.iter()
+    }
+}
+
+impl From<BTreeMap<String, String>> for Environment {
+    fn from(vars: BTreeMap<String, String>) -> Self {
+        Environment {
+            vars,
+            secrets: BTreeMap::new(),
+        }
+    }
+}
+
+impl Serialize for Environment {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut m = s.serialize_map(None)?;
+        let mut keys: Vec<&String> = self.vars.keys().chain(self.secrets.keys()).collect();
+        keys.sort();
+        keys.dedup();
+        for k in keys {
+            match (self.vars.get(k), self.secrets.get(k)) {
+                (Some(v), _) => m.serialize_entry(k, v)?,
+                (None, Some(sec)) => {
+                    m.serialize_entry(k, &BTreeMap::from([("secret", sec.as_str())]))?
+                }
+                (None, None) => {}
+            }
+        }
+        m.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Environment {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let mut env = Environment::default();
+        match flex::EnvMapOrList::deserialize(d)? {
+            flex::EnvMapOrList::Map(m) => {
+                for (k, v) in m {
+                    match v {
+                        flex::EnvValue::Scalar(v) => {
+                            env.vars.insert(k, v.into_string());
+                        }
+                        flex::EnvValue::Secret { secret } if secret.is_empty() => {
+                            return Err(D::Error::custom(format!(
+                                "environment {k}: secret needs a top-level secret's name"
+                            )));
+                        }
+                        flex::EnvValue::Secret { secret } => {
+                            env.secrets.insert(k, secret);
+                        }
+                    }
+                }
+            }
+            flex::EnvMapOrList::List(l) => {
+                for item in l {
+                    let Some((k, v)) = item.split_once('=') else {
+                        return Err(D::Error::custom(format!(
+                            "environment entry {item:?} has no value: write {item}=VALUE"
+                        )));
+                    };
+                    env.vars.insert(k.to_string(), v.to_string());
+                }
+            }
+        }
+        Ok(env)
     }
 }
 
@@ -323,16 +459,16 @@ pub struct SandboxSpec {
     pub labels: BTreeMap<String, String>,
 
     /// Instance environment (`environment.<KEY>`), seen by every exec: a map, or
-    /// a list of `KEY=VALUE`. Not for secrets: it is plain instance config,
-    /// readable by anyone who can read the instance.
+    /// a list of `KEY=VALUE`. A plain value is instance config, readable by
+    /// anyone who can read the instance. `KEY: {secret: NAME}` delivers the
+    /// top-level secret NAME as the variable (docs/secrets.md).
     #[serde(
         default,
         rename = "environment",
-        deserialize_with = "flex::env_map_or_list",
-        skip_serializing_if = "BTreeMap::is_empty"
+        skip_serializing_if = "Environment::is_empty"
     )]
-    #[schemars(with = "flex::MapOrList")]
-    pub env: BTreeMap<String, String>,
+    #[schemars(with = "flex::EnvMapOrList")]
+    pub env: Environment,
 
     /// Mounts: `SOURCE:TARGET[:OPTIONS]` or the long form. A source starting
     /// with `/`, `.` or `~` is a host path; anything else is a named volume.
@@ -1596,6 +1732,15 @@ impl SecretRef {
 }
 
 impl SandboxSpec {
+    /// Every top-level secret the service uses, as a file or a variable.
+    pub fn secret_keys(&self) -> std::collections::BTreeSet<&str> {
+        self.secrets
+            .iter()
+            .map(|r| r.source.as_str())
+            .chain(self.env.secrets.values().map(String::as_str))
+            .collect()
+    }
+
     /// `restart` is set to something that keeps the service running.
     pub fn long_running(&self) -> bool {
         self.restart.is_some_and(|r| r.is_long_running())

@@ -18,6 +18,34 @@ type Handler = Box<dyn Fn(&Secrets, Value, &Caller) -> Result<Value> + Send + Sy
 /// The stacks in an org whose services use a stored secret.
 pub type InUse = Arc<dyn Fn(&OrgId, &str) -> Vec<String> + Send + Sync>;
 
+/// A stored secret got a new value: roll what uses it; returns the stacks
+/// rolled.
+pub type Changed = Arc<dyn Fn(&OrgId, &str) -> Vec<String> + Send + Sync>;
+
+/// Re-read every stack reference to a name through its driver now; returns
+/// (driver, version) per reference and the stacks rolled.
+pub type Refresh =
+    Arc<dyn Fn(&OrgId, &str) -> Result<(Vec<(String, u64)>, Vec<String>)> + Send + Sync>;
+
+/// How the secret tools reach the stacks.
+#[derive(Clone)]
+pub struct Hooks {
+    pub in_use: InUse,
+    pub changed: Changed,
+    pub refresh: Refresh,
+}
+
+impl Hooks {
+    /// No stacks at all.
+    pub fn none() -> Hooks {
+        Hooks {
+            in_use: Arc::new(|_, _| Vec::new()),
+            changed: Arc::new(|_, _| Vec::new()),
+            refresh: Arc::new(|_, _| Ok((Vec::new(), Vec::new()))),
+        }
+    }
+}
+
 fn args<T: DeserializeOwned>(v: Value) -> Result<T> {
     serde_json::from_value(v).map_err(|e| Error::invalid(format!("bad arguments: {e}")))
 }
@@ -72,7 +100,12 @@ fn value_of(b64: &str) -> Result<Vec<u8>> {
 }
 
 /// Register the secret tools.
-pub fn register(r: &mut Registry, secrets: Arc<Secrets>, in_use: InUse) -> Result<()> {
+pub fn register(r: &mut Registry, secrets: Arc<Secrets>, hooks: Hooks) -> Result<()> {
+    let Hooks {
+        in_use,
+        changed,
+        refresh,
+    } = hooks;
     let ro = json!({"readOnlyHint": true, "openWorldHint": false});
     let destructive = json!({"destructiveHint": true, "openWorldHint": false});
     let write = json!({"destructiveHint": false, "openWorldHint": false});
@@ -132,16 +165,17 @@ pub fn register(r: &mut Registry, secrets: Arc<Secrets>, in_use: InUse) -> Resul
             Ok(serde_json::to_value(m)?)
         }),
     )?;
+    let on_set = changed.clone();
     add(
         "secret_set",
         "Set a secret",
-        "Give a secret a new value (base64), bumping its version; creates it in the local store if missing. Stacks using it roll to the new version.",
+        "Give a secret a new value (base64), bumping its version; creates it in the local store if missing. Stacks using it roll to the new version (listed in `rolled`).",
         obj(
             props(json!({"name": name_prop()["name"], "value": value_prop["value"]})),
             &["name", "value"],
         ),
         &write,
-        Box::new(|s, a, c| {
+        Box::new(move |s, a, c| {
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields)]
             struct A {
@@ -152,11 +186,11 @@ pub fn register(r: &mut Registry, secrets: Arc<Secrets>, in_use: InUse) -> Resul
             }
             let a: A = args(a)?;
             let org = org_for(c, a.org.as_deref())?;
-            Ok(serde_json::to_value(s.set(
-                &org,
-                &a.name,
-                &value_of(&a.value)?,
-            )?)?)
+            let m = s.set(&org, &a.name, &value_of(&a.value)?)?;
+            let rolled = on_set(&org, &a.name);
+            let mut v = serde_json::to_value(m)?;
+            v["rolled"] = json!(rolled);
+            Ok(v)
         }),
     )?;
     add(
@@ -200,7 +234,7 @@ pub fn register(r: &mut Registry, secrets: Arc<Secrets>, in_use: InUse) -> Resul
     add(
         "secret_delete",
         "Delete a secret",
-        "Delete a secret. Refused while a deployed stack's services use it (`external: true`).",
+        "Delete a secret. Refused while a deployed stack's services use it.",
         obj(props(name_prop()), &["name"]),
         &destructive,
         Box::new(move |s, a, c| {
@@ -222,13 +256,70 @@ pub fn register(r: &mut Registry, secrets: Arc<Secrets>, in_use: InUse) -> Resul
     add(
         "secret_refresh",
         "Refresh a secret",
-        "Re-read an externally stored secret from its source now. A no-op for the local store.",
-        obj(props(name_prop()), &["name"]),
+        "Re-read an externally stored secret from its source now, and roll the stacks using it if its version moved (listed in `rolled`). `name` is a store name, or a stack's driver reference. A no-op for the local store.",
+        obj(
+            props(json!({"name": {"type": "string", "description": "A store name, or a driver reference a stack uses."}})),
+            &["name"],
+        ),
         &write,
-        Box::new(|s, a, c| {
+        Box::new(move |s, a, c| {
             let a: Named = args(a)?;
             let org = org_for(c, a.org.as_deref())?;
-            Ok(serde_json::to_value(s.refresh(&org, &a.name)?)?)
+            // A driver reference (`op://...`) is no store name; only the
+            // stacks know it.
+            let meta = if crate::secrets::validate_name(&a.name).is_ok() {
+                match s.refresh(&org, &a.name) {
+                    Ok(m) => Some(m),
+                    Err(Error::NotFound(_)) => None,
+                    Err(e) => return Err(e),
+                }
+            } else {
+                None
+            };
+            let (refs, rolled) = refresh(&org, &a.name)?;
+            let mut v = match (meta, refs.first()) {
+                (Some(m), _) => serde_json::to_value(m)?,
+                (None, Some((driver, version))) => {
+                    json!({"org": org, "name": a.name, "driver": driver, "version": version})
+                }
+                (None, None) => return Err(crate::secrets::not_found(&org, &a.name)),
+            };
+            v["rolled"] = json!(rolled);
+            Ok(v)
+        }),
+    )?;
+    add(
+        "secret_resolve",
+        "Resolve compose secrets",
+        "Local callers only (`isb up`): the values (base64) of a compose file's store-backed secrets (`external`, `age`, `driver`), read from the org's store and decrypted with the daemon's key.",
+        obj(
+            props(json!({"secrets": {"type": "object", "description": "Top-level compose secrets, by key."}})),
+            &["secrets"],
+        ),
+        &ro,
+        Box::new(|s, a, c| {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct A {
+                #[serde(default)]
+                org: Option<String>,
+                secrets: BTreeMap<String, crate::spec::SecretDef>,
+            }
+            // A decryption oracle for the daemon's key: never for remote
+            // callers, whatever --deny-tools says.
+            if !c.is_trusted() {
+                return Err(Error::invalid(
+                    "secret_resolve is for local callers (isb up) only",
+                ));
+            }
+            let a: A = args(a)?;
+            let org = org_for(c, a.org.as_deref())?;
+            let values = crate::stack::secrets::resolve(s, &org, &a.secrets)?;
+            let out: BTreeMap<String, String> = values
+                .iter()
+                .map(|(k, v)| (k.clone(), crate::rpc::b64_encode(v)))
+                .collect();
+            Ok(json!({"values": out}))
         }),
     )?;
     add(
@@ -295,9 +386,74 @@ mod tests {
                 vec![]
             }
         });
+        let changed: Changed = Arc::new(|org: &OrgId, name: &str| {
+            if org.is_default() && name == "used" {
+                vec!["app".to_string()]
+            } else {
+                vec![]
+            }
+        });
+        let refresh: Refresh = Arc::new(|_org: &OrgId, name: &str| {
+            if name == "op://v/item" {
+                Ok((vec![("vault".to_string(), 4)], vec!["app".to_string()]))
+            } else {
+                Ok((vec![], vec![]))
+            }
+        });
         let mut r = Registry::new();
-        register(&mut r, s, in_use).unwrap();
+        register(
+            &mut r,
+            s,
+            Hooks {
+                in_use,
+                changed,
+                refresh,
+            },
+        )
+        .unwrap();
         r
+    }
+
+    #[test]
+    fn set_and_refresh_roll_and_resolve_is_local_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = registry(dir.path());
+        let v = crate::rpc::b64_encode(b"one");
+        call(&r, "secret_create", json!({"name": "used", "value": v})).unwrap();
+        let m = call(&r, "secret_set", json!({"name": "used", "value": v})).unwrap();
+        assert_eq!(m["rolled"], json!(["app"]));
+        assert_eq!(m["version"], 2);
+        // A driver reference is no store name; the stacks answer for it.
+        let m = call(&r, "secret_refresh", json!({"name": "op://v/item"})).unwrap();
+        assert_eq!(
+            (m["driver"].as_str(), m["version"].as_u64(), m["rolled"].clone()),
+            (Some("vault"), Some(4), json!(["app"]))
+        );
+        assert!(matches!(
+            call(&r, "secret_refresh", json!({"name": "op://v/other"})),
+            Err(Error::NotFound(_))
+        ));
+        let m = call(&r, "secret_refresh", json!({"name": "used"})).unwrap();
+        assert_eq!(m["version"], 2);
+        // secret_resolve reads store-backed sources for isb up...
+        let res = call(
+            &r,
+            "secret_resolve",
+            json!({"secrets": {"a": {"external": true, "name": "used"}, "f": {"file": "./x"}}}),
+        )
+        .unwrap();
+        assert_eq!(res["values"]["a"], json!(v));
+        assert!(res["values"].get("f").is_none());
+        // ...and never for a remote caller.
+        let remote = Caller::Unauthenticated {
+            addr: "127.0.0.1:1".parse().unwrap(),
+        };
+        let e = (r.get("secret_resolve").unwrap().handler)(
+            json!({"secrets": {"a": {"external": true, "name": "used"}}}),
+            &remote,
+        )
+        .unwrap_err();
+        assert!(e.to_string().contains("local callers"), "{e}");
     }
 
     fn call(r: &Registry, tool: &str, a: Value) -> Result<Value> {

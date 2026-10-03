@@ -98,12 +98,39 @@ pub struct UnitFiles {
     pub env: String,
 }
 
-/// Render the unit and its environment file.
+/// The variables a service gets from secrets (`KEY: {secret: NAME}`), from
+/// the values of its top-level secrets. A variable's value must be text.
+pub fn secret_env(
+    spec: &SandboxSpec,
+    values: &BTreeMap<String, Vec<u8>>,
+) -> Result<BTreeMap<String, String>> {
+    let mut out = BTreeMap::new();
+    for (var, key) in &spec.env.secrets {
+        let v = values
+            .get(key)
+            .ok_or_else(|| Error::invalid(format!("no value for secret {key:?}")))?;
+        let text = String::from_utf8(v.clone())
+            .ok()
+            .filter(|t| !t.contains('\0'))
+            .ok_or_else(|| {
+                Error::invalid(format!(
+                    "secret {key:?} cannot be the variable {var}: it is not text (NUL or invalid UTF-8); mount it as a file instead"
+                ))
+            })?;
+        out.insert(var.clone(), text);
+    }
+    Ok(out)
+}
+
+/// Render the unit and its environment file. `secret_env` (from
+/// [`secret_env`]) lands in the 0600 environment file only, after the
+/// plain variables.
 pub fn render(
     service: &str,
     spec: &SandboxSpec,
     login_shell: Option<&str>,
     uses_secrets: bool,
+    secret_env: &BTreeMap<String, String>,
 ) -> Result<UnitFiles> {
     let argv = effective_argv(spec, login_shell).ok_or_else(|| {
         Error::invalid(format!("{service}: restart needs a command to supervise"))
@@ -180,8 +207,9 @@ pub fn render(
     u.push_str("\n[Install]\nWantedBy=multi-user.target\n");
 
     // incus' environment.* reaches exec, not systemd's services: repeat it.
-    let mut env: BTreeMap<String, String> = spec.env.clone();
+    let mut env: BTreeMap<String, String> = spec.env.vars.clone();
     env.extend(spec.exec.env.clone());
+    env.extend(secret_env.clone());
     let mut e = String::from("# Written by isb.\n");
     for (k, v) in &env {
         e.push_str(&env_line(k, v));
@@ -218,6 +246,7 @@ pub fn install(
     service: &str,
     spec: &SandboxSpec,
     uses_secrets: bool,
+    secret_env: &BTreeMap<String, String>,
 ) -> Result<bool> {
     let client = sb.client();
     let name = sb.name();
@@ -239,7 +268,7 @@ pub fn install(
         _ => None,
     }
     .filter(|s| !s.ends_with("nologin") && !s.ends_with("/false"));
-    let files = render(service, spec, shell.as_deref(), uses_secrets)?;
+    let files = render(service, spec, shell.as_deref(), uses_secrets, secret_env)?;
     let unit_path = format!("/etc/systemd/system/{}", unit_name(service));
     let env_file = env_path(service);
     let same = |path: &str, want: &str| -> Result<bool> {
@@ -418,18 +447,16 @@ fn numeric_user(user: Option<&str>) -> Option<(u32, u32)> {
     Some((a.parse().ok()?, b.parse().ok()?))
 }
 
-/// Read every secret a file declares from where the deployer stands: a host
-/// file (relative to `base`) or one of `vars` / the environment.
+/// Read the secrets the file's services use that come from where the
+/// deployer stands: a host file (relative to `base`) or one of `vars` / the
+/// environment. The others (`external`, `age`, `driver`) come from the org's
+/// store and the daemon's key, and are skipped here.
 pub fn resolve_secret_values(
     file: &crate::spec::ComposeFile,
     base: &std::path::Path,
     lookup: &dyn Fn(&str) -> Option<String>,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
-    let used: std::collections::BTreeSet<&String> = file
-        .services
-        .values()
-        .flat_map(|s| s.secrets.iter().map(|r| &r.source))
-        .collect();
+    let used = crate::stack::secrets::used_keys(file);
     let mut out = BTreeMap::new();
     for (key, def) in &file.secrets {
         if !used.contains(key) {
@@ -448,12 +475,7 @@ pub fn resolve_secret_values(
                 })?
                 .into_bytes()
         } else {
-            // external, age, driver: the daemon's store and key hold these
-            // (P1.9/P1.10 wire them into stack deploys).
-            return Err(Error::invalid(format!(
-                "secret {key:?}: {} secrets are not resolved by `isb up` or by the client running `isb stack deploy`",
-                def.source_kind()
-            )));
+            continue;
         };
         out.insert(key.clone(), v);
     }
@@ -556,7 +578,7 @@ mod tests {
         let s = spec(
             "image: x\nuser: dev\nworking_dir: /srv\nrestart: always\ncommand: bun run dev --port=$PORT\nenvironment: {A: 'x \"y\" $z'}\n",
         );
-        let f = render("web", &s, None, false).unwrap();
+        let f = render("web", &s, None, false, &BTreeMap::new()).unwrap();
         assert!(f.unit.contains("User=dev\n"), "{}", f.unit);
         assert!(f.unit.contains("WorkingDirectory=/srv\n"));
         assert!(f.unit.contains("Restart=always\n"));
@@ -578,7 +600,7 @@ mod tests {
         let s = spec(
             "image: x\nrestart: on-failure\ncommand: [/usr/bin/app, '50%']\ndeploy: {restart_policy: {delay: 2s, max_attempts: 3, window: 1m}}\n",
         );
-        let f = render("api", &s, None, true).unwrap();
+        let f = render("api", &s, None, true, &BTreeMap::new()).unwrap();
         assert!(
             f.unit.contains("ExecStart=\"/usr/bin/app\" \"50%%\"\n"),
             "{}",
@@ -604,7 +626,35 @@ mod tests {
             effective_argv(&s, Some("/bin/bash")).unwrap(),
             ["/bin/bash", "-l", "-c", "exec \"$@\"", "isb", "bun", "dev"]
         );
-        assert!(render("x", &spec("image: x\nrestart: always\n"), None, false).is_err());
+        assert!(render("x", &spec("image: x\nrestart: always\n"), None, false, &BTreeMap::new()).is_err());
+    }
+
+    #[test]
+    fn secret_variables_go_to_the_env_file_only() {
+        let s = spec(
+            "image: x\nrestart: always\ncommand: [/usr/bin/app]\nenvironment: {A: plain, TOKEN: {secret: tok}, DB: {secret: db}}\nexec: {env: {B: two}}\n",
+        );
+        let values = BTreeMap::from([
+            ("tok".to_string(), b"s3cr$t \"x\"".to_vec()),
+            ("db".to_string(), b"pw".to_vec()),
+        ]);
+        let env = secret_env(&s, &values).unwrap();
+        assert_eq!(env["TOKEN"], "s3cr$t \"x\"");
+        let f = render("app", &s, None, false, &env).unwrap();
+        assert_eq!(
+            f.env,
+            "# Written by isb.\nA=\"plain\"\nB=\"two\"\nDB=\"pw\"\nTOKEN=\"s3cr\\$t \\\"x\\\"\"\n"
+        );
+        assert!(!f.unit.contains("s3cr"), "{}", f.unit);
+        // Not text: refused, pointing at a file mount instead.
+        let bad = BTreeMap::from([
+            ("tok".to_string(), vec![0xff, 0x00]),
+            ("db".to_string(), b"pw".to_vec()),
+        ]);
+        let e = secret_env(&s, &bad).unwrap_err().to_string();
+        assert!(e.contains("not text") && e.contains("TOKEN"), "{e}");
+        let e = secret_env(&s, &BTreeMap::new()).unwrap_err().to_string();
+        assert!(e.contains("no value"), "{e}");
     }
 
     #[test]

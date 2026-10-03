@@ -1410,8 +1410,64 @@ struct UpFlags {
     json: bool,
 }
 
+/// Read the values of the project's store-backed secrets (`external`, `age`,
+/// `driver`): through `isb serve` when it answers on its socket (the only
+/// way when its key is a systemd credential), else from the store on disk
+/// with the daemon's key, looked up as the daemon does. A key is never
+/// generated here.
+fn read_store_secrets(ctx: &Ctx, p: &mut Project) -> Result<()> {
+    use serde_json::json;
+    let defs = p.store_backed_secrets();
+    if defs.is_empty() {
+        return Ok(());
+    }
+    let org = isb::org::OrgId::new(
+        ctx.global
+            .org
+            .clone()
+            .unwrap_or_else(|| isb::org::DEFAULT_ORG.to_string()),
+    )?;
+    let socket = isb::server::default_socket_path();
+    let values = if std::os::unix::net::UnixStream::connect(&socket).is_ok() {
+        let r = isb::server::client::call_tool(
+            &socket,
+            "secret_resolve",
+            json!({"org": org, "secrets": defs}),
+            SHORT,
+        )?;
+        r["values"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .map(|(k, v)| {
+                let b = isb::rpc::b64_decode(v.as_str().unwrap_or_default())
+                    .map_err(|_| Error::Invalid(format!("secret {k:?}: bad value from isb serve")))?;
+                Ok((k.clone(), b))
+            })
+            .collect::<Result<BTreeMap<_, _>>>()?
+    } else {
+        let config = isb::secrets::SecretsConfig::load(&isb::secrets::SecretsConfig::default_path())?;
+        let secrets = isb::secrets::Secrets::open_existing(
+            &isb::daemon::default_state_dir(),
+            &isb::secrets::KeySources::from_env(),
+            &config,
+        )
+        .map_err(|e| {
+            Error::Invalid(format!(
+                "secrets {}: no isb serve on {} and the store cannot be opened here: {e}",
+                defs.keys().cloned().collect::<Vec<_>>().join(", "),
+                socket.display()
+            ))
+        })?;
+        isb::stack::secrets::resolve(&secrets, &org, &defs)?
+    };
+    p.store_secrets = compose::SecretValues(values);
+    Ok(())
+}
+
 fn up(ctx: &Ctx, services: Vec<String>, flags: UpFlags) -> Result<u8> {
-    let p = ctx.load()?;
+    let mut p = ctx.load()?;
+    read_store_secrets(ctx, &mut p)?;
     let opts = EnsureOptions {
         diff: DiffOptions {
             prune_devices: flags.prune_devices,
@@ -1832,7 +1888,7 @@ fn secret(ctx: &Ctx, cmd: SecretCmd) -> Result<u8> {
                 json!({"org": org, "name": name, "value": b64(&v)}),
                 SHORT,
             )?;
-            eprintln!("{name}: version {}", m["version"]);
+            print_rolled(&name, &m);
         }
         SecretCmd::Get { name } => {
             let r = call("secret_get", json!({"org": org, "name": name}), SHORT)?;
@@ -1939,10 +1995,18 @@ fn secret(ctx: &Ctx, cmd: SecretCmd) -> Result<u8> {
         }
         SecretCmd::Refresh { name } => {
             let m = call("secret_refresh", json!({"org": org, "name": name}), SHORT)?;
-            eprintln!("{name}: version {}", m["version"]);
+            print_rolled(&name, &m);
         }
     }
     Ok(0)
+}
+
+/// A secret's version after set/refresh, and the stacks now rolling to it.
+fn print_rolled(name: &str, m: &serde_json::Value) {
+    eprintln!("{name}: version {}", m["version"]);
+    for s in m["rolled"].as_array().into_iter().flatten() {
+        eprintln!("{}: rolling to the new version", s.as_str().unwrap_or(""));
+    }
 }
 
 fn print_stack(st: &serde_json::Value) {

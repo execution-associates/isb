@@ -190,6 +190,19 @@ impl Secrets {
         })
     }
 
+    /// Open the store with an existing key only, for a client reading it
+    /// while no daemon runs (`isb up`). Never generates a key.
+    pub fn open_existing(
+        state_dir: &Path,
+        keys: &KeySources,
+        config: &SecretsConfig,
+    ) -> Result<Secrets> {
+        let break_glass = config.parsed_recipients()?;
+        let k = keys::find_identity(keys)?;
+        let keyring = Arc::new(Keyring::new(k.identity, break_glass));
+        Ok(Secrets::new(LocalDriver::new(state_dir, keyring)))
+    }
+
     /// Add a driver. Names are unique.
     pub fn with_driver(mut self, d: Arc<dyn Driver>) -> Result<Secrets> {
         if self.drivers.iter().any(|x| x.name() == d.name()) {
@@ -295,6 +308,35 @@ impl Secrets {
 
     pub fn version(&self, org: &OrgId, name: &str) -> Result<u64> {
         let (d, _) = self.holder(org, name)?;
+        d.version(org, name)
+    }
+
+    /// Store `value` under `name` unless it already holds exactly that, so
+    /// the version moves only when the value does.
+    pub fn put(&self, org: &OrgId, name: &str, value: &[u8]) -> Result<SecretMeta> {
+        match self.get(org, name) {
+            Ok((v, m)) if v == value => return Ok(m),
+            Ok(_) | Err(Error::NotFound(_)) => {}
+            Err(e) => return Err(e),
+        }
+        self.set(org, name, value)
+    }
+
+    /// A value read through a named driver, by that driver's reference
+    /// (which need not be a store name: an `op://` path, say).
+    pub fn get_in(&self, driver: &str, org: &OrgId, name: &str) -> Result<(Vec<u8>, u64)> {
+        self.driver(driver)?.get(org, name)
+    }
+
+    /// The current version in a named driver: cheap, for polling.
+    pub fn version_in(&self, driver: &str, org: &OrgId, name: &str) -> Result<u64> {
+        self.driver(driver)?.version(org, name)
+    }
+
+    /// Re-read from the source through a named driver.
+    pub fn refresh_in(&self, driver: &str, org: &OrgId, name: &str) -> Result<u64> {
+        let d = self.driver(driver)?;
+        d.refresh(org, name)?;
         d.version(org, name)
     }
 
@@ -439,6 +481,23 @@ mod tests {
         assert_eq!(s.set(&org, "db", b"pw2").unwrap().version, 2);
         assert_eq!(s.version(&org, "db").unwrap(), 2);
         assert_eq!(s.refresh(&org, "db").unwrap().version, 2);
+        // put: the version moves only with the value.
+        assert_eq!(s.put(&org, "db", b"pw2").unwrap().version, 2);
+        assert_eq!(s.put(&org, "db", b"pw3").unwrap().version, 3);
+        assert_eq!(s.put(&org, "fresh", b"x").unwrap().version, 1);
+        s.delete(&org, "fresh").unwrap();
+        s.set(&org, "db", b"pw2").unwrap();
+        assert_eq!(s.version_in("local", &org, "db").unwrap(), 4);
+        assert_eq!(s.get_in("fixed", &org, "vault_token").unwrap().1, 7);
+        assert!(s.version_in("nope", &org, "db").is_err());
+        s.set(&org, "db", b"pw2").unwrap();
+        s.set(&org, "db", b"pw2").unwrap();
+        assert_eq!(s.version(&org, "db").unwrap(), 6);
+        // Back to where the rest of the test expects it.
+        s.delete(&org, "db").unwrap();
+        s.create(&org, "db", None, b"pw2", &BTreeMap::new())
+            .unwrap();
+        s.set(&org, "db", b"pw2").unwrap();
         let names: Vec<_> = s.list(&org).unwrap().into_iter().map(|m| m.name).collect();
         assert_eq!(names, ["db", "vault_token"]);
         assert!(s.set(&org, "big", &vec![0; MAX_VALUE_BYTES + 1]).is_err());

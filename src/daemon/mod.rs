@@ -98,19 +98,28 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     for n in &opened.notes {
         eprintln!("isb serve: {n}");
     }
+    let secrets = Arc::new(opened.secrets);
+    // Definitions from before secrets were references carry values: move
+    // them into the store before anything reads the definitions.
+    for r in crate::stack::migrate::run(&store, &secrets, Some(&client)) {
+        match r {
+            Ok(m) => eprintln!("isb serve: {m}"),
+            Err(e) => eprintln!("isb serve: WARNING: {e}"),
+        }
+    }
     // The identity endpoints ride on the TCP listener; open the database
     // before anything starts, so a bad one fails startup cleanly.
     let auth = match &cfg.listen {
         Some(_) => Some(auth_routes(&cfg)?),
         None => None,
     };
-    let ctl = Controller::start(client.clone(), store, cfg.interval)?;
+    let ctl = Controller::start(client.clone(), store, cfg.interval, secrets.clone())?;
     let d = Arc::new(Daemon {
         client,
         ctl: ctl.clone(),
         policy: cfg.policy.clone(),
         state_dir: cfg.state_dir.clone(),
-        secrets: Arc::new(opened.secrets),
+        secrets,
     });
     let registry = registry(d.clone())?;
     let mut listeners = vec![Listener::unix(&cfg.socket)];
@@ -206,7 +215,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
                 "name": {"type": "string", "description": "Stack name: [a-z0-9-], starts with a letter, at most 30 characters."},
                 "compose": {"type": "string", "description": "The compose file, as YAML text. ${VAR} is filled from `vars` only."},
                 "vars": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Variables for ${VAR} and for secrets with `environment:`."},
-                "secrets": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Secret values by top-level secret name."},
+                "secrets": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Values of `file:`/`environment:` secrets by top-level secret name. They are stored in the org's store as <stack>_<name>; `external`, `age` and `driver` secrets need none."},
                 "base_dir": {"type": "string", "description": "Host directory relative bind paths resolve against. Remote callers: must be under a --bind-root."},
                 "wait": {"type": "boolean", "description": "Wait until every service converges, pauses or fails (default false)."},
                 "dry_run": {"type": "boolean", "description": "Only report what would change."},
@@ -310,7 +319,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
     tool!(
         "stack_config",
         "Stack config",
-        "The compose file a stack was deployed with, resolved (secret values are not included).",
+        "The compose file a stack was deployed with, resolved, and its secrets as references (store name, driver, version; never values).",
         obj(json!({"name": {"type": "string"}}), &["name"]),
         ro,
         |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
@@ -328,7 +337,8 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
                 "deployed_at": def.deployed_at,
                 "deployed_by": def.deployed_by,
                 "file": def.file,
-                "secrets": def.secrets.keys().collect::<Vec<_>>(),
+                // References only: store name, driver, version.
+                "secrets": def.secrets,
             }))
         }
     );
@@ -473,12 +483,38 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
                 volumes: bool,
             }
             let a: A = args(a)?;
-            d.ctl.remove(
-                &qname(&a.org, &a.name)?,
-                a.volumes,
-                Duration::from_secs(300),
-            )?;
-            Ok(json!({"ok": true}))
+            let q = qname(&a.org, &a.name)?;
+            let def = d.ctl.definition(&q)?;
+            d.ctl.remove(&q, a.volumes, Duration::from_secs(300))?;
+            // As swarm does: the secrets the stack made go with it, unless
+            // another stack has come to use them.
+            let mut removed: Vec<String> = Vec::new();
+            let owned = def
+                .secrets
+                .values()
+                .chain(def.previous.iter().flat_map(|p| p.secrets.values()))
+                .filter(|b| b.owned);
+            for b in owned {
+                if removed.contains(&b.name) {
+                    continue;
+                }
+                let used = d
+                    .ctl
+                    .definitions()
+                    .iter()
+                    .any(|o| o.org == def.org && o.store_secrets().contains(&b.name));
+                if used {
+                    continue;
+                }
+                match d.secrets.delete(&def.org, &b.name) {
+                    Ok(()) => removed.push(b.name.clone()),
+                    Err(e) if e.is_not_found() => {}
+                    Err(e) => d
+                        .ctl
+                        .note("warn", &q, format!("secret {}: not removed: {e}", b.name)),
+                }
+            }
+            Ok(json!({"ok": true, "secrets_removed": removed}))
         }
     );
     tool!(
@@ -503,7 +539,21 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
             .map(|def| def.name.clone())
             .collect()
     });
-    secrets::register(&mut r, d.secrets.clone(), in_use)?;
+    let ctl = d.ctl.clone();
+    let changed: secrets::Changed =
+        Arc::new(move |org: &crate::org::OrgId, name: &str| ctl.secret_changed(org, name));
+    let ctl = d.ctl.clone();
+    let refresh: secrets::Refresh =
+        Arc::new(move |org: &crate::org::OrgId, name: &str| ctl.refresh_secret(org, name));
+    secrets::register(
+        &mut r,
+        d.secrets.clone(),
+        secrets::Hooks {
+            in_use,
+            changed,
+            refresh,
+        },
+    )?;
     tool!(
         "sandbox_list",
         "List sandboxes",
@@ -728,56 +778,45 @@ fn stack_deploy(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     if !c.is_trusted() {
         d.policy.check_file(&file, &base)?;
     }
-    // Secret values: given directly, or from `vars` for `environment:` ones.
-    let mut values: BTreeMap<String, String> = BTreeMap::new();
-    let used: std::collections::BTreeSet<&String> = file
-        .services
-        .values()
-        .flat_map(|s| s.secrets.iter().map(|r| &r.source))
-        .collect();
-    for key in used {
-        let def = file.secrets.get(key).ok_or_else(|| {
-            Error::invalid(format!(
-                "secret {key:?} is not declared under top-level secrets"
-            ))
-        })?;
-        // P1.9/P1.10: resolve external, age and driver secrets from the
-        // org's store and the daemon's key, by name and version.
-        if def.file.is_none() && def.environment.is_none() {
-            return Err(Error::invalid(format!(
-                "secret {key:?}: stack_deploy does not deliver {} secrets; use an environment: or file: source",
-                def.source_kind()
-            )));
-        }
-        let v = a
-            .secrets
-            .get(key)
-            .cloned()
-            .or_else(|| {
-                def.environment
-                    .as_ref()
-                    .and_then(|e| a.vars.get(e).cloned())
-            })
-            .ok_or_else(|| {
-                Error::invalid(format!("no value for secret {key:?}: pass it in `secrets`"))
-            })?;
-        values.insert(key.clone(), crate::rpc::b64_encode(v.as_bytes()));
-    }
     let org = match &a.org {
         Some(o) => crate::org::OrgId::new(o.clone())?,
         None => crate::org::OrgId::default_org(),
     };
-    let def = StackDef {
+    // Values for `file:`/`environment:` secrets: given directly, or from
+    // `vars` for `environment:` ones. The rest come from the org's store.
+    let mut given: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    for key in crate::stack::secrets::used_keys(&file) {
+        let Some(def) = file.secrets.get(&key) else {
+            continue;
+        };
+        if !def.is_client_side() {
+            continue;
+        }
+        let v = a.secrets.get(&key).cloned().or_else(|| {
+            def.environment
+                .as_ref()
+                .and_then(|e| a.vars.get(e).cloned())
+        });
+        if let Some(v) = v {
+            given.insert(key, v.into_bytes());
+        }
+    }
+    let mut def = StackDef {
         name: a.name.clone(),
         org: org.clone(),
         file,
         base_dir: base,
-        secrets: values,
+        secrets: BTreeMap::new(),
         force: BTreeMap::new(),
         deployed_at: now_secs(),
         deployed_by: caller_name(c),
         previous: None,
     };
+    // Checked before any value is stored, so a deploy that cannot happen
+    // bumps no secret's version.
+    d.ctl.validate(&def)?;
+    def.secrets =
+        crate::stack::secrets::bind(&d.secrets, &org, &a.name, &def.file, &given, a.dry_run)?;
     if a.dry_run {
         return Ok(json!({"changes": d.ctl.plan(&def)?, "dry_run": true}));
     }
@@ -962,8 +1001,12 @@ pub fn local_deploy_args(
     wait: bool,
     timeout: Option<&str>,
 ) -> Result<Value> {
-    let secrets: BTreeMap<String, String> = project
-        .secret_values()?
+    // Only `file:`/`environment:` values travel; the daemon reads the rest
+    // from the org's store.
+    let secrets: BTreeMap<String, String> =
+        crate::supervise::resolve_secret_values(&project.file, &project.base_dir, &|k| {
+            project.lookup(k)
+        })?
         .into_iter()
         .map(|(k, v)| {
             String::from_utf8(v)

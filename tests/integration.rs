@@ -1150,6 +1150,15 @@ fn long_running_service() {
     );
 }
 
+/// A secret store under `state` with a throwaway key.
+fn test_secrets(state: &std::path::Path) -> std::sync::Arc<isb::secrets::Secrets> {
+    let k = isb::secrets::Keyring::new(age::x25519::Identity::generate(), vec![]);
+    std::sync::Arc::new(isb::secrets::Secrets::new(isb::secrets::LocalDriver::new(
+        state,
+        std::sync::Arc::new(k),
+    )))
+}
+
 /// The stack controller: replicas behind the balancer, a forced rolling
 /// redeploy with no failed request, scale down, remove.
 #[test]
@@ -1160,7 +1169,9 @@ fn stack_controller() {
     let client = Client::new();
     let state = tempfile::tempdir().unwrap();
     let store = isb::stack::Store::open(state.path()).unwrap();
-    let ctl = isb::stack::Controller::start(client.clone(), store, Duration::from_secs(2)).unwrap();
+    let secrets = test_secrets(state.path());
+    let ctl = isb::stack::Controller::start(client.clone(), store, Duration::from_secs(2), secrets)
+        .unwrap();
     let stack = format!("isb-test-{}", std::process::id() % 100000);
     let port = free_port();
     let yaml = format!(

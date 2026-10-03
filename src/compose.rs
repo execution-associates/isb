@@ -31,6 +31,20 @@ pub struct Project {
     /// with `environment:` resolve the way `${VAR}` did.
     pub vars: BTreeMap<String, String>,
     pub dotenv: BTreeMap<String, String>,
+    /// Values of the secrets that come from the org's store (`external`,
+    /// `age`, `driver`), read by the caller before `up`
+    /// ([`Project::store_backed_secrets`] says which).
+    pub store_secrets: SecretValues,
+}
+
+/// Secret values by top-level key. Debug output shows the keys only.
+#[derive(Clone, Default, PartialEq)]
+pub struct SecretValues(pub BTreeMap<String, Vec<u8>>);
+
+impl std::fmt::Debug for SecretValues {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_set().entries(self.0.keys()).finish()
+    }
 }
 
 impl Project {
@@ -105,9 +119,36 @@ impl Project {
             .or_else(|| self.dotenv.get(k).cloned())
     }
 
-    /// The values of the secrets the selected services use.
+    /// The values of the secrets the services use: `file:` and
+    /// `environment:` ones read here, the rest from
+    /// [`Project::store_secrets`].
     pub fn secret_values(&self) -> Result<BTreeMap<String, Vec<u8>>> {
-        crate::supervise::resolve_secret_values(&self.file, &self.base_dir, &|k| self.lookup(k))
+        let mut out =
+            crate::supervise::resolve_secret_values(&self.file, &self.base_dir, &|k| {
+                self.lookup(k)
+            })?;
+        for (key, def) in self.store_backed_secrets() {
+            let v = self.store_secrets.0.get(&key).ok_or_else(|| {
+                Error::invalid(format!(
+                    "secret {key:?}: {} secrets come from the org's secret store, which was not read",
+                    def.source_kind()
+                ))
+            })?;
+            out.insert(key, v.clone());
+        }
+        Ok(out)
+    }
+
+    /// The secrets the services use whose values come from the org's store
+    /// and the daemon's key (`external`, `age`, `driver`).
+    pub fn store_backed_secrets(&self) -> BTreeMap<String, crate::spec::SecretDef> {
+        crate::stack::secrets::used_keys(&self.file)
+            .into_iter()
+            .filter_map(|k| {
+                let d = self.file.secrets.get(&k)?;
+                (!d.is_client_side()).then(|| (k, d.clone()))
+            })
+            .collect()
     }
 
     /// The resolved project as YAML (what `isb config` prints).
@@ -302,6 +343,7 @@ pub fn load_docs(
         files,
         vars: BTreeMap::new(),
         dotenv: BTreeMap::new(),
+        store_secrets: SecretValues::default(),
     })
 }
 
@@ -335,6 +377,21 @@ fn validate_services(file: &mut crate::spec::ComposeFile) -> std::result::Result
             }
             s.file_mode()
                 .map_err(|e| format!("service {service:?}: {e}"))?;
+        }
+        for (var, key) in &spec.env.secrets {
+            if !file.secrets.contains_key(key) {
+                return Err(format!(
+                    "service {service:?}: environment {var} uses secret {key:?}, which is not declared under top-level secrets"
+                ));
+            }
+        }
+        let oci = crate::plan::ImageSource::parse(&spec.image).is_ok_and(|i| i.is_oci());
+        if !spec.env.secrets.is_empty() && !oci && spec.command.is_none() {
+            // A system image's secret variables live in its command's unit
+            // (or exec), never in instance config.
+            return Err(format!(
+                "service {service:?}: environment secrets on a system image need a command to give them to"
+            ));
         }
         if let Some(h) = &spec.healthcheck {
             h.probe().map_err(|e| format!("service {service:?}: {e}"))?;
@@ -467,7 +524,7 @@ pub fn up_handles(
     }
     let secret_values = if selected
         .iter()
-        .any(|s| !project.file.services[s].secrets.is_empty())
+        .any(|s| !project.file.services[s].secret_keys().is_empty())
     {
         project.secret_values()?
     } else {
@@ -484,7 +541,18 @@ pub fn up_handles(
     let mut out = Vec::new();
     for s in selected {
         let spec = project.service(&s)?;
-        let d = crate::sandbox::resolve(&c, spec, &project.file.volumes, &project.base_dir)?;
+        let oci = crate::plan::ImageSource::parse(&spec.image)?.is_oci();
+        let secret_env = crate::supervise::secret_env(spec, &secret_values)?;
+        // Secret variables: an OCI image's go into its config (redacted in
+        // reports, since `env.secrets` stays set); a system image's reach
+        // its command only, through exec defaults and the unit's env file.
+        let mut with_env = spec.clone();
+        if oci {
+            with_env.env.vars.extend(secret_env.clone());
+        } else {
+            with_env.exec.env.extend(secret_env.clone());
+        }
+        let d = crate::sandbox::resolve(&c, &with_env, &project.file.volumes, &project.base_dir)?;
         let r = crate::sandbox::ensure(&c, &d, opts, report)?;
         if r.applied.iter().all(|a| !a.is_change()) {
             report(&format!("{}: up to date", d.name));
@@ -496,7 +564,7 @@ pub fn up_handles(
         if spec.long_running()
             && spec.command.is_some()
             && !d.image.is_oci()
-            && crate::supervise::install(&sb, &s, spec, !spec.secrets.is_empty())?
+            && crate::supervise::install(&sb, &s, spec, !spec.secrets.is_empty(), &secret_env)?
         {
             report(&format!(
                 "{}: supervising command as {}",
@@ -947,9 +1015,71 @@ mod tests {
         assert!(load_with(&[bad], &[]).is_err());
         let p = load_with(&[&format!("secrets:\n  k: {{external: true}}\n{svc}")], &[]).unwrap();
         assert_eq!(p.file.secrets["k"].store_name("k"), Some("k"));
-        // Not resolvable by `isb up` or the deploying client.
+        // Read from the org's store by the caller; missing, it says so.
         let e = p.secret_values().unwrap_err().to_string();
         assert!(e.contains("external"), "{e}");
+        assert_eq!(p.store_backed_secrets().len(), 1);
+        let mut p2 = p.clone();
+        p2.store_secrets.0.insert("k".into(), b"v".to_vec());
+        assert_eq!(p2.secret_values().unwrap()["k"], b"v");
+        assert!(!format!("{p2:?}").contains("118"), "values are not in Debug");
+    }
+
+    #[test]
+    fn environment_secrets() {
+        let mut ok = load_with(
+            &["secrets: {k: {environment: K}}\nservices:\n  web: {image: docker:busybox, environment: {TOKEN: {secret: k}, A: 1}}\n"],
+            &[],
+        )
+        .unwrap();
+        ok.vars.insert("K".into(), "v".into());
+        let web = &ok.file.services["web"];
+        assert_eq!(web.env.secrets["TOKEN"], "k");
+        assert_eq!(web.env["A"], "1");
+        assert_eq!(ok.secret_values().unwrap()["k"], b"v");
+        // An undeclared secret.
+        let e = load_with(
+            &["services:\n  web: {image: docker:busybox, environment: {T: {secret: nope}}}\n"],
+            &[],
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("not declared"), "{e}");
+        // A system image needs a command to hand the variable to.
+        let e = load_with(
+            &["secrets: {k: {environment: K}}\nservices:\n  web: {image: dev-base, environment: {T: {secret: k}}}\n"],
+            &[("K", "v")],
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("need a command"), "{e}");
+        assert!(
+            load_with(
+                &["secrets: {k: {environment: K}}\nservices:\n  web: {image: dev-base, command: [app], environment: {T: {secret: k}}}\n"],
+                &[("K", "v")],
+            )
+            .is_ok()
+        );
+        // refresh goes with a driver, and is at least 10s.
+        let svc = "services:\n  web: {image: x, secrets: [k]}\n";
+        for (bad, why) in [
+            ("{external: true, refresh: 1h}", "refresh goes with driver"),
+            ("{driver: d, name: r, refresh: 1s}", "at least 10s"),
+            ("{driver: d, name: r, refresh: soon}", "refresh"),
+        ] {
+            let doc = format!("secrets:\n  k: {bad}\n{svc}");
+            let e = load_with(&[&doc], &[]).unwrap_err().to_string();
+            assert!(e.contains(why), "{bad}: {e}");
+        }
+        let p = load_with(
+            &[&format!("secrets:\n  k: {{driver: d, name: r, refresh: 30m}}\n{svc}")],
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            p.file.secrets["k"].refresh_interval(),
+            std::time::Duration::from_secs(1800)
+        );
     }
 
     #[test]
