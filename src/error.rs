@@ -83,6 +83,15 @@ pub enum Error {
     #[error("protocol: {0}")]
     Protocol(String),
 
+    /// A tool called through `isb serve` failed. `code` and `data` are the
+    /// fields of the server-side error's [`crate::rpc::error_json`].
+    #[error("{message}")]
+    Remote {
+        code: String,
+        message: String,
+        data: serde_json::Value,
+    },
+
     #[error(transparent)]
     Io(#[from] std::io::Error),
 
@@ -98,6 +107,7 @@ impl Error {
     /// True for an incusd "not found" answer.
     pub fn is_not_found(&self) -> bool {
         matches!(self, Error::Api { status: 404, .. } | Error::NotFound(_))
+            || matches!(self, Error::Remote { code, .. } if code == "not_found")
     }
 
     /// True for an incusd conflict (the object already exists).
@@ -106,6 +116,7 @@ impl Error {
             self,
             Error::Api { status: 409, .. } | Error::AlreadyExists(_)
         ) || matches!(self, Error::Api { message, .. } if message.contains("already exists"))
+            || matches!(self, Error::Remote { code, .. } if code == "already_exists")
     }
 
     /// True when the error is a deadline, either on a request or an operation.
@@ -113,7 +124,7 @@ impl Error {
         matches!(
             self,
             Error::RequestTimeout { .. } | Error::OperationTimeout { .. }
-        )
+        ) || matches!(self, Error::Remote { code, .. } if code == "request_timeout" || code == "operation_timeout")
     }
 }
 

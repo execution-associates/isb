@@ -29,8 +29,10 @@
 //! YAML, and [`plan`] turns a spec plus the instance's actual state into the
 //! minimal set of changes. A device that is already correct is never touched.
 
+pub mod balance;
 pub mod client;
 pub mod compose;
+pub mod daemon;
 pub mod error;
 pub mod exec;
 mod flex;
@@ -41,8 +43,11 @@ pub mod lock;
 pub mod plan;
 pub mod rpc;
 pub mod sandbox;
+pub mod server;
 pub mod shorthand;
 pub mod spec;
+pub mod stack;
+pub mod supervise;
 pub mod volume;
 
 pub use client::{Client, Timeouts};

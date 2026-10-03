@@ -954,6 +954,18 @@ impl Sandbox {
         }
     }
 
+    /// A handle on `name` with the exec defaults and readiness of `d` (a
+    /// sibling built from the same spec, such as another replica).
+    pub(crate) fn like(client: &Client, name: &str, d: &Desired) -> Sandbox {
+        Sandbox {
+            client: client.clone(),
+            name: name.to_string(),
+            exec_defaults: d.exec.clone(),
+            ready: d.ready.clone(),
+            ready_timeout: d.ready_timeout,
+        }
+    }
+
     /// Create and start a new sandbox; fails if it already exists. Relative bind
     /// paths resolve against the current directory.
     pub fn create(client: &Client, spec: &SandboxSpec) -> Result<Sandbox> {
@@ -1012,6 +1024,21 @@ impl Sandbox {
         report: Reporter<'_>,
     ) -> Result<(Sandbox, ApplyReport)> {
         let d = resolve(client, spec, defs, &std::env::current_dir()?)?;
+        let r = ensure(client, &d, opts, report)?;
+        Ok((Self::from_desired(client, &d), r))
+    }
+
+    /// [`Sandbox::connect_or_create_with`], with relative bind paths
+    /// resolving against `base` instead of the current directory.
+    pub fn connect_or_create_with_base(
+        client: &Client,
+        spec: &SandboxSpec,
+        defs: &VolumeDefs,
+        base: &Path,
+        opts: EnsureOptions,
+        report: Reporter<'_>,
+    ) -> Result<(Sandbox, ApplyReport)> {
+        let d = resolve(client, spec, defs, base)?;
         let r = ensure(client, &d, opts, report)?;
         Ok((Self::from_desired(client, &d), r))
     }

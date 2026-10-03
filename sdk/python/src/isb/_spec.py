@@ -10,12 +10,40 @@ from typing import Literal, Mapping, Optional, Sequence, TypedDict, Union
 BoolOrString = Union[bool, str]
 Scalar = Union[str, bool, int, float]
 Command = Union[str, Sequence[Scalar]]
+DependCondition = Literal["service_started", "service_healthy"]
+FailureAction = Literal["pause", "rollback", "continue"]
 IdmapMode = Literal["auto", "none", "always"]
 InstanceType = Literal["container", "virtual-machine", "vm"]
 IntOrString = Union[int, str]
 MapOrList = Union[Mapping[str, Scalar], Sequence[str]]
 MountType = Literal["bind", "volume"]
 PortBind = Literal["host", "guest"]
+RestartCondition = Literal["none", "on-failure", "any"]
+RestartMode = Literal["no", "always", "on-failure", "unless-stopped"]
+UpdateOrder = Literal["stop-first", "start-first"]
+
+
+class Dependency(TypedDict, total=False):
+    condition: DependCondition
+
+
+class Deploy(TypedDict, total=False):
+    """docker's `deploy:`, for `isb stack deploy`."""
+    #: Labels for the service's instances, merged over `labels`.
+    labels: MapOrList
+    #: Only `replicated`.
+    mode: Optional[str]
+    #: Number of instances. Default 1. `isb up` handles at most 1.
+    replicas: Optional[int]
+    #: `limits.cpus` (whole CPUs) and `limits.memory`: the same as `cpus` and
+    #: `mem_limit`.
+    resources: Optional[Resources]
+    #: When the daemon restarts an instance whose app failed.
+    restart_policy: Optional[RestartPolicy]
+    #: How a rollback is rolled out. Default: like `update_config`.
+    rollback_config: Optional[UpdateConfig]
+    #: How a changed service is rolled out.
+    update_config: Optional[UpdateConfig]
 
 
 class ExecSpec(TypedDict, total=False):
@@ -26,6 +54,25 @@ class ExecSpec(TypedDict, total=False):
     #: Run argv through the user's login shell (`$SHELL -l -c 'exec "$@"'`), so
     #: profile scripts run. argv is still passed as separate arguments.
     login: BoolOrString
+
+
+class Healthcheck(TypedDict, total=False):
+    """docker compose's `healthcheck:`. Durations are strings (`30s`, `1m30s`)."""
+    #: Turn off a healthcheck set in another file.
+    disable: BoolOrString
+    #: Time between checks. Default `30s`.
+    interval: Optional[IntOrString]
+    #: Consecutive failures before unhealthy. Default 3.
+    retries: Optional[int]
+    #: Time between checks during `start_period`. Default `5s`.
+    start_interval: Optional[IntOrString]
+    #: Grace after a start during which failures do not count. Default `0s`.
+    start_period: Optional[IntOrString]
+    #: `[CMD, argv...]`, `[CMD-SHELL, "a shell line"]`, a plain string (a shell
+    #: line), or `[NONE]`. Runs in the guest as the service's `user`.
+    test: Optional[Command]
+    #: One check's deadline. Default `30s`.
+    timeout: Optional[IntOrString]
 
 
 class IdmapMap(TypedDict, total=False):
@@ -124,6 +171,26 @@ class ReadyCheckCommand(_ReadyCheckCommandRequired, total=False):
     """This argv exits 0 in the guest (run as root)."""
 
 
+class ResourceLimits(TypedDict, total=False):
+    cpus: Optional[IntOrString]
+    memory: Optional[IntOrString]
+
+
+class Resources(TypedDict, total=False):
+    limits: Optional[ResourceLimits]
+
+
+class RestartPolicy(TypedDict, total=False):
+    #: `none`, `on-failure` or `any` (default).
+    condition: Optional[RestartCondition]
+    #: Wait before restarting. Default `5s`.
+    delay: Optional[IntOrString]
+    #: Give up after this many restarts within `window`. Default: never.
+    max_attempts: Optional[int]
+    #: The window `max_attempts` counts in. Default: forever.
+    window: Optional[IntOrString]
+
+
 class SandboxSpec(TypedDict, total=False):
     """Everything about one sandbox: a compose service."""
     #: The sandbox's main command, run by a foreground `isb up` once the
@@ -139,12 +206,25 @@ class SandboxSpec(TypedDict, total=False):
     cpus: Optional[IntOrString]
     #: CPUs to pin to (`limits.cpu`), e.g. `0-3` or `0,2`. Excludes `cpus`.
     cpuset: Optional[IntOrString]
+    #: Services to bring up first: a list, or a map to `{condition:
+    #: service_started | service_healthy}`.
+    depends_on: DependsOnRepr
+    #: Replicas, rolling updates and restart policy for `isb stack deploy`.
+    deploy: Optional[Deploy]
+    #: OCI images only: the entrypoint, run with `command` as its arguments.
+    #: On an OCI image `command` alone replaces the whole command line,
+    #: including the image's own entrypoint.
+    entrypoint: Optional[Command]
     #: Instance environment (`environment.<KEY>`), seen by every exec: a map, or
     #: a list of `KEY=VALUE`. Not for secrets: it is plain instance config,
     #: readable by anyone who can read the instance.
     environment: MapOrList
     #: More exec defaults: an exec-only environment and the login shell.
     exec: ExecSpec
+    #: A recurring health test, as in docker compose. `isb stack deploy`
+    #: routes traffic only to healthy replicas and replaces unhealthy ones;
+    #: `depends_on` can wait for it.
+    healthcheck: Optional[Healthcheck]
     #: uid/gid mapping so a host user can write bind mounts. See [`IdmapSpec`].
     idmap: Optional[IdmapSpec]
     #: Image: a local alias or fingerprint (`dev-base`), or `remote:alias` for a
@@ -176,6 +256,15 @@ class SandboxSpec(TypedDict, total=False):
     #: Deadline for all readiness checks together, e.g. `90s`. Default: `60s`
     #: for a container, `300s` for a VM.
     ready_timeout: Optional[IntOrString]
+    #: `no` (default), `always`, `on-failure` or `unless-stopped`. Anything but
+    #: `no` makes the service long-running: the instance starts with the host
+    #: (`boot.autostart`), and `command` is supervised inside the guest (a
+    #: systemd unit, or the instance itself for an OCI image) instead of being
+    #: held open by `isb up`, so it survives isb exiting.
+    restart: Optional[RestartMode]
+    #: Secrets (top-level `secrets:`) to write under `/run/secrets` in the
+    #: guest: names, or `{source, target, uid, gid, mode}`.
+    secrets: Sequence[SecretRef]
     #: Storage pool for the root disk. `auto` (default): `incus-zfs` if it exists,
     #: else `default`, else the first pool. Fixed at creation.
     storage: Optional[str]
@@ -189,6 +278,45 @@ class SandboxSpec(TypedDict, total=False):
     volumes: Sequence[VolumeSpec]
     #: Working directory for `command` and `isb exec`. Default: the user's home.
     working_dir: Optional[str]
+
+
+class SecretDef(TypedDict, total=False):
+    """Where a secret's value comes from. Exactly one source."""
+    #: An environment variable of whoever deploys the file (`isb up`, or the
+    #: client calling `isb stack deploy`).
+    environment: Optional[str]
+    #: A host file holding the value (relative to the compose file).
+    file: Optional[str]
+
+
+class _SecretRefRequired(TypedDict):
+    #: The top-level secret's key.
+    source: str
+
+
+class SecretRef(_SecretRefRequired, total=False):
+    """A service's use of a secret."""
+    gid: Optional[int]
+    #: Octal mode, e.g. `0400` (default) or `"0440"`.
+    mode: Optional[IntOrString]
+    #: File name under `/run/secrets`, or an absolute path. Default: `source`.
+    target: Optional[str]
+    #: Owner in the guest: a uid. Default: the service's numeric `user`, else 0.
+    uid: Optional[int]
+
+
+class UpdateConfig(TypedDict, total=False):
+    #: Wait between batches. Default `0s`.
+    delay: Optional[IntOrString]
+    #: `pause` (default), `rollback` or `continue`.
+    failure_action: Optional[FailureAction]
+    #: How long a new instance must stay healthy to count as a success.
+    #: Default `5s`.
+    monitor: Optional[IntOrString]
+    #: `stop-first` (default) or `start-first`.
+    order: Optional[UpdateOrder]
+    #: Instances replaced at a time. Default 1; 0 means all at once.
+    parallelism: Optional[int]
 
 
 class _VolumeMountRequired(TypedDict):
@@ -243,6 +371,9 @@ class ComposeFile(TypedDict, total=False):
     #: volumes are `<name>_<volume>`. Defaults to the directory holding the
     #: first compose file.
     name: Optional[str]
+    #: Secrets services can mount as files under `/run/secrets`. Values are
+    #: read when the file is deployed and never stored in instance config.
+    secrets: Mapping[str, SecretDef]
     #: Sandboxes, keyed by service name.
     services: Mapping[str, SandboxSpec]
     #: Named custom storage volumes, created if missing before any sandbox that
@@ -262,12 +393,25 @@ class SandboxSpecFields(TypedDict, total=False):
     cpus: Optional[IntOrString]
     #: CPUs to pin to (`limits.cpu`), e.g. `0-3` or `0,2`. Excludes `cpus`.
     cpuset: Optional[IntOrString]
+    #: Services to bring up first: a list, or a map to `{condition:
+    #: service_started | service_healthy}`.
+    depends_on: DependsOnRepr
+    #: Replicas, rolling updates and restart policy for `isb stack deploy`.
+    deploy: Optional[Deploy]
+    #: OCI images only: the entrypoint, run with `command` as its arguments.
+    #: On an OCI image `command` alone replaces the whole command line,
+    #: including the image's own entrypoint.
+    entrypoint: Optional[Command]
     #: Instance environment (`environment.<KEY>`), seen by every exec: a map, or
     #: a list of `KEY=VALUE`. Not for secrets: it is plain instance config,
     #: readable by anyone who can read the instance.
     environment: MapOrList
     #: More exec defaults: an exec-only environment and the login shell.
     exec: ExecSpec
+    #: A recurring health test, as in docker compose. `isb stack deploy`
+    #: routes traffic only to healthy replicas and replaces unhealthy ones;
+    #: `depends_on` can wait for it.
+    healthcheck: Optional[Healthcheck]
     #: uid/gid mapping so a host user can write bind mounts. See [`IdmapSpec`].
     idmap: Optional[IdmapSpec]
     #: incus profiles to apply, in order. Default: `[default]`. Fixed at creation.
@@ -295,6 +439,15 @@ class SandboxSpecFields(TypedDict, total=False):
     #: Deadline for all readiness checks together, e.g. `90s`. Default: `60s`
     #: for a container, `300s` for a VM.
     ready_timeout: Optional[IntOrString]
+    #: `no` (default), `always`, `on-failure` or `unless-stopped`. Anything but
+    #: `no` makes the service long-running: the instance starts with the host
+    #: (`boot.autostart`), and `command` is supervised inside the guest (a
+    #: systemd unit, or the instance itself for an OCI image) instead of being
+    #: held open by `isb up`, so it survives isb exiting.
+    restart: Optional[RestartMode]
+    #: Secrets (top-level `secrets:`) to write under `/run/secrets` in the
+    #: guest: names, or `{source, target, uid, gid, mode}`.
+    secrets: Sequence[SecretRef]
     #: Storage pool for the root disk. `auto` (default): `incus-zfs` if it exists,
     #: else `default`, else the first pool. Fixed at creation.
     storage: Optional[str]
@@ -310,6 +463,7 @@ class SandboxSpecFields(TypedDict, total=False):
     working_dir: Optional[str]
 
 
+DependsOnRepr = Union[Sequence[str], Mapping[str, Dependency]]
 IdmapSpec = Union[IdmapMode, IdmapMap, IdmapRaw]
 PortSpec = Union[str, PortMapping, ProxyPort]
 ReadyCheck = Union[Literal["running", "agent", "default_route"], ReadyCheckUserExists, ReadyCheckPathWritable, ReadyCheckCommand]
@@ -319,7 +473,13 @@ __all__ = [
     "BoolOrString",
     "Command",
     "ComposeFile",
+    "DependCondition",
+    "Dependency",
+    "DependsOnRepr",
+    "Deploy",
     "ExecSpec",
+    "FailureAction",
+    "Healthcheck",
     "IdmapMap",
     "IdmapMode",
     "IdmapRaw",
@@ -337,9 +497,18 @@ __all__ = [
     "ReadyCheckCommand",
     "ReadyCheckPathWritable",
     "ReadyCheckUserExists",
+    "ResourceLimits",
+    "Resources",
+    "RestartCondition",
+    "RestartMode",
+    "RestartPolicy",
     "SandboxSpec",
     "SandboxSpecFields",
     "Scalar",
+    "SecretDef",
+    "SecretRef",
+    "UpdateConfig",
+    "UpdateOrder",
     "VolumeMount",
     "VolumeOptions",
     "VolumeSpec",

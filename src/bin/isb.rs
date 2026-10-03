@@ -207,6 +207,140 @@ enum Cmd {
         #[arg(long)]
         services: bool,
     },
+    /// Recent output of a long-running service (`restart:`): its supervised
+    /// command's journal, or an OCI image's console log.
+    Logs {
+        #[command(flatten)]
+        f: Files,
+        service: String,
+        /// How many lines.
+        #[arg(short = 'n', long, default_value = "100")]
+        lines: usize,
+    },
+    /// Run the stack daemon: keeps deployed stacks running, and serves MCP
+    /// on a unix socket (for `isb stack`) and on loopback HTTP (for remote
+    /// agents behind Cloudflare Access).
+    Serve(ServeArgs),
+    /// Deploy and manage stacks on the `isb serve` daemon.
+    #[command(subcommand)]
+    Stack(StackCmd),
+}
+
+#[derive(Args)]
+struct ServeArgs {
+    #[command(subcommand)]
+    action: Option<ServeAction>,
+    /// Loopback address for remote MCP (`/mcp`) and `/healthz`.
+    #[arg(long, env = "ISB_SERVE_LISTEN")]
+    listen: Option<String>,
+    /// Unix socket for the local CLI.
+    #[arg(long = "serve-socket", env = "ISB_SERVE_SOCKET")]
+    serve_socket: Option<PathBuf>,
+    /// Where stack definitions are kept.
+    #[arg(long, env = "ISB_SERVE_STATE_DIR")]
+    state_dir: Option<PathBuf>,
+    /// How often each service is reconciled and health-checked.
+    #[arg(long, value_parser = dur, default_value = "5s")]
+    interval: Duration,
+    /// Cloudflare Access team domain (https://TEAM.cloudflareaccess.com).
+    #[arg(long, env = "CF_ACCESS_TEAM_DOMAIN")]
+    access_team_domain: Option<String>,
+    /// Cloudflare Access application audience (AUD tag).
+    #[arg(long, env = "CF_ACCESS_AUD")]
+    access_aud: Option<String>,
+    /// Serve remote MCP with no Access validation (local testing only).
+    #[arg(long, env = "ISB_SERVE_ALLOW_UNAUTHENTICATED")]
+    allow_unauthenticated: bool,
+    /// Tools remote callers may use: names or globs, comma-separated.
+    #[arg(long, env = "ISB_SERVE_ALLOW_TOOLS", default_value = "")]
+    allow_tools: String,
+    /// Tools hidden from remote callers (wins over --allow-tools).
+    #[arg(long, env = "ISB_SERVE_DENY_TOOLS", default_value = "")]
+    deny_tools: String,
+    /// Host directories remote callers may bind-mount from (comma-separated).
+    #[arg(long, env = "ISB_SERVE_BIND_ROOTS", value_delimiter = ',')]
+    bind_root: Vec<PathBuf>,
+    /// Host addresses remote callers may publish ports on, besides loopback.
+    #[arg(long, env = "ISB_SERVE_PUBLISH_ADDRESSES", value_delimiter = ',')]
+    publish_address: Vec<String>,
+    /// Let remote callers create privileged containers.
+    #[arg(long, env = "ISB_SERVE_ALLOW_PRIVILEGED")]
+    allow_privileged: bool,
+    /// Let remote callers use raw_config, raw_devices, incus_profiles,
+    /// idmap maps and guest-bound ports.
+    #[arg(long, env = "ISB_SERVE_ALLOW_RAW")]
+    allow_raw: bool,
+    /// Let remote callers reach every instance, not only managed ones.
+    #[arg(long, env = "ISB_SERVE_ANY_INSTANCE")]
+    any_instance: bool,
+}
+
+#[derive(Subcommand)]
+enum ServeAction {
+    /// Install (or update) `isb serve` as a systemd user service and start it.
+    Install {
+        /// The loopback address to serve on (default: the env file's, else 127.0.0.1:8092).
+        #[arg(long)]
+        listen: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum StackCmd {
+    /// Deploy (or update) a stack from the compose file. Waits for the
+    /// rollout unless -d.
+    Deploy {
+        #[command(flatten)]
+        f: Files,
+        /// Stack name (default: the compose project name).
+        name: Option<String>,
+        /// Return once the deployment is accepted.
+        #[arg(short, long)]
+        detach: bool,
+        /// How long to wait for the rollout.
+        #[arg(long, default_value = "10m")]
+        timeout: String,
+    },
+    /// List stacks.
+    #[command(alias = "list")]
+    Ls {
+        #[arg(long)]
+        json: bool,
+    },
+    /// A stack's services and replicas.
+    Ps {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove a stack (its instances and ports; volumes with --volumes).
+    #[command(alias = "remove")]
+    Rm {
+        name: String,
+        #[arg(long)]
+        volumes: bool,
+    },
+    /// Go back to the previous deployment.
+    Rollback { name: String },
+    /// Set replica counts: SERVICE=N ...
+    Scale {
+        name: String,
+        #[arg(required = true)]
+        services: Vec<String>,
+    },
+    /// Replace a service's replicas even though nothing changed (a moved tag).
+    Redeploy { name: String, service: String },
+    /// Recent output of a service's replicas.
+    Logs {
+        name: String,
+        service: String,
+        #[arg(long)]
+        slot: Option<u32>,
+        #[arg(short = 'n', long, default_value = "100")]
+        lines: usize,
+    },
+    /// The compose file a stack runs, as deployed.
+    Config { name: String },
 }
 
 #[derive(Args)]
@@ -387,7 +521,9 @@ impl Cmd {
             | Cmd::Up { f, .. }
             | Cmd::Down { f, .. }
             | Cmd::Plan { f, .. }
-            | Cmd::Config { f, .. } => Some(f),
+            | Cmd::Config { f, .. }
+            | Cmd::Logs { f, .. }
+            | Cmd::Stack(StackCmd::Deploy { f, .. }) => Some(f),
             Cmd::Exec(a) => Some(&a.f),
             _ => None,
         }
@@ -497,6 +633,9 @@ fn main() -> ExitCode {
 
 fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
     match cmd {
+        Cmd::Logs { service, lines, .. } => logs(ctx, &service, lines),
+        Cmd::Serve(a) => serve(ctx, a),
+        Cmd::Stack(s) => stack(ctx, s),
         Cmd::Create(a) => create(ctx, a),
         Cmd::Start { names } => {
             let c = ctx.client(None);
@@ -735,7 +874,7 @@ fn ps(ctx: &Ctx, services: Vec<String>, json: bool) -> Result<u8> {
                 .into_iter()
                 .map(|i| (i.name.clone(), i))
                 .collect();
-            for s in p.select(&services)? {
+            for s in p.select_exact(&services)? {
                 let name = p.service(&s)?.name.clone().unwrap_or_default();
                 let status = all
                     .get(&name)
@@ -1036,8 +1175,17 @@ fn up(ctx: &Ctx, services: Vec<String>, flags: UpFlags) -> Result<u8> {
     let held = ups
         .into_iter()
         .map(|(s, _, sandbox)| {
+            use isb::foreground::Run;
+            let spec = p.service(&s)?;
+            let oci = isb::plan::ImageSource::parse(&spec.image)?.is_oci();
+            let run = match &spec.command {
+                _ if oci => Run::Console,
+                Some(_) if spec.long_running() => Run::Follow(isb::supervise::follow_argv(&s)),
+                Some(argv) => Run::Command(argv.clone()),
+                None => Run::Hold,
+            };
             Ok(isb::foreground::Service {
-                command: p.service(&s)?.command.clone(),
+                run,
                 name: s,
                 sandbox,
             })
@@ -1088,6 +1236,297 @@ fn plan(
         }
     }
     Ok(if exit_code && changes { 2 } else { 0 })
+}
+
+fn logs(ctx: &Ctx, service: &str, lines: usize) -> Result<u8> {
+    let p = ctx.load()?;
+    let spec = p.service(service)?;
+    let c = ctx.client(p.file.incus_project.as_deref());
+    let name = spec.name.clone().unwrap_or_default();
+    let oci = isb::plan::ImageSource::parse(&spec.image)?.is_oci();
+    if !oci && !spec.long_running() {
+        return Err(Error::Invalid(format!(
+            "{service} is not long-running (no restart), so its output went to `isb up`"
+        )));
+    }
+    let sb = Sandbox::get(&c, &name)?;
+    let out = isb::supervise::logs(&sb, service, oci, lines)?;
+    println!("{}", out.trim_end());
+    Ok(0)
+}
+
+fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
+    use isb::daemon::{ServeConfig, policy::RemotePolicy};
+    if let Some(ServeAction::Install { listen }) = a.action {
+        let r =
+            isb::server::service::install_user_service(&isb::server::service::ServiceOptions {
+                listen,
+                health_timeout: None,
+            })?;
+        println!(
+            "installed {} (runs {})",
+            r.unit_path.display(),
+            r.exe.display()
+        );
+        println!("settings: {}", r.env_path.display());
+        println!("healthy at {}", r.health_url);
+        for n in r.notes {
+            println!("note: {n}");
+        }
+        return Ok(0);
+    }
+    let access = match (a.access_team_domain, a.access_aud) {
+        (Some(t), Some(aud)) if !t.is_empty() && !aud.is_empty() => Some((t, aud)),
+        (Some(t), None) | (None, Some(t)) if !t.is_empty() => {
+            return Err(Error::Invalid(
+                "Cloudflare Access needs both CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD".into(),
+            ));
+        }
+        _ => None,
+    };
+    let cfg = ServeConfig {
+        listen: a.listen.filter(|l| !l.is_empty()),
+        socket: a
+            .serve_socket
+            .unwrap_or_else(isb::server::default_socket_path),
+        access,
+        allow_unauthenticated: a.allow_unauthenticated,
+        remote_tools: isb::server::ToolPolicy::from_lists(&a.allow_tools, &a.deny_tools),
+        policy: RemotePolicy {
+            allow_privileged: a.allow_privileged,
+            allow_raw: a.allow_raw,
+            bind_roots: a.bind_root,
+            publish_addresses: a.publish_address,
+            any_instance: a.any_instance,
+        },
+        state_dir: a.state_dir.unwrap_or_else(isb::daemon::default_state_dir),
+        interval: a.interval,
+    };
+    isb::daemon::serve(ctx.client(None), cfg)?;
+    Ok(0)
+}
+
+/// Call a tool on the local daemon.
+fn call(tool: &str, args: serde_json::Value, timeout: Duration) -> Result<serde_json::Value> {
+    let socket = isb::server::default_socket_path();
+    isb::server::client::call_tool(&socket, tool, args, timeout).map_err(|e| match e {
+        Error::Io(_) | Error::Connect { .. } => Error::Invalid(format!(
+            "no isb serve on {} ({e}); start it with `isb serve`, or install it with `isb serve install`",
+            socket.display()
+        )),
+        e => e,
+    })
+}
+
+const SHORT: Duration = Duration::from_secs(60);
+
+fn stack(ctx: &Ctx, cmd: StackCmd) -> Result<u8> {
+    use serde_json::json;
+    match cmd {
+        StackCmd::Deploy {
+            name,
+            detach,
+            timeout,
+            ..
+        } => {
+            let p0 = ctx.load()?;
+            let name = name.unwrap_or_else(|| p0.name.clone());
+            // Load again under the stack's name, so named volumes are
+            // `<stack>_<volume>`, as `isb up -P <stack>` would name them.
+            let p = compose::load(&LoadOptions {
+                files: p0.files.clone(),
+                env_files: ctx.global.env_files.clone(),
+                project_name: Some(name.clone()),
+                ..Default::default()
+            })?;
+            let wait_for = isb::parse_duration(&timeout).map_err(Error::Invalid)?;
+            let args = isb::daemon::local_deploy_args(&p, &name, !detach, Some(&timeout))?;
+            let r = call("stack_deploy", args, wait_for + SHORT)?;
+            for c in r["changes"].as_array().into_iter().flatten() {
+                eprintln!(
+                    "{}: {} (rev {}, {} replicas)",
+                    c["service"].as_str().unwrap_or(""),
+                    c["change"].as_str().unwrap_or(""),
+                    c["rev"].as_str().unwrap_or(""),
+                    c["replicas"]
+                );
+            }
+            if detach {
+                return Ok(0);
+            }
+            let st = &r["status"];
+            print_stack(st);
+            let ok = st["services"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .all(|s| s["state"] == "converged");
+            Ok(if ok { 0 } else { 1 })
+        }
+        StackCmd::Ls { json } => {
+            let r = call("stack_list", json!({}), SHORT)?;
+            if json {
+                print_json(&r["stacks"]);
+                return Ok(0);
+            }
+            let mut rows = vec![vec![
+                "NAME".into(),
+                "SERVICES".into(),
+                "CONVERGED".into(),
+                "DEPLOYED BY".into(),
+            ]];
+            for s in r["stacks"].as_array().into_iter().flatten() {
+                rows.push(vec![
+                    s["name"].as_str().unwrap_or("").into(),
+                    s["services"]
+                        .as_array()
+                        .map(|a| a.len())
+                        .unwrap_or(0)
+                        .to_string(),
+                    s["converged"].to_string(),
+                    s["deployed_by"].as_str().unwrap_or("").into(),
+                ]);
+            }
+            table(rows);
+            Ok(0)
+        }
+        StackCmd::Ps { name, json } => {
+            let r = call("stack_status", json!({"name": name}), SHORT)?;
+            if json {
+                print_json(&r);
+            } else {
+                print_stack(&r);
+            }
+            Ok(0)
+        }
+        StackCmd::Rm { name, volumes } => {
+            call(
+                "stack_remove",
+                json!({"name": name, "volumes": volumes}),
+                Duration::from_secs(400),
+            )?;
+            Ok(0)
+        }
+        StackCmd::Rollback { name } => {
+            let r = call("stack_rollback", json!({"name": name}), SHORT)?;
+            for c in r["changes"].as_array().into_iter().flatten() {
+                eprintln!(
+                    "{}: {}",
+                    c["service"].as_str().unwrap_or(""),
+                    c["change"].as_str().unwrap_or("")
+                );
+            }
+            Ok(0)
+        }
+        StackCmd::Scale { name, services } => {
+            for s in services {
+                let (svc, n) = s
+                    .split_once('=')
+                    .ok_or_else(|| Error::Invalid(format!("{s:?}: expected SERVICE=REPLICAS")))?;
+                let n: u32 = n
+                    .parse()
+                    .map_err(|_| Error::Invalid(format!("{s:?}: replicas must be a number")))?;
+                call(
+                    "stack_scale",
+                    json!({"name": name, "service": svc, "replicas": n}),
+                    SHORT,
+                )?;
+            }
+            Ok(0)
+        }
+        StackCmd::Redeploy { name, service } => {
+            call(
+                "stack_redeploy",
+                json!({"name": name, "service": service}),
+                SHORT,
+            )?;
+            Ok(0)
+        }
+        StackCmd::Logs {
+            name,
+            service,
+            slot,
+            lines,
+        } => {
+            let mut a = json!({"name": name, "service": service, "lines": lines});
+            if let Some(s) = slot {
+                a["slot"] = json!(s);
+            }
+            let r = call("stack_logs", a, Duration::from_secs(120))?;
+            for (inst, text) in r["logs"].as_object().into_iter().flatten() {
+                println!("==> {inst} <==");
+                println!("{}", text.as_str().unwrap_or("").trim_end());
+            }
+            Ok(0)
+        }
+        StackCmd::Config { name } => {
+            let r = call("stack_config", json!({"name": name}), SHORT)?;
+            let yaml =
+                serde_yaml_ng::to_string(&r["file"]).map_err(|e| Error::Invalid(e.to_string()))?;
+            print!("{yaml}");
+            Ok(0)
+        }
+    }
+}
+
+fn print_stack(st: &serde_json::Value) {
+    let mut rows = vec![vec![
+        "SERVICE".into(),
+        "STATE".into(),
+        "REPLICAS".into(),
+        "INSTANCE".into(),
+        "STATUS".into(),
+        "HEALTH".into(),
+        "IP".into(),
+    ]];
+    for s in st["services"].as_array().into_iter().flatten() {
+        let svc = s["service"].as_str().unwrap_or("").to_string();
+        let reps = format!("{}/{}", s["healthy"], s["replicas"]);
+        let state = s["state"].as_str().unwrap_or("").to_string();
+        let insts = s["instances"].as_array().cloned().unwrap_or_default();
+        if insts.is_empty() {
+            rows.push(vec![
+                svc.clone(),
+                state.clone(),
+                reps.clone(),
+                "-".into(),
+                "-".into(),
+                "-".into(),
+                "-".into(),
+            ]);
+        }
+        for (n, i) in insts.iter().enumerate() {
+            let first = n == 0;
+            rows.push(vec![
+                if first { svc.clone() } else { String::new() },
+                if first { state.clone() } else { String::new() },
+                if first { reps.clone() } else { String::new() },
+                i["name"].as_str().unwrap_or("").into(),
+                i["status"].as_str().unwrap_or("").to_uppercase(),
+                i["health"].as_str().unwrap_or("").into(),
+                i["ip"].as_str().unwrap_or("-").into(),
+            ]);
+        }
+    }
+    table(rows);
+    for s in st["services"].as_array().into_iter().flatten() {
+        if let Some(m) = s["message"].as_str() {
+            eprintln!("{}: {m}", s["service"].as_str().unwrap_or(""));
+        }
+        for p in s["ports"].as_array().into_iter().flatten() {
+            eprintln!(
+                "{}: {} -> :{} ({} backends){}",
+                s["service"].as_str().unwrap_or(""),
+                p["listen"].as_str().unwrap_or(""),
+                p["target"],
+                p["backends"].as_array().map(|a| a.len()).unwrap_or(0),
+                p["error"]
+                    .as_str()
+                    .map(|e| format!(": {e}"))
+                    .unwrap_or_default()
+            );
+        }
+    }
 }
 
 #[cfg(test)]

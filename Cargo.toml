@@ -30,8 +30,13 @@ thiserror = "2"
 clap = { version = "4", features = ["derive", "env"] }
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 httparse = "1"
-rustix = { version = "1", features = ["fs", "termios", "process", "stdio", "event"] }
+rustix = { version = "1", features = ["fs", "termios", "process", "stdio", "event", "net"] }
 signal-hook = "0.4"
+# isb serve: Cloudflare Access JWT verification and the JWKS fetch. rustls on
+# ring with webpki roots keeps the static musl build free of OpenSSL.
+base64 = { version = "0.23", default-features = false, features = ["alloc"] }
+ring = { version = "0.17", default-features = false, features = ["alloc"] }
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
 tempfile = "3"

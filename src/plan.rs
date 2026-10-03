@@ -21,7 +21,9 @@ use serde_json::{Value, json};
 use crate::error::{Error, Result};
 use crate::flex::parse_duration;
 use crate::idmap::{self, SubIds};
-use crate::spec::{ExecDefaults, InstanceType, MountType, PortBind, ReadyCheck, SandboxSpec};
+use crate::spec::{
+    ExecDefaults, InstanceType, MountType, PortBind, ReadyCheck, RestartMode, SandboxSpec,
+};
 
 pub type Props = BTreeMap<String, String>;
 
@@ -141,12 +143,39 @@ pub struct ImageSource {
     pub alias: String,
 }
 
+/// OCI registries known by a short prefix: `docker:nginx:1.27`.
+const OCI_REGISTRIES: &[(&str, &str)] = &[
+    ("docker", "https://docker.io"),
+    ("ghcr", "https://ghcr.io"),
+    ("quay", "https://quay.io"),
+];
+
 impl ImageSource {
     pub fn parse(s: &str) -> Result<Self> {
         if s.is_empty() {
             return Err(Error::invalid("image is required"));
         }
         if let Some((remote, alias)) = s.split_once(':') {
+            if let Some((_, server)) = OCI_REGISTRIES.iter().find(|(k, _)| *k == remote) {
+                return Ok(ImageSource {
+                    spec: s.into(),
+                    server: Some(server.to_string()),
+                    protocol: Some("oci".into()),
+                    alias: oci_reference(alias, remote == "docker")?,
+                });
+            }
+            if remote == "oci" {
+                // oci:registry.example.com/team/app:tag
+                let (host, path) = alias.split_once('/').ok_or_else(|| {
+                    Error::invalid(format!("{s:?}: an oci: image is oci:REGISTRY/PATH[:TAG]"))
+                })?;
+                return Ok(ImageSource {
+                    spec: s.into(),
+                    server: Some(format!("https://{host}")),
+                    protocol: Some("oci".into()),
+                    alias: oci_reference(path, false)?,
+                });
+            }
             let (server, protocol) = match remote {
                 "images" => ("https://images.linuxcontainers.org", "simplestreams"),
                 "ubuntu" => ("https://cloud-images.ubuntu.com/releases", "simplestreams"),
@@ -157,7 +186,7 @@ impl ImageSource {
                 ),
                 other => {
                     return Err(Error::invalid(format!(
-                        "unknown image remote {other:?} in {s:?} (known: images, ubuntu, ubuntu-daily, ubuntu-minimal; local images need no prefix)"
+                        "unknown image remote {other:?} in {s:?} (known: images, ubuntu, ubuntu-daily, ubuntu-minimal, and OCI registries docker, ghcr, quay, oci:REGISTRY/...; local images need no prefix)"
                     )));
                 }
             };
@@ -176,6 +205,12 @@ impl ImageSource {
         })
     }
 
+    /// An OCI (docker) image: an application container whose process is the
+    /// instance's init.
+    pub fn is_oci(&self) -> bool {
+        self.protocol.as_deref() == Some("oci")
+    }
+
     /// The `source` object for `POST /1.0/instances`. A local image is given by
     /// fingerprint once resolved, by alias otherwise.
     pub fn to_api(&self, local_fingerprint: Option<&str>) -> Value {
@@ -188,6 +223,44 @@ impl ImageSource {
             (None, None) => json!({"type": "image", "alias": self.alias}),
         }
     }
+}
+
+/// `nginx` -> `library/nginx:latest` on Docker Hub, as docker spells it.
+fn oci_reference(r: &str, docker_hub: bool) -> Result<String> {
+    if r.is_empty() || r.contains(char::is_whitespace) {
+        return Err(Error::invalid(format!("invalid OCI image reference {r:?}")));
+    }
+    let mut r = r.to_string();
+    if docker_hub && !r.contains('/') {
+        r = format!("library/{r}");
+    }
+    let last = r.rsplit('/').next().unwrap_or(&r);
+    if !last.contains(':') && !last.contains('@') {
+        r.push_str(":latest");
+    }
+    Ok(r)
+}
+
+/// Quote argv for `oci.entrypoint`, which incus splits on whitespace with
+/// quotes grouping. There is no escape character, so an argument may not
+/// contain both kinds of quote.
+pub fn oci_command_line(argv: &[String]) -> std::result::Result<String, String> {
+    argv.iter()
+        .map(|a| {
+            if !a.is_empty() && !a.contains(|c: char| c.is_whitespace() || c == '"' || c == '\'') {
+                Ok(a.clone())
+            } else if !a.contains('"') {
+                Ok(format!("\"{a}\""))
+            } else if !a.contains('\'') {
+                Ok(format!("'{a}'"))
+            } else {
+                Err(format!(
+                    "argument {a:?} has both ' and \" in it, which an OCI command line cannot carry; use a script"
+                ))
+            }
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map(|v| v.join(" "))
 }
 
 /// A spec resolved against the host: exactly what incus should hold.
@@ -417,6 +490,17 @@ pub fn resolve(
         ImageSource::parse(&spec.image).map_err(|e| Error::invalid(format!("{name}: {e}")))?;
     let pool = host.pick_pool(spec.storage.as_deref())?;
     let vm = spec.instance_type == InstanceType::VirtualMachine;
+    let oci = image.is_oci();
+    if oci && vm {
+        return Err(Error::invalid(format!(
+            "{name}: OCI images run as containers, not VMs"
+        )));
+    }
+    if spec.entrypoint.is_some() && !oci {
+        return Err(Error::invalid(format!(
+            "{name}: entrypoint is for OCI images; use command"
+        )));
+    }
     if vm {
         if spec.privileged.is_some() {
             return Err(Error::invalid(format!(
@@ -490,6 +574,37 @@ pub fn resolve(
     }
     for (k, v) in &spec.env {
         config.insert(format!("environment.{k}"), v.clone());
+    }
+    if let Some(r) = spec.restart {
+        // incus' default (no boot.autostart) already restores the state the
+        // instance had at shutdown, which is exactly unless-stopped.
+        if matches!(r, RestartMode::Always | RestartMode::OnFailure) {
+            config.insert("boot.autostart".into(), "true".into());
+        }
+        if r.is_long_running() {
+            config.insert("boot.autorestart".into(), "true".into());
+        }
+    }
+    if oci {
+        let mut line: Vec<String> = spec.entrypoint.clone().unwrap_or_default();
+        line.extend(spec.command.clone().unwrap_or_default());
+        if !line.is_empty() {
+            let l = oci_command_line(&line).map_err(|e| Error::invalid(format!("{name}: {e}")))?;
+            config.insert("oci.entrypoint".into(), l);
+        }
+        if let Some(w) = &spec.working_dir {
+            config.insert("oci.cwd".into(), w.clone());
+        }
+        if let Some(u) = &spec.user {
+            let (uid, gid) = u.split_once(':').unwrap_or((u, u));
+            if uid.parse::<u32>().is_err() || gid.parse::<u32>().is_err() {
+                return Err(Error::invalid(format!(
+                    "{name}: an OCI image's user must be numeric (uid or uid:gid), got {u:?}"
+                )));
+            }
+            config.insert("oci.uid".into(), uid.into());
+            config.insert("oci.gid".into(), gid.into());
+        }
     }
     for (k, v) in &spec.raw_config {
         config.insert(k.clone(), v.clone());
@@ -1014,7 +1129,7 @@ pub fn device_matches(desired: &DesiredDevice, actual: &Props) -> bool {
 }
 
 fn restart_needed(key: &str) -> bool {
-    key.starts_with("raw.") || key.starts_with("security.")
+    key.starts_with("raw.") || key.starts_with("security.") || key.starts_with("oci.")
 }
 
 /// Diff desired against actual (`None`: the instance does not exist).

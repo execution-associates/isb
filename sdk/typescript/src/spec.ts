@@ -21,6 +21,22 @@ export type Scalar = string | boolean | number;
  */
 export type IntOrString = number | string;
 /**
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "DependsOnRepr".
+ */
+export type DependsOnRepr =
+  | string[]
+  | {
+      [k: string]: Dependency;
+    };
+/**
+ * What a dependency must reach before its dependents start.
+ *
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "DependCondition".
+ */
+export type DependCondition = "service_started" | "service_healthy";
+/**
  * A map, or docker's list of `KEY=VALUE` strings.
  *
  * This interface was referenced by `ComposeFile`'s JSON-Schema
@@ -31,6 +47,21 @@ export type MapOrList =
       [k: string]: Scalar;
     }
   | string[];
+/**
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "RestartCondition".
+ */
+export type RestartCondition = "none" | "on-failure" | "any";
+/**
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "FailureAction".
+ */
+export type FailureAction = "pause" | "rollback" | "continue";
+/**
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "UpdateOrder".
+ */
+export type UpdateOrder = "stop-first" | "start-first";
 /**
  * This interface was referenced by `ComposeFile`'s JSON-Schema
  * via the `definition` "BoolOrString".
@@ -99,6 +130,13 @@ export type ReadyCheck =
       command: string[];
     };
 /**
+ * docker's `restart:`.
+ *
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "RestartMode".
+ */
+export type RestartMode = "no" | "always" | "on-failure" | "unless-stopped";
+/**
  * Instance type.
  *
  * This interface was referenced by `ComposeFile`'s JSON-Schema
@@ -136,6 +174,13 @@ export interface ComposeFile {
    */
   name?: string | null;
   /**
+   * Secrets services can mount as files under `/run/secrets`. Values are
+   * read when the file is deployed and never stored in instance config.
+   */
+  secrets?: {
+    [k: string]: SecretDef;
+  };
+  /**
    * Sandboxes, keyed by service name.
    */
   services?: {
@@ -148,6 +193,23 @@ export interface ComposeFile {
   volumes?: {
     [k: string]: NamedVolumeSpec;
   };
+}
+/**
+ * Where a secret's value comes from. Exactly one source.
+ *
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "SecretDef".
+ */
+export interface SecretDef {
+  /**
+   * An environment variable of whoever deploys the file (`isb up`, or the
+   * client calling `isb stack deploy`).
+   */
+  environment?: string | null;
+  /**
+   * A host file holding the value (relative to the compose file).
+   */
+  file?: string | null;
 }
 /**
  * Everything about one sandbox: a compose service.
@@ -177,8 +239,25 @@ export interface SandboxSpec {
    * CPUs to pin to (`limits.cpu`), e.g. `0-3` or `0,2`. Excludes `cpus`.
    */
   cpuset?: IntOrString | null;
+  depends_on?: DependsOnRepr;
+  /**
+   * Replicas, rolling updates and restart policy for `isb stack deploy`.
+   */
+  deploy?: Deploy | null;
+  /**
+   * OCI images only: the entrypoint, run with `command` as its arguments.
+   * On an OCI image `command` alone replaces the whole command line,
+   * including the image's own entrypoint.
+   */
+  entrypoint?: Command | null;
   environment?: MapOrList;
   exec?: ExecSpec;
+  /**
+   * A recurring health test, as in docker compose. `isb stack deploy`
+   * routes traffic only to healthy replicas and replaces unhealthy ones;
+   * `depends_on` can wait for it.
+   */
+  healthcheck?: Healthcheck | null;
   /**
    * uid/gid mapping so a host user can write bind mounts. See [`IdmapSpec`].
    */
@@ -234,6 +313,19 @@ export interface SandboxSpec {
    */
   ready_timeout?: IntOrString | null;
   /**
+   * `no` (default), `always`, `on-failure` or `unless-stopped`. Anything but
+   * `no` makes the service long-running: the instance starts with the host
+   * (`boot.autostart`), and `command` is supervised inside the guest (a
+   * systemd unit, or the instance itself for an OCI image) instead of being
+   * held open by `isb up`, so it survives isb exiting.
+   */
+  restart?: RestartMode | null;
+  /**
+   * Secrets (top-level `secrets:`) to write under `/run/secrets` in the
+   * guest: names, or `{source, target, uid, gid, mode}`.
+   */
+  secrets?: SecretRef[];
+  /**
    * Storage pool for the root disk. `auto` (default): `incus-zfs` if it exists,
    * else `default`, else the first pool. Fixed at creation.
    */
@@ -255,6 +347,111 @@ export interface SandboxSpec {
   working_dir?: string | null;
 }
 /**
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "Dependency".
+ */
+export interface Dependency {
+  condition?: DependCondition;
+}
+/**
+ * docker's `deploy:`, for `isb stack deploy`.
+ *
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "Deploy".
+ */
+export interface Deploy {
+  labels?: MapOrList;
+  /**
+   * Only `replicated`.
+   */
+  mode?: string | null;
+  /**
+   * Number of instances. Default 1. `isb up` handles at most 1.
+   */
+  replicas?: number | null;
+  /**
+   * `limits.cpus` (whole CPUs) and `limits.memory`: the same as `cpus` and
+   * `mem_limit`.
+   */
+  resources?: Resources | null;
+  /**
+   * When the daemon restarts an instance whose app failed.
+   */
+  restart_policy?: RestartPolicy | null;
+  /**
+   * How a rollback is rolled out. Default: like `update_config`.
+   */
+  rollback_config?: UpdateConfig | null;
+  /**
+   * How a changed service is rolled out.
+   */
+  update_config?: UpdateConfig | null;
+}
+/**
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "Resources".
+ */
+export interface Resources {
+  limits?: ResourceLimits | null;
+}
+/**
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "ResourceLimits".
+ */
+export interface ResourceLimits {
+  cpus?: IntOrString | null;
+  memory?: IntOrString | null;
+}
+/**
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "RestartPolicy".
+ */
+export interface RestartPolicy {
+  /**
+   * `none`, `on-failure` or `any` (default).
+   */
+  condition?: RestartCondition | null;
+  /**
+   * Wait before restarting. Default `5s`.
+   */
+  delay?: IntOrString | null;
+  /**
+   * Give up after this many restarts within `window`. Default: never.
+   */
+  max_attempts?: number | null;
+  /**
+   * The window `max_attempts` counts in. Default: forever.
+   */
+  window?: IntOrString | null;
+}
+/**
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "UpdateConfig".
+ */
+export interface UpdateConfig {
+  /**
+   * Wait between batches. Default `0s`.
+   */
+  delay?: IntOrString | null;
+  /**
+   * `pause` (default), `rollback` or `continue`.
+   */
+  failure_action?: FailureAction | null;
+  /**
+   * How long a new instance must stay healthy to count as a success.
+   * Default `5s`.
+   */
+  monitor?: IntOrString | null;
+  /**
+   * `stop-first` (default) or `start-first`.
+   */
+  order?: UpdateOrder | null;
+  /**
+   * Instances replaced at a time. Default 1; 0 means all at once.
+   */
+  parallelism?: number | null;
+}
+/**
  * The `exec:` block of a service: exec defaults with no docker equivalent.
  *
  * This interface was referenced by `ComposeFile`'s JSON-Schema
@@ -263,6 +460,40 @@ export interface SandboxSpec {
 export interface ExecSpec {
   env?: MapOrList;
   login?: BoolOrString;
+}
+/**
+ * docker compose's `healthcheck:`. Durations are strings (`30s`, `1m30s`).
+ *
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "Healthcheck".
+ */
+export interface Healthcheck {
+  disable?: BoolOrString;
+  /**
+   * Time between checks. Default `30s`.
+   */
+  interval?: IntOrString | null;
+  /**
+   * Consecutive failures before unhealthy. Default 3.
+   */
+  retries?: number | null;
+  /**
+   * Time between checks during `start_period`. Default `5s`.
+   */
+  start_interval?: IntOrString | null;
+  /**
+   * Grace after a start during which failures do not count. Default `0s`.
+   */
+  start_period?: IntOrString | null;
+  /**
+   * `[CMD, argv...]`, `[CMD-SHELL, "a shell line"]`, a plain string (a shell
+   * line), or `[NONE]`. Runs in the guest as the service's `user`.
+   */
+  test?: Command | null;
+  /**
+   * One check's deadline. Default `30s`.
+   */
+  timeout?: IntOrString | null;
 }
 /**
  * This interface was referenced by `ComposeFile`'s JSON-Schema
@@ -333,6 +564,31 @@ export interface ProxyPort {
   options?: {
     [k: string]: Scalar;
   };
+}
+/**
+ * A service's use of a secret.
+ *
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "SecretRef".
+ */
+export interface SecretRef {
+  gid?: number | null;
+  /**
+   * Octal mode, e.g. `0400` (default) or `"0440"`.
+   */
+  mode?: IntOrString | null;
+  /**
+   * The top-level secret's key.
+   */
+  source: string;
+  /**
+   * File name under `/run/secrets`, or an absolute path. Default: `source`.
+   */
+  target?: string | null;
+  /**
+   * Owner in the guest: a uid. Default: the service's numeric `user`, else 0.
+   */
+  uid?: number | null;
 }
 /**
  * The long form of a mount.
