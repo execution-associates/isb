@@ -44,6 +44,7 @@ pub mod error;
 pub mod exec;
 mod flex;
 pub mod foreground;
+pub mod history;
 pub mod idmap;
 pub mod ingress;
 pub mod interp;

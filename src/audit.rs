@@ -29,12 +29,13 @@ use crate::error::{Error, Result};
 pub const DEFAULT_RETENTION: Duration = Duration::from_secs(90 * 86400);
 
 /// `prev_hash` of the first row ever written.
-const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+pub(crate) const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
 /// How often appends also prune.
 const PRUNE_EVERY: Duration = Duration::from_secs(3600);
 
-const MIGRATIONS: &[&str] = &["
+const MIGRATIONS: &[&str] = &[
+    "
     CREATE TABLE audit (
         id          INTEGER PRIMARY KEY,
         time        INTEGER NOT NULL,
@@ -64,7 +65,36 @@ const MIGRATIONS: &[&str] = &["
     CREATE TRIGGER audit_no_delete BEFORE DELETE ON audit
     WHEN (SELECT v FROM audit_meta WHERE k = 'pruning') IS NOT '1'
     BEGIN SELECT RAISE(ABORT, 'the audit log is append-only; rows leave only by retention'); END;
-    "];
+    ",
+    // 2: the history: controller events, incus lifecycle events and markers
+    // (crate::history), chained like the audit rows but on their own.
+    "
+    CREATE TABLE history (
+        id          INTEGER PRIMARY KEY,
+        time        INTEGER NOT NULL,
+        source      TEXT NOT NULL,
+        org         TEXT,
+        project     TEXT,
+        kind        TEXT NOT NULL,
+        object_type TEXT,
+        object      TEXT,
+        objects     TEXT NOT NULL DEFAULT '',
+        actor       TEXT,
+        level       TEXT,
+        message     TEXT,
+        details     TEXT NOT NULL DEFAULT '{}',
+        prev_hash   TEXT NOT NULL,
+        hash        TEXT NOT NULL
+    );
+    CREATE INDEX history_org ON history(org, id);
+    CREATE INDEX history_time ON history(time);
+    CREATE TRIGGER history_no_update BEFORE UPDATE ON history
+    BEGIN SELECT RAISE(ABORT, 'the history is append-only'); END;
+    CREATE TRIGGER history_no_delete BEFORE DELETE ON history
+    WHEN (SELECT v FROM audit_meta WHERE k = 'pruning') IS NOT '1'
+    BEGIN SELECT RAISE(ABORT, 'the history is append-only; rows leave only by retention'); END;
+    ",
+];
 
 /// What kind of party acted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -258,6 +288,12 @@ pub struct Query {
     pub after: Option<i64>,
     /// Default 100, at most 1000.
     pub limit: Option<usize>,
+    /// A name the row is about: its target, or a value in its details.
+    /// Substring, or the whole value with `object_exact`.
+    pub object: Option<String>,
+    pub object_exact: bool,
+    /// Oldest first (without `after`).
+    pub ascending: bool,
 }
 
 /// What [`AuditLog::verify`] found.
@@ -277,11 +313,14 @@ pub struct AuditLog {
     conn: Mutex<Connection>,
     path: Option<PathBuf>,
     retention: Duration,
-    /// The newest id this process appended, and a signal for tailers.
-    seq: Mutex<i64>,
+    /// How long, and how many, history rows are kept.
+    pub(crate) history_retention: Duration,
+    pub(crate) history_max_rows: i64,
+    /// Bumped by every append here (audit or history), a signal for tailers.
+    generation: Mutex<u64>,
     appended: Condvar,
     last_prune: Mutex<Option<Instant>>,
-    clock: Box<dyn Fn() -> i64 + Send + Sync>,
+    pub(crate) clock: Box<dyn Fn() -> i64 + Send + Sync>,
 }
 
 impl std::fmt::Debug for AuditLog {
@@ -297,14 +336,14 @@ pub fn db_path(state_dir: &Path) -> PathBuf {
     state_dir.join("audit.db")
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
 }
 
-fn clip(mut s: String, n: usize) -> String {
+pub(crate) fn clip(mut s: String, n: usize) -> String {
     if s.len() > n {
         let mut i = n;
         while !s.is_char_boundary(i) {
@@ -316,12 +355,12 @@ fn clip(mut s: String, n: usize) -> String {
     s
 }
 
-fn db_err(step: &str, e: rusqlite::Error) -> Error {
+pub(crate) fn db_err(step: &str, e: rusqlite::Error) -> Error {
     Error::Protocol(format!("audit log: {step}: {e}"))
 }
 
 /// Keys sorted at every level, so the hash never depends on map order.
-fn canonical(v: &Value) -> String {
+pub(crate) fn canonical(v: &Value) -> String {
     match v {
         Value::Object(m) => {
             let mut keys: Vec<&String> = m.keys().collect();
@@ -340,7 +379,7 @@ fn canonical(v: &Value) -> String {
     }
 }
 
-fn hex(b: &[u8]) -> String {
+pub(crate) fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
@@ -390,16 +429,16 @@ fn row(r: &rusqlite::Row) -> rusqlite::Result<Entry> {
 }
 
 /// A shell glob as SQLite's GLOB writes it (`[!x]` is `[^x]` there).
-fn sql_glob(p: &str) -> String {
+pub(crate) fn sql_glob(p: &str) -> String {
     p.replace("[!", "[^")
 }
 
-fn meta(conn: &Connection, k: &str) -> rusqlite::Result<Option<String>> {
+pub(crate) fn meta(conn: &Connection, k: &str) -> rusqlite::Result<Option<String>> {
     conn.query_row("SELECT v FROM audit_meta WHERE k = ?1", [k], |r| r.get(0))
         .optional()
 }
 
-fn set_meta(conn: &Connection, k: &str, v: &str) -> rusqlite::Result<()> {
+pub(crate) fn set_meta(conn: &Connection, k: &str, v: &str) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT INTO audit_meta (k, v) VALUES (?1, ?2) ON CONFLICT(k) DO UPDATE SET v = ?2",
         params![k, v],
@@ -456,7 +495,9 @@ impl AuditLog {
             conn: Mutex::new(conn),
             path,
             retention,
-            seq: Mutex::new(0),
+            history_retention: crate::history::DEFAULT_RETENTION,
+            history_max_rows: crate::history::DEFAULT_MAX_ROWS,
+            generation: Mutex::new(0),
             appended: Condvar::new(),
             last_prune: Mutex::new(None),
             clock: Box::new(now_ms),
@@ -471,6 +512,13 @@ impl AuditLog {
         self
     }
 
+    /// Keep history rows for `retention`, and at most `max_rows` of them.
+    pub fn with_history_limits(mut self, retention: Duration, max_rows: i64) -> Self {
+        self.history_retention = retention;
+        self.history_max_rows = max_rows.max(1000);
+        self
+    }
+
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
@@ -479,7 +527,7 @@ impl AuditLog {
         self.retention
     }
 
-    fn db(&self) -> MutexGuard<'_, Connection> {
+    pub(crate) fn db(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock().unwrap_or_else(|e| e.into_inner())
     }
 
@@ -565,10 +613,13 @@ impl AuditLog {
             }
         }
         drop(db);
-        {
-            let mut s = self.seq.lock().unwrap_or_else(|e| e.into_inner());
-            *s = (*s).max(e.id);
-        }
+        self.appended_one();
+        Ok(e)
+    }
+
+    /// Wake tailers, and prune when it is time.
+    pub(crate) fn appended_one(&self) {
+        *self.generation.lock().unwrap_or_else(|e| e.into_inner()) += 1;
         self.appended.notify_all();
         let due = self
             .last_prune
@@ -580,13 +631,17 @@ impl AuditLog {
                 eprintln!("isb: {err}");
             }
         }
-        Ok(e)
     }
 
     /// Remove rows older than the retention, keeping the chain anchored.
     /// The only way rows ever leave.
     pub fn prune(&self) -> Result<usize> {
         *self.last_prune.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+        let n = self.prune_history()?;
+        Ok(n + self.prune_audit()?)
+    }
+
+    fn prune_audit(&self) -> Result<usize> {
         let cutoff = (self.clock)() - self.retention.as_millis() as i64;
         let db = self.db();
         db.execute_batch("BEGIN IMMEDIATE")
@@ -704,8 +759,29 @@ impl AuditLog {
         if let Some(a) = q.after {
             push(&mut sql, &mut args, " AND id > ?", V::Integer(a));
         }
+        if let Some(o) = q.object.as_deref().map(str::trim).filter(|o| !o.is_empty()) {
+            let esc = o
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            if q.object_exact {
+                args.push(V::Text(o.to_string()));
+                args.push(V::Text(format!("%\"{esc}\"%")));
+                let n = args.len();
+                sql.push_str(&format!(
+                    " AND (target = ?{} OR details LIKE ?{n} ESCAPE '\\')",
+                    n - 1
+                ));
+            } else {
+                args.push(V::Text(format!("%{esc}%")));
+                let n = args.len();
+                sql.push_str(&format!(
+                    " AND (IFNULL(target, '') LIKE ?{n} ESCAPE '\\' OR details LIKE ?{n} ESCAPE '\\')"
+                ));
+            }
+        }
         let limit = q.limit.unwrap_or(100).clamp(1, 1000);
-        sql.push_str(if q.after.is_some() {
+        sql.push_str(if q.after.is_some() || q.ascending {
             " ORDER BY id ASC"
         } else {
             " ORDER BY id DESC"
@@ -720,17 +796,22 @@ impl AuditLog {
             .map_err(|e| db_err("query", e))
     }
 
-    /// Wait up to `timeout` for a row newer than `after` to be appended by
-    /// this process. Other writers (the CLI) show up at the next poll.
-    pub fn wait(&self, after: i64, timeout: Duration) {
-        let g = self.seq.lock().unwrap_or_else(|e| e.into_inner());
-        if *g > after {
-            return;
-        }
-        let _ = self
+    /// The current append generation (see [`Self::wait_change`]).
+    pub fn generation(&self) -> u64 {
+        *self.generation.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Wait up to `timeout` for this process to append anything after
+    /// generation `seen`; returns the generation now. Other writers (the
+    /// CLI) show up at the next poll.
+    pub fn wait_change(&self, seen: u64, timeout: Duration) -> u64 {
+        let g = self.generation.lock().unwrap_or_else(|e| e.into_inner());
+        let g = self
             .appended
-            .wait_timeout_while(g, timeout, |s| *s <= after)
-            .unwrap_or_else(|e| e.into_inner());
+            .wait_timeout_while(g, timeout, |s| *s <= seen)
+            .unwrap_or_else(|e| e.into_inner())
+            .0;
+        *g
     }
 
     /// The newest id, 0 when empty.

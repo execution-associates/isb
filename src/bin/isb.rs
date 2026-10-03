@@ -313,6 +313,52 @@ enum Cmd {
     /// The audit log of `isb serve` (`<state>/audit.db`): who did what.
     #[command(subcommand)]
     Audit(AuditCmd),
+    /// The history of `isb serve`: the controller's events, incus lifecycle
+    /// events in every project (with who requested them), audit rows, and
+    /// markers for when nothing was watching (docs/history.md).
+    History(HistoryArgs),
+}
+
+#[derive(Args)]
+struct HistoryArgs {
+    /// An instance, image, alias, volume, stack, app or service: its whole
+    /// timeline, oldest first, with what likely caused each instance event.
+    object_pos: Option<String>,
+    /// Rows about this name (substring; --exact for the whole name).
+    #[arg(long)]
+    object: Option<String>,
+    #[arg(long)]
+    exact: bool,
+    #[arg(long)]
+    org: Option<String>,
+    /// Only host-level rows (images, pools, other projects).
+    #[arg(long)]
+    platform: bool,
+    /// audit, controller, incus, marker (comma-separated).
+    #[arg(long)]
+    source: Option<String>,
+    /// Kind or action (glob): instance-*, deploy.*, secret_*.
+    #[arg(long)]
+    kind: Option<String>,
+    /// Who (glob).
+    #[arg(long)]
+    actor: Option<String>,
+    /// Newer than this long ago, e.g. 24h.
+    #[arg(long, value_parser = dur)]
+    since: Option<Duration>,
+    /// Older than this long ago.
+    #[arg(long, value_parser = dur)]
+    until: Option<Duration>,
+    /// How many (newest first; a timeline shows all).
+    #[arg(short = 'n', long, default_value = "50")]
+    limit: usize,
+    #[arg(long)]
+    json: bool,
+    /// Every match as JSON lines, oldest first.
+    #[arg(long)]
+    export: bool,
+    #[command(flatten)]
+    db: AuthDb,
 }
 
 /// Filters shared by `isb audit ls` and `export`.
@@ -553,6 +599,12 @@ struct ServeArgs {
     /// Record read-only tool calls too (secret reads always are).
     #[arg(long, env = "ISB_AUDIT_ALL")]
     audit_all: bool,
+    /// How long the history keeps rows (controller and incus events).
+    #[arg(long, value_parser = dur, default_value = "365d", env = "ISB_HISTORY_RETENTION")]
+    history_retention: Duration,
+    /// At most this many history rows; past it, the oldest go first.
+    #[arg(long, default_value = "5000000", env = "ISB_HISTORY_MAX_ROWS")]
+    history_max_rows: i64,
     /// Ingress: serve stack domains over plain HTTP here (and redirect
     /// HTTPS domains), e.g. 0.0.0.0:80. Turns the ingress on.
     #[arg(long, env = "ISB_INGRESS_HTTP", value_name = "ADDR")]
@@ -1275,6 +1327,7 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         } => invite_cmd(&org, &email, &role, &db),
         Cmd::Token(c) => token_cmd(c),
         Cmd::Audit(c) => audit_cmd(c),
+        Cmd::History(a) => history_cmd(a),
         Cmd::Create(a) => create(ctx, a),
         Cmd::Start { names } => {
             let c = ctx.client(None);
@@ -2149,6 +2202,8 @@ fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
         open_signup: a.open_signup,
         audit_retention: a.audit_retention,
         audit_all: a.audit_all,
+        history_retention: a.history_retention,
+        history_max_rows: a.history_max_rows,
         ingress: ingress_config(
             a.ingress_http,
             a.ingress_https,
@@ -3491,11 +3546,105 @@ fn audit_cmd(c: AuditCmd) -> Result<u8> {
             Ok(0)
         }
         AuditCmd::Verify { db } => {
-            let v = audit_log(&db)?.verify()?;
-            print_json(&v);
-            Ok(if v.ok { 0 } else { 1 })
+            let log = audit_log(&db)?;
+            let (a, h) = (log.verify()?, log.history_verify()?);
+            let ok = a.ok && h.ok;
+            print_json(&serde_json::json!({"ok": ok, "audit": a, "history": h}));
+            Ok(if ok { 0 } else { 1 })
         }
     }
+}
+
+fn history_cmd(a: HistoryArgs) -> Result<u8> {
+    use isb::audit::Visibility;
+    use isb::history::HistoryQuery;
+    use std::io::Write;
+    let log = audit_log(&a.db)?;
+    let timeline = a.object_pos.is_some();
+    let mut q = HistoryQuery {
+        org: a.org.clone(),
+        platform: a.platform,
+        object: a.object_pos.clone().or(a.object.clone()),
+        exact: a.exact,
+        kind: a.kind.clone(),
+        source: a.source.clone(),
+        actor: a.actor.clone(),
+        since: a.since.map(isb::audit::ago_ms),
+        until: a.until.map(isb::audit::ago_ms),
+        ascending: timeline || a.export,
+        correlate: timeline,
+        limit: Some(if timeline || a.export {
+            1000
+        } else {
+            a.limit.clamp(1, 1000)
+        }),
+        ..Default::default()
+    };
+    let mut items = Vec::new();
+    let out = std::io::stdout();
+    let mut out = out.lock();
+    loop {
+        let p = log.timeline(&q, &Visibility::All, Some(&Visibility::All))?;
+        let more = p.next.clone();
+        if a.export {
+            for it in &p.items {
+                writeln!(out, "{}", serde_json::to_string(it)?)?;
+            }
+        } else {
+            items.extend(p.items);
+        }
+        match more {
+            Some(n) if timeline || a.export => q.before = Some(n),
+            _ => break,
+        }
+    }
+    if a.export {
+        return Ok(0);
+    }
+    if a.json {
+        print_json(&items);
+        return Ok(0);
+    }
+    let mut t = vec![vec![
+        "TIME".into(),
+        "SOURCE".into(),
+        "ORG".into(),
+        "KIND".into(),
+        "OBJECT".into(),
+        "ACTOR".into(),
+        "LEVEL".into(),
+        "MESSAGE".into(),
+    ]];
+    for i in &items {
+        let ms = i.time.rem_euclid(1000);
+        let mut msg = i.message.clone().unwrap_or_default();
+        if let Some(inf) = &i.inferred {
+            msg = format!(
+                "{msg}[inferred: {} by {} {:.0}s before]",
+                inf["action"].as_str().unwrap_or(""),
+                inf["actor"].as_str().unwrap_or(""),
+                inf["seconds_before"].as_f64().unwrap_or(0.0)
+            );
+        }
+        if msg.chars().count() > 90 {
+            msg = msg.chars().take(89).collect::<String>() + "…";
+        }
+        t.push(vec![
+            format!(
+                "{}.{ms:03}",
+                fmt_time((i.time / 1000).max(0) as u64).trim_end_matches('Z')
+            ),
+            i.source.clone(),
+            i.org.clone().unwrap_or_else(|| "-".into()),
+            i.kind.clone(),
+            i.object.clone().unwrap_or_default(),
+            i.actor.clone().unwrap_or_default(),
+            i.level.clone().unwrap_or_default(),
+            msg,
+        ]);
+    }
+    table(t);
+    Ok(0)
 }
 
 fn open_auth(db: &AuthDb) -> Result<isb::auth::AuthStore> {
