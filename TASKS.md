@@ -227,6 +227,14 @@ minime only runs binaries downloaded from our CI runs.
   token scopes (`read`, `deploy`, `admin`, `tool:GLOB`) that only narrow a
   role. A tool can name an argument that makes one call a secret read
   (`isbSecretReadArg`, e.g. `database_get`'s `reveal`).
+- **History** lives in `audit.db` beside the audit rows, on its own hash
+  chain: every controller event, every incus lifecycle event in every
+  project (with requestor; context scrubbed of secrets), and markers
+  (`serve.started/stopped`, `incus.gap`). Repeated exec/file reads are
+  folded to one row per instance, program and requestor per hour (isb's own
+  probes made ~48 rows/min per stack otherwise); ~1,800 rows/day on titan,
+  ~1.5 KB/row, 365 days or 5M rows. Members see their org's controller and
+  incus rows; host objects are platform-admin only.
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
 - **Remote servers: federation, not incus clustering.** Each server runs incus
@@ -381,7 +389,7 @@ minime only runs binaries downloaded from our CI runs.
 - [~] (subagent p5.1) P5.2 Placement: orgs on servers; MCP/REST calls proxied to the owning
   server; secrets delivered only to servers that run their consumers.
   **Verify:** deploy to an org placed on the hcloud box from titan's UI.
-- [~] (8423ecc, f48d234: audit log, viewer role, token scopes done; the persistent history is next) P5.3 Audit log and finer roles. **Verify:** actions appear in the log
+- [x] (8423ecc, f48d234, 39d4158, cabc357, bf41199) P5.3 Audit log and finer roles. **Verify:** actions appear in the log
   with the acting user or agent.
 
 ## Log
