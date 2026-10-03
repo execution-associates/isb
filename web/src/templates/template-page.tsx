@@ -1,7 +1,7 @@
 // /orgs/:org/templates/:catalog/:id: one template, the form its variables
 // generate, a dry-run plan, and the deploy into a project environment.
 import { useQueryClient } from "@tanstack/react-query";
-import { Box, CircleAlert, ExternalLink, Globe, HardDrive, Info, KeyRound, Link2, Loader2, Rocket, ScanEye, Sparkles } from "lucide-react";
+import { Box, CircleAlert, ExternalLink, Globe, HardDrive, Info, KeyRound, Link2, Loader2, Plus, Rocket, ScanEye, Sparkles } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { toast } from "sonner";
@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { errorMessage } from "@/lib/messages";
 import { useMe } from "@/lib/session";
@@ -26,6 +27,7 @@ import { useCanWrite } from "@/lib/use-role";
 import { cn } from "@/lib/utils";
 import { type DeployAnswer, emptyMeans, followOf, formProblems, logoSrc, type Plan, type PlannedVar, type TemplateDetail, useTemplate, valuesToSend, type Variable, varLabel } from "./api";
 import { TemplateLogo } from "./logo";
+import { defaultEnvironment, defaultProject, NEW } from "./where";
 
 export function TemplatePage() {
   const { org = "", catalog = "", id = "" } = useParams();
@@ -240,8 +242,11 @@ function DeployForm({ org, detail }: { org: string; detail: TemplateDetail }) {
   const apps = useApps(org);
   const canWrite = useCanWrite(org);
   const vars: Variable[] = useMemo(() => detail.variables ?? [], [detail.variables]);
-  const [project, setProject] = useState(params.get("project") ?? "");
-  const [environment, setEnvironment] = useState(params.get("env") || "production");
+  // null: not chosen yet, so the default (computed from what exists) shows.
+  const [projectSel, setProjectSel] = useState<string | null>(null);
+  const [newProject, setNewProject] = useState<string | null>(null);
+  const [envSel, setEnvSel] = useState<string | null>(null);
+  const [newEnv, setNewEnv] = useState<string | null>(null);
   const [name, setName] = useState(detail.template.id);
   const [values, setValues] = useState<Record<string, string>>({});
   const [touched, setTouched] = useState(false);
@@ -249,18 +254,24 @@ function DeployForm({ org, detail }: { org: string; detail: TemplateDetail }) {
   const [pending, setPending] = useState<"plan" | "deploy" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!project && projects.data?.length) setProject(projects.data[0].name);
-  }, [project, projects.data]);
+  const loaded = !projects.isLoading;
+  const pd = defaultProject(projects.data ?? [], detail.template.id, params.get("project"));
+  const projectChoice = projectSel ?? pd.choice;
+  const creatingProject = projectChoice === NEW;
+  const project = creatingProject ? (newProject ?? pd.newName) : projectChoice;
+  const existingProject = creatingProject ? undefined : projects.data?.find((p) => p.name === project);
+  const ed = defaultEnvironment(existingProject?.environments ?? [], projectSel === null ? params.get("env") : null);
+  const envChoice = envSel !== null && (envSel === NEW || existingProject?.environments.some((e) => e.name === envSel)) ? envSel : ed.choice;
+  const creatingEnv = envChoice === NEW;
+  const environment = creatingEnv ? (newEnv ?? ed.newName) : envChoice;
   // A changed form makes the previous plan stale.
   useEffect(() => setPlan(null), [project, environment, name, values]);
 
   const problems = formProblems(vars, values);
-  const projErr = project ? nameProblem("project", project) : "Pick or name a project.";
+  const projErr = nameProblem("project", project);
   const envErr = nameProblem("environment", environment);
   const nameErr = nameProblem("app", name);
   const ok = !projErr && !envErr && !nameErr && Object.keys(problems).length === 0;
-  const existingProject = projects.data?.find((p) => p.name === project);
   const taken = (apps.data ?? []).some((a) => a.name === name);
   const appCount = detail.apps?.length ?? 0;
 
@@ -319,30 +330,50 @@ function DeployForm({ org, detail }: { org: string; detail: TemplateDetail }) {
     <>
       <Section title="Where" description="A missing project or environment is created. The instance name names the apps and their secrets, so a template can be deployed twice.">
         <div className="grid items-start gap-4 sm:grid-cols-3">
-          <Field label="Project" error={touched || project ? projErr : null} hint={project && !existingProject && !projects.isLoading ? "A new project." : undefined}>
-            {(id, d) => (
-              <>
-                <Input id={id} aria-describedby={d} list={`${id}-l`} spellCheck={false} value={project} onChange={(e) => setProject(e.target.value.toLowerCase())} />
-                <datalist id={`${id}-l`}>
-                  {(projects.data ?? []).map((p) => (
-                    <option key={p.name} value={p.name} />
-                  ))}
-                </datalist>
-              </>
+          <div className="grid content-start gap-2">
+            <Field label="Project">
+              {(id, d) => (
+                <ChoiceSelect
+                  id={id}
+                  describedBy={d}
+                  disabled={!loaded}
+                  value={projectChoice}
+                  options={(projects.data ?? []).map((p) => p.name)}
+                  newLabel="New project"
+                  onChange={(v) => {
+                    setProjectSel(v);
+                    setEnvSel(null);
+                    setNewEnv(null);
+                  }}
+                />
+              )}
+            </Field>
+            {creatingProject && loaded && (
+              <Field label="New project name" error={touched || newProject !== null ? projErr : null} hint="This creates the project.">
+                {(id, d) => <Input id={id} aria-describedby={d} aria-invalid={!!projErr} spellCheck={false} value={project} onChange={(e) => setNewProject(e.target.value.toLowerCase())} />}
+              </Field>
             )}
-          </Field>
-          <Field label="Environment" error={envErr}>
-            {(id, d) => (
-              <>
-                <Input id={id} aria-describedby={d} list={`${id}-l`} spellCheck={false} value={environment} onChange={(e) => setEnvironment(e.target.value.toLowerCase())} />
-                <datalist id={`${id}-l`}>
-                  {(existingProject?.environments ?? []).map((e) => (
-                    <option key={e.name} value={e.name} />
-                  ))}
-                </datalist>
-              </>
+          </div>
+          <div className="grid content-start gap-2">
+            <Field label="Environment">
+              {(id, d) => (
+                <ChoiceSelect
+                  id={id}
+                  describedBy={d}
+                  disabled={!loaded}
+                  value={envChoice}
+                  options={(existingProject?.environments ?? []).map((e) => e.name)}
+                  newLabel="New environment"
+                  onChange={setEnvSel}
+                />
+              )}
+            </Field>
+            {creatingEnv && loaded && (
+              <Field label="New environment name" error={envErr}>
+                {(id, d) => <Input id={id} aria-describedby={d} aria-invalid={!!envErr} spellCheck={false} value={environment} onChange={(e) => setNewEnv(e.target.value.toLowerCase())} />}
+              </Field>
             )}
-          </Field>
+          </div>
           <Field label="Instance name" error={nameErr ?? (taken ? `An app ${name} exists: pick another name.` : null)}>
             {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={name} onChange={(e) => setName(e.target.value.toLowerCase())} />}
           </Field>
@@ -390,6 +421,44 @@ function DeployForm({ org, detail }: { org: string; detail: TemplateDetail }) {
         )}
       </Card>
     </>
+  );
+}
+
+/** The existing names of something, plus a "New" entry that stands for making one. */
+function ChoiceSelect({
+  id,
+  describedBy,
+  value,
+  options,
+  newLabel,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  describedBy?: string;
+  value: string;
+  options: string[];
+  newLabel: string;
+  disabled?: boolean;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <Select value={value} onValueChange={onChange} disabled={disabled}>
+      <SelectTrigger id={id} aria-describedby={describedBy} className="w-full font-mono">
+        <SelectValue placeholder="Loading…" />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((o) => (
+          <SelectItem key={o} value={o} className="font-mono">
+            {o}
+          </SelectItem>
+        ))}
+        <SelectItem value={NEW}>
+          <Plus />
+          {newLabel}
+        </SelectItem>
+      </SelectContent>
+    </Select>
   );
 }
 
