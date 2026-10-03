@@ -256,7 +256,14 @@ pub fn install(
     // failed before reloading.
     let loaded = root_exec(
         sb,
-        &["systemctl", "show", "--value", "-p", "NeedDaemonReload", &unit],
+        &[
+            "systemctl",
+            "show",
+            "--value",
+            "-p",
+            "NeedDaemonReload",
+            &unit,
+        ],
         Duration::from_secs(30),
     )?;
     if changed || loaded.stdout_text().trim() != "no" {
@@ -367,11 +374,12 @@ pub fn push_secrets(
     let (def_uid, def_gid) = numeric_user(spec.user.as_deref()).unwrap_or((0, 0));
     make_dirs(client, name, "/var/lib/isb")?;
     client.make_dir(name, SECRETS_STORE, 0, 0, 0o700)?;
-    let mut script = String::from("#!/bin/sh\n# Written by isb: puts the secrets back after a boot.\nset -e\n");
+    let mut script =
+        String::from("#!/bin/sh\n# Written by isb: puts the secrets back after a boot.\nset -e\n");
     for (n, s) in spec.secrets.iter().enumerate() {
-        let value = values.get(&s.source).ok_or_else(|| {
-            Error::invalid(format!("{name}: no value for secret {:?}", s.source))
-        })?;
+        let value = values
+            .get(&s.source)
+            .ok_or_else(|| Error::invalid(format!("{name}: no value for secret {:?}", s.source)))?;
         let path = s.guest_path();
         let parent = path.rsplit_once('/').map(|(p, _)| p).unwrap_or("/");
         make_dirs(client, name, parent)?;
@@ -577,7 +585,10 @@ mod tests {
             f.unit
                 .contains("StartLimitIntervalSec=60\nStartLimitBurst=3\n")
         );
-        assert!(f.unit.contains("ExecStartPre=+/bin/sh /var/lib/isb/secrets/restore\n"));
+        assert!(
+            f.unit
+                .contains("ExecStartPre=+/bin/sh /var/lib/isb/secrets/restore\n")
+        );
         assert!(!f.unit.contains("User="));
     }
 

@@ -85,6 +85,18 @@ impl RemotePolicy {
                 Some(_) => return Err(refuse("an idmap other than auto or none")),
             }
         }
+        // isb's own labels tie an instance to a stack and its balancer: set
+        // by hand, they would put a sandbox into another stack's rotation.
+        let deploy_labels = spec.deploy.as_ref().map(|d| &d.labels);
+        for k in spec
+            .labels
+            .keys()
+            .chain(deploy_labels.into_iter().flat_map(|l| l.keys()))
+        {
+            if k.starts_with("isb.") {
+                return Err(refuse(format!("label {k:?} (isb.* labels are isb's own)")));
+            }
+        }
         for v in &spec.volumes {
             if v.mount_type == MountType::Bind {
                 self.check_bind(&v.source, base)?;
@@ -93,11 +105,14 @@ impl RemotePolicy {
         for p in &spec.ports {
             if p.bind == PortBind::Guest {
                 if !self.allow_raw {
-                    return Err(refuse("a guest-bound port (bind: guest) reaching into the host"));
+                    return Err(refuse(
+                        "a guest-bound port (bind: guest) reaching into the host",
+                    ));
                 }
                 continue;
             }
-            let listen = crate::plan::normalize_addr(&p.listen, "127.0.0.1").map_err(Error::invalid)?;
+            let listen =
+                crate::plan::normalize_addr(&p.listen, "127.0.0.1").map_err(Error::invalid)?;
             if listen.starts_with("unix:") {
                 return Err(refuse("a unix-socket listener on the host"));
             }
@@ -105,7 +120,7 @@ impl RemotePolicy {
                 .map(|(_, h, _)| h.to_string())
                 .or_else(|| {
                     // A range: tcp:HOST:8000-8010.
-                    listen.splitn(3, ':').nth(1).map(String::from)
+                    listen.split(':').nth(1).map(String::from)
                 })
                 .unwrap_or_default();
             let h = host.trim_start_matches('[').trim_end_matches(']');
@@ -123,14 +138,17 @@ impl RemotePolicy {
     /// followed.
     fn check_bind(&self, source: &str, base: &Path) -> Result<()> {
         if self.bind_roots.is_empty() {
-            return Err(refuse(format!("bind mount {source:?} (no --bind-root is set)")));
+            return Err(refuse(format!(
+                "bind mount {source:?} (no --bind-root is set)"
+            )));
         }
         let p = crate::plan::resolve_host_path(source, base)?;
         let real = std::fs::canonicalize(&p)
             .map_err(|e| Error::invalid(format!("bind mount {p}: {e}")))?;
-        let inside = self.bind_roots.iter().any(|r| {
-            std::fs::canonicalize(r).is_ok_and(|root| real.starts_with(&root))
-        });
+        let inside = self
+            .bind_roots
+            .iter()
+            .any(|r| std::fs::canonicalize(r).is_ok_and(|root| real.starts_with(&root)));
         if !inside {
             return Err(refuse(format!(
                 "bind mount {} (outside every --bind-root)",
@@ -158,15 +176,35 @@ mod tests {
     fn refuses_host_escapes() {
         let p = RemotePolicy::default();
         let base = Path::new("/");
-        assert!(p.check_spec(&spec("image: x\nprivileged: true\n"), base).is_err());
-        assert!(p.check_spec(&spec("image: x\nraw_config: {a: b}\n"), base).is_err());
-        assert!(p.check_spec(&spec("image: x\nraw_devices: {d: {type: disk}}\n"), base).is_err());
-        assert!(p.check_spec(&spec("image: x\nincus_profiles: [default]\n"), base).is_err());
-        assert!(p.check_spec(&spec("image: x\nvolumes: ['/etc:/x']\n"), base).is_err());
-        assert!(p.check_spec(&spec("image: x\nports: ['0.0.0.0:80:80']\n"), base).is_err());
+        assert!(
+            p.check_spec(&spec("image: x\nprivileged: true\n"), base)
+                .is_err()
+        );
+        assert!(
+            p.check_spec(&spec("image: x\nraw_config: {a: b}\n"), base)
+                .is_err()
+        );
+        assert!(
+            p.check_spec(&spec("image: x\nraw_devices: {d: {type: disk}}\n"), base)
+                .is_err()
+        );
+        assert!(
+            p.check_spec(&spec("image: x\nincus_profiles: [default]\n"), base)
+                .is_err()
+        );
+        assert!(
+            p.check_spec(&spec("image: x\nvolumes: ['/etc:/x']\n"), base)
+                .is_err()
+        );
+        assert!(
+            p.check_spec(&spec("image: x\nports: ['0.0.0.0:80:80']\n"), base)
+                .is_err()
+        );
         assert!(
             p.check_spec(
-                &spec("image: x\nports: [{listen: 'unix:/run/x.sock', connect: 'tcp:127.0.0.1:1'}]\n"),
+                &spec(
+                    "image: x\nports: [{listen: 'unix:/run/x.sock', connect: 'tcp:127.0.0.1:1'}]\n"
+                ),
                 base
             )
             .is_err()
@@ -180,6 +218,14 @@ mod tests {
         );
         assert!(
             p.check_spec(&spec("image: x\nidmap: {raw: 'both 0 0'}\n"), base)
+                .is_err()
+        );
+        assert!(
+            p.check_spec(&spec("image: x\nlabels: {isb.stack: app}\n"), base)
+                .is_err()
+        );
+        assert!(
+            p.check_spec(&spec("image: x\ndeploy: {labels: {isb.rev: x}}\n"), base)
                 .is_err()
         );
         // Fine: loopback ports, named volumes, idmap auto.
@@ -201,14 +247,20 @@ mod tests {
             ..Default::default()
         };
         let base = dir.path();
-        p.check_spec(&spec("image: x\nvolumes: ['./app:/app']\nports: ['100.86.22.100:80:80']\n"), base)
-            .unwrap();
+        p.check_spec(
+            &spec("image: x\nvolumes: ['./app:/app']\nports: ['100.86.22.100:80:80']\n"),
+            base,
+        )
+        .unwrap();
         let e = p
             .check_spec(&spec("image: x\nvolumes: ['./app/escape:/x']\n"), base)
             .unwrap_err()
             .to_string();
         assert!(e.contains("outside"), "{e}");
-        assert!(p.check_spec(&spec("image: x\nports: ['10.0.0.1:80:80']\n"), base).is_err());
+        assert!(
+            p.check_spec(&spec("image: x\nports: ['10.0.0.1:80:80']\n"), base)
+                .is_err()
+        );
     }
 
     #[test]
@@ -219,7 +271,8 @@ mod tests {
         )
         .unwrap();
         assert!(p.check_file(&f, Path::new("/")).is_err());
-        let f: ComposeFile = serde_yaml_ng::from_str("incus_project: other\nservices: {}\n").unwrap();
+        let f: ComposeFile =
+            serde_yaml_ng::from_str("incus_project: other\nservices: {}\n").unwrap();
         assert!(p.check_file(&f, Path::new("/")).is_err());
     }
 }

@@ -1121,7 +1121,12 @@ impl Worker {
             }
             self.log(&format!(
                 "{} is unhealthy ({}); restarting its app",
-                i.name, self.rt[&i.name].last_probe
+                i.name,
+                self.rt[&i.name]
+                    .last_probe
+                    .lines()
+                    .last()
+                    .unwrap_or("probe failed")
             ));
             self.count_restart(&i.name);
             let rt = self.rt.get_mut(&i.name).unwrap();

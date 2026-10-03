@@ -1028,6 +1028,21 @@ impl Sandbox {
         Ok((Self::from_desired(client, &d), r))
     }
 
+    /// [`Sandbox::connect_or_create_with`], with relative bind paths
+    /// resolving against `base` instead of the current directory.
+    pub fn connect_or_create_with_base(
+        client: &Client,
+        spec: &SandboxSpec,
+        defs: &VolumeDefs,
+        base: &Path,
+        opts: EnsureOptions,
+        report: Reporter<'_>,
+    ) -> Result<(Sandbox, ApplyReport)> {
+        let d = resolve(client, spec, defs, base)?;
+        let r = ensure(client, &d, opts, report)?;
+        Ok((Self::from_desired(client, &d), r))
+    }
+
     /// Handle on an existing sandbox.
     pub fn get(client: &Client, name: &str) -> Result<Sandbox> {
         if get_actual(client, name)?.is_none() {
