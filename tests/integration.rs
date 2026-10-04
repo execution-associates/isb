@@ -23,17 +23,8 @@ use isb::{
     Timeouts, Volume,
 };
 
-fn enabled() -> bool {
-    if std::env::var("ISB_INTEGRATION").as_deref() == Ok("1") {
-        return true;
-    }
-    eprintln!("skipped: set ISB_INTEGRATION=1 to run against incusd");
-    false
-}
-
-fn image() -> String {
-    std::env::var("ISB_TEST_IMAGE").unwrap_or_else(|_| "dev-base".into())
-}
+mod common;
+use common::{default_org_client, enabled, image};
 
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
@@ -1264,7 +1255,8 @@ fn stack_controller() {
         std::thread::sleep(Duration::from_secs(1));
     }
     ctl.remove(&stack, true, Duration::from_secs(120)).unwrap();
-    let left = Sandbox::list_with(&client, &[LabelFilter::parse("isb-test")])
+    let org_client = default_org_client(&client);
+    let left = Sandbox::list_with(&org_client, &[LabelFilter::parse("isb-test")])
         .unwrap()
         .into_iter()
         .filter(|i| i.name.starts_with(&stack))
@@ -1677,7 +1669,8 @@ impl SecretStack {
         let st = self.ctl.status(&self.name).unwrap();
         let s = st.services.iter().find(|s| s.service == service).unwrap();
         assert_eq!(s.instances.len(), 1, "{s:?}");
-        Sandbox::get(&Client::new(), &s.instances[0].name).unwrap()
+        let org_client = default_org_client(&Client::new());
+        Sandbox::get(&org_client, &s.instances[0].name).unwrap()
     }
 }
 
@@ -1944,6 +1937,7 @@ fn apps_deploy_edit_rollback_git_webhook() {
         .with_build(build)
         .with_timeout(Duration::from_secs(400));
     let org = isb::org::OrgId::default_org();
+    let org_client = default_org_client(&client);
     let project = format!("isbt{}", std::process::id() % 100000);
     let stack = format!("{project}-test");
     struct Rm(isb::app::Apps, isb::stack::Controller, String);
@@ -1998,7 +1992,7 @@ fn apps_deploy_edit_rollback_git_webhook() {
     };
     let env_a = |svc: &str| -> Option<String> {
         let n = &instances(svc)[0];
-        Sandbox::get(&client, n)
+        Sandbox::get(&org_client, n)
             .unwrap()
             .info()
             .unwrap()

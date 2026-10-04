@@ -37,4 +37,4 @@ lint:too_many_arguments 13
 lint:too_many_lines 80
 lint:type_complexity 0
 src/bin/isb/data.rs 1073
-tests/integration.rs 2355
+tests/integration.rs 2349
