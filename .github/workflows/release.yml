@@ -4,7 +4,10 @@ name: Release
 # both (linked only against the system libraries), published as release
 # assets with SHA256SUMS when a v* tag is pushed, so hosts can install with
 # `mise use -g github:execution-associates/isb` and never build on the host.
-# Run it by hand (workflow_dispatch) to build the artifacts without releasing.
+# After the release, the seven crates go to crates.io (secret
+# CARGO_REGISTRY_TOKEN); a crate version that is already there is skipped, so a
+# failed run can be re-run. Run it by hand (workflow_dispatch) to build the
+# artifacts without releasing. Tag only after main's CI is green.
 
 on:
   push:
@@ -104,3 +107,26 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+
+  crates:
+    name: publish to crates.io
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # Dependency order: everything needs isb-core; isb-daemon needs the
+      # others; isb needs them all.
+      - name: publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          [ -n "$CARGO_REGISTRY_TOKEN" ] || { echo "secret CARGO_REGISTRY_TOKEN is not set"; exit 1; }
+          v="${GITHUB_REF_NAME#v}"
+          for c in isb-core isb-egress isb-apps isb-server isb-tui isb-daemon isb; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -A "isb-release (github.com/$GITHUB_REPOSITORY)" \
+              "https://crates.io/api/v1/crates/$c/$v")
+            if [ "$code" = 200 ]; then echo "$c $v is already on crates.io"; continue; fi
+            cargo publish --locked -p "$c"
+          done
