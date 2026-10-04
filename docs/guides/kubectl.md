@@ -52,11 +52,11 @@ isb manages, whatever it is:
 
 ```text
 $ isb instance ls
-NAME                        KIND      OWNER  SLOT  STATUS   HEALTH   ROTATION  IP              RESTARTS  AGE  CPU   MEMORY
-demo-production-web-1-c0c5  app       web    1     Running  healthy  yes       10.175.180.167  0         12m  0.3%  18Mi
-demo-production-web-2-0a60  app       web    2     Running  healthy  yes       10.175.180.171  0         12m  0.2%  17Mi
-demo-production-db-1-91ab   database  db     1     Running  healthy  yes       10.175.180.140  0         3d   1.1%  210Mi
-workspace                   workspace -      -     Running  none     -         10.175.180.5    -         9d   0.0%  96Mi
+NAME                          KIND      OWNER  SLOT  STATUS   HEALTH   ROTATION  IP              RESTARTS  AGE  CPU   MEMORY
+demo-production-cache-1-4d93  database  cache  1     Running  healthy  yes       10.175.180.57   0         1m   0.4%  3Mi
+demo-production-web-1-b737    app       web    1     Running  none     yes       10.175.180.71   0         2m   0.0%  756Ki
+demo-production-web-2-98d1    app       web    2     Running  none     yes       10.175.180.246  0         1m   0.0%  756Ki
+scratch1                      sandbox   -      -     Running  none     -         10.175.180.89   -         1m   0.0%  29Mi
 ```
 
 `kind` says what the instance is to isb: `app` (a replica of an app; a
@@ -64,7 +64,8 @@ preview's replicas too), `database`, `stack` (a replica of a compose
 service), `tunnel` (an org's cloudflared), `workspace`, `sandbox` and `build`.
 Filter with `app`, `stack`, `service`, `kind` and `status`. **Rotation** is
 whether the load balancer sends it traffic; a replica that is running but
-unhealthy is out of rotation.
+unhealthy is out of rotation. **Health** is `none` for an app without a health
+check (it is judged by its process alone).
 
 `instance_get` is `describe pod`: the same row plus the image and revision,
 limits, the **names** of its environment variables (never their values),
@@ -74,8 +75,8 @@ delivers into it, its labels, and its recent history (the controller's events,
 incus lifecycle events and restarts):
 
 ```sh
-isb instance get demo-production-web-1-c0c5
-isb instance get demo-production-web-1-c0c5 --json    # everything, for a script
+isb instance get demo-production-web-1-b737
+isb instance get demo-production-web-1-b737 --json    # everything, for a script
 ```
 
 `app_top` is `top pods`: per replica CPU (percent of one core), memory, disk
@@ -145,8 +146,8 @@ like any other.
 ## Copy small files
 
 ```sh
-isb cp web-1-c0c5:/etc/app/config.yml ./config.yml
-isb cp ./config.yml web-1-c0c5:/etc/app/config.yml
+isb cp demo-production-web-1-b737:/etc/app/config.yml ./config.yml
+isb cp ./config.yml demo-production-web-1-b737:/etc/app/config.yml
 ```
 
 `instance_file_read` returns one file, running instance or stopped, of at
@@ -171,7 +172,7 @@ size.
 ```sh
 isb app scale web 4
 isb app restart web --wait      # a rolling replace, same settings
-isb instance restart demo-production-web-1-c0c5 --wait
+isb instance restart demo-production-web-1-b737 --wait
 ```
 
 `app_scale` sets the replica count (0 stops the app without removing it) and
