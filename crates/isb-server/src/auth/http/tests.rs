@@ -960,3 +960,5 @@ fn superadmins_sign_in_by_their_source_and_never_mint_superadmin_tokens() {
     assert_eq!(st, 403);
     assert_eq!(s.list_superadmin_tokens().unwrap().len(), 1);
 }
+
+mod agent_ui;

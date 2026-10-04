@@ -1534,6 +1534,90 @@
                           "description": "Cloudflare Access guards a listener.",
                           "type": "boolean"
                         },
+                        "public_url": {
+                          "description": "The server's --public-url, null when unset.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "reach": {
+                          "properties": {
+                            "access_superadmins": {
+                              "properties": {
+                                "count": {
+                                  "type": "integer"
+                                },
+                                "who": {
+                                  "description": "Emails, logins or client ids; empty unless the caller owns or administers the org.",
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "you": {
+                                  "description": "The caller is one of them.",
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "who",
+                                "you"
+                              ],
+                              "type": "object"
+                            },
+                            "platform_admins": {
+                              "properties": {
+                                "count": {
+                                  "type": "integer"
+                                },
+                                "who": {
+                                  "description": "Emails, logins or client ids; empty unless the caller owns or administers the org.",
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "who"
+                              ],
+                              "type": "object"
+                            },
+                            "tailnet_superadmins": {
+                              "properties": {
+                                "count": {
+                                  "type": "integer"
+                                },
+                                "who": {
+                                  "description": "Emails, logins or client ids; empty unless the caller owns or administers the org.",
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "you": {
+                                  "description": "The caller is one of them.",
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "who",
+                                "you"
+                              ],
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "platform_admins",
+                            "access_superadmins",
+                            "tailnet_superadmins"
+                          ],
+                          "type": "object"
+                        },
                         "tailnet_listen": {
                           "description": "The tailnet --listen addresses; empty when no tailnet peer can reach the server.",
                           "items": {
@@ -1544,7 +1628,9 @@
                       },
                       "required": [
                         "tailnet_listen",
-                        "access"
+                        "access",
+                        "public_url",
+                        "reach"
                       ],
                       "type": "object"
                     },

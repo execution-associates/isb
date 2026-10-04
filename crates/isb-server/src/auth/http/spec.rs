@@ -173,6 +173,20 @@ fn invitations() -> Value {
 fn org_tokens() -> Value {
     list("tokens", "OrgToken")
 }
+/// Who reaches every org without a mapping: a count for any member, the
+/// names for owners and admins only.
+fn reach(you: bool) -> Value {
+    let mut props = json!({
+        "count": {"type": "integer"},
+        "who": {"type": "array", "items": {"type": "string"}, "description": "Emails, logins or client ids; empty unless the caller owns or administers the org."},
+    });
+    let mut req = vec!["count", "who"];
+    if you {
+        props["you"] = json!({"type": "boolean", "description": "The caller is one of them."});
+        req.push("you");
+    }
+    obj(props, &req)
+}
 fn agent_identities() -> Value {
     obj(
         json!({
@@ -181,8 +195,17 @@ fn agent_identities() -> Value {
                 json!({
                     "tailnet_listen": {"type": "array", "items": {"type": "string"}, "description": "The tailnet --listen addresses; empty when no tailnet peer can reach the server."},
                     "access": {"type": "boolean", "description": "Cloudflare Access guards a listener."},
+                    "public_url": {"type": ["string", "null"], "description": "The server's --public-url, null when unset."},
+                    "reach": obj(
+                        json!({
+                            "platform_admins": reach(false),
+                            "access_superadmins": reach(true),
+                            "tailnet_superadmins": reach(true),
+                        }),
+                        &["platform_admins", "access_superadmins", "tailnet_superadmins"],
+                    ),
                 }),
-                &["tailnet_listen", "access"],
+                &["tailnet_listen", "access", "public_url", "reach"],
             ),
         }),
         &["identities", "available"],

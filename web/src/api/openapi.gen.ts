@@ -5448,6 +5448,29 @@ export interface operations {
                         available: {
                             /** @description Cloudflare Access guards a listener. */
                             access: boolean;
+                            /** @description The server's --public-url, null when unset. */
+                            public_url: string | null;
+                            reach: {
+                                access_superadmins: {
+                                    count: number;
+                                    /** @description Emails, logins or client ids; empty unless the caller owns or administers the org. */
+                                    who: string[];
+                                    /** @description The caller is one of them. */
+                                    you: boolean;
+                                };
+                                platform_admins: {
+                                    count: number;
+                                    /** @description Emails, logins or client ids; empty unless the caller owns or administers the org. */
+                                    who: string[];
+                                };
+                                tailnet_superadmins: {
+                                    count: number;
+                                    /** @description Emails, logins or client ids; empty unless the caller owns or administers the org. */
+                                    who: string[];
+                                    /** @description The caller is one of them. */
+                                    you: boolean;
+                                };
+                            };
                             /** @description The tailnet --listen addresses; empty when no tailnet peer can reach the server. */
                             tailnet_listen: string[];
                         };

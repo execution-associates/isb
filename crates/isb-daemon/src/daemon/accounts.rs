@@ -369,7 +369,8 @@ fn register_agent_identities(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Re
         schema(json!({}), &[], ORG),
         ann.ro,
         |d: &Daemon, p: &Principal, a: Value, _c: &Caller| -> Result<Value> {
-            ops::agent_identities(&d.users, p, &org_of(&a)?, &d.gate.agent_ways()).map_err(err)
+            let ways = d.gate.agent_ways().with_public_url(d.public_url.clone());
+            ops::agent_identities(&d.users, p, &org_of(&a)?, &ways).map_err(err)
         }
     );
     account_tool!(

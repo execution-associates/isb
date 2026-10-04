@@ -14,13 +14,16 @@ import {
   listenOrigin,
   orgMcpUrl,
   orgWays,
+  memberOffer,
   type OrgAgentIdentities,
+  publicMcpUrl,
   subjectKind,
   subjectProblem,
   orgTokenBlocker,
   orgTokenReach,
   rootMcpUrl,
   type SnippetOptions,
+  type Viewer,
 } from "@/lib/mcp";
 
 const base: SnippetOptions = { name: "isb-acme", url: "https://isb.example.com/orgs/acme/mcp", tokenVar: "ISB_TOKEN", access: false };
@@ -152,8 +155,13 @@ describe("tool list", () => {
 });
 
 const mapping = (kind: "tailnet" | "access", subject: string) => ({ id: 1, org: "acme", kind, subject, role: "member" as const, note: "", created_at: 0, created_by: "me" });
-const ids = (identities: OrgAgentIdentities["identities"], tailnet_listen: string[], access: boolean): OrgAgentIdentities => ({ identities, available: { tailnet_listen, access } });
-const state = (d: OrgAgentIdentities | undefined, members: number) => Object.fromEntries(orgWays(d, members).map((w) => [w.id, w]));
+type Reaches = OrgAgentIdentities["available"]["reach"];
+const noReach: Reaches = { platform_admins: { count: 0, who: [] }, access_superadmins: { count: 0, who: [], you: false }, tailnet_superadmins: { count: 0, who: [], you: false } };
+const ids = (identities: OrgAgentIdentities["identities"], tailnet_listen: string[], access: boolean, reach: Partial<Reaches> = {}, public_url: string | null = null): OrgAgentIdentities => ({
+  identities,
+  available: { tailnet_listen, access, public_url, reach: { ...noReach, ...reach } },
+});
+const state = (d: OrgAgentIdentities | undefined, members: number, viewer?: Viewer) => Object.fromEntries(orgWays(d, members, viewer).map((w) => [w.id, w]));
 
 describe("the org's sign-in cards", () => {
   it("always have the org token on, in the order token, tailnet, access", () => {
@@ -191,6 +199,51 @@ describe("the org's sign-in cards", () => {
     expect(state(ids([mapping("tailnet", "me@example.com")], [], true), 0).access.on).toBe(false);
   });
 
+  it("turn Access on for people who get in without a mapping: members, platform admins, Access superadmins", () => {
+    const viewer = (platformAdmin: boolean, member: boolean) => ({ platformAdmin, member });
+    // A member of the org.
+    const asMember = state(ids([], [], true), 1, viewer(false, true)).access;
+    expect(asMember).toMatchObject({ on: true, why: null });
+    expect(asMember.works).toContain("you (a member)");
+    // A platform admin, not a member (0 members), reaching every org.
+    const asAdmin = state(ids([], [], true, { platform_admins: { count: 1, who: [] } }), 0, viewer(true, false)).access;
+    expect(asAdmin.on).toBe(true);
+    expect(asAdmin.works).toContain("you (platform admin)");
+    // Listed in --superadmin-access, whatever else: on, and says so.
+    const reach = { platform_admins: { count: 1, who: [] }, access_superadmins: { count: 1, who: [], you: true } };
+    const asSuper = state(ids([], [], true, reach), 0, viewer(true, false)).access;
+    expect(asSuper.on).toBe(true);
+    expect(asSuper.works).toContain("you (superadmin via Access)");
+    expect(asSuper.works).not.toContain("platform admin");
+    // Nobody: off, and the reason names every way in.
+    const none = state(ids([], [], true), 0, viewer(false, false)).access;
+    expect(none.on).toBe(false);
+    expect(none.why).toContain("no platform admin");
+    expect(none.why).toContain("--superadmin-access");
+    // Access not on a listener beats everything.
+    expect(state(ids([], [], false, reach), 3, viewer(true, true)).access.on).toBe(false);
+  });
+
+  it("name other people only when the server sent their names", () => {
+    const hidden = state(ids([], [], true, { platform_admins: { count: 2, who: [] }, access_superadmins: { count: 1, who: [], you: false } }), 0, { platformAdmin: false, member: false }).access.works;
+    expect(hidden).toContain("2 other platform admins");
+    expect(hidden).toContain("1 other Access superadmin");
+    expect(hidden).not.toContain("@");
+    const shown = state(ids([], [], true, { access_superadmins: { count: 1, who: ["root@example.com"], you: false } }), 0, { platformAdmin: false, member: false }).access.works;
+    expect(shown).toContain("root@example.com");
+  });
+
+  it("turn the tailnet on for a --superadmin-tailnet login, which reaches every org", () => {
+    const reach = { tailnet_superadmins: { count: 1, who: [], you: true } };
+    const t = state(ids([], ["100.86.22.100:8092"], false, reach), 0).tailnet;
+    expect(t).toMatchObject({ on: true, why: null });
+    expect(t.works).toContain("you (superadmin via the tailnet)");
+    expect(t.works).toContain("Any other node needs");
+    // Still off without a tailnet listener.
+    expect(state(ids([], [], false, reach), 0).tailnet.on).toBe(false);
+    expect(state(ids([], ["100.86.22.100:8092"], false), 0).tailnet.on).toBe(false);
+  });
+
   it("show tokenless snippets for the tailnet and service token headers for Access", () => {
     const tail = { name: "isb-acme", url: orgMcpUrl(listenOrigin("100.86.22.100:8092"), "acme"), tokenVar: null, access: false };
     expect(claudeCode(tail).blocks[0].code).toBe("claude mcp add --transport http --scope user isb-acme http://100.86.22.100:8092/orgs/acme/mcp");
@@ -219,5 +272,29 @@ describe("agent identity subjects", () => {
     expect(subjectProblem("access", "bob@example.com")).toBeNull();
     expect(subjectProblem("access", "@example.com")).not.toBeNull();
     expect(subjectProblem("access", "a*")).not.toBeNull();
+  });
+});
+
+describe("the Access card's MCP URL", () => {
+  it("is the public URL's, never the page's origin, and null without one", () => {
+    expect(publicMcpUrl("https://isb-test.execution.associates/", "lab")).toBe("https://isb-test.execution.associates/orgs/lab/mcp");
+    expect(publicMcpUrl(null, "lab")).toBeNull();
+    expect(publicMcpUrl(undefined, "lab")).toBeNull();
+    expect(publicMcpUrl("", "lab")).toBeNull();
+  });
+});
+
+describe("the inline add-as-member action", () => {
+  const isUser = { code: "is_user", status: 409, data: { user_id: 7, email: "knowsuchagency@gmail.com" } };
+  it("is offered to owners and admins when the email is an isb user's", () => {
+    expect(memberOffer(isUser, "lab", "member", true)).toEqual({ userId: 7, email: "knowsuchagency@gmail.com", label: "Add knowsuchagency@gmail.com to lab as member" });
+    expect(memberOffer(isUser, "lab", "viewer", true)?.label).toBe("Add knowsuchagency@gmail.com to lab as viewer");
+  });
+  it("is not offered to anyone else, or for another error", () => {
+    expect(memberOffer(isUser, "lab", "member", false)).toBeNull();
+    expect(memberOffer({ code: "conflict", status: 409 }, "lab", "member", true)).toBeNull();
+    expect(memberOffer({ code: "is_user", data: { email: "a@b.c" } }, "lab", "member", true)).toBeNull();
+    expect(memberOffer(new Error("x"), "lab", "member", true)).toBeNull();
+    expect(memberOffer(null, "lab", "member", true)).toBeNull();
   });
 });

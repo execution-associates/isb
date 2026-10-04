@@ -411,9 +411,31 @@ pub fn agent_identities(
     ways: &AgentWays,
 ) -> R<Value> {
     visible_org(p, org)?;
+    // Who gets in without a mapping: the other half of "can an agent sign
+    // in here". Counts for every member; the names only for those who
+    // manage the org, so a viewer learns nobody's email.
+    let names = p.can_manage_members(org);
+    let me = p.user.email.as_str();
+    let has = |list: &[String]| list.iter().any(|x| x.eq_ignore_ascii_case(me));
+    let admins: Vec<String> = store
+        .list_users()?
+        .into_iter()
+        .filter(|u| u.platform_admin && !u.disabled)
+        .map(|u| u.email)
+        .collect();
+    let who = |l: &[String]| if names { l.to_vec() } else { Vec::new() };
     Ok(json!({
         "identities": store.list_agent_identities(org)?,
-        "available": ways,
+        "available": {
+            "tailnet_listen": ways.tailnet_listen,
+            "access": ways.access,
+            "public_url": ways.public_url,
+            "reach": {
+                "platform_admins": {"count": admins.len(), "who": who(&admins)},
+                "access_superadmins": {"count": ways.superadmin_access.len(), "who": who(&ways.superadmin_access), "you": has(&ways.superadmin_access)},
+                "tailnet_superadmins": {"count": ways.superadmin_tailnet.len(), "who": who(&ways.superadmin_tailnet), "you": has(&ways.superadmin_tailnet)},
+            },
+        },
     }))
 }
 

@@ -57,6 +57,23 @@ pub struct AgentWays {
     pub tailnet_listen: Vec<String>,
     /// Cloudflare Access guards a listener.
     pub access: bool,
+    /// The server's `--public-url` (where Access sits in front of it).
+    pub public_url: Option<String>,
+    /// `--superadmin-access` entries (emails, service token client ids):
+    /// they reach every org through Access with no mapping.
+    #[serde(skip)]
+    pub superadmin_access: Vec<String>,
+    /// `--superadmin-tailnet` entries (logins, tags): they reach every org.
+    #[serde(skip)]
+    pub superadmin_tailnet: Vec<String>,
+}
+
+impl AgentWays {
+    /// The same, with the server's `--public-url`.
+    pub fn with_public_url(mut self, url: Option<String>) -> AgentWays {
+        self.public_url = url;
+        self
+    }
 }
 
 /// One mapping.
@@ -180,7 +197,7 @@ impl AuthStore {
             && self.user_by_email(&subject)?.is_some()
         {
             return Err(AuthError::Conflict(format!(
-                "{subject} is an isb user, and a Cloudflare Access caller with that email already acts as that user; add them as a member of the org instead"
+                "a Cloudflare Access caller with the email {subject} already acts as the isb user with that address; add that user as a member of the org instead"
             )));
         }
         let db = self.db();

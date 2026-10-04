@@ -70,10 +70,27 @@ impl AuthApi {
             )),
             ("PUT", ["agent-identities"]) => {
                 let b: ops::NewAgentIdentity = body(req)?;
-                Ok(Response::json(
-                    200,
-                    &ops::set_agent_identity(s, p, org, &b)?,
-                ))
+                match ops::set_agent_identity(s, p, org, &b) {
+                    Ok(v) => Ok(Response::json(200, &v)),
+                    // The email is an isb user's: say which user, so the UI
+                    // can offer to add them to the org instead.
+                    Err(AuthError::Conflict(message))
+                        if b.kind == crate::auth::agent_identities::AgentKind::Access =>
+                    {
+                        match s.user_by_email(b.subject.trim()) {
+                            Ok(Some(u)) => Ok(Response::json(
+                                409,
+                                &serde_json::json!({
+                                    "error": "is_user",
+                                    "message": message,
+                                    "data": {"user_id": u.id, "email": u.email},
+                                }),
+                            )),
+                            _ => Err(AuthError::Conflict(message)),
+                        }
+                    }
+                    Err(e) => Err(e),
+                }
             }
             ("DELETE", ["agent-identities", id]) => {
                 ops::remove_agent_identity(s, p, org, parse_id(id)?)?;

@@ -32,6 +32,7 @@ import {
   listenOrigin,
   orgMcpUrl,
   orgWays,
+  publicMcpUrl,
   type OrgAgentIdentities,
   ROLE_REACH,
   subjectKind,
@@ -104,7 +105,7 @@ function OrgMcp({ me, org }: { me: Me; org: string }) {
   const [created, setCreated] = useState<{ token: string; info: ApiToken } | null>(null);
   const ids = useQuery({ queryKey: agentIdentitiesKey(org), queryFn: () => auth.agentIdentities(org) });
   const members = useQuery({ queryKey: ["members", org], queryFn: () => auth.members(org) });
-  const ways = orgWays(ids.data, members.data?.members.length ?? 0);
+  const ways = orgWays(ids.data, members.data?.members.length ?? 0, { platformAdmin: me.platform_admin, member: me.memberships.some((m) => m.org === org) });
   const opts: SnippetOptions = { name: `isb-${org}`, url, tokenVar: TOKEN_VAR, access };
   return (
     <>
@@ -225,10 +226,10 @@ function OrgTailnet({ me, org, state, data, loading }: { me: Me; org: string; st
               The node's login, or one of its tags, is mapped to a role in {org} only; a tagged node is its tags, never its owner's login. The server asks tailscaled who is connecting, so nothing the client sends can claim an identity. The client must send <code className="font-mono text-xs">Content-Type: application/json</code> and no foreign <code className="font-mono text-xs">Origin</code>, as MCP clients do.
             </SourceHead>
             <Mappings org={org} me={me} kind="tailnet" data={data} />
-            {!state.on && <WhyOff>{state.why}</WhyOff>}
+            <WayStatus state={state} />
             {url && (
               <>
-                <UrlRow url={url} label="MCP URL on the tailnet" />
+                <UrlRow url={url} label="MCP URL on the tailnet" hint="The server's tailnet address: reachable from any node on the tailnet, and no Cloudflare Access in front." />
                 <Install opts={{ name: `isb-${org}`, url, tokenVar: null, access: false }} envStep={false} />
               </>
             )}
@@ -240,7 +241,7 @@ function OrgTailnet({ me, org, state, data, loading }: { me: Me; org: string; st
 }
 
 function OrgAccess({ me, org, state, data, loading, memberCount }: { me: Me; org: string; state: WayState; data: OrgAgentIdentities | undefined; loading: boolean; memberCount: number }) {
-  const url = orgMcpUrl(origin(), org);
+  const url = publicMcpUrl(data?.available.public_url, org);
   return (
     <Panel icon={<Cloud />} title="Access identity" description="No isb token: Cloudflare Access signs the identity, and isb trusts only a verified assertion.">
       <div className="grid gap-4 p-5">
@@ -252,9 +253,17 @@ function OrgAccess({ me, org, state, data, loading, memberCount }: { me: Me; org
               A headless agent uses an Access service token that {org} maps to a role (below), or one of Access's own policies for a person: someone whose email is an isb user acts as that user with their real roles ({memberCount} member{memberCount === 1 ? "" : "s"} here), and anyone else needs their email mapped. Put the service token's client id in Settings and its secret in the agent's environment.
             </SourceHead>
             <Mappings org={org} me={me} kind="access" data={data} />
-            {!state.on && <WhyOff>{state.why}</WhyOff>}
-            <UrlRow url={url} label="MCP URL (the public URL)" />
-            <Install opts={{ name: `isb-${org}`, url, tokenVar: null, access: true }} />
+            <WayStatus state={state} />
+            {url ? (
+              <>
+                <UrlRow url={url} label="MCP URL (the public URL)" hint="The server's public URL, where Cloudflare Access sits in front of it. An agent connects here, not at the address this page is open at." />
+                <Install opts={{ name: `isb-${org}`, url, tokenVar: null, access: true }} />
+              </>
+            ) : (
+              <WhyOff>
+                This server has no public URL, so there is no address Cloudflare Access sits in front of. Start <code className="font-mono text-xs">isb serve</code> with <code className="font-mono text-xs">--public-url https://your-host</code> (the address Access guards); the MCP URL is then <code className="font-mono text-xs">{"<public URL>"}/orgs/{org}/mcp</code>.
+              </WhyOff>
+            )}
           </>
         )}
       </div>
@@ -273,7 +282,21 @@ function WhyOff({ children }: { children: ReactNode }) {
   );
 }
 
-function UrlRow({ url, label = "MCP URL" }: { url: string; label?: string }) {
+/** Why a way is off, or who it works for when it is on. */
+function WayStatus({ state }: { state: WayState }) {
+  if (!state.on) return <WhyOff>{state.why}</WhyOff>;
+  if (!state.works) return null;
+  return (
+    <div className="rounded-lg border px-4 py-3 text-[13px] leading-relaxed text-muted-foreground">
+      <StatusBadge tone="success" className="mr-2">
+        On
+      </StatusBadge>
+      {state.works}
+    </div>
+  );
+}
+
+function UrlRow({ url, label = "MCP URL", hint }: { url: string; label?: string; hint?: string }) {
   return (
     <div className="grid gap-1.5">
       <div className="text-[13px] font-medium">{label}</div>
@@ -284,7 +307,8 @@ function UrlRow({ url, label = "MCP URL" }: { url: string; label?: string }) {
         <CopyIconButton value={url} label="Copy URL" />
       </div>
       <p className="text-xs leading-relaxed text-muted-foreground">
-        The address this page is open at. An agent on another machine needs an address that reaches this server from there: the public URL behind the tunnel, or the tailnet address.
+        {hint ??
+          "The address this page is open at. An agent on another machine needs an address that reaches this server from there: the public URL behind the tunnel, or the tailnet address."}
       </p>
     </div>
   );

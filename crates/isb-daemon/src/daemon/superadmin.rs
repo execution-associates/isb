@@ -136,6 +136,16 @@ impl Gate {
                 Vec::new()
             },
             access: self.access_agents.is_some(),
+            public_url: None,
+            superadmin_access: self
+                .access_list()
+                .map(AccessAllowList::entries)
+                .unwrap_or_default(),
+            superadmin_tailnet: self
+                .tailnet
+                .as_ref()
+                .map(|t| t.allow().entries())
+                .unwrap_or_default(),
         }
     }
 

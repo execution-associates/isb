@@ -320,7 +320,7 @@ platform admin) touches an owner or makes one.
 | `invitation_list` | admin | Pending invitations. |
 | `invitation_create` | admin | `email`, `role` (default member, at most your own). Returns the invitation, its `token` (shown once) and the `link` when `--public-url` is set. isb sends no mail. |
 | `invitation_revoke` | admin | `id`. |
-| `agent_identity_list` | viewer | The org's tailnet and Access agent identities (kind, subject, role, note) and `available`: the server's tailnet listen addresses and whether Access guards a listener. |
+| `agent_identity_list` | viewer | The org's tailnet and Access agent identities (kind, subject, role, note) and `available`: the server's tailnet listen addresses, whether Access guards a listener, its public URL, and `reach` (who gets in with no mapping: counts, and names for owners and admins only). |
 | `agent_identity_set` | admin | `kind` (`tailnet`, `access`), `subject` (a tailnet login or `tag:name`; an Access service token client id or the email of someone who is not an isb user), `role` (`viewer`, `member`, `admin`: never owner, at most your own), `note`. An existing subject changes role. |
 | `agent_identity_remove` | admin | `id`. |
 | `token_list` | anyone signed in | Your tokens' metadata (only `org`'s when given; an org token sees its org's). `all: true`: every token in `org`, with its holder (admins). |

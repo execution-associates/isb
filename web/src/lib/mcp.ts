@@ -71,10 +71,24 @@ export function orgTokenReach(me: Me, org: string): string {
 
 // ---- how an org's agent signs in ----
 
+/** Who reaches every org with no mapping: a count for any member, names for owners and admins. */
+export interface Reach {
+  count: number;
+  who: string[];
+  /** The caller is one of them (absent for platform admins: `Me` says). */
+  you?: boolean;
+}
+
 /** `GET orgs/ORG/agent-identities`: the org's mappings and which front doors the server has. */
 export interface OrgAgentIdentities {
   identities: AgentIdentity[];
-  available: { tailnet_listen: string[]; access: boolean };
+  available: {
+    tailnet_listen: string[];
+    access: boolean;
+    /** The server's `--public-url`, null when unset. */
+    public_url: string | null;
+    reach: { platform_admins: Reach; access_superadmins: Reach; tailnet_superadmins: Reach };
+  };
 }
 
 export type Way = "token" | "tailnet" | "access";
@@ -85,6 +99,15 @@ export interface WayState {
   on: boolean;
   /** When off: what is missing, in a sentence. */
   why: string | null;
+  /** When on: who gets in, in a sentence (no other user's email unless the caller manages the org). */
+  works: string | null;
+}
+
+/** What `orgWays` needs to know of the viewer. */
+export interface Viewer {
+  platformAdmin: boolean;
+  /** A member of the org. */
+  member: boolean;
 }
 
 /** The roles an agent identity may have (never owner). */
@@ -97,29 +120,99 @@ export const ROLE_REACH: Record<AgentRole, string> = {
   admin: "member, and manages the org's members, invitations and tokens",
 };
 
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const named = (r: Reach | undefined, n: number, one: string, many?: string) => (r?.who.length ? `${plural(n, one, many)} (${r.who.join(", ")})` : plural(n, one, many));
+
 /**
  * The three ways an org's agent can sign in, with whether each is on. The
  * org token is always on. A tailnet identity needs a tailnet `--listen`
- * address and a tailnet mapping in the org. An Access identity needs Access
- * on a listener, and either a mapping (a service token, or the email of
- * someone who is not an isb user) or member users (their email acts as them).
- * `data` is undefined while it loads.
+ * address and someone it admits: a tailnet mapping in the org, or a
+ * `--superadmin-tailnet` login (which reaches every org). An Access identity
+ * needs Access on a listener and someone it admits: a mapping (a service
+ * token, or the email of someone who is not an isb user), a member user
+ * (their email acts as them), a platform admin (who reaches every org) or a
+ * `--superadmin-access` identity. `data` is undefined while it loads.
  */
-export function orgWays(data: OrgAgentIdentities | undefined, memberCount: number): WayState[] {
+export function orgWays(data: OrgAgentIdentities | undefined, memberCount: number, viewer: Viewer = { platformAdmin: false, member: false }): WayState[] {
   const maps = (k: AgentIdentity["kind"]) => (data?.identities ?? []).filter((i) => i.kind === k).length;
   const listens = data?.available.tailnet_listen ?? [];
   const accessOn = !!data?.available.access;
+  const reach = data?.available.reach;
+  const accessSuper = reach?.access_superadmins;
+  const tailSuper = reach?.tailnet_superadmins;
+  const admins = reach?.platform_admins;
+
+  const tailnetWho: string[] = [];
+  if (tailSuper?.you) tailnetWho.push("you (superadmin via the tailnet)");
+  const otherTail = (tailSuper?.count ?? 0) - (tailSuper?.you ? 1 : 0);
+  if (otherTail > 0) tailnetWho.push(`${named(tailSuper, otherTail, "other tailnet superadmin")}, who reach every org`);
+  if (maps("tailnet") > 0) tailnetWho.push(plural(maps("tailnet"), "mapped login or tag", "mapped logins or tags"));
   const tailnetWhy: string[] = [];
   if (listens.length === 0) tailnetWhy.push("The server has no tailnet --listen address (start isb serve with --listen 100.x.y.z:PORT), so no tailnet peer can reach it.");
-  if (maps("tailnet") === 0) tailnetWhy.push("No tailnet login or tag is mapped to a role in this org: an owner or admin adds one in Settings, Agent identities.");
+  if (tailnetWho.length === 0) tailnetWhy.push("No tailnet login or tag is mapped to a role in this org and no --superadmin-tailnet login is set: an owner or admin adds a mapping in Settings, Agent identities.");
+  const tailnetOn = tailnetWhy.length === 0;
+
+  const accessWho: string[] = [];
+  if (accessSuper?.you) accessWho.push("you (superadmin via Access)");
+  else if (viewer.platformAdmin) accessWho.push("you (platform admin)");
+  else if (viewer.member) accessWho.push("you (a member)");
+  const otherMembers = memberCount - (viewer.member ? 1 : 0);
+  if (otherMembers > 0) accessWho.push(`${plural(otherMembers, "other member user")}, as themselves`);
+  const otherAdmins = (admins?.count ?? 0) - (viewer.platformAdmin ? 1 : 0);
+  if (otherAdmins > 0) accessWho.push(`${named(admins, otherAdmins, "other platform admin")}, who reach every org`);
+  const otherSuper = (accessSuper?.count ?? 0) - (accessSuper?.you ? 1 : 0);
+  if (otherSuper > 0) accessWho.push(`${named(accessSuper, otherSuper, "other Access superadmin")}, who reach every org`);
+  if (maps("access") > 0) accessWho.push(plural(maps("access"), "mapped service token or email", "mapped service tokens or emails"));
   const accessWhy: string[] = [];
   if (!accessOn) accessWhy.push("Cloudflare Access does not guard a listener on this server (set CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD).");
-  if (maps("access") === 0 && memberCount === 0) accessWhy.push("This org has no member users and no Access service token or email mapped: an owner or admin adds one in Settings, Agent identities.");
+  if (accessWho.length === 0) accessWhy.push("This org has no member users, no platform admin, no --superadmin-access identity and no Access service token or email mapped: an owner or admin adds one in Settings, Agent identities.");
+  const accessReady = accessWhy.length === 0;
+
   return [
-    { id: "token", label: "Org token", on: true, why: null },
-    { id: "tailnet", label: "Tailnet identity", on: tailnetWhy.length === 0, why: tailnetWhy.join(" ") || null },
-    { id: "access", label: "Access identity", on: accessWhy.length === 0, why: accessWhy.join(" ") || null },
+    { id: "token", label: "Org token", on: true, why: null, works: null },
+    {
+      id: "tailnet",
+      label: "Tailnet identity",
+      on: tailnetOn,
+      why: tailnetWhy.join(" ") || null,
+      works: tailnetOn ? `Tailnet sign-in works for: ${tailnetWho.join("; ")}. Any other node needs its login or tag mapped.` : null,
+    },
+    {
+      id: "access",
+      label: "Access identity",
+      on: accessReady,
+      why: accessWhy.join(" ") || null,
+      works: accessReady ? `Access sign-in works for: ${accessWho.join("; ")}. Anyone else needs their email or service token mapped, or to be added as a member.` : null,
+    },
   ];
+}
+
+/**
+ * The MCP URL behind Cloudflare Access: the server's public URL, never the
+ * address the page is open at (which may be a tailnet or loopback one Access
+ * does not guard). Null when the server has no `--public-url`.
+ */
+export function publicMcpUrl(publicUrl: string | null | undefined, org: string): string | null {
+  return publicUrl ? orgMcpUrl(publicUrl, org) : null;
+}
+
+/** The inline offer when a mapping's email is an isb user's: add them to the org instead. */
+export interface MemberOffer {
+  userId: number;
+  email: string;
+  label: string;
+}
+
+/**
+ * `PUT agent-identities` answers 409 `is_user` (with the user's id and email)
+ * for an Access email that is an isb user's. Offer to add that user to the
+ * org as `role`, to owners and admins only; null otherwise.
+ */
+export function memberOffer(e: unknown, org: string, role: AgentRole, canManage: boolean): MemberOffer | null {
+  if (!canManage || !e || typeof e !== "object") return null;
+  const { code, data } = e as { code?: string; data?: { user_id?: unknown; email?: unknown } };
+  if (code !== "is_user" || typeof data?.user_id !== "number" || typeof data.email !== "string") return null;
+  return { userId: data.user_id, email: data.email, label: `Add ${data.email} to ${org} as ${role}` };
 }
 
 /** What a mapping's subject is: a login, a node tag, an email or a service token. */

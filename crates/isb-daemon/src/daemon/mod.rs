@@ -181,7 +181,7 @@ fn auth_routes(
     }
     let path = crate::auth::db_path(&cfg.state_dir);
     let agent_gate = gate.clone();
-    let agent_ways = gate.agent_ways();
+    let agent_ways = gate.agent_ways().with_public_url(cfg.public_url.clone());
     let api = AuthApi::new(
         store.clone(),
         ApiConfig {

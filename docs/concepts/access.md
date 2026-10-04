@@ -84,7 +84,17 @@ org's owners and admins map identities to a role in **that org**
   user's memberships. An Access email that is an isb user's is the opposite:
   it acts as that user with their real memberships, and cannot be mapped (the
   mapping is refused, and ignored if the account came later); make the user a
-  member instead.
+  member instead. The web form offers that inline ("Add the user to the org as
+  the chosen role") to owners and admins when the refusal names an isb user.
+- Some callers get in through a front door with no mapping, and the org's MCP
+  page counts them when it says whether Access or the tailnet sign-in is on:
+  a member user's Access email, a platform admin's (who reaches every org),
+  an identity on `--superadmin-access`, and a login on `--superadmin-tailnet`.
+  `agent_identity_list` reports them under `available.reach` as counts for any
+  member, with the names (emails, logins, client ids) only for the org's
+  owners, admins and platform admins, plus whether the caller is one. It also
+  reports `available.public_url`, the address Access sits in front of, which
+  the Access card shows as `<public URL>/orgs/<org>/mcp`.
 - A request that carries a bearer token or a session cookie is judged by it
   alone; the identity is asked only of one that carries neither. The caller
   gets a role in each org that maps it, the highest if several of its tags do.
