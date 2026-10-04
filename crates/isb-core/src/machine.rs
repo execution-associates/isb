@@ -29,6 +29,9 @@ use serde_json::Value;
 
 use crate::client::{Client, Timeouts};
 use crate::error::{Error, Result};
+#[doc(hidden)]
+pub use crate::self_update::hex;
+pub(crate) use crate::self_update::{download_asset, fetch};
 
 /// The machine every command uses unless told otherwise, and the one whose
 /// sockets [`Client::default_socket`] and the serve socket fall back to.
@@ -42,7 +45,6 @@ const GUEST_INCUS_SOCKET: &str = "/var/lib/incus/unix.socket";
 const GUEST_SERVE_SOCKET: &str = "/run/isb/serve.sock";
 /// Written by the provisioning script once incus is installed and initialised.
 const PROVISIONED_MARKER: &str = "/var/lib/isb-machine/provisioned";
-const RELEASES: &str = "https://github.com/execution-associates/isb/releases/download";
 
 fn home() -> Result<PathBuf> {
     std::env::var_os("HOME")
@@ -613,7 +615,7 @@ fn stage_binary(src: &Path, dst: &Path) -> Result<()> {
     set_mode(dst, 0o755)
 }
 
-fn set_mode(p: &Path, mode: u32) -> Result<()> {
+pub(crate) fn set_mode(p: &Path, mode: u32) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode))?;
     Ok(())
@@ -624,77 +626,16 @@ pub fn release_asset(version: &str, arch: &str) -> String {
     format!("isb-v{version}-{arch}-unknown-linux-musl")
 }
 
-pub(crate) fn fetch(url: &str, limit: u64) -> Result<Vec<u8>> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(300)))
-        .user_agent(concat!("isb/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .into();
-    let step = || format!("download {url}");
-    let mut resp = agent.get(url).call().map_err(|e| Error::OperationFailed {
-        step: step(),
-        message: e.to_string(),
-    })?;
-    resp.body_mut()
-        .with_config()
-        .limit(limit)
-        .read_to_vec()
-        .map_err(|e| Error::OperationFailed {
-            step: step(),
-            message: e.to_string(),
-        })
-}
-
 /// Download the release tarball, check it against SHA256SUMS, unpack the binary.
 #[doc(hidden)]
 pub fn download_release(version: &str, arch: &str, dir: &Path, dst: &Path) -> Result<()> {
-    let asset = release_asset(version, arch);
-    let base = format!("{RELEASES}/v{version}");
-    let sums =
-        String::from_utf8_lossy(&fetch(&format!("{base}/SHA256SUMS"), 1 << 20)?).into_owned();
-    let want = sums
-        .lines()
-        .find_map(|l| {
-            let (h, f) = l.split_once(char::is_whitespace)?;
-            (f.trim().trim_start_matches('*') == format!("{asset}.tar.gz")).then(|| h.to_string())
-        })
-        .ok_or_else(|| {
-            Error::invalid(format!(
-                "release v{version} has no {asset}.tar.gz; pass a Linux build with --isb-binary"
-            ))
-        })?;
-    let tarball = fetch(&format!("{base}/{asset}.tar.gz"), 256 << 20)?;
-    let got = hex(ring::digest::digest(&ring::digest::SHA256, &tarball).as_ref());
-    if !got.eq_ignore_ascii_case(&want) {
-        return Err(Error::invalid(format!(
-            "{asset}.tar.gz: sha256 {got} does not match SHA256SUMS ({want})"
-        )));
-    }
-    let tgz = dir.join(format!("{asset}.tar.gz"));
-    std::fs::write(&tgz, &tarball)?;
-    let out = Command::new("tar")
-        .arg("-xzf")
-        .arg(&tgz)
-        .arg("-C")
-        .arg(dir)
-        .arg(format!("{asset}/isb"))
-        .stdin(Stdio::null())
-        .output()?;
-    let _ = std::fs::remove_file(&tgz);
-    if !out.status.success() {
-        return Err(Error::OperationFailed {
-            step: format!("unpack {asset}.tar.gz"),
-            message: String::from_utf8_lossy(&out.stderr).trim().to_string(),
-        });
-    }
-    std::fs::rename(dir.join(&asset).join("isb"), dst)?;
-    let _ = std::fs::remove_dir_all(dir.join(&asset));
-    set_mode(dst, 0o755)
-}
-
-#[doc(hidden)]
-pub fn hex(b: &[u8]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect()
+    download_asset(
+        version,
+        &release_asset(version, arch),
+        "pass a Linux build with --isb-binary",
+        dir,
+        dst,
+    )
 }
 
 /// Wait until both forwarded sockets answer.

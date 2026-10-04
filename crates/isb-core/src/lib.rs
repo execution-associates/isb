@@ -29,6 +29,7 @@ pub mod registry;
 pub mod rpc;
 pub mod sandbox;
 pub mod secrets;
+pub mod self_update;
 pub mod serve_client;
 pub mod shorthand;
 pub mod spec;
