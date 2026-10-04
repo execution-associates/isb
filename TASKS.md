@@ -51,6 +51,17 @@ minime only runs binaries downloaded from our CI runs.
 
 ## Decisions
 
+- **Sandbox egress is a bridge per sandbox, not nft redirects.** A NIC ACL
+  is enforced in incus' bridge-family nft tables, before the host's IP
+  prerouting, so a DNAT to the proxy would be dropped by the very ACL that
+  makes the sandbox fail closed unless br_netfilter happens to be loaded; and
+  incus always allows DNS to the bridge's own address, so on a shared bridge
+  DNS cannot be blocked. A bridge of its own per sandbox (no NAT, no routing)
+  with a dnsmasq that has no upstream and answers only the allowed names (with
+  the bridge's address, where the proxy listens) needs no root helper, no
+  per-sandbox host firewall rules and survives restarts with incus alone. The
+  cost: a sandbox's network is chosen at creation, and the proxy cannot see
+  the address the guest meant, only the name it says (SNI or Host).
 - **Org = trust boundary = incus project.** An org's people and agents fully
   administer the org: apps, secrets (read included), deploys. Nothing crosses
   orgs. Platform admins span orgs.
@@ -650,7 +661,7 @@ Finishing this workstream is isb **1.0.0** (Stephan, 2026-10-03), not another 0.
 - [ ] PR `platform` → `main` with release notes (the user-visible changes since 0.7, and breaking changes: the default org, the crate split).
 - [ ] Bump to 1.0.0 everywhere the release process lists, for all six crates together; tag; publish (crates.io `cargo publish --workspace`, PyPI, npm) per the release process.
 - [ ] Upgrade titan's `isb.service` from 0.7.0; `isb host setup`; `--workspace-home-root /srv/workspaces`.
-- [ ] lasso plugin sandboxing (queued until the running agents land): per-sandbox egress allowlist (`egress: [host[:port]]` / `none`, domains and `*.` suffixes, via a host-side egress proxy + filtered DNS behind a deny-all ACL; works for VMs) and secrets that never enter the guest (placeholder env var, substituted on the wire only to approved hosts via per-sandbox TLS interception); measure `isb exec -T` stdio round trip into a VM; design in docs; on release run `lasso notify "isb <version>: per-sandbox egress allowlist + on-the-wire secrets ready for lasso plugins"`.
+- [x] (branch `sandbox-egress`) lasso plugin sandboxing: per-sandbox egress allowlist (`egress: [host[:port]]` / `none`, domains and `*.` suffixes; a bridge, ACL and filtering dnsmasq per sandbox plus a host-side proxy in `isb serve`; containers and VMs) and secrets that never enter the guest (placeholder env var, swapped on the wire only towards approved hosts, per-sandbox CA, verified upstream TLS); surfaces: compose, `isb create --egress/--secret`, rpc and both SDKs, `sandbox_create`; docs/guides/egress.md. **Verify:** integration tests `tests/egress.rs` (container and VM: DNS, direct public and private IPs, `none`, secret substitution to a local HTTPS server with its own CA, placeholder unchanged to a non-approved host, teardown) and a scratch `isb serve` on titan (default org too, daemon restart, live list edit, orphan sweep); `isb exec -T` into a VM: p50 0.9-1.4 ms, p95 2.4-4.7 ms per line over 300 lines (container p50 0.3-0.5 ms). Left: `egress` on an existing open sandbox needs a recreate; remote servers' bootstrap does not run `host setup --sandbox-egress`; request bodies are not rewritten and h2 is not offered to intercepted hosts. On release run `lasso notify "isb <version>: per-sandbox egress allowlist + on-the-wire secrets ready for lasso plugins"`.
 - [ ] Marketing site pulls isb docs from `main` (or the v1.0.0 tag) instead of `platform`.
 - [x] Uptime monitoring (branch `uptime`): `monitor_*` tools (HTTP(S), TCP and app monitors; thresholds, hysteresis, flap damping), apps with a served domain get `app-<name>` automatically, `monitor.down` / `monitor.up` / `monitor.cert_expiring` with details to channels, 7 d raw and 90 d hourly history with incidents, the Uptime section, monitor pages, the app card and the overview banner, and `--heartbeat-url` as a dead man's switch (docs/guides/uptime.md).
 - [ ] Uptime follow-ups: a public status page per org (off by default); `isb monitor` CLI commands; the control plane's `server.*` events reach only the control plane's channels for an org placed on a server, whose channels live on the agent.
