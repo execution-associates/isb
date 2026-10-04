@@ -13,13 +13,19 @@ interface Proj {
   environments: Env[];
 }
 
-/** What the project select starts on: the URL's project, else the newest one, else a new one named after the template. */
+/**
+ * What the project select starts on: the URL's project, else always a new
+ * project named after the template (numbered if that name is taken), so a
+ * template never lands in an existing project by accident.
+ */
 export function defaultProject(projects: Proj[], templateId: string, wanted?: string | null): { choice: string; newName: string } {
   if (wanted) {
     return projects.some((p) => p.name === wanted) ? { choice: wanted, newName: "" } : { choice: NEW, newName: wanted };
   }
-  const newest = projects.toSorted((a, b) => b.created_at - a.created_at)[0];
-  return newest ? { choice: newest.name, newName: "" } : { choice: NEW, newName: templateId };
+  const taken = new Set(projects.map((p) => p.name));
+  let name = templateId;
+  for (let n = 2; taken.has(name); n++) name = `${templateId}-${n}`;
+  return { choice: NEW, newName: name };
 }
 
 /** What the environment select starts on within a project: the wanted one, else production, else the first, else a new "production". */

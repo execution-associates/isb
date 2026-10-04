@@ -7,9 +7,9 @@ describe("where a template deploys", () => {
   it("defaults to a new project named after the template when there are none", () => {
     expect(defaultProject([], "umami")).toEqual({ choice: NEW, newName: "umami" });
   });
-  it("preselects the only project, or the newest of several", () => {
-    expect(defaultProject([p("web", 1)], "umami").choice).toBe("web");
-    expect(defaultProject([p("old", 1), p("fresh", 9), p("mid", 5)], "umami").choice).toBe("fresh");
+  it("defaults to a new project even when projects exist, numbering a taken name", () => {
+    expect(defaultProject([p("web", 1)], "umami")).toEqual({ choice: NEW, newName: "umami" });
+    expect(defaultProject([p("umami", 1), p("umami-2", 2)], "umami")).toEqual({ choice: NEW, newName: "umami-3" });
   });
   it("honors a project from the link, existing or not", () => {
     expect(defaultProject([p("web", 1), p("api", 2)], "umami", "web").choice).toBe("web");
