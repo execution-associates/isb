@@ -1,4 +1,4 @@
-import { Check, ChevronsUpDown, Crown, HardDrive, LogOut, Menu, Search, ShieldCheck, UserRound } from "lucide-react";
+import { BookOpen, Check, ChevronsUpDown, Crown, HardDrive, LogOut, Menu, Search, ShieldCheck, UserRound } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
@@ -277,6 +277,12 @@ function UserMenu({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
             Platform
           </DropdownMenuItem>
         )}
+        <DropdownMenuItem asChild>
+          <a href={DOCS_URL} target="_blank" rel="noreferrer">
+            <BookOpen />
+            Docs
+          </a>
+        </DropdownMenuItem>
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
             <ThemeIcon className="size-4 text-muted-foreground" />
@@ -306,6 +312,8 @@ function UserMenu({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
     </DropdownMenu>
   );
 }
+
+const DOCS_URL = "https://github.com/execution-associates/isb/blob/main/docs/index.md";
 
 function SearchButton({ className }: { className?: string }) {
   const open = usePalette();
