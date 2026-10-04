@@ -8,8 +8,10 @@ fn parse(y: &str) -> Result<ComposeFile, String> {
 fn rejects_unknown_fields() {
     let e = parse("services:\n  web:\n    image: x\n    cpu: 8\n").unwrap_err();
     assert!(e.contains("unknown field `cpu`"), "{e}");
-    let e = parse("services:\n  web:\n    image: x\n    volumes:\n      - {source: /b, target: /a, bnd: 1}\n")
-        .unwrap_err();
+    let e = parse(
+        "services:\n  web:\n    image: x\n    volumes:\n      - {source: /b, target: /a, bnd: 1}\n",
+    )
+    .unwrap_err();
     assert!(e.contains("bnd"), "{e}");
 }
 
@@ -104,9 +106,8 @@ fn port_forms() {
     );
     let e = parse("services:\n  web: {image: x, ports: [5173]}\n").unwrap_err();
     assert!(e.contains("host port"), "{e}");
-    let e =
-        parse("services:\n  web: {image: x, ports: [{listen: 1, connect: 2, search: 5}]}\n")
-            .unwrap_err();
+    let e = parse("services:\n  web: {image: x, ports: [{listen: 1, connect: 2, search: 5}]}\n")
+        .unwrap_err();
     assert!(e.contains("published"), "{e}");
 }
 
@@ -136,9 +137,8 @@ fn volumes_serialize_back_to_what_parses() {
 
 #[test]
 fn command_as_a_string() {
-    let f =
-        parse("services:\n  a: {image: x, command: \"sh -c 'bun install && bun run dev'\"}\n")
-            .unwrap();
+    let f = parse("services:\n  a: {image: x, command: \"sh -c 'bun install && bun run dev'\"}\n")
+        .unwrap();
     assert_eq!(
         f.services["a"].command.as_deref().unwrap(),
         ["sh", "-c", "bun install && bun run dev"]

@@ -114,6 +114,17 @@ See [Domains and ingress](../guides/domains.md).
 
 See [Workspaces](../concepts/workspaces.md).
 
+### Sandbox egress
+
+The proxy that serves sandboxes with `egress:` runs inside `isb serve`
+([Sandbox egress and secrets](../guides/egress.md)); these are the operator's
+settings for it.
+
+| Flag | Environment | Default | |
+|---|---|---|---|
+| `--egress-pin` | `ISB_EGRESS_PINS` | none | `NAME=IP[:PORT]`, comma-separated: the proxy connects to `NAME` at that address instead of resolving it, and may reach a private one. The only way a name that resolves to a private address is reachable. |
+| `--egress-ca` | `ISB_EGRESS_CA` | none | PEM files of certificates the proxy trusts for the hosts it connects to, besides the system's (a private CA) |
+
 ### Audit and history
 
 | Flag | Environment | Default | |

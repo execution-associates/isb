@@ -85,7 +85,7 @@ means every member of the org, *member* means members, admins and owners.
 
 | Tool | Who | Does |
 |---|---|---|
-| `sandbox_create` | member | Create or reconcile one sandbox from a service spec (an object or YAML, `container_name` set), with `expires` and `idle_timeout` (the org's defaults otherwise: 24h and 2h) and `wait_ready`. Remote callers' specs are held to the [remote-spec policy](../concepts/security.md#the-remote-spec-policy), and their sandboxes labelled `isb.owner=<identity>`. |
+| `sandbox_create` | member | Create or reconcile one sandbox from a service spec (an object or YAML, `container_name` set), with `expires` and `idle_timeout` (the org's defaults otherwise: 24h and 2h) and `wait_ready`. Remote callers' specs are held to the [remote-spec policy](../concepts/security.md#the-remote-spec-policy), and their sandboxes labelled `isb.owner=<identity>`. `spec.egress` confines the sandbox's network to a list of hosts (or none) and gives it [secrets that never enter the guest](../guides/egress.md); a secret the org does not hold is refused. |
 | `sandbox_list` | viewer | Instances, filtered by labels and `kind` (`sandbox`, `workspace`, `replica`, `build`): creator, age, expiry, idle timeout, last activity, limits and use, and `mine`. Remote callers see only instances isb manages. |
 | `sandbox_exec` | member | Run argv in a sandbox: exit code, stdout, stderr (each capped at 256 KiB, keeping the end), optional `stdin` text, `user`, `cwd`, `env`, `timeout` (default 10m). |
 | `sandbox_extend` | the sandbox's creator, or admin | Push the expiry out (`by`, default 24h, at most 30 days from now) or change `idle_timeout`. |

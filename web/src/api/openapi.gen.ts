@@ -2739,7 +2739,7 @@ export interface paths {
         put?: never;
         /**
          * Create a sandbox
-         * @description Create (or reconcile) one sandbox: an incus container or VM to run code in isolation. `spec` is one compose service (docs/reference/compose.md) with container_name set, as an object or YAML text. Remote callers' sandboxes are labelled with their identity, and only managed sandboxes are reachable remotely. Sandboxes are short-lived: each expires (the org's default, 24h, unless `expires` says otherwise; sandbox_extend pushes it out) and is deleted after sitting idle (`idle_timeout`, default 2h; `none` turns it off).
+         * @description Create (or reconcile) one sandbox: an incus container or VM to run code in isolation. `spec` is one compose service (docs/reference/compose.md) with container_name set, as an object or YAML text. Remote callers' sandboxes are labelled with their identity, and only managed sandboxes are reachable remotely. For untrusted code set `spec.egress`: `none` (no network), or a list of `host[:port]` the sandbox may reach (port 443 by default, `*.example.com` for subdomains; everything else, public or private, is refused), or `{allow, secrets}` where each secret (`{env, secret?, hosts}`) is an org secret the guest sees only as a placeholder in `env`, put on the wire only towards its approved hosts (docs/guides/egress.md). Sandboxes are short-lived: each expires (the org's default, 24h, unless `expires` says otherwise; sandbox_extend pushes it out) and is deleted after sitting idle (`idle_timeout`, default 2h; `none` turns it off).
          */
         post: operations["sandbox_create"];
         delete?: never;
@@ -10678,7 +10678,7 @@ export interface operations {
                     idle_timeout?: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
-                    /** @description The service spec: an object, or YAML text. */
+                    /** @description The service spec: an object, or YAML text. `egress` limits its network. */
                     spec: unknown;
                     /** @description Run readiness checks (default true). */
                     wait_ready?: boolean;

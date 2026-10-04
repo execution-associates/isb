@@ -112,6 +112,14 @@ when it carries the random token this call wrote, so it never deletes someone
 else's. Details: [How reconcile works](../reference/compose.md#how-reconcile-works)
 and [The ensure flow](../reference/compose.md#the-ensure-flow).
 
+## Network
+
+A sandbox gets an address on a private bridge and, unless you say otherwise,
+reaches the internet. For code you do not trust, `egress:` confines it to a
+list of hostnames (or to nothing) behind a proxy `isb serve` runs, and keeps
+secrets out of the guest, for containers and VMs alike
+([Sandbox egress and secrets](../guides/egress.md)).
+
 ## Readiness
 
 "Running" alone is not ready: networking comes up a moment after the

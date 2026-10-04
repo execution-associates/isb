@@ -842,6 +842,33 @@ secrets:
   - {source: tls_key, target: tls.key, uid: 1000, mode: "0440"}
 ```
 
+### `egress`
+
+Confines the sandbox's network to a list of hostnames, and gives it secrets it
+never holds ([Sandbox egress and secrets](../guides/egress.md)). Omitted, the
+network is open.
+
+```yaml
+egress: none                          # no network at all
+egress: [registry.npmjs.org, "*.example.com:8443"]
+egress:
+  allow: [db.example.com:5432]
+  secrets:
+    - API_TOKEN=acme-api-token@api.example.com        # ENV[=SECRET]@host1,host2
+    - {env: OTHER, secret: other-token, hosts: [api.other.example:8443]}
+```
+
+- An entry is `host[:port]` (port 443 by default); `*.example.com` covers every
+  name below `example.com`, not `example.com` itself. A host is a name, never
+  an IP address.
+- A secret's `env` is the variable the guest sees, holding a placeholder;
+  `secret` names the org [secret](../guides/secrets.md) (default: `env`);
+  `hosts` are where the real value may be sent, and are allowed too.
+- `none` cannot be combined with hosts or secrets; an empty list means `none`.
+- The network belongs to the sandbox from its creation: recreate it to add or
+  remove `egress`. Editing the list or the secrets later is live. Needs
+  `isb serve` for its proxy.
+
 ### `raw_config`
 
 Map of string to string, set verbatim as instance config. Applied after every

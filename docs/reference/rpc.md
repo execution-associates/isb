@@ -79,7 +79,12 @@ control connection when it exits, and incus kills them.
 ## Types
 
 - **spec**: a sandbox spec, exactly the `services.<service>` object of the
-  compose format ([isb.yaml](compose.md#servicesservice)), with `container_name` required. The JSON Schema from `isb schema`
+  compose format ([isb.yaml](compose.md#servicesservice)), with `container_name` required.
+  Its [`egress`](compose.md#egress) field (`"none"`, a list of `host[:port]`,
+  or `{"allow": [...], "secrets": [...]}`) confines the sandbox's network
+  ([Sandbox egress and secrets](../guides/egress.md)): `sandbox.create` and
+  `sandbox.ensure` make its bridge and ACL, and `sandbox.remove` deletes
+  them. The proxy that enforces it is `isb serve`'s. The JSON Schema from `isb schema`
   (or method `schema`) describes it as the `SandboxSpec` definition.
 - **info**: a sandbox as listed:
   `{name, status, type, labels, config, devices, profiles, created_at, description}`.

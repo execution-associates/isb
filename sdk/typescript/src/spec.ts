@@ -68,6 +68,43 @@ export type FailureAction = "pause" | "rollback" | "continue";
  */
 export type UpdateOrder = "stop-first" | "start-first";
 /**
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "EgressSpec".
+ */
+export type EgressSpec =
+  | string
+  | string[]
+  | {
+      /**
+       * The hosts the sandbox may reach: `host[:port]`.
+       */
+      allow?: string[];
+      /**
+       * Secrets the guest sees only as placeholders.
+       */
+      secrets?: EgressSecretSpec[];
+    };
+/**
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "EgressSecretSpec".
+ */
+export type EgressSecretSpec =
+  | string
+  | {
+      /**
+       * The environment variable the guest sees (holding a placeholder).
+       */
+      env: string;
+      /**
+       * Hosts the real value may be sent to: `host[:port]`, port 443 by default.
+       */
+      hosts: string[];
+      /**
+       * The secret in the org's store (default: the variable's name).
+       */
+      secret?: string | null;
+    };
+/**
  * An environment: a map (a value may be `{secret: NAME}`), or docker's
  * list of `KEY=VALUE` strings.
  *
@@ -293,6 +330,22 @@ export interface SandboxSpec {
    */
   deploy?: Deploy | null;
   /**
+   * Public hostnames `isb serve`'s ingress routes to this service's
+   * replicas (docs/guides/domains.md). Only stacks use them; `isb up` ignores
+   * them.
+   */
+  domains?: DomainSpec[];
+  /**
+   * Which hostnames the sandbox may reach, and secrets that never enter
+   * it (docs/guides/egress.md). `none` denies all network; a list of
+   * `host[:port]` (port 443 by default; `*.example.com` for subdomains)
+   * denies everything else, public and private; `{allow, secrets}` adds
+   * secrets the guest sees only as placeholders, put on the wire towards
+   * their approved hosts. Omitted: open egress, as before. Needs
+   * `isb serve` running for its proxy.
+   */
+  egress?: EgressSpec | null;
+  /**
    * OCI images only: the entrypoint, run with `command` as its arguments.
    * On an OCI image `command` alone replaces the whole command line,
    * including the image's own entrypoint.
@@ -498,6 +551,42 @@ export interface UpdateConfig {
    * Instances replaced at a time. Default 1; 0 means all at once.
    */
   parallelism?: number | null;
+}
+/**
+ * A hostname (and path) the ingress serves a service on.
+ *
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "DomainSpec".
+ */
+export interface DomainSpec {
+  /**
+   * The hostname, e.g. `app.example.com`; `*.example.com` where the org
+   * allows wildcards; or `auto` for a generated
+   * `<service>-<stack>-<org>.<ip>.sslip.io` name.
+   */
+  host: string;
+  /**
+   * Serve over HTTPS with a certificate the ingress obtains (default
+   * true), redirecting plain HTTP to it. `false` serves plain HTTP.
+   */
+  https?: BoolOrString | null;
+  /**
+   * Path prefix (default `/`): `/api` matches `/api` and `/api/...`.
+   */
+  path?: string | null;
+  /**
+   * The port the service listens on inside its replicas. Not needed with
+   * `redirect`.
+   */
+  port?: number | null;
+  /**
+   * Answer every request with a permanent redirect (308) to this URL
+   * instead of proxying. A URL without a path keeps the request's path
+   * and query (`https://example.com`); one with a path is used as is.
+   */
+  redirect?: string | null;
+  strip_prefix?: BoolOrString;
+  www_redirect?: BoolOrString;
 }
 /**
  * The `exec:` block of a service: exec defaults with no docker equivalent.

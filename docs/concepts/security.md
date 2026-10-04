@@ -209,6 +209,32 @@ Details: [Identity API](../reference/identity-api.md).
 - **Sandboxes made through the daemon** expire and are reaped when idle
   ([Sandboxes are short-lived](workspaces.md#sandboxes-are-short-lived)).
 
+## Sandbox egress and secrets
+
+A sandbox's network is open unless its spec says `egress:`
+([Sandbox egress and secrets](../guides/egress.md)). With it, for a container
+or a VM:
+
+- The sandbox sits on a bridge of its own that neither routes nor NATs, behind
+  an ACL that drops everything but TCP to the bridge's own address on the
+  ports its list uses, where `isb serve`'s proxy listens. incus enforces it on
+  the host side of the virtual NIC, so nothing inside the guest can undo it.
+- The proxy lets through a connection only to a listed name on a listed port,
+  by the TLS server name or HTTP `Host` the client sends, and connects as the
+  host resolves that name (public addresses only). The bridge's DNS answers
+  only the listed names. `egress: none` leaves the bridge with no address.
+- A **secret** reaches the guest as a placeholder, and is swapped for the real
+  value on the wire to its approved hosts only: the proxy terminates TLS with
+  a CA made for that sandbox (its key stays on the host), and verifies the real
+  host's certificate with the host's roots. The value lives in the org's store
+  and the proxy's memory, never in the guest, the instance config, logs or
+  tool results.
+- What it does not stop: **domain fronting** through a shared front end for a
+  host that is only passed through (the name is the client's word; for hosts a
+  secret is approved for the proxy refuses a `Host` that differs from the
+  handshake's name); code inside **using** a secret against its approved
+  hosts; and any sandbox without `egress`, which keeps its open network.
+
 ## Outbound connections
 
 Some destinations are chosen by org members, so they must not become a way
@@ -303,7 +329,12 @@ every project, including changes made outside isb, with who requested them.
   and has no org network or service names, and only isb's own checks apply to
   remote callers there. Put tenants in orgs of their own.
 - **Members of an org see its secrets.** Give a contractor their own org, or
-  a viewer role, or a scoped token.
+  a viewer role, or a scoped token. A sandbox's [egress
+  secrets](../guides/egress.md) are the exception that matters for untrusted
+  code: the guest never holds the value.
+- **A sandbox without `egress` has an open network**, and so does every one
+  made before the setting existed. Set `egress` on anything that runs code you
+  did not write.
 - **VM port forwards are DNAT** and do not pass through a host firewall such
   as ufw. Publish on the address you mean to expose, never `0.0.0.0` on a
   host with a public interface.

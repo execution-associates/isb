@@ -451,10 +451,10 @@ pub(super) fn sandbox_create_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) 
         d,
         "sandbox_create",
         "Create a sandbox",
-        "Create (or reconcile) one sandbox: an incus container or VM to run code in isolation. `spec` is one compose service (docs/reference/compose.md) with container_name set, as an object or YAML text. Remote callers' sandboxes are labelled with their identity, and only managed sandboxes are reachable remotely. Sandboxes are short-lived: each expires (the org's default, 24h, unless `expires` says otherwise; sandbox_extend pushes it out) and is deleted after sitting idle (`idle_timeout`, default 2h; `none` turns it off).",
+        "Create (or reconcile) one sandbox: an incus container or VM to run code in isolation. `spec` is one compose service (docs/reference/compose.md) with container_name set, as an object or YAML text. Remote callers' sandboxes are labelled with their identity, and only managed sandboxes are reachable remotely. For untrusted code set `spec.egress`: `none` (no network), or a list of `host[:port]` the sandbox may reach (port 443 by default, `*.example.com` for subdomains; everything else, public or private, is refused), or `{allow, secrets}` where each secret (`{env, secret?, hosts}`) is an org secret the guest sees only as a placeholder in `env`, put on the wire only towards its approved hosts (docs/guides/egress.md). Sandboxes are short-lived: each expires (the org's default, 24h, unless `expires` says otherwise; sandbox_extend pushes it out) and is deleted after sitting idle (`idle_timeout`, default 2h; `none` turns it off).",
         obj(
             json!({
-                "spec": {"description": "The service spec: an object, or YAML text."},
+                "spec": {"description": "The service spec: an object, or YAML text. `egress` limits its network."},
                 "wait_ready": {"type": "boolean", "description": "Run readiness checks (default true)."},
                 "expires": {"type": "string", "description": "Lifetime from now, e.g. 4h or 7d (at most 30d; default: the org's, 24h)."},
                 "idle_timeout": {"type": "string", "description": "Delete after this long without use (exec, a terminal, CPU), e.g. 2h; `none` for never (default: the org's, 2h)."}

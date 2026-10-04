@@ -52,6 +52,13 @@ isb manages: `isb machine status`, `isb machine init`, `isb machine start`.
   of the sandbox is that code inside cannot reach them.
 - **Untrusted or unknown code goes in a VM** (`type: vm`, `isb create --vm`):
   a container shares the host's kernel.
+- **Untrusted code also gets a closed network**: `egress: [host[:port], ...]`
+  (or `isb create --egress HOST`) lets a sandbox reach only those hostnames
+  and `egress: none` nothing, through a proxy `isb serve` runs; a secret the
+  code may use but never read is `--secret NAME@host`, a placeholder in the
+  guest swapped for the value on the wire to that host only
+  ([docs/guides/egress.md](docs/guides/egress.md)). Without `egress` a
+  sandbox's network is open.
 - **Secrets reach a sandbox only as the one variable or file it needs**
   (`-e`, `environment: {KEY: {secret: NAME}}`, `secrets:`). Anything inside
   can read them. Never put a secret value in plain `environment:`: that is

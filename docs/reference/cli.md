@@ -80,6 +80,7 @@ isb create NAME -i IMAGE [--vm] [--cpus N | --cpuset-cpus SET] [-m MEM] [-s POOL
                 [--idmap auto|none|always|RAW] [--privileged true|false]
                 [-l KEY=VALUE]... [-e KEY=VALUE]... [-v SRC:GUEST[:OPTS]]... [-p PORT]...
                 [--ready CHECK]... [--ready-timeout D] [-c KEY=VALUE]... [--profile P]...
+                [--egress HOST[:PORT]|none]... [--secret NAME[=SECRET]@HOSTS]...
                 [--ensure] [--no-ready]
 isb start NAME...                      start, and wait until running
 isb stop NAME... [-f] [-t 30s]         clean shutdown (or kill with -f) within -t
@@ -95,6 +96,12 @@ isb prune --label KEY --missing-path [-y] [--json]
   reconciles it the way `up` does. `-v`, `-p` and `--ready` use the
   [CLI shorthands](compose.md#cli-shorthands); relative bind paths resolve
   against the current directory. `--no-ready` skips readiness checks.
+- `--egress` (repeatable) confines the sandbox's network to those hosts
+  (`HOST[:PORT]`, port 443 by default, `*.example.com` for subdomains), or to
+  nothing with `none`. `--secret NAME[=SECRET]@host1,host2` gives it the org
+  secret as a placeholder in `$NAME`, swapped for the real value on the wire
+  to those hosts only. Both are [`egress`](compose.md#egress) in a compose
+  file; [Sandbox egress and secrets](../guides/egress.md) has the guarantees.
 - `start` and `restart` wait for `running` only, not a file's `ready`
   checks.
 - `exec` runs argv with no shell. `TARGET` is a compose service when a
@@ -199,7 +206,7 @@ isb org create NAME [--cpus N] [--memory SIZE] [--disk SIZE] [--instances N]
 isb org ls [--json]                                    alias list
 isb org show NAME [--json]
 isb org rm NAME [--force] [--delete-vm]
-sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run] [--public-ingress]
+sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run] [--public-ingress] [--sandbox-egress]
 ```
 
 `org create` on an existing org updates it to the flags given.

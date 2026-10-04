@@ -128,6 +128,13 @@ keeps org bridges apart from each other and from the host's other networks.
 When ufw is not active, the command says so and skips the firewall: incus'
 own firewall rules already let org bridges through.
 
+`--sandbox-egress` prepares [sandbox egress](../guides/egress.md): it lets the
+egress bridges (`isbbrx*`) reach the host's proxy (`ufw allow in on
+isbbrx+`, commented `isb sandbox egress: proxy`; each sandbox's ACL keeps it to
+the proxy's ports) and writes `/etc/sysctl.d/61-isb-egress.conf` with
+`net.ipv4.ip_unprivileged_port_start = 80`, so `isb serve` binds the proxy's
+ports (443, 80 and the like) as an ordinary user.
+
 `--public-ingress` also opens 80 and 443 (`ufw allow 80/tcp`, `443/tcp`) and
 writes `/etc/sysctl.d/60-isb-ingress.conf` with
 `net.ipv4.ip_unprivileged_port_start = 80`, so the daemon binds them as an

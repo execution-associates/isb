@@ -159,7 +159,7 @@ pub struct SecretBinding {
 
 /// A secret as written in a spec: `{env, secret?, hosts}`, or the string
 /// `ENV[=SECRET]@host1,host2`.
-#[derive(Debug, Clone, PartialEq, Eq, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EgressSecretSpec {
     /// The environment variable the guest sees (holding a placeholder).
     pub env: String,
@@ -172,13 +172,28 @@ pub struct EgressSecretSpec {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 enum SecretRepr {
+    /// `ENV[=SECRET]@host1,host2`
     Short(String),
+    /// A secret with its fields spelled out.
     Full {
+        /// The environment variable the guest sees (holding a placeholder).
         env: String,
+        /// The secret in the org's store (default: the variable's name).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         secret: Option<String>,
+        /// Hosts the real value may be sent to: `host[:port]`, port 443 by default.
         hosts: Vec<String>,
     },
+}
+
+impl JsonSchema for EgressSecretSpec {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "EgressSecretSpec".into()
+    }
+
+    fn json_schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        SecretRepr::json_schema(g)
+    }
 }
 
 impl EgressSecretSpec {
@@ -234,12 +249,17 @@ pub struct EgressSpec {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 enum EgressRepr {
-    /// `none`
+    /// `none`: no network at all.
     Keyword(String),
+    /// The hosts the sandbox may reach: `host[:port]` (port 443 by default),
+    /// `*.example.com` for subdomains.
     List(Vec<String>),
+    /// Hosts and secrets.
     Full {
+        /// The hosts the sandbox may reach: `host[:port]`.
         #[serde(default)]
         allow: Vec<String>,
+        /// Secrets the guest sees only as placeholders.
         #[serde(default)]
         secrets: Vec<EgressSecretSpec>,
     },

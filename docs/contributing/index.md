@@ -43,14 +43,15 @@ which re-exports the internal crates' modules under their original paths
 
 | crate | modules |
 |---|---|
-| `crates/isb-core` | the incus client, spec, plan, sandbox, compose, stack, org, registry, ingress, secrets, rpc, machine, metrics, net (outbound connections under the SSRF policy), `serve_client` (the CLI's client for `isb serve`) |
+| `crates/isb-core` | the incus client, spec, plan, sandbox, compose, stack, org, registry, ingress, secrets, rpc, machine, metrics, net (outbound connections under the SSRF policy), egress (the policy, bridge and ACL of [sandbox egress](../guides/egress.md)), `serve_client` (the CLI's client for `isb serve`) |
+| `crates/isb-egress` | the egress proxy: name sniffing, pass-through, TLS interception and secret substitution, and the manager that runs one proxy per egress network (exposed as `isb::egress_proxy`) |
 | `crates/isb-server` | auth, audit, history, server, servers, web (its `build.rs` embeds `web/dist`) |
 | `crates/isb-apps` | app, build, jobs, backup, s3, template, notify, volume_backup |
 | `crates/isb-tui` | tui |
 | `crates/isb-daemon` | daemon, workspace |
 
-`isb-server`, `isb-apps` and `isb-tui` depend only on `isb-core`, so they
-compile in parallel; `isb-daemon` needs all but the TUI. An edit recompiles
+`isb-server`, `isb-apps`, `isb-egress` and `isb-tui` depend only on
+`isb-core`, so they compile in parallel; `isb-daemon` needs all but the TUI. An edit recompiles
 its own crate and the crates above it, so a change to the TUI or the CLI
 never re-checks the other 90k lines. Each internal crate's root imports the
 modules of the crates below it (`use isb_core::*;`), so `crate::org::OrgId`

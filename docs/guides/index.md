@@ -62,3 +62,5 @@ every flag and field is in the [Reference](../reference/index.md).
 - [A dev environment per worktree](dev-environments.md): an `isb.yaml` per
   project, one directory mounted, a dev server that dies with the session.
 - [isb from code](sdk.md): the Python, TypeScript and Rust SDKs.
+- [Sandbox egress and secrets](egress.md): confine an untrusted sandbox to a
+  list of hostnames, and give it secrets it can use but never read.
