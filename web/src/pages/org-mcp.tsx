@@ -124,7 +124,7 @@ function OrgMcp({ me, org }: { me: Me; org: string }) {
         }
       >
         <div className="grid gap-5 p-5">
-          <UrlRow url={url} />
+          <WayUrl way={way} org={org} pageUrl={url} data={ids.data} />
           <div className="grid gap-2">
             <div className="text-[13px] font-medium">How the agent signs in</div>
             <SourceTabs label="Agent sign-in" items={ways} value={way} onChange={setWay} loading={ids.isLoading} />
@@ -152,6 +152,19 @@ function OrgMcp({ me, org }: { me: Me; org: string }) {
       <ToolList filter={(t) => !isHostTool(t.name)} title={`Tools at /orgs/${org}/mcp`} hint="What the server lists. A call is still judged by the caller's role and scopes: a viewer's or a read-only token's writes are refused." />
     </>
   );
+}
+
+/** The MCP URL for the chosen way in: the tailnet address for a tailnet agent, the public URL for an Access one, else the address this page is open at. */
+function WayUrl({ way, org, pageUrl, data }: { way: Way; org: string; pageUrl: string; data: OrgAgentIdentities | undefined }) {
+  const listens = data?.available.tailnet_listen ?? [];
+  if (way === "tailnet" && listens[0]) {
+    return <UrlRow url={orgMcpUrl(listenOrigin(listens[0]), org)} label="MCP URL on the tailnet" hint="The server's tailnet address: reachable from any node on the tailnet, and no Cloudflare Access in front." />;
+  }
+  const pub = publicMcpUrl(data?.available.public_url, org);
+  if (way === "access" && pub) {
+    return <UrlRow url={pub} label="MCP URL (the public URL)" hint="The server's public URL, where Cloudflare Access sits in front of it. An agent connects here, not at the address this page is open at." />;
+  }
+  return <UrlRow url={pageUrl} />;
 }
 
 /** The sign-in cards: each a way in, with On or Off; selecting one shows how. */
