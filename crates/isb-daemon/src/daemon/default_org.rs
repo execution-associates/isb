@@ -3,6 +3,13 @@
 
 use super::*;
 
+/// Say so at startup when incus is too old for OCI images (`docker:` apps).
+pub(super) fn warn_old_incus(client: &Client) {
+    if let Some(m) = client.oci_unsupported() {
+        eprintln!("isb serve: WARNING: {m}");
+    }
+}
+
 /// Create the default org (`isb-default`) if it is missing, and warn about
 /// default-org stacks whose instances are still in incus' own `default`
 /// project, which is no org: the controller recreates them in

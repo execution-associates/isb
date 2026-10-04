@@ -263,9 +263,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     client
         .server_info()
         .map_err(|e| Error::invalid(format!("isb serve needs incusd: {e}")))?;
-    if let Some(m) = client.oci_unsupported() {
-        eprintln!("isb serve: WARNING: {m}");
-    }
+    default_org::warn_old_incus(&client);
     let store = Store::open(&cfg.state_dir)?;
     dns::open_dns_path(&cfg.state_dir);
     // The default org is the incus project `isb-default`, made here when
