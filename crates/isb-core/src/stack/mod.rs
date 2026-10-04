@@ -21,6 +21,7 @@ mod changes;
 pub mod controller;
 pub mod failure;
 pub mod migrate;
+mod ports;
 pub mod secrets;
 
 use std::collections::BTreeMap;
@@ -123,7 +124,7 @@ impl StackDef {
         s.depends_on.clear();
         // Domains are the ingress's: changing them never replaces an instance.
         s.domains.clear();
-        // Published ports are the balancer's, not the instance's.
+        // Published ports are the balancer's, not the instance's (UDP: below).
         s.ports.retain(|p| p.bind == crate::spec::PortBind::Guest);
         if let Some(d) = &mut s.deploy {
             d.replicas = None;
@@ -157,6 +158,13 @@ impl StackDef {
         if let Some(d) = self.images.get(service) {
             h.write(b"image");
             h.write(d.as_bytes());
+        }
+        // A UDP port is a device on the instance (see `ports`), so a changed
+        // one replaces it. Only when there is one, as above.
+        for p in ports::published(spec).unwrap_or_default() {
+            if p.udp {
+                h.write(format!("udp {} {}", p.listen, p.target).as_bytes());
+            }
         }
         Ok(format!("{:08x}", h.finish() as u32))
     }
@@ -487,6 +495,20 @@ mod tests {
         f.secrets.get_mut("k").unwrap().owned = true;
         f.deployed_at = 99;
         assert_eq!(f.revision("web").unwrap(), web);
+    }
+
+    #[test]
+    fn udp_ports_are_part_of_the_revision_tcp_ports_are_not() {
+        let rev = |ports: &str| {
+            def(&format!("services:\n  m: {{image: x, ports: {ports}}}\n"))
+                .revision("m")
+                .unwrap()
+        };
+        let none = rev("[]");
+        assert_eq!(rev("['8080:80']"), none);
+        let udp = rev("['203.0.113.7:10000:10000/udp']");
+        assert_ne!(udp, none);
+        assert_ne!(rev("['203.0.113.7:10001:10000/udp']"), udp);
     }
 
     #[test]

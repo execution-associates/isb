@@ -17,6 +17,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use super::changes::diff;
+use super::ports::{Published, published};
 use super::{
     LABEL_REV, LABEL_SERVICE, LABEL_SLOT, LABEL_STACK, StackDef, Store, instance_name, new_id,
     now_secs, validate_stack_name,
@@ -25,12 +26,12 @@ use crate::balance::Balancer;
 use crate::client::{Client, encode_query, encode_segment};
 use crate::error::{Error, Result};
 use crate::org::OrgId;
-use crate::plan::{Desired, split_addr};
+use crate::plan::Desired;
 use crate::sandbox::{EnsureOptions, Sandbox};
 use crate::secrets::Secrets;
 use crate::spec::{
-    DependCondition, FailureAction, HealthProbe, PortBind, RestartCondition, RestartMode,
-    SandboxSpec, UpdateConfig, UpdateOrder,
+    DependCondition, FailureAction, HealthProbe, RestartCondition, RestartMode, SandboxSpec,
+    UpdateConfig, UpdateOrder,
 };
 use crate::supervise;
 
@@ -67,7 +68,8 @@ pub struct InstanceStatus {
     pub disk_bytes: Option<u64>,
 }
 
-/// A published port served by the balancer.
+/// A published port: TCP served by the balancer, UDP by a NAT proxy on the
+/// replica (`listen` ends in `/udp`, `backends` is the replica).
 #[derive(Debug, Clone, Serialize)]
 pub struct PortStatus {
     pub listen: String,
@@ -692,7 +694,7 @@ impl Controller {
             published(spec)?;
             crate::ingress::domain::validate(svc, &spec.domains)?;
         }
-        Ok(())
+        super::ports::validate_udp(&self.inner.client, def, &self.definitions())
     }
 
     /// Deploy (or update) a stack. Returns what will change; the rollout
@@ -887,6 +889,7 @@ impl Controller {
             .get_mut(service)
             .ok_or_else(|| Error::NotFound(format!("service {service} in stack {name}")))?;
         spec.deploy.get_or_insert_with(Default::default).replicas = Some(replicas);
+        super::ports::check_replicas(service, spec)?;
         self.inner.store.save(&def)?;
         self.apply(Arc::new(def));
         Ok(())
@@ -1043,8 +1046,9 @@ fn limit_error(msg: &str) -> bool {
 }
 
 /// The spec an instance of `service` is created from: labelled, with its
-/// published host ports removed (the balancer serves them), and always
-/// long-running, as swarm ignores `restart` in favour of `restart_policy`.
+/// published TCP ports removed (the balancer serves them) and its UDP ports
+/// as NAT proxies (see [`super::ports`]), and always long-running, as swarm
+/// ignores `restart` in favour of `restart_policy`.
 fn instance_spec(
     def: &StackDef,
     service: &str,
@@ -1055,7 +1059,7 @@ fn instance_spec(
     let mut s = spec.clone();
     s.image = def.instance_image(service, &spec.image);
     s.restart = Some(RestartMode::Always);
-    s.ports.retain(|p| p.bind == PortBind::Guest);
+    (s.ports, s.stack_udp) = super::ports::instance_ports(spec)?;
     s.domains.clear();
     if let Some(d) = &s.deploy {
         s.labels.extend(d.labels.clone());
@@ -1065,58 +1069,6 @@ fn instance_spec(
     s.labels.insert(LABEL_SLOT.into(), slot.to_string());
     s.labels.insert(LABEL_REV.into(), rev.into());
     Ok(s)
-}
-
-/// A published host port: where the balancer listens and the guest port it
-/// forwards to.
-#[derive(Debug, Clone, PartialEq)]
-struct Published {
-    listen: SocketAddr,
-    target: u16,
-}
-
-fn published(spec: &SandboxSpec) -> Result<Vec<Published>> {
-    let mut out = Vec::new();
-    for p in &spec.ports {
-        if p.bind == PortBind::Guest {
-            continue;
-        }
-        let listen = crate::plan::normalize_addr(&p.listen, "127.0.0.1").map_err(Error::invalid)?;
-        let connect =
-            crate::plan::normalize_addr(&p.connect, "127.0.0.1").map_err(Error::invalid)?;
-        let (lp, lh, lport) = split_addr(&listen).ok_or_else(|| {
-            Error::invalid(format!(
-                "port {listen}: a stack publishes single tcp ports (no ranges)"
-            ))
-        })?;
-        let (_, _, cport) = split_addr(&connect).ok_or_else(|| {
-            Error::invalid(format!(
-                "port {connect}: a stack publishes single tcp ports (no ranges)"
-            ))
-        })?;
-        if lp != "tcp" {
-            return Err(Error::invalid(format!(
-                "port {listen}: the stack balancer is tcp only"
-            )));
-        }
-        if p.search.is_some() {
-            return Err(Error::invalid(
-                "a stack's published ports are fixed; port search is for isb up",
-            ));
-        }
-        let host: IpAddr = lh
-            .trim_start_matches('[')
-            .trim_end_matches(']')
-            .parse()
-            .map_err(|_| {
-                Error::invalid(format!("port {listen}: the host must be an IP address"))
-            })?;
-        out.push(Published {
-            listen: SocketAddr::new(host, lport),
-            target: cport,
-        });
-    }
-    Ok(out)
 }
 
 /// A stack's instance as listed.
@@ -2298,7 +2250,7 @@ impl Worker {
         let want: BTreeMap<String, Published> = match published(spec) {
             Ok(ps) => ps
                 .into_iter()
-                .map(|p| (format!("{}/{}/{}", self.q, self.service, p.listen), p))
+                .map(|p| (format!("{}/{}/{}", self.q, self.service, p.display()), p))
                 .collect(),
             Err(e) => {
                 self.message = Some(e.to_string());
@@ -2324,7 +2276,8 @@ impl Worker {
 
     fn sync_routes(&mut self) {
         let mut errors = BTreeMap::new();
-        for (k, p) in &self.routes {
+        // UDP ports are proxy devices on the replica (see super::ports).
+        for (k, p) in self.routes.iter().filter(|(_, p)| !p.udp) {
             let backends: Vec<SocketAddr> = self
                 .rt
                 .values()
@@ -2472,11 +2425,17 @@ impl Worker {
                 e.1 = now;
             }
             ports.push(PortStatus {
-                listen: p.listen.to_string(),
+                listen: p.display(),
                 target: p.target,
-                backends: r
-                    .map(|r| r.backends.iter().map(|b| b.addr.to_string()).collect())
-                    .unwrap_or_default(),
+                backends: match r {
+                    _ if p.udp => {
+                        let ips = self.rt.values().filter_map(|r| r.ip);
+                        ips.map(|ip| SocketAddr::new(ip, p.target).to_string())
+                            .collect()
+                    }
+                    Some(r) => r.backends.iter().map(|b| b.addr.to_string()).collect(),
+                    None => Vec::new(),
+                },
                 error: self.route_errors.get(k).cloned(),
                 accepted,
                 active: r

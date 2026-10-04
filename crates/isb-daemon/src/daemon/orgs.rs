@@ -36,6 +36,10 @@ pub(super) struct Settings {
     /// Replaces the exceptions; `[]` clears them.
     #[serde(default)]
     pub egress: Option<Vec<String>>,
+    /// UDP ports (`IP:PORT`) the org's stacks may publish. Replaces the
+    /// list; `[]` clears it.
+    #[serde(default)]
+    pub udp: Option<Vec<String>>,
     /// Where the org runs: `local` (this daemon) or a server's name. A
     /// control plane routes a server placement before the tool runs.
     #[serde(default)]
@@ -98,6 +102,16 @@ impl Settings {
             }
             None => None,
         };
+        let udp = match &self.udp {
+            Some(list) => Some(
+                list.iter()
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(org::check_udp_port)
+                    .collect::<Result<Vec<_>>>()?,
+            ),
+            None => None,
+        };
         let parse_u32 = |v: Option<&String>| v.and_then(|s| s.parse::<u32>().ok());
         for (what, v) in [
             ("memory", &self.memory),
@@ -133,6 +147,7 @@ impl Settings {
                 .map(|c| c.bind_roots.iter().map(Into::into).collect())
                 .unwrap_or_default(),
             egress,
+            udp,
             // Domain allowlist and ingress provider stay as they are: they
             // are set with `isb org create`, not through this tool.
             ..Default::default()
@@ -190,6 +205,7 @@ fn settings_props() -> Value {
         "default_cpus": {"type": "integer", "minimum": 1, "description": "CPUs an instance gets when its spec sets none."},
         "default_memory": {"type": "string", "description": "Memory an instance gets when its spec sets none, e.g. 512MiB."},
         "egress": {"type": "array", "items": {"type": "string"}, "description": "Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/concepts/orgs.md). Replaces the list; [] clears it."},
+        "udp": {"type": "array", "items": {"type": "string"}, "description": "UDP ports the org's stacks may publish on the host, IP:PORT each (a specific host address, e.g. 203.0.113.7:10000), forwarded by incus to the service's one replica with the client's address kept (docs/concepts/stacks.md). Replaces the list; [] clears it."},
         "server": {"type": "string", "description": "Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. Same as placement {\"server\": NAME}."},
         "placement": {
             "description": "Where the org runs, set at creation: \"local\" (this host: an incus project sharing its kernel), {\"server\": NAME} (another host, server_list), or {\"vm\": {\"cpus\", \"memory\", \"disk\"}} (a dedicated VM this control plane makes on its own host: the org's own kernel; defaults 2 CPUs, 4GiB, 40GiB). An org is not moved afterwards.",
@@ -299,7 +315,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
     tool!(
         "org_update",
         "Change an org",
-        "Platform admins: change an org's limits, per-instance defaults or egress exceptions. Fields left out keep their value; `egress` replaces the list. A limit cannot be lifted once set (as with `isb org create`).",
+        "Platform admins: change an org's limits, per-instance defaults, egress exceptions or the UDP ports its stacks may publish. Fields left out keep their value; `egress` and `udp` replace their lists. A limit cannot be lifted once set (as with `isb org create`).",
         schema(settings_props(), &["org"], "The org."),
         write,
         |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
@@ -399,6 +415,7 @@ mod tests {
             egress: vec!["10.9.0.0/16".into()],
             domains: vec![],
             ingress: "caddy".into(),
+            udp: vec![],
             cloudflare_account: None,
             cloudflare_zone: None,
             dns_dir: None,
@@ -443,6 +460,30 @@ mod tests {
             ..Default::default()
         };
         assert!(s.options(None).is_err());
+    }
+
+    #[test]
+    fn udp_ports_replace_keep_and_are_checked() {
+        let s = Settings {
+            udp: Some(vec!["203.0.113.7:10000".into(), " ".into()]),
+            ..Default::default()
+        };
+        let u = s.options(None).unwrap().udp.unwrap();
+        assert_eq!(u, vec!["203.0.113.7:10000".parse().unwrap()]);
+        assert!(
+            Settings::default()
+                .options(Some(&info()))
+                .unwrap()
+                .udp
+                .is_none()
+        );
+        for bad in ["0.0.0.0:10000", "10000", "127.0.0.1:53"] {
+            let s = Settings {
+                udp: Some(vec![bad.into()]),
+                ..Default::default()
+            };
+            assert!(s.options(None).is_err(), "{bad}");
+        }
     }
 
     #[test]

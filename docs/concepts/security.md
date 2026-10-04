@@ -47,7 +47,7 @@ only by isb's checks ([What an org is in incus](orgs.md#what-an-org-is-in-incus)
 
 | Boundary | Enforced by |
 |---|---|
-| no privileged containers, nesting, `raw.lxc`, `raw.idmap` of root, proxy devices | the restricted incus project (nesting: [one exception](#the-docker-exception)) |
+| no privileged containers, nesting, `raw.lxc`, `raw.idmap` of root, proxy devices | the restricted incus project (nesting: [one exception](#the-docker-exception); proxy devices: a stack's [UDP ports](orgs.md#udp-ports)) |
 | no host paths but the org's bind roots | `restricted.devices.disk` and its paths |
 | one network: the org's own bridge | `restricted.networks.access` |
 | a uid range per instance | `security.idmap.isolated` |
@@ -55,6 +55,7 @@ only by isb's checks ([What an org is in incus](orgs.md#what-an-org-is-in-incus)
 | no route to private ranges (other orgs, the host's networks, the LAN, the tailnet) | the org's network ACL; exceptions only by a platform admin ([Egress exceptions](orgs.md#egress-exceptions)) |
 | bridges apart from each other and the host | the host firewall's routed default-deny, after `sudo isb host setup` ([Host firewall](../operations/host-setup.md#host-firewall)) |
 | one org's hostnames, images and secrets out of another's reach | isb: domain claims, `registry:` naming only the org's repositories, a secret store per org |
+| host UDP ports only where a platform admin allowed them | isb: the org's [UDP ports](orgs.md#udp-ports), and once the project allows proxy devices for them, isb refuses every other proxy device in the org |
 
 Limits, egress exceptions and domain allowlists are what keep orgs apart, so
 only platform admins change them. Bind roots are host paths, set only on the
@@ -341,8 +342,8 @@ every project, including changes made outside isb, with who requested them.
 - **A sandbox without `egress` has an open network**, and so does every one
   made before the setting existed. Set `egress` on anything that runs code you
   did not write.
-- **VM port forwards are DNAT** and do not pass through a host firewall such
-  as ufw. Publish on the address you mean to expose, never `0.0.0.0` on a
+- **VM port forwards and a stack's UDP ports are DNAT** and do not pass
+  through ufw's input rules (a UDP port does meet its routed default-deny). Publish on the address you mean to expose, never `0.0.0.0` on a
   host with a public interface.
 - **The org's dnsmasq runs unconfined** (no AppArmor profile) once service
   names are set up, because incus has no other way to point it at a hosts

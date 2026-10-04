@@ -926,6 +926,8 @@ pub fn resolve(
     if let Some(root) = devices.get_mut("root") {
         root.props.extend(root_extra);
     }
+    let props = devices.iter().map(|(k, d)| (k, &d.props));
+    crate::org::check_proxies(&name, host.org.as_ref(), props, spec.stack_udp)?;
 
     let ready_timeout = match &spec.ready_timeout {
         Some(s) => parse_duration(s).map_err(|e| Error::invalid(format!("{name}: {e}")))?,

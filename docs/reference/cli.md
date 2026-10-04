@@ -210,7 +210,7 @@ compose project name. See [Stacks](../concepts/stacks.md).
 ```text
 isb org create NAME [--cpus N] [--memory SIZE] [--disk SIZE] [--instances N]
                     [--default-cpus N] [--default-memory SIZE] [--bind-root DIR]...
-                    [--allow-egress DEST]... [--allow-domain SUFFIX]...
+                    [--allow-egress DEST]... [--allow-domain SUFFIX]... [--allow-udp IP:PORT]...
                     [--ingress caddy|cloudflare-tunnel] [--cloudflare-account ID] [--cloudflare-zone ID]
                     [--server SERVER | --vm [--vm-cpus 2] [--vm-memory 4GiB] [--vm-disk 40GiB]]
 isb org ls [--json]                                    alias list
@@ -220,8 +220,8 @@ sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run] [--public-ingress
 ```
 
 `org create` on an existing org updates it to the flags given.
-`--allow-egress` and `--allow-domain` replace the org's lists (`none`
-clears them). `--server` and `--vm` place the org once, through the local
+`--allow-egress`, `--allow-domain` and `--allow-udp` replace the org's lists
+(`none` clears them). `--server` and `--vm` place the org once, through the local
 daemon (`--vm` takes a few minutes; rerun to retry). `org rm` refuses an
 org with instances unless `--force`; `--delete-vm` also deletes a dedicated
 VM. See [Orgs](../concepts/orgs.md), [Placement](../concepts/placement.md)

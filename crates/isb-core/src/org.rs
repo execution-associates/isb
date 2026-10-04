@@ -111,6 +111,8 @@ pub use ensure::{Names, ensure_service_names};
 pub use names::{ensure_all_service_names, ensure_default};
 pub(crate) mod limits;
 pub mod nesting;
+mod udp;
+pub use udp::{allowed_udp, check_proxies, check_udp_port};
 
 pub use ensure::ensure;
 pub use homes::allow_home;
@@ -123,6 +125,7 @@ const KEY_DOMAINS: &str = "user.isb.domains";
 const KEY_INGRESS: &str = "user.isb.ingress";
 const KEY_CF_ACCOUNT: &str = "user.isb.ingress.cloudflare.account";
 const KEY_CF_ZONE: &str = "user.isb.ingress.cloudflare.zone";
+const KEY_UDP: &str = "user.isb.udp";
 
 /// How an org's domains reach it: Caddy's public listeners (default) or the
 /// org's own Cloudflare Tunnel.
@@ -171,6 +174,9 @@ pub struct OrgOptions {
     /// Cloudflare account and zone ids for the tunnel provider's API calls (`Some("")` clears).
     pub cloudflare_account: Option<String>,
     pub cloudflare_zone: Option<String>,
+    /// UDP ports (`IP:PORT`) the org's stacks may publish ([`allowed_udp`]);
+    /// `Some(empty)` clears, `None` keeps.
+    pub udp: Option<Vec<std::net::SocketAddr>>,
 }
 
 /// An org as it exists in incus.
@@ -196,6 +202,9 @@ pub struct OrgInfo {
     pub domains: Vec<String>,
     /// `caddy` or `cloudflare-tunnel`.
     pub ingress: String,
+    /// UDP ports (`IP:PORT`) its stacks may publish, as a platform admin
+    /// allowed them.
+    pub udp: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cloudflare_account: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -616,6 +625,10 @@ fn info(base: &Client, org: OrgId, p: &Value) -> Result<OrgInfo> {
             .filter(|s| !s.is_empty())
             .cloned()
             .unwrap_or_else(|| INGRESS_CADDY.to_string()),
+        udp: udp::parse_list(cfg.get(KEY_UDP).map(String::as_str).unwrap_or_default())
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
         cloudflare_account: cfg.get(KEY_CF_ACCOUNT).filter(|s| !s.is_empty()).cloned(),
         cloudflare_zone: cfg.get(KEY_CF_ZONE).filter(|s| !s.is_empty()).cloned(),
         dns_dir,

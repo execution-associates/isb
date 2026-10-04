@@ -200,17 +200,20 @@ fn published_ports() {
         vec![
             Published {
                 listen: "127.0.0.1:8080".parse().unwrap(),
-                target: 80
+                target: 80,
+                udp: false
             },
             Published {
                 listen: "0.0.0.0:9000".parse().unwrap(),
-                target: 9000
+                target: 9000,
+                udp: false
             },
         ]
     );
     let bad: SandboxSpec =
         serde_yaml_ng::from_str("image: x\nports: ['8000-8001:8000-8001']\n").unwrap();
     assert!(published(&bad).is_err());
+    // UDP needs a host address of its own (ports.rs has the rest).
     let udp: SandboxSpec = serde_yaml_ng::from_str("image: x\nports: ['53:53/udp']\n").unwrap();
     assert!(published(&udp).is_err());
 }
