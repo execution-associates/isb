@@ -211,6 +211,7 @@ fn rig() -> Rig {
             network: NETWORK.into(),
             ip: "127.0.0.1".parse().unwrap(),
             policy: policy.clone(),
+            guests_only: false,
         },
     );
     proxy.set_policy(policy, Some(sandbox_ca.clone()));
@@ -371,6 +372,7 @@ fn a_missing_secret_is_a_clear_error_to_the_guest_not_a_leak() {
             network: "isbbrxe2e00003".into(),
             ip: "127.0.0.1".parse().unwrap(),
             policy: policy.clone(),
+            guests_only: false,
         },
     );
     proxy.set_policy(policy, Some(ca.clone()));
@@ -393,4 +395,45 @@ fn updating_the_policy_changes_the_listeners() {
     r.proxy.set_policy(Policy::default(), None);
     assert!(r.proxy.sync_ports().is_empty());
     assert!(r.proxy.ports().is_empty());
+}
+
+#[test]
+fn the_host_itself_cannot_borrow_the_proxy() {
+    state();
+    let port = free_port();
+    let spec = EgressSpec {
+        secrets: vec![
+            EgressSecretSpec::parse(&format!("T=api-token@api.example.test:{port}")).unwrap(),
+        ],
+        ..Default::default()
+    };
+    let policy = Policy::from_spec(&spec, "isbbrxe2e00004").unwrap();
+    let ca = Ca::ensure("isbbrxe2e00004").unwrap();
+    let env = Arc::new(Env {
+        settings: Arc::new(Settings::default()),
+        secrets: Arc::new(Store),
+        log: Arc::new(|_| {}),
+    });
+    let proxy = Proxy::new(
+        env,
+        Config {
+            project: "default".into(),
+            instance: "p".into(),
+            network: "isbbrxe2e00004".into(),
+            ip: "127.0.0.1".parse().unwrap(),
+            policy: policy.clone(),
+            guests_only: true,
+        },
+    );
+    proxy.set_policy(policy, Some(ca.clone()));
+    assert!(proxy.sync_ports().is_empty());
+    // A connection from loopback (the host's own address) is dropped
+    // before the handshake.
+    let e = https_get(
+        SocketAddr::from(([127, 0, 0, 1], port)),
+        "api.example.test",
+        &ca.cert_pem,
+        "x",
+    );
+    assert!(e.is_err(), "{e:?}");
 }

@@ -10,7 +10,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{self, Read, Write};
-use std::net::{Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
@@ -55,6 +55,10 @@ pub struct Config {
     pub network: String,
     pub ip: Ipv4Addr,
     pub policy: Policy,
+    /// Serve only the sandbox on the bridge: drop connections from the host
+    /// itself (its own address, loopback), so a local user cannot borrow the
+    /// proxy, or the sandbox's secrets, by connecting to it.
+    pub guests_only: bool,
 }
 
 struct State {
@@ -67,6 +71,7 @@ struct Shared {
     project: String,
     instance: String,
     ip: Ipv4Addr,
+    guests_only: bool,
     state: RwLock<State>,
     active: AtomicUsize,
     stop: AtomicBool,
@@ -97,6 +102,7 @@ impl Proxy {
             project: cfg.project,
             instance: cfg.instance,
             ip: cfg.ip,
+            guests_only: cfg.guests_only,
             state: RwLock::new(State {
                 policy: Arc::new(cfg.policy),
                 ca: None,
@@ -201,7 +207,11 @@ impl Drop for Proxy {
 fn accept_loop(l: &TcpListener, port: u16, sh: &Arc<Shared>, stop: &AtomicBool) {
     while !stop.load(Ordering::SeqCst) && !sh.stop.load(Ordering::SeqCst) {
         match l.accept() {
-            Ok((c, _)) => {
+            Ok((c, peer)) => {
+                if sh.guests_only && (peer.ip().is_loopback() || peer.ip() == IpAddr::V4(sh.ip)) {
+                    sh.deny(&peer.ip().to_string(), port, "not from the sandbox");
+                    continue;
+                }
                 if sh.active.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
                     sh.active.fetch_sub(1, Ordering::SeqCst);
                     sh.deny("-", port, "too many connections");

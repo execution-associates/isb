@@ -84,6 +84,9 @@ Say it exactly, because it is a security boundary:
    name (SNI) of a TLS connection, or the `Host` of a plain HTTP request. The
    proxy then connects to that name as *the host* resolves it, never to an
    address the guest chose. TLS and HTTP are passed through byte for byte.
+   The proxy serves only the guest: a connection from the host itself
+   (its own address, loopback) is dropped, so a local user cannot borrow the
+   proxy, or a sandbox's secrets, by connecting to its bridge.
 4. **A secret's real value never enters the guest** and is put on the wire
    only towards the hosts approved for it, and only over TLS the proxy
    verified (below).
@@ -192,6 +195,16 @@ connections are logged by `isb serve`, once per target per half minute
 When a sandbox is removed its bridge, ACL and CA go with it; `isb serve`
 removes any left behind by a sandbox deleted some other way, ten minutes after
 the network was made.
+
+## Who makes the sandbox
+
+`isb create`, `isb up`, the SDKs and the daemon's tools all set up the same
+thing in incus; the daemon's proxy notices a new egress network within about a
+second. The CLI and the daemon share the sandbox's CA through the state
+directory (`$XDG_STATE_HOME/isb`, or `--state-dir`), so run them as the same
+user, as the installed service does. On macOS, where the daemon runs in the
+`isb machine` VM, create sandboxes with secrets through the daemon's
+`sandbox_create`.
 
 ## Limits
 

@@ -242,6 +242,7 @@ impl Manager {
                 network: name.to_string(),
                 ip,
                 policy: policy.clone(),
+                guests_only: true,
             },
         );
         proxy.set_policy(policy, ca);
