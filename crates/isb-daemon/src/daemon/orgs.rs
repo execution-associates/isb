@@ -283,6 +283,11 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
             let info = org::ensure(&d.client, &id, &opts, &mut |m: &str| {
                 notes.push(m.to_string())
             })?;
+            // Services that were failing on a limit retry now.
+            let woken = d.ctl.org_limits_changed(&id);
+            if woken > 0 {
+                notes.push(format!("{woken} service(s) waiting on a limit retry now"));
+            }
             d.users
                 .ensure_org(&info.name)
                 .map_err(|e| Error::invalid(e.to_string()))?;
@@ -306,6 +311,11 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
             let info = org::ensure(&d.client, &id, &opts, &mut |m: &str| {
                 notes.push(m.to_string())
             })?;
+            // Services that were failing on a limit retry now.
+            let woken = d.ctl.org_limits_changed(&id);
+            if woken > 0 {
+                notes.push(format!("{woken} service(s) waiting on a limit retry now"));
+            }
             let mut v = view(d, &info);
             v["notes"] = json!(notes);
             Ok(v)

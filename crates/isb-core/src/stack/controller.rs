@@ -236,6 +236,9 @@ struct WorkerShared {
     slot: Mutex<Slot>,
     wake: Condvar,
     stop: AtomicBool,
+    /// Set when something the service was failing on may have changed (an
+    /// org's limits): the worker drops its retry backoff on its next pass.
+    kick: AtomicBool,
 }
 
 struct Inner {
@@ -733,6 +736,15 @@ impl Controller {
                     let mut slot = w.slot.lock().unwrap();
                     slot.def = def.clone();
                     slot.remove = false;
+                    // A new deployment starts from a clean slate: the
+                    // failure the service reported before it is not the
+                    // deployment's, and a waiter must not read it as such.
+                    if let Some(st) = self.inner.status.lock().unwrap().get_mut(&key) {
+                        if st.state == "failing" {
+                            st.state = "updating".into();
+                            st.message = None;
+                        }
+                    }
                     w.wake.notify_all();
                 }
                 None => {
@@ -744,6 +756,7 @@ impl Controller {
                         }),
                         wake: Condvar::new(),
                         stop: AtomicBool::new(false),
+                        kick: AtomicBool::new(false),
                     });
                     workers.insert(key, shared.clone());
                     spawn_worker(self.inner.clone(), &def, svc.clone(), shared);
@@ -759,6 +772,31 @@ impl Controller {
         }
         drop(workers);
         self.notify_stacks();
+    }
+
+    /// An org's limits changed: services of the org that are failing on a
+    /// limit (a quota refusal from incus) retry now instead of after their
+    /// backoff. Returns how many were woken.
+    pub fn org_limits_changed(&self, org: &OrgId) -> usize {
+        let stacks = self.inner.stacks.lock().unwrap();
+        let workers = self.inner.workers.lock().unwrap();
+        let status = self.inner.status.lock().unwrap();
+        let mut n = 0;
+        for (key, w) in workers.iter() {
+            let ours = stacks.get(&key.0).is_some_and(|d| d.org == *org);
+            let limited = status.get(key).is_some_and(|s| {
+                s.state == "failing" && s.message.as_deref().is_some_and(limit_error)
+            });
+            if ours && limited {
+                w.kick.store(true, Ordering::SeqCst);
+                // Under the slot lock, the worker is either waiting (and
+                // wakes) or yet to look at the flag.
+                let _slot = w.slot.lock().unwrap();
+                w.wake.notify_all();
+                n += 1;
+            }
+        }
+        n
     }
 
     /// Remove a stack: every instance and published port; with `volumes`,
@@ -991,6 +1029,12 @@ impl Controller {
 }
 
 /// What deploying `new` over `old` changes, per service.
+/// Whether a failure message is an incus project-limit refusal (see
+/// `org::limits`): one that raising the org's limits can fix.
+fn limit_error(msg: &str) -> bool {
+    msg.contains(" quota (") || msg.contains(" limit (")
+}
+
 fn diff(old: Option<&StackDef>, new: &StackDef) -> Result<Vec<DeployChange>> {
     let mut out = Vec::new();
     for (svc, spec) in &new.file.services {
@@ -1273,6 +1317,8 @@ struct Worker {
     health_down: Option<Instant>,
     /// `health.unhealthy` was raised and not yet answered by `recovered`.
     health_alarm: bool,
+    /// The definition the last pass ran on.
+    seen: Option<Arc<StackDef>>,
 }
 
 fn spawn_worker(inner: Arc<Inner>, def: &StackDef, service: String, shared: Arc<WorkerShared>) {
@@ -1280,7 +1326,25 @@ fn spawn_worker(inner: Arc<Inner>, def: &StackDef, service: String, shared: Arc<
     let oclient = crate::org::client(&inner.client, &def.org);
     let name = format!("isb-{q}-{service}");
     let r = std::thread::Builder::new().name(name).spawn(move || {
-        let mut w = Worker {
+        let mut w = Worker::new(inner, stack, q, oclient, service, shared, org);
+        w.run();
+    });
+    if let Err(e) = r {
+        eprintln!("isb serve: cannot start a worker thread: {e}");
+    }
+}
+
+impl Worker {
+    fn new(
+        inner: Arc<Inner>,
+        stack: String,
+        q: String,
+        oclient: Client,
+        service: String,
+        shared: Arc<WorkerShared>,
+        org: OrgId,
+    ) -> Worker {
+        Worker {
             inner,
             stack,
             q,
@@ -1307,11 +1371,28 @@ fn spawn_worker(inner: Arc<Inner>, def: &StackDef, service: String, shared: Arc<
             ever_healthy: false,
             health_down: None,
             health_alarm: false,
-        };
-        w.run();
-    });
-    if let Err(e) = r {
-        eprintln!("isb serve: cannot start a worker thread: {e}");
+            seen: None,
+        }
+    }
+
+    /// Drop the retry backoff when the instructions changed (a new
+    /// deployment) or were kicked (an org's limits changed), so the next
+    /// pass makes a fresh attempt, and forget the failure the old
+    /// instructions ended in.
+    fn begin_pass(&mut self, def: &Arc<StackDef>) {
+        let new_def = self.seen.as_ref().is_none_or(|d| !Arc::ptr_eq(d, def));
+        let kicked = self.shared.kick.swap(false, Ordering::SeqCst);
+        if new_def {
+            self.seen = Some(def.clone());
+            self.last_error = None;
+            if self.state == "failing" {
+                self.state = "updating".into();
+                self.message = None;
+            }
+        }
+        if new_def || kicked {
+            self.create_backoff = None;
+        }
     }
 }
 
@@ -1401,6 +1482,7 @@ impl Worker {
                 }
                 continue;
             }
+            self.begin_pass(&def);
             if let Err(e) = self.pass(&def) {
                 self.state = "failing".into();
                 self.message = Some(e.to_string());
@@ -2474,89 +2556,5 @@ pub fn unsettled(st: &StackStatus) -> BTreeSet<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn def(y: &str) -> StackDef {
-        StackDef {
-            name: "app".into(),
-            org: crate::org::OrgId::default_org(),
-            file: serde_yaml_ng::from_str(y).unwrap(),
-            base_dir: "/".into(),
-            secrets: BTreeMap::new(),
-            force: BTreeMap::new(),
-            images: BTreeMap::new(),
-            deployed_at: 0,
-            deployed_by: String::new(),
-            previous: None,
-        }
-    }
-
-    #[test]
-    fn published_ports() {
-        let s: SandboxSpec = serde_yaml_ng::from_str(
-            "image: x\nports: ['8080:80', '0.0.0.0:9000:9000', {listen: 'tcp:127.0.0.1:5000', connect: 'tcp:127.0.0.1:5000', bind: guest}]\n",
-        )
-        .unwrap();
-        let p = published(&s).unwrap();
-        assert_eq!(
-            p,
-            vec![
-                Published {
-                    listen: "127.0.0.1:8080".parse().unwrap(),
-                    target: 80
-                },
-                Published {
-                    listen: "0.0.0.0:9000".parse().unwrap(),
-                    target: 9000
-                },
-            ]
-        );
-        let bad: SandboxSpec =
-            serde_yaml_ng::from_str("image: x\nports: ['8000-8001:8000-8001']\n").unwrap();
-        assert!(published(&bad).is_err());
-        let udp: SandboxSpec = serde_yaml_ng::from_str("image: x\nports: ['53:53/udp']\n").unwrap();
-        assert!(published(&udp).is_err());
-    }
-
-    #[test]
-    fn instance_specs_are_labelled_and_unpublished() {
-        let d = def(
-            "services:\n  web: {image: x, ports: ['8080:80'], deploy: {labels: {tier: front}}}\n",
-        );
-        let s = instance_spec(&d, "web", d.service("web").unwrap(), 2, "abcd").unwrap();
-        assert!(s.ports.is_empty());
-        assert_eq!(s.labels["isb.stack"], "app");
-        assert_eq!(s.labels["isb.slot"], "2");
-        assert_eq!(s.labels["isb.rev"], "abcd");
-        assert_eq!(s.labels["tier"], "front");
-        assert_eq!(s.restart, Some(RestartMode::Always));
-    }
-
-    #[test]
-    fn deploy_diff() {
-        let a = def("services:\n  web: {image: x}\n  db: {image: y}\n");
-        let b = def("services:\n  web: {image: x, deploy: {replicas: 3}}\n  api: {image: z}\n");
-        let c: BTreeMap<String, String> = diff(Some(&a), &b)
-            .unwrap()
-            .into_iter()
-            .map(|c| (c.service, c.change))
-            .collect();
-        assert_eq!(c["web"], "scale");
-        assert_eq!(c["api"], "create");
-        assert_eq!(c["db"], "remove");
-        let c = diff(
-            Some(&a),
-            &def("services:\n  web: {image: x2}\n  db: {image: y}\n"),
-        )
-        .unwrap();
-        assert_eq!(
-            c.iter().find(|c| c.service == "web").unwrap().change,
-            "update"
-        );
-        assert_eq!(
-            c.iter().find(|c| c.service == "db").unwrap().change,
-            "unchanged"
-        );
-    }
-}
+#[path = "controller_tests.rs"]
+mod tests;

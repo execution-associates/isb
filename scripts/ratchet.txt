@@ -18,7 +18,7 @@ crates/isb-core/src/registry/mod.rs 1105
 crates/isb-core/src/registry/oci.rs 1081
 crates/isb-core/src/sandbox.rs 1375
 crates/isb-core/src/spec.rs 2016
-crates/isb-core/src/stack/controller.rs 2562
+crates/isb-core/src/stack/controller.rs 2560
 crates/isb-daemon/src/daemon/audit.rs 1063
 crates/isb-daemon/src/daemon/mod.rs 1446
 crates/isb-daemon/src/daemon/servers.rs 1263

@@ -214,7 +214,7 @@ state:
 | `updating` | Creating or replacing instances. |
 | `converged` | Every slot has a current instance in rotation. |
 | `paused` | A rollout failed with `failure_action: pause`; the message says why. Deploy again to retry. |
-| `failing` | Something is wrong that the daemon keeps retrying (an image that will not pull, a replica that stays unhealthy). |
+| `failing` | Something is wrong that the daemon keeps retrying (an image that will not pull, a replica that stays unhealthy), slower each time for a slot that cannot be created. A new deployment of the service retries at once and reports only what happens after it started; raising the org's limits (`org_update`) wakes services that were refused by a quota. |
 
 and per replica its status, health, address, whether it is in rotation, its
 restarts and its last probe output. `isb stack logs STACK SERVICE` shows each
