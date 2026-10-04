@@ -25,7 +25,7 @@ const RELEASES: &str = "https://github.com/execution-associates/isb/releases/dow
 pub const RELEASE_KEYS: &[&str] =
     &["4f08d05a2ffaf58f40d4d0e658a9934e5246de1b472ccd2143af6c928adfd51a"];
 /// The first release whose SHA256SUMS is signed; older ones cannot be installed.
-const FIRST_SIGNED: &str = "1.0.3";
+const FIRST_SIGNED: &str = "1.1.1";
 
 const LATEST_API: &str = "https://api.github.com/repos/execution-associates/isb/releases/latest";
 

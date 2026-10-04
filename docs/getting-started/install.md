@@ -88,7 +88,7 @@ the signature is `SHA256SUMS.sig`, 64 raw bytes), and isb has the public key
 built in: `isb update`, `isb machine init` and `isb server` upgrades install
 nothing whose signature does not verify, so a release changed after it was
 built is refused even when its checksums were changed to match. Releases
-before 1.0.3 are unsigned and cannot be installed that way. The public key
+before 1.1.1 are unsigned and cannot be installed that way. The public key
 is
 
 ```text
@@ -99,7 +99,7 @@ To check a download by hand, use the GitHub build attestation each tarball
 also carries, which ties it to the workflow run that built it:
 
 ```sh
-gh attestation verify isb-v1.0.3-x86_64-unknown-linux-musl.tar.gz -R execution-associates/isb
+gh attestation verify isb-v1.1.1-x86_64-unknown-linux-musl.tar.gz -R execution-associates/isb
 ```
 
 ```console

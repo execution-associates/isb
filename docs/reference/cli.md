@@ -537,7 +537,7 @@ isb update [VERSION] [--check] [--force]
 ```
 
 Replaces the running binary with the latest release (or `VERSION`, which may
-be older, down to 1.0.3, the first signed release). The release's
+be older, down to 1.1.1, the first signed release). The release's
 `SHA256SUMS` must carry a valid signature by the isb release key
 ([Releases are signed](../getting-started/install.md#releases-are-signed)),
 and the tarball for this platform must match it; it is then unpacked next
