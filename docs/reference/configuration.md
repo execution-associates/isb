@@ -31,7 +31,7 @@ written `--flag=false`.
 
 | Flag | Environment | Default | |
 |---|---|---|---|
-| `--listen` | `ISB_SERVE_LISTEN` | none: the unix socket only. `isb serve install` writes `127.0.0.1:8092` into `serve.env` | HTTP listeners, comma-separated: loopback addresses, and tailnet ones (100.64.0.0/10, fd7a:115c:a1e0::/48) with `--superadmin-tailnet`; anything else is refused |
+| `--listen` | `ISB_SERVE_LISTEN` | none: the unix socket only. `isb serve install` writes `127.0.0.1:8092` into `serve.env` | HTTP listeners, comma-separated: loopback addresses, and tailnet ones (100.64.0.0/10, fd7a:115c:a1e0::/48); anything else is refused |
 | `--serve-socket` | `ISB_SERVE_SOCKET` | `$XDG_RUNTIME_DIR/isb/serve.sock`, else `<tmp>/isb-<uid>/serve.sock` | the unix socket for the local CLI |
 | `--state-dir` | `ISB_SERVE_STATE_DIR` | `$XDG_STATE_HOME/isb`, else `~/.local/state/isb` | everything the daemon keeps ([The state directory](../operations/host-setup.md#the-state-directory)) |
 | `--interval` | | `5s` | how often each service is reconciled and health-checked |
@@ -56,7 +56,7 @@ policy](../concepts/security.md#the-remote-spec-policy).
 
 | Flag | Environment | Default | |
 |---|---|---|---|
-| `--superadmin-tailnet` | `ISB_SUPERADMIN_TAILNET` | off | tailnet login names and `tag:` node tags, comma-separated, that are superadmins on a tailnet `--listen` address |
+| `--superadmin-tailnet` | `ISB_SUPERADMIN_TAILNET` | off | tailnet login names and `tag:` node tags, comma-separated, that are superadmins on a tailnet `--listen` address (orgs map their own tailnet agents, [Agent identities](../concepts/access.md#agent-identities)) |
 | `--superadmin-access` | `ISB_SUPERADMIN_ACCESS` | off | Access emails and service token client ids, comma-separated and exact, that are superadmins; needs Access and `--public-url` |
 
 See [Superadmins](../concepts/access.md#superadmins) and

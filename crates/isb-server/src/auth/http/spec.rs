@@ -173,6 +173,35 @@ fn invitations() -> Value {
 fn org_tokens() -> Value {
     list("tokens", "OrgToken")
 }
+fn agent_identities() -> Value {
+    obj(
+        json!({
+            "identities": {"type": "array", "items": r("AgentIdentity")},
+            "available": obj(
+                json!({
+                    "tailnet_listen": {"type": "array", "items": {"type": "string"}, "description": "The tailnet --listen addresses; empty when no tailnet peer can reach the server."},
+                    "access": {"type": "boolean", "description": "Cloudflare Access guards a listener."},
+                }),
+                &["tailnet_listen", "access"],
+            ),
+        }),
+        &["identities", "available"],
+    )
+}
+fn agent_identity_body() -> Value {
+    obj(
+        json!({
+            "kind": {"type": "string", "enum": ["tailnet", "access"]},
+            "subject": {"type": "string", "description": "Tailnet: a login name or tag:name. Access: the email of someone who is not an isb user, or a service token's client id."},
+            "role": {"type": "string", "enum": ["admin", "member", "viewer"]},
+            "note": {"type": "string"},
+        }),
+        &["kind", "subject", "role"],
+    )
+}
+fn agent_identity_answer() -> Value {
+    obj(json!({"identity": r("AgentIdentity")}), &["identity"])
+}
 fn users() -> Value {
     list("users", "AdminUser")
 }
@@ -276,6 +305,9 @@ pub const ROUTES: &[Route] = &[
     route!("DELETE" "orgs/{org}/members/{user_id}", "Remove a member (or leave)", "org owners and admins, or the member leaving", None, 204, None, T("member_remove")),
     route!("GET" "orgs/{org}/invitations", "An org's pending invitations", "org owners and admins", None, 200, Some(invitations), T("invitation_list")),
     route!("DELETE" "orgs/{org}/invitations/{id}", "Revoke an invitation", "org owners and admins", None, 204, None, T("invitation_revoke")),
+    route!("GET" "orgs/{org}/agent-identities", "An org's tailnet and Access agent identities", "org members", None, 200, Some(agent_identities), T("agent_identity_list")),
+    route!("PUT" "orgs/{org}/agent-identities", "Map a tailnet or Access identity to a role in the org", "org owners and admins", Some(agent_identity_body), 200, Some(agent_identity_answer), T("agent_identity_set")),
+    route!("DELETE" "orgs/{org}/agent-identities/{id}", "Remove an agent identity", "org owners and admins", None, 204, None, T("agent_identity_remove")),
     route!("GET" "orgs/{org}/tokens", "Every API token in an org", "org owners and admins", None, 200, Some(org_tokens), T("token_list")),
 ];
 
@@ -336,6 +368,12 @@ pub fn schemas() -> Value {
         "AdminUser": admin_user,
         "Membership": obj(json!({"org": {"type": "string"}, "role": r("Role")}), &["org", "role"]),
         "Member": obj(json!({"user": r("User"), "role": r("Role"), "last_active": {"type": ["integer", "null"]}}), &["user", "role", "last_active"]),
+        "AgentIdentity": obj(json!({
+            "id": {"type": "integer"}, "org": {"type": "string"},
+            "kind": {"type": "string", "enum": ["tailnet", "access"]},
+            "subject": {"type": "string"}, "role": r("Role"), "note": {"type": "string"},
+            "created_at": {"type": "integer"}, "created_by": {"type": "string"},
+        }), &["id", "org", "kind", "subject", "role", "note", "created_at", "created_by"]),
         "Session": obj(json!({
             "id": {"type": "integer"}, "user_id": {"type": "integer"}, "created_at": {"type": "integer"},
             "last_seen": {"type": "integer"}, "expires_at": {"type": "integer"}, "idle_expires_at": {"type": "integer"},
@@ -399,7 +437,7 @@ fn sign_in_schemas() -> Value {
             "platform_admin": {"type": "boolean"},
             "memberships": {"type": "array", "items": r("Membership")},
             "orgs": {"type": "array", "items": {"type": "string"}, "description": "Every org this caller can open."},
-            "auth": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["session", "api_token", "access", "superadmin", "workspace"]}}, "required": ["kind"], "additionalProperties": true, "description": "How the caller signed in: {kind: session, id}, {kind: api_token, id, org, name, scopes?}, {kind: access}, {kind: superadmin, source}, {kind: workspace, org, name}."},
+            "auth": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["session", "api_token", "access", "superadmin", "workspace", "agent"]}}, "required": ["kind"], "additionalProperties": true, "description": "How the caller signed in: {kind: session, id}, {kind: api_token, id, org, name, scopes?}, {kind: access}, {kind: superadmin, source}, {kind: workspace, org, name}, {kind: agent, label}."},
             "superadmin": {"oneOf": [{"type": "null"}, obj(json!({"source": {"type": "string"}, "via": superadmin_via, "account": {"type": "boolean"}}), &["source", "via", "account"])]},
         }), &["user", "platform_admin", "memberships", "orgs", "auth", "superadmin"]),
     })
@@ -475,24 +513,23 @@ mod tests {
 
     /// The router's `("METHOD", ["seg", var, ...])` arms, as `METHOD a/{}/b`.
     fn router_arms() -> Vec<String> {
-        let src = include_str!("../http.rs");
-        let arm = regex_lite_arms(src);
+        let arm = regex_lite_arms("");
         let mut out = Vec::new();
-        let mut in_org = false;
-        for line in src.lines() {
-            if line.contains("fn org_route(") {
-                in_org = true;
-            }
-            if line.contains("// ---- platform administration") {
-                in_org = false;
-            }
-            for (m, segs) in arm(line) {
-                let p = segs.join("/");
-                out.push(if in_org {
-                    format!("{m} orgs/{{}}/{p}")
-                } else {
-                    format!("{m} {p}")
-                });
+        // The org endpoints are in their own file: every arm there is under
+        // `orgs/{org}/`.
+        for (src, org) in [
+            (include_str!("../http.rs"), false),
+            (include_str!("org.rs"), true),
+        ] {
+            for line in src.lines() {
+                for (m, segs) in arm(line) {
+                    let p = segs.join("/");
+                    out.push(if org {
+                        format!("{m} orgs/{{}}/{p}")
+                    } else {
+                        format!("{m} {p}")
+                    });
+                }
             }
         }
         out.sort();

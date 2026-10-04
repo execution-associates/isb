@@ -64,8 +64,17 @@ pub type Notifier = Arc<dyn Fn(&Notice) -> Result<(), String> + Send + Sync>;
 /// listed tailnet or Access identity (the daemon's gate).
 pub type SuperadminFn = Arc<dyn Fn(&Request) -> Option<Arc<super::Superadmin>> + Send + Sync>;
 
+/// The tailnet or Access agent identity behind a request, if an org maps
+/// it (the daemon's gate).
+pub type AgentFn = Arc<dyn Fn(&Request) -> Option<Principal> + Send + Sync>;
+
 #[derive(Clone, Default)]
 pub struct ApiConfig {
+    /// Who is an org's tailnet or Access agent. Asked last, and only for a
+    /// request with no bearer token and no session cookie.
+    pub agent: Option<AgentFn>,
+    /// Which front doors this server has, for `agent_identity_list`.
+    pub agent_ways: super::agent_identities::AgentWays,
     /// Where users reach isb (`https://isb.example.com`), for the links in
     /// invitations and resets. Without it the token alone is returned.
     pub public_url: Option<String>,
@@ -98,6 +107,7 @@ impl std::fmt::Debug for ApiConfig {
             .field("open_signup", &self.open_signup)
             .field("audit", &self.audit.is_some())
             .field("superadmin", &self.superadmin.is_some())
+            .field("agent", &self.agent.is_some())
             .finish()
     }
 }
@@ -223,7 +233,10 @@ impl AuthApi {
         if let Some(s) = self.cfg.superadmin.as_ref().and_then(|f| f(req)) {
             return Some(s.principal.clone());
         }
-        self.store.principal_from_request(req)
+        if let Some(p) = self.store.principal_from_request(req) {
+            return Some(p);
+        }
+        self.agent_principal(req)
     }
 
     /// Answer `req` if its path is under [`PREFIX`].
@@ -509,6 +522,23 @@ impl AuthApi {
                 "auth.member_remove",
                 Some(org.to_string()),
                 Some(uid.to_string()),
+            ),
+            ("PUT", ["orgs", org, "agent-identities"]) => {
+                for k in ["kind", "role"] {
+                    if let Some(v) = field(&body, k) {
+                        details.insert(k.into(), json!(v));
+                    }
+                }
+                (
+                    "auth.agent_identity_set",
+                    Some(org.to_string()),
+                    answer["identity"]["subject"].as_str().map(String::from),
+                )
+            }
+            ("DELETE", ["orgs", org, "agent-identities", id]) => (
+                "auth.agent_identity_remove",
+                Some(org.to_string()),
+                Some(id.to_string()),
             ),
             ("DELETE", ["orgs", org, "invitations", id]) => (
                 "auth.invitation_revoke",
@@ -865,43 +895,6 @@ impl AuthApi {
 
     // ---- org administration ----
 
-    fn org_route(
-        &self,
-        req: &Request,
-        p: &Principal,
-        org: &OrgId,
-        rest: &[&str],
-    ) -> Result<Response, AuthError> {
-        let s = &self.store;
-        match (req.method.as_str(), rest) {
-            ("GET", ["members"]) => Ok(Response::json(200, &ops::members(s, p, org)?)),
-            ("PUT", ["members", uid]) => {
-                #[derive(Deserialize)]
-                struct B {
-                    role: Role,
-                }
-                let uid = parse_id(uid)?;
-                let b: B = body(req)?;
-                Ok(Response::json(200, &ops::set_role(s, p, org, uid, b.role)?))
-            }
-            ("DELETE", ["members", uid]) => {
-                ops::remove_member(s, p, org, parse_id(uid)?)?;
-                Ok(Response::new(204))
-            }
-            ("GET", ["invitations"]) => Ok(Response::json(200, &ops::invitations(s, p, org)?)),
-            ("DELETE", ["invitations", id]) => {
-                ops::revoke_invitation(s, p, org, parse_id(id)?)?;
-                Ok(Response::new(204))
-            }
-            ("GET", ["tokens"]) => Ok(Response::json(200, &ops::org_tokens(s, p, org)?)),
-            _ => {
-                // Nobody outside the org learns which paths exist.
-                ops::visible_org(p, org)?;
-                Ok(org_405(rest))
-            }
-        }
-    }
-
     // ---- platform administration ----
 
     /// Every user, with their orgs and when they were last active.
@@ -1124,6 +1117,7 @@ fn org_405(seg: &[&str]) -> Response {
 }
 
 mod external;
+mod org;
 pub mod spec;
 pub use external::{LOGIN_PAGE, OAUTH_COOKIE, safe_next};
 

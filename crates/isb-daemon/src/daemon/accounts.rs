@@ -34,6 +34,9 @@ pub const TOOLS: &[&str] = &[
     "invitation_list",
     "invitation_create",
     "invitation_revoke",
+    "agent_identity_list",
+    "agent_identity_set",
+    "agent_identity_remove",
     "token_list",
     "token_create",
     "token_revoke",
@@ -211,6 +214,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
     );
     register_members(r, &d, &ann)?;
     register_invitations(r, &d, &ann)?;
+    register_agent_identities(r, &d, &ann)?;
     register_tokens(r, &d, &ann)?;
     register_sessions(r, &d, &ann)?;
     register_keys(r, &d, &ann)?;
@@ -349,6 +353,61 @@ fn register_invitations(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<
             let a: Id = args(a)?;
             ops::revoke_invitation(&d.users, p, &org, a.id).map_err(err)?;
             Ok(json!({"revoked": a.id, "org": org}))
+        }
+    );
+    Ok(())
+}
+
+/// The tailnet and Access identities an org lets in as its agents.
+fn register_agent_identities(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> {
+    account_tool!(
+        r,
+        d,
+        "agent_identity_list",
+        "List agent identities",
+        "The org's tailnet and Cloudflare Access agent identities: each a tailnet login or tag, an Access email (of someone who is not an isb user) or a service token's client id, with the role it gets in this org (viewer, member or admin), plus which front doors this server has (`available`: the tailnet listen addresses, whether Access guards a listener). Any member may list.",
+        schema(json!({}), &[], ORG),
+        ann.ro,
+        |d: &Daemon, p: &Principal, a: Value, _c: &Caller| -> Result<Value> {
+            ops::agent_identities(&d.users, p, &org_of(&a)?, &d.gate.agent_ways()).map_err(err)
+        }
+    );
+    account_tool!(
+        r,
+        d,
+        "agent_identity_set",
+        "Map an identity to a role",
+        "Let a tailnet or Access caller in as an agent of this org with a role: tailnet `subject` is a login (someone@example.com) or a node tag (tag:agents; a tagged node matches its tags only, never its owner's login); access `subject` is the email of someone who is not an isb user, or a service token's client id. Roles viewer, member or admin, never owner and at most your own. Setting an existing subject changes its role. Owners and admins. The identity gets this org only, never superadmin.",
+        schema(
+            json!({
+                "kind": {"type": "string", "enum": ["tailnet", "access"]},
+                "subject": {"type": "string"},
+                "role": {"type": "string", "enum": ["admin", "member", "viewer"]},
+                "note": {"type": "string", "description": "What it is for (at most 100 characters)."},
+            }),
+            &["kind", "subject", "role"],
+            ORG
+        ),
+        ann.write,
+        |d: &Daemon, p: &Principal, a: Value, _c: &Caller| -> Result<Value> {
+            let org = org_of(&a)?;
+            let b: ops::NewAgentIdentity = args(a)?;
+            ops::set_agent_identity(&d.users, p, &org, &b).map_err(err)
+        }
+    );
+    account_tool!(
+        r,
+        d,
+        "agent_identity_remove",
+        "Remove an agent identity",
+        "Remove an agent identity by id (agent_identity_list); the caller loses its access at once. Owners and admins.",
+        schema(json!({"id": {"type": "integer"}}), &["id"], ORG),
+        ann.destructive,
+        |d: &Daemon, p: &Principal, a: Value, _c: &Caller| -> Result<Value> {
+            let org = org_of(&a)?;
+            let a: Id = args(a)?;
+            ops::remove_agent_identity(&d.users, p, &org, a.id).map_err(err)?;
+            Ok(json!({"removed": a.id, "org": org}))
         }
     );
     Ok(())

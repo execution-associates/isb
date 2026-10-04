@@ -50,6 +50,49 @@
         ],
         "type": "object"
       },
+      "AgentIdentity": {
+        "properties": {
+          "created_at": {
+            "type": "integer"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "tailnet",
+              "access"
+            ],
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "org": {
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "subject": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "org",
+          "kind",
+          "subject",
+          "role",
+          "note",
+          "created_at",
+          "created_by"
+        ],
+        "type": "object"
+      },
       "ApiToken": {
         "properties": {
           "created_at": {
@@ -248,7 +291,7 @@
         "properties": {
           "auth": {
             "additionalProperties": true,
-            "description": "How the caller signed in: {kind: session, id}, {kind: api_token, id, org, name, scopes?}, {kind: access}, {kind: superadmin, source}, {kind: workspace, org, name}.",
+            "description": "How the caller signed in: {kind: session, id}, {kind: api_token, id, org, name, scopes?}, {kind: access}, {kind: superadmin, source}, {kind: workspace, org, name}, {kind: agent, label}.",
             "properties": {
               "kind": {
                 "enum": [
@@ -256,7 +299,8 @@
                   "api_token",
                   "access",
                   "superadmin",
-                  "workspace"
+                  "workspace",
+                  "agent"
                 ],
                 "type": "string"
               }
@@ -1462,6 +1506,213 @@
           "identity"
         ],
         "x-isb-browser-only": "a browser sign-in flow: it sets the session cookie a person's browser carries"
+      }
+    },
+    "/api/v1/auth/orgs/{org}/agent-identities": {
+      "get": {
+        "description": "Who: org members.",
+        "operationId": "auth_get_orgs_org_agent_identities",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "available": {
+                      "properties": {
+                        "access": {
+                          "description": "Cloudflare Access guards a listener.",
+                          "type": "boolean"
+                        },
+                        "tailnet_listen": {
+                          "description": "The tailnet --listen addresses; empty when no tailnet peer can reach the server.",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "tailnet_listen",
+                        "access"
+                      ],
+                      "type": "object"
+                    },
+                    "identities": {
+                      "items": {
+                        "$ref": "#/components/schemas/AgentIdentity"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "identities",
+                    "available"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthError"
+                }
+              }
+            },
+            "description": "An error"
+          }
+        },
+        "summary": "An org's tailnet and Access agent identities",
+        "tags": [
+          "identity"
+        ],
+        "x-isb-tool": "agent_identity_list"
+      },
+      "put": {
+        "description": "Who: org owners and admins.",
+        "operationId": "auth_put_orgs_org_agent_identities",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "tailnet",
+                      "access"
+                    ],
+                    "type": "string"
+                  },
+                  "note": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "enum": [
+                      "admin",
+                      "member",
+                      "viewer"
+                    ],
+                    "type": "string"
+                  },
+                  "subject": {
+                    "description": "Tailnet: a login name or tag:name. Access: the email of someone who is not an isb user, or a service token's client id.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "subject",
+                  "role"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "identity": {
+                      "$ref": "#/components/schemas/AgentIdentity"
+                    }
+                  },
+                  "required": [
+                    "identity"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthError"
+                }
+              }
+            },
+            "description": "An error"
+          }
+        },
+        "summary": "Map a tailnet or Access identity to a role in the org",
+        "tags": [
+          "identity"
+        ],
+        "x-isb-tool": "agent_identity_set"
+      }
+    },
+    "/api/v1/auth/orgs/{org}/agent-identities/{id}": {
+      "delete": {
+        "description": "Who: org owners and admins.",
+        "operationId": "auth_delete_orgs_org_agent_identities_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "org",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthError"
+                }
+              }
+            },
+            "description": "An error"
+          }
+        },
+        "summary": "Remove an agent identity",
+        "tags": [
+          "identity"
+        ],
+        "x-isb-tool": "agent_identity_remove"
       }
     },
     "/api/v1/auth/orgs/{org}/invitations": {
@@ -2918,6 +3169,208 @@
         "tags": [
           "surface"
         ]
+      }
+    },
+    "/api/v1/tools/agent_identity_list": {
+      "post": {
+        "description": "The org's tailnet and Cloudflare Access agent identities: each a tailnet login or tag, an Access email (of someone who is not an isb user) or a service token's client id, with the role it gets in this org (viewer, member or admin), plus which front doors this server has (`available`: the tailnet listen addresses, whether Access guards a listener). Any member may list.",
+        "operationId": "agent_identity_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "The org (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List agent identities",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "agent_identity_list"
+      }
+    },
+    "/api/v1/tools/agent_identity_remove": {
+      "post": {
+        "description": "Remove an agent identity by id (agent_identity_list); the caller loses its access at once. Owners and admins.",
+        "operationId": "agent_identity_remove",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "integer"
+                  },
+                  "org": {
+                    "description": "The org (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Remove an agent identity",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "agent_identity_remove"
+      }
+    },
+    "/api/v1/tools/agent_identity_set": {
+      "post": {
+        "description": "Let a tailnet or Access caller in as an agent of this org with a role: tailnet `subject` is a login (someone@example.com) or a node tag (tag:agents; a tagged node matches its tags only, never its owner's login); access `subject` is the email of someone who is not an isb user, or a service token's client id. Roles viewer, member or admin, never owner and at most your own. Setting an existing subject changes its role. Owners and admins. The identity gets this org only, never superadmin.",
+        "operationId": "agent_identity_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "tailnet",
+                      "access"
+                    ],
+                    "type": "string"
+                  },
+                  "note": {
+                    "description": "What it is for (at most 100 characters).",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org (default: default).",
+                    "type": "string"
+                  },
+                  "role": {
+                    "enum": [
+                      "admin",
+                      "member",
+                      "viewer"
+                    ],
+                    "type": "string"
+                  },
+                  "subject": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "subject",
+                  "role"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Map an identity to a role",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "agent_identity_set"
       }
     },
     "/api/v1/tools/app_create": {

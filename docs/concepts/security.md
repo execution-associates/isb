@@ -31,7 +31,7 @@ incusd can make a privileged container and mount `/`. Membership in the
   0600 in a 0700 directory, so only the daemon's user reaches it, and that
   caller is trusted with everything (it could run `isb` directly).
 - Remote callers come in over HTTP, which `--listen` accepts only on
-  loopback, or on a tailnet address with `--superadmin-tailnet`. Put a tunnel
+  loopback or on a tailnet address. Put a tunnel
   or a reverse proxy in front, never an open port
   ([Reach isb serve remotely](../guides/remote-access.md)).
 - **Never mount the incus socket into a sandbox.** Anything holding it owns
@@ -160,8 +160,9 @@ protects the credentials themselves:
   limited per address and per IP.
 - Superadmin tokens are minted only on the host, so no stolen HTTP
   credential becomes a durable superadmin one. Ambient superadmin identities
-  (tailnet, Access) pass CSRF, `Origin`, `Content-Type` and `Host` checks
-  ([Superadmins](access.md#superadmins)).
+  (tailnet, Access) and an org's agent identities pass CSRF, `Origin`,
+  `Content-Type` and `Host` checks ([Superadmins](access.md#superadmins),
+  [Agent identities](access.md#agent-identities)).
 - The first admin is created on the host or with a one-time setup token from
   `<state>/setup-token`, so whoever reaches the port first cannot claim the
   platform.

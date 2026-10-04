@@ -16,6 +16,7 @@ superadmin. This page explains those levels; signing in is in
 |---|---|---|
 | org viewer | reads one org | a stakeholder, a dashboard |
 | org member, admin, owner | administers one org | the org's people, its workspace, its agents |
+| org agent identity | one org, at a role the org gave it (never owner) | a tailnet node or Cloudflare Access service token an org maps ([Agent identities](#agent-identities)) |
 | platform admin | every org, plus creating and deleting orgs | the platform's operators |
 | superadmin | everything the daemon's unix socket can do, the host included | the host's own operator, break-glass automation |
 
@@ -52,6 +53,48 @@ restores are for the org's admins and owners
 ([Volumes](../guides/volumes.md)), and so are creating, changing and deleting
 the workspace ([Workspaces](workspaces.md#who-may-do-what)). The audit log
 is for owners and admins ([The audit log](../operations/audit.md)).
+
+## Agent identities
+
+An org can let agents in with no isb token, by where they connect from. An
+org's owners and admins map identities to a role in **that org**
+(`agent_identity_set`, or Settings, Agent identities in the web UI):
+
+| Front door | A mapping names | Matches |
+|---|---|---|
+| tailnet | a login (`someone@example.com`) or a node tag (`tag:agents`) | a peer on a tailnet `--listen` address, as tailscaled's `whois` says: a tagged node by its tags only, never its owner's login; any other node by its user's login |
+| Cloudflare Access | a service token's client id, or the email of someone who is not an isb user | a verified `Cf-Access-Jwt-Assertion` on a listener Access guards |
+
+- The role is `viewer`, `member` or `admin`, never `owner`, and at most the
+  role of whoever sets it. Names are exact (emails, logins and tags
+  case-insensitively; client ids as given), with no wildcards or domains.
+  `agent_identity_list` shows them to any member; viewers read, owners and
+  admins change. Setting and removing are audited
+  (`auth.agent_identity_set`, `auth.agent_identity_remove`).
+- A matched caller is a synthetic principal named after its source,
+  `tailnet:<login>` (a tagged node: `tailnet:<node>`) or `access:<email or
+  client id>`, with no isb account (no sessions, passkeys or tokens;
+  `POST tokens` is `403`). It holds a role in each org that maps it and
+  nothing anywhere else: a tool call for another org is refused, `/orgs/<org>/mcp`
+  pins its own org, and the platform, `server_*`, org-management and host
+  tools are never reachable. It is never a superadmin; an identity on the
+  superadmin lists is judged as a superadmin first.
+- The mapping alone decides. A tailnet login that is also an isb user's
+  email is still the mapped principal, not that user, and gets nothing of the
+  user's memberships. An Access email that is an isb user's is the opposite:
+  it acts as that user with their real memberships, and cannot be mapped (the
+  mapping is refused, and ignored if the account came later); make the user a
+  member instead.
+- A request that carries a bearer token or a session cookie is judged by it
+  alone; the identity is asked only of one that carries neither. The caller
+  gets a role in each org that maps it, the highest if several of its tags do.
+- It is **ambient**, like a cookie, so the superadmin defences apply: writes
+  need `X-Isb-Csrf: 1`, `/mcp` needs `Content-Type: application/json`, an
+  `Origin` must name the `Host`, and the `Host` must be one of the server's
+  names (the tailnet listen addresses, the node's MagicDNS names, the public
+  URL's host). Refusals are audited (`agent.refused`). The tailnet identity
+  comes from the TCP peer only, never a forwarded header.
+- Workspace tokens are unchanged: they stay the org's own actor.
 
 ## Platform admins
 
@@ -170,6 +213,7 @@ Minting and revoking are in the audit log.
 | API token, `Authorization: Bearer isb_tok_...` | agents, scripts, the CLI against a remote daemon | from `isb token create` or the web UI |
 | Workspace token `isb_ws_...` | the agents in an org's workspace | delivered inside the workspace, never shown ([Workspaces](workspaces.md#the-workspace-is-an-org-actor)) |
 | Cloudflare Access | anyone, when Access is in front | an Access identity whose email belongs to an isb user acts as that user; one that does not gets "ask an org admin to invite you" |
+| Tailnet or Access agent identity | agents an org maps | [Agent identities](#agent-identities) |
 | Superadmin sources | operators | above |
 
 Anonymous calls are refused, unless the daemon runs with

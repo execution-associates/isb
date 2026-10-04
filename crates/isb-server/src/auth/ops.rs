@@ -22,6 +22,7 @@ use serde_json::{Value, json};
 
 #[cfg(test)]
 use super::Superadmin;
+use super::agent_identities::{AgentKind, AgentWays};
 use super::{AuthError, AuthStore, Principal, PrincipalKind, Role, SuperadminSource};
 use crate::org::OrgId;
 
@@ -55,10 +56,19 @@ pub fn may_change_accounts(p: &Principal) -> R<()> {
 /// could mint another would survive its own revocation through the copy,
 /// and a scope or expiry bound on the copy would not change that.
 pub fn may_mint_tokens(p: &Principal) -> R<()> {
+    if p.is_agent() {
+        return Err(AuthError::Forbidden(
+            "a tailnet or Access agent identity has no tokens of its own: create one from a \
+             signed-in browser session, or on the host with `isb token create`"
+                .into(),
+        ));
+    }
     let by_token = match &p.kind {
         PrincipalKind::ApiToken { .. } | PrincipalKind::Workspace { .. } => true,
         PrincipalKind::Superadmin { source } => matches!(source, SuperadminSource::Token { .. }),
-        PrincipalKind::Session { .. } | PrincipalKind::Access => false,
+        PrincipalKind::Session { .. } | PrincipalKind::Access | PrincipalKind::Agent { .. } => {
+            false
+        }
     };
     if by_token {
         return Err(AuthError::Forbidden(
@@ -372,6 +382,78 @@ pub fn revoke_invitation(store: &AuthStore, p: &Principal, org: &OrgId, id: i64)
     may_change_accounts(p)?;
     if !store.revoke_invitation(org, id)? {
         return Err(AuthError::NotFound(format!("invitation {id}")));
+    }
+    Ok(())
+}
+
+// ---- agent identities ----
+
+/// What `PUT orgs/{org}/agent-identities` and `agent_identity_set` take.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NewAgentIdentity {
+    pub kind: AgentKind,
+    pub subject: String,
+    pub role: Role,
+    #[serde(default)]
+    pub note: Option<String>,
+    /// Ignored: the org is the endpoint's or the tool's `org`.
+    #[serde(default)]
+    pub org: Option<String>,
+}
+
+/// The org's tailnet and Access mappings, and which front doors this
+/// server has. Any member may read.
+pub fn agent_identities(
+    store: &AuthStore,
+    p: &Principal,
+    org: &OrgId,
+    ways: &AgentWays,
+) -> R<Value> {
+    visible_org(p, org)?;
+    Ok(json!({
+        "identities": store.list_agent_identities(org)?,
+        "available": ways,
+    }))
+}
+
+/// Map a tailnet login or tag, an Access email or a service token to a
+/// role (never owner, and at most the caller's own) in `org`.
+pub fn set_agent_identity(
+    store: &AuthStore,
+    p: &Principal,
+    org: &OrgId,
+    b: &NewAgentIdentity,
+) -> R<Value> {
+    manage(p, org)?;
+    may_change_accounts(p)?;
+    match p.max_grant(org) {
+        Some(max) if b.role <= max => {}
+        _ => {
+            return Err(AuthError::Forbidden(format!(
+                "you cannot map an identity to {} in org {org}",
+                b.role
+            )));
+        }
+    }
+    let by: String = p.user.email.chars().take(100).collect();
+    let i = store.set_agent_identity(
+        org,
+        b.kind,
+        &b.subject,
+        b.role,
+        b.note.as_deref().unwrap_or(""),
+        &by,
+    )?;
+    Ok(json!({"identity": i}))
+}
+
+/// Remove a mapping (owners and admins; a mapping is never an owner's).
+pub fn remove_agent_identity(store: &AuthStore, p: &Principal, org: &OrgId, id: i64) -> R<()> {
+    manage(p, org)?;
+    may_change_accounts(p)?;
+    if !store.remove_agent_identity(org, id)? {
+        return Err(AuthError::NotFound(format!("agent identity {id}")));
     }
     Ok(())
 }

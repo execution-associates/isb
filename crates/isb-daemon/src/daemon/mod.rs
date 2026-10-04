@@ -174,9 +174,15 @@ fn auth_routes(
         eprintln!("isb serve: {n}");
     }
     let path = crate::auth::db_path(&cfg.state_dir);
+    let agent_gate = gate.clone();
+    let agent_ways = gate.agent_ways();
     let api = AuthApi::new(
         store.clone(),
         ApiConfig {
+            agent: Some(Arc::new(move |r: &crate::server::http::Request| {
+                agent_gate.agent(r, None)
+            })),
+            agent_ways,
             public_url: cfg.public_url.clone(),
             notifier: None,
             setup_token_file: Some(cfg.state_dir.join("setup-token")),
@@ -663,6 +669,10 @@ fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate:
             if let Ok(Some(p)) = u.principal_for_email(email) {
                 return Authenticated::User(Arc::new(p));
             }
+        }
+        // A tailnet or Access caller an org mapped to a role.
+        if let Some(p) = gate.agent(req, id) {
+            return Authenticated::User(Arc::new(p));
         }
         Authenticated::None
     });
@@ -1410,6 +1420,10 @@ pub use crate::stack::local_deploy_args;
 pub fn default_state_dir() -> PathBuf {
     Store::default_dir()
 }
+
+#[cfg(test)]
+#[path = "agent_tests.rs"]
+mod agent_tests;
 
 #[cfg(test)]
 mod tests {

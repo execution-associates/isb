@@ -15,14 +15,15 @@ This page sets up both.
 ## What `--listen` accepts
 
 `--listen` (`ISB_SERVE_LISTEN`) takes one or more addresses, comma-separated,
-and refuses anything but loopback, or a tailnet address (100.64.0.0/10,
-fd7a:115c:a1e0::/48) when `--superadmin-tailnet` is set. Put a tunnel (or a
-reverse proxy) in front of loopback, never an open port. Cloudflare Access
+and refuses anything but loopback or a tailnet address (100.64.0.0/10,
+fd7a:115c:a1e0::/48). Put a tunnel (or a reverse proxy) in front of loopback,
+never an open port. Cloudflare Access
 guards the loopback listeners; a tailnet listener is reached only by tailnet
 peers and has no Access in front.
 
 Whatever is in front, every HTTP caller still signs in as an isb user (a
-session, an API token) or is a superadmin; Access and the tailnet decide who
+session, an API token), is a superadmin, or is an agent identity an org
+mapped; Access and the tailnet decide who
 reaches the port, isb decides what they may do ([Users, roles and
 superadmins](../concepts/access.md)).
 
@@ -107,7 +108,16 @@ identity, the tool, its duration and whether it failed, never its arguments,
 and calls that change something are in the [audit log](../operations/audit.md).
 Stacks record who deployed them (`deployed_by`).
 
-### 5. Superadmins through Access (optional)
+### 5. Agents and superadmins through Access (optional)
+
+An org can map an Access service token's client id, or the email of someone
+who is not an isb user, to a role in that org only ([Agent
+identities](../concepts/access.md#agent-identities)); the agent sends the
+service token's `CF-Access-Client-Id` and `CF-Access-Client-Secret`. The same
+CSRF, `Origin`, `Content-Type` and `Host` checks apply (the `Host` against the
+public URL when `--public-url` is set).
+
+#### Superadmins
 
 `--superadmin-access alice@example.com,abc123.access` (or
 `ISB_SUPERADMIN_ACCESS`) gives the listed Access identities, users by email
@@ -136,7 +146,7 @@ its node's tags, is on the list (a tagged node only by its tags). Everyone
 else on that listener signs in as on any other (tokens, sessions). The
 `Host` a browser sends must be the listen address, the node's MagicDNS name
 (`host` or `host.tailnet.ts.net`) or the public URL's host. An empty list is
-refused, and so is a tailnet `--listen` address without the flag.
+refused.
 
 The identity comes only from the TCP peer address, asked of the local
 tailscaled (`whois` over its LocalAPI socket, else the `tailscale` CLI on
@@ -147,8 +157,19 @@ once.
 
 A superadmin is root on the host in all but name: grant it to the people and
 tagged machines that administer the host, nobody else. For agents that should
-reach one org, give them an org API token instead ([Agents and
-MCP](agents.md)).
+reach one org, give them an org API token, or map their tailnet login or tag
+to a role in the org ([Agent identities](../concepts/access.md#agent-identities)):
+
+```dotenv
+# ~/.config/isb/serve.env: a tailnet listener is enough for org agent identities
+ISB_SERVE_LISTEN=127.0.0.1:8092,100.86.22.100:8092
+```
+
+The org's owners and admins then add `tag:agents` (or a login) with a role in
+Settings, Agent identities, and an agent on a node with that tag connects to
+`http://100.86.22.100:8092/orgs/acme/mcp` with no token. The identity is asked
+of tailscaled exactly as for superadmins; the `Host`, CSRF, `Origin` and
+`Content-Type` checks apply, and it reaches that org only.
 
 ## Checking it
 

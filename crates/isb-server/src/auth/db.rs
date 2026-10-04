@@ -149,6 +149,22 @@ const MIGRATIONS: &[&str] = &[
         UNIQUE (user_id, fingerprint)
     );
     ",
+    // 6: agent identities: tailnet logins and tags, Access emails and service
+    // token client ids, each mapped to a role in one org (never owner).
+    "
+    CREATE TABLE org_agent_identities (
+        id         INTEGER PRIMARY KEY,
+        org        TEXT NOT NULL REFERENCES orgs(name) ON DELETE CASCADE,
+        kind       TEXT NOT NULL,
+        subject    TEXT NOT NULL,
+        role       TEXT NOT NULL,
+        note       TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL,
+        created_by TEXT NOT NULL DEFAULT '',
+        UNIQUE (org, kind, subject)
+    );
+    CREATE INDEX org_agent_identities_subject ON org_agent_identities(kind, subject);
+    ",
 ];
 
 /// The schema version this build writes.

@@ -8,7 +8,8 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use crate::auth::{AuthStore, Superadmin, SuperadminSource};
+use crate::auth::agent_identities::AgentWays;
+use crate::auth::{AuthStore, Principal, Superadmin, SuperadminSource};
 use crate::error::{Error, Result};
 use crate::server::access::{ASSERTION_HEADER, AccessValidator, Identity};
 use crate::server::http::{Peer, Request};
@@ -77,6 +78,11 @@ pub enum Resolved {
 pub struct Gate {
     store: Arc<AuthStore>,
     tailnet: Option<Tailnet>,
+    /// The tailnet `--listen` addresses (what lets a tailnet peer in at all).
+    tailnet_listens: Vec<String>,
+    /// The validator of the listeners Access guards, and the `Host` names an
+    /// Access agent's request may carry (empty: no public URL, not checked).
+    access_agents: Option<(Arc<AccessValidator>, Vec<String>)>,
     /// The Access validator of the loopback listeners, the allow list, and
     /// the `Host` names an Access superadmin's request may carry.
     access: Option<(Arc<AccessValidator>, AccessAllowList, Vec<String>)>,
@@ -97,8 +103,82 @@ impl Gate {
         Gate {
             store,
             tailnet,
+            tailnet_listens: Vec::new(),
+            access_agents: None,
             access,
         }
+    }
+
+    /// Let orgs' tailnet and Access agent identities in
+    /// ([`crate::auth::agent_identities`]): the tailnet `--listen`
+    /// addresses, and Access's validator with the `Host` names to allow.
+    pub fn with_agents(
+        mut self,
+        tailnet_listens: Vec<String>,
+        access: Option<(Arc<AccessValidator>, Vec<String>)>,
+    ) -> Gate {
+        self.tailnet_listens = tailnet_listens;
+        self.access_agents = access.map(|(v, hosts)| {
+            let mut hosts: Vec<String> = hosts.iter().map(|h| host_only(h)).collect();
+            hosts.sort();
+            hosts.dedup();
+            (v, hosts)
+        });
+        self
+    }
+
+    /// Which agent identities can reach this server at all.
+    pub fn agent_ways(&self) -> AgentWays {
+        AgentWays {
+            tailnet_listen: if self.tailnet.is_some() {
+                self.tailnet_listens.clone()
+            } else {
+                Vec::new()
+            },
+            access: self.access_agents.is_some(),
+        }
+    }
+
+    /// The agent identity behind `req`, if an org maps it: a verified
+    /// Access identity (`id`, else the request's own assertion) on a
+    /// loopback listener Access guards, or a tailnet peer, as tailscaled
+    /// says. A bearer token decides on its own, so it is not asked here.
+    /// Superadmin sources are judged first, by [`Gate::resolve`].
+    pub fn agent(&self, req: &Request, id: Option<&Identity>) -> Option<Principal> {
+        if req.header("authorization").is_some() {
+            return None;
+        }
+        let looked = if matches!(&req.peer, Peer::Tcp(a) if a.ip().is_loopback()) {
+            let (v, hosts) = self.access_agents.as_ref()?;
+            let verified;
+            let id = match id {
+                Some(id) => id,
+                None => {
+                    let t = req.header(ASSERTION_HEADER)?.trim();
+                    verified = v.validate(t).ok()?;
+                    &verified
+                }
+            };
+            if !hosts.is_empty() {
+                let host = req.header("host").map(host_only).unwrap_or_default();
+                if !hosts.contains(&host) {
+                    eprintln!(
+                        "isb serve: Access agent {} sent Host {host:?}, not one of this server's names; not an agent",
+                        id.name()
+                    );
+                    return None;
+                }
+            }
+            self.store
+                .principal_for_access_agent(id.email.as_deref(), id.common_name.as_deref())
+        } else {
+            let w = self.tailnet.as_ref()?.identify(req)?;
+            self.store.principal_for_tailnet(&w.login, &w.node, &w.tags)
+        };
+        looked.unwrap_or_else(|e| {
+            eprintln!("isb serve: agent identities: {e}");
+            None
+        })
     }
 
     pub fn tailnet(&self) -> Option<&Tailnet> {
@@ -231,8 +311,7 @@ fn public_host(url: &str) -> Option<String> {
     (!host.is_empty()).then(|| host.to_string())
 }
 
-/// The gate `cfg` describes. Refuses a tailnet listener without
-/// `--superadmin-tailnet`, and `--superadmin-access` without Access or a
+/// The gate `cfg` describes. Refuses `--superadmin-access` without Access or a
 /// public URL (whose host the Access check needs).
 pub fn gate(
     cfg: &super::ServeConfig,
@@ -241,27 +320,30 @@ pub fn gate(
 ) -> Result<Gate> {
     let tailnet_listens: Vec<&String> =
         cfg.listen.iter().filter(|a| is_tailnet_listen(a)).collect();
-    if !tailnet_listens.is_empty() && cfg.superadmin_tailnet.is_none() {
-        return Err(Error::invalid(format!(
-            "--listen {}: a tailnet address is for --superadmin-tailnet; otherwise listen on loopback behind a tunnel",
-            tailnet_listens[0]
-        )));
-    }
     let public = cfg.public_url.as_deref().and_then(public_host);
-    let tailnet = cfg.superadmin_tailnet.clone().map(|allow| {
-        if tailnet_listens.is_empty() {
-            eprintln!(
-                "isb serve: WARNING: --superadmin-tailnet without a tailnet --listen address: no tailnet peer can reach this daemon"
-            );
-        }
+    if cfg.superadmin_tailnet.is_some() && tailnet_listens.is_empty() {
+        eprintln!(
+            "isb serve: WARNING: --superadmin-tailnet without a tailnet --listen address: no tailnet peer can reach this daemon"
+        );
+    }
+    // The tailnet check runs wherever a tailnet address is served: for the
+    // superadmin allow list, and for orgs' agent identities.
+    let tailnet = (cfg.superadmin_tailnet.is_some() || !tailnet_listens.is_empty()).then(|| {
+        let allow = cfg.superadmin_tailnet.clone().unwrap_or_default();
         let mut hosts: Vec<String> = tailnet_listens.iter().map(|a| a.to_string()).collect();
         hosts.extend(crate::server::tailnet::self_names());
         hosts.extend(public.clone());
-        crate::server::tailnet::Tailnet::new(
-            allow,
-            crate::server::tailnet::system_fetcher(),
-            hosts,
-        )
+        crate::server::tailnet::Tailnet::new(allow, crate::server::tailnet::system_fetcher(), hosts)
+    });
+    let mut access_hosts: Vec<String> = public.iter().cloned().collect();
+    access_hosts.extend(cfg.listen.iter().filter(|a| !is_tailnet_listen(a)).cloned());
+    let agent_access = access.clone().map(|v| {
+        let hosts = if public.is_some() {
+            access_hosts
+        } else {
+            Vec::new()
+        };
+        (v, hosts)
     });
     let access = match (&cfg.superadmin_access, access) {
         (None, _) => None,
@@ -281,7 +363,8 @@ pub fn gate(
             Some((v, list.clone(), hosts))
         }
     };
-    Ok(Gate::new(store, tailnet, access))
+    let listens = tailnet_listens.iter().map(|a| a.to_string()).collect();
+    Ok(Gate::new(store, tailnet, access).with_agents(listens, agent_access))
 }
 
 /// What `host_policy` reports of the configuration (never a secret).
@@ -305,7 +388,7 @@ pub fn host_summary(cfg: &super::ServeConfig, gate: &Gate) -> Value {
         "superadmin": {
             "socket": cfg.socket,
             "tokens": true,
-            "tailnet": gate.tailnet().map(|t| t.allow().entries()),
+            "tailnet": cfg.superadmin_tailnet.as_ref().and(gate.tailnet()).map(|t| t.allow().entries()),
             "tailnet_hosts": gate.tailnet().map(|t| t.hosts().to_vec()),
             "access": gate.access_list().map(AccessAllowList::entries),
         },
@@ -321,7 +404,7 @@ pub fn announce(cfg: &super::ServeConfig, gate: &Gate, store: &AuthStore) {
             "superadmin tokens ({n}; minted on this host with `isb token create NAME --superadmin`)"
         ));
     }
-    if let Some(t) = gate.tailnet() {
+    if let Some(t) = cfg.superadmin_tailnet.as_ref().and(gate.tailnet()) {
         v.push(format!(
             "tailnet identities {} (Host: {})",
             t.allow().entries().join(", "),
@@ -668,5 +751,165 @@ mod tests {
             ),
             Resolved::None
         ));
+    }
+
+    fn agent_store() -> (Arc<AuthStore>, crate::org::OrgId, crate::org::OrgId) {
+        let s = store();
+        let acme = crate::org::OrgId::new("acme").unwrap();
+        let beta = crate::org::OrgId::new("beta").unwrap();
+        s.ensure_org(&acme).unwrap();
+        s.ensure_org(&beta).unwrap();
+        (s, acme, beta)
+    }
+
+    #[test]
+    fn tailnet_agents_are_pinned_to_the_orgs_that_map_them() {
+        use crate::auth::Role;
+        use crate::auth::agent_identities::AgentKind;
+        let (s, acme, beta) = agent_store();
+        let map = |o: &crate::org::OrgId, subj: &str, r| {
+            s.set_agent_identity(o, AgentKind::Tailnet, subj, r, "", "t")
+                .unwrap()
+        };
+        map(&acme, "tag:agents", Role::Member);
+        map(&beta, "me@example.com", Role::Viewer);
+        let fetch: WhoisFetcher = Arc::new(|p: std::net::SocketAddr| {
+            Ok(match p.ip().to_string().as_str() {
+                "100.64.0.1" => Whois {
+                    login: "me@example.com".into(),
+                    node: "laptop.t.ts.net".into(),
+                    tags: vec![],
+                },
+                "100.64.0.2" => Whois {
+                    login: "tagged-devices".into(),
+                    node: "bot.t.ts.net".into(),
+                    tags: vec!["tag:agents".into()],
+                },
+                // A tagged node owned by the mapped login.
+                "100.64.0.3" => Whois {
+                    login: "me@example.com".into(),
+                    node: "owned.t.ts.net".into(),
+                    tags: vec!["tag:other".into()],
+                },
+                _ => Whois {
+                    login: "stranger@example.com".into(),
+                    node: "x.t.ts.net".into(),
+                    tags: vec![],
+                },
+            })
+        });
+        // No superadmin allow list at all: agents still resolve.
+        let t = Tailnet::new(AllowList::default(), fetch, vec!["100.86.22.100".into()]);
+        let g = Gate::new(s, Some(t), None).with_agents(vec!["100.86.22.100:18995".into()], None);
+        assert_eq!(g.agent_ways().tailnet_listen, vec!["100.86.22.100:18995"]);
+        let host = ("Host", "100.86.22.100:18995");
+        let who = |peer: &str, h: &[(&str, &str)]| g.agent(&req(peer, h), None);
+        // An untagged node by login: viewer in beta only.
+        let p = who("100.64.0.1:1", &[host]).unwrap();
+        assert_eq!(p.user.email, "tailnet:me@example.com");
+        assert_eq!(p.orgs, vec![(beta.clone(), Role::Viewer)]);
+        assert!(p.role_in(&acme).is_none() && !p.platform_admin && p.user.id == 0);
+        // A tagged node by its tag: member in acme only.
+        let p = who("100.64.0.2:1", &[host]).unwrap();
+        assert_eq!(p.user.email, "tailnet:bot.t.ts.net");
+        assert_eq!(p.orgs, vec![(acme, Role::Member)]);
+        // A tagged node is never its owner's login.
+        assert!(who("100.64.0.3:1", &[host]).is_none());
+        assert!(who("100.64.0.9:1", &[host]).is_none());
+        // Not a tailnet address, or another Host (DNS rebinding).
+        assert!(who("192.168.1.5:1", &[host]).is_none());
+        assert!(who("100.64.0.1:1", &[("Host", "evil.example")]).is_none());
+        assert!(who("100.64.0.1:1", &[]).is_none());
+        // A bearer token takes the request away from the tailnet.
+        assert!(who("100.64.0.1:1", &[host, ("Authorization", "Bearer x")]).is_none());
+        // And a tailnet agent is no superadmin.
+        assert!(matches!(
+            g.resolve(&req("100.64.0.1:1", &[host]), None),
+            Resolved::None
+        ));
+        assert!(
+            g.tailnet()
+                .unwrap()
+                .superadmin(&req("100.64.0.1:1", &[host]))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn access_agents_need_a_verified_mapped_identity_that_is_not_a_user() {
+        use crate::auth::Role;
+        use crate::auth::agent_identities::AgentKind;
+        let (s, acme, _beta) = agent_store();
+        let map = |subj: &str| {
+            s.set_agent_identity(&acme, AgentKind::Access, subj, Role::Admin, "", "t")
+                .unwrap()
+        };
+        map("svc.access");
+        map("alice@example.com");
+        // The isb user's email acts as that user (the authn hook's job); the
+        // gate never makes it an agent.
+        s.create_user("alice@example.com", "Alice", None, false)
+            .ok();
+        let (v, _) = at::validator();
+        let g = Gate::new(s, None, None).with_agents(
+            Vec::new(),
+            Some((Arc::new(v), vec!["isb.example.com".into()])),
+        );
+        assert!(g.agent_ways().access);
+        let host = ("Host", "isb.example.com");
+        let token = at::sign(&at::header(), &at::claims());
+        // The test claims' email is alice's: an isb user, so no agent.
+        assert!(
+            g.agent(
+                &req("127.0.0.1:1", &[("Cf-Access-Jwt-Assertion", &token), host]),
+                None
+            )
+            .is_none()
+        );
+        let mut c = at::claims();
+        c.as_object_mut().unwrap().remove("email");
+        c["common_name"] = json!("svc.access");
+        let svc = at::sign(&at::header(), &c);
+        let ok = req("127.0.0.1:1", &[("Cf-Access-Jwt-Assertion", &svc), host]);
+        let p = g.agent(&ok, None).unwrap();
+        assert_eq!(p.user.email, "access:svc.access");
+        assert_eq!(p.orgs, vec![(acme.clone(), Role::Admin)]);
+        // An unmapped client id, a forged assertion, a foreign Host, a
+        // non-loopback peer.
+        c["common_name"] = json!("other.access");
+        let other = at::sign(&at::header(), &c);
+        assert!(
+            g.agent(
+                &req("127.0.0.1:1", &[("Cf-Access-Jwt-Assertion", &other), host]),
+                None
+            )
+            .is_none()
+        );
+        assert!(
+            g.agent(
+                &req("127.0.0.1:1", &[("Cf-Access-Jwt-Assertion", "a.b.c"), host]),
+                None
+            )
+            .is_none()
+        );
+        assert!(
+            g.agent(
+                &req(
+                    "127.0.0.1:1",
+                    &[("Cf-Access-Jwt-Assertion", &svc), ("Host", "evil.example")]
+                ),
+                None
+            )
+            .is_none()
+        );
+        assert!(
+            g.agent(
+                &req("100.64.0.1:1", &[("Cf-Access-Jwt-Assertion", &svc), host]),
+                None
+            )
+            .is_none()
+        );
+        // Never a superadmin.
+        assert!(matches!(g.resolve(&ok, None), Resolved::None));
     }
 }

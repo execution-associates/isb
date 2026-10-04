@@ -268,6 +268,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/orgs/{org}/agent-identities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An org's tailnet and Access agent identities
+         * @description Who: org members.
+         */
+        get: operations["auth_get_orgs_org_agent_identities"];
+        /**
+         * Map a tailnet or Access identity to a role in the org
+         * @description Who: org owners and admins.
+         */
+        put: operations["auth_put_orgs_org_agent_identities"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/orgs/{org}/agent-identities/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove an agent identity
+         * @description Who: org owners and admins.
+         */
+        delete: operations["auth_delete_orgs_org_agent_identities_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/orgs/{org}/invitations": {
         parameters: {
             query?: never;
@@ -818,6 +862,66 @@ export interface paths {
         get: operations["get_api_v1_tools"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/agent_identity_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List agent identities
+         * @description The org's tailnet and Cloudflare Access agent identities: each a tailnet login or tag, an Access email (of someone who is not an isb user) or a service token's client id, with the role it gets in this org (viewer, member or admin), plus which front doors this server has (`available`: the tailnet listen addresses, whether Access guards a listener). Any member may list.
+         */
+        post: operations["agent_identity_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/agent_identity_remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove an agent identity
+         * @description Remove an agent identity by id (agent_identity_list); the caller loses its access at once. Owners and admins.
+         */
+        post: operations["agent_identity_remove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/agent_identity_set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Map an identity to a role
+         * @description Let a tailnet or Access caller in as an agent of this org with a role: tailnet `subject` is a login (someone@example.com) or a node tag (tag:agents; a tagged node matches its tags only, never its owner's login); access `subject` is the email of someone who is not an isb user, or a service token's client id. Roles viewer, member or admin, never owner and at most your own. Setting an existing subject changes its role. Owners and admins. The identity gets this org only, never superadmin.
+         */
+        post: operations["agent_identity_set"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4675,6 +4779,17 @@ export interface components {
             name: string;
             platform_admin: boolean;
         };
+        AgentIdentity: {
+            created_at: number;
+            created_by: string;
+            id: number;
+            /** @enum {string} */
+            kind: "tailnet" | "access";
+            note: string;
+            org: string;
+            role: components["schemas"]["Role"];
+            subject: string;
+        };
         ApiToken: {
             created_at: number;
             expires_at: number | null;
@@ -4719,10 +4834,10 @@ export interface components {
             role: components["schemas"]["Role"];
         };
         Me: {
-            /** @description How the caller signed in: {kind: session, id}, {kind: api_token, id, org, name, scopes?}, {kind: access}, {kind: superadmin, source}, {kind: workspace, org, name}. */
+            /** @description How the caller signed in: {kind: session, id}, {kind: api_token, id, org, name, scopes?}, {kind: access}, {kind: superadmin, source}, {kind: workspace, org, name}, {kind: agent, label}. */
             auth: {
                 /** @enum {string} */
-                kind: "session" | "api_token" | "access" | "superadmin" | "workspace";
+                kind: "session" | "api_token" | "access" | "superadmin" | "workspace" | "agent";
             } & {
                 [key: string]: unknown;
             };
@@ -5300,6 +5415,120 @@ export interface operations {
                         url: string;
                     };
                 };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_get_orgs_org_agent_identities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        available: {
+                            /** @description Cloudflare Access guards a listener. */
+                            access: boolean;
+                            /** @description The tailnet --listen addresses; empty when no tailnet peer can reach the server. */
+                            tailnet_listen: string[];
+                        };
+                        identities: components["schemas"]["AgentIdentity"][];
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_put_orgs_org_agent_identities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    kind: "tailnet" | "access";
+                    note?: string;
+                    /** @enum {string} */
+                    role: "admin" | "member" | "viewer";
+                    /** @description Tailnet: a login name or tag:name. Access: the email of someone who is not an isb user, or a service token's client id. */
+                    subject: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        identity: components["schemas"]["AgentIdentity"];
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_delete_orgs_org_agent_identities_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org: string;
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description An error */
             default: {
@@ -6295,6 +6524,128 @@ export interface operations {
                 };
                 content: {
                     "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    agent_identity_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The org (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    agent_identity_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    id: number;
+                    /** @description The org (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    agent_identity_set: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    kind: "tailnet" | "access";
+                    /** @description What it is for (at most 100 characters). */
+                    note?: string;
+                    /** @description The org (default: default). */
+                    org?: string;
+                    /** @enum {string} */
+                    role: "admin" | "member" | "viewer";
+                    subject: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
                 };
             };
         };

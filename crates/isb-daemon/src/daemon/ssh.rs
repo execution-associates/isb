@@ -107,6 +107,7 @@ pub(super) fn still_allowed(
             }
         }
         PrincipalKind::Access
+        | PrincipalKind::Agent { .. }
         | PrincipalKind::Superadmin { .. }
         | PrincipalKind::Workspace { .. } => {}
     }

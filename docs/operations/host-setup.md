@@ -90,7 +90,7 @@ including break-glass recipients, is in
 ### Reaching it from elsewhere
 
 The installed daemon listens on loopback only, and refuses any other
-`--listen` address apart from tailnet ones with `--superadmin-tailnet`. Put a
+`--listen` address apart from tailnet ones. Put a
 tunnel or reverse proxy in front of it, never an open port: see
 [Reach isb serve remotely](../guides/remote-access.md).
 

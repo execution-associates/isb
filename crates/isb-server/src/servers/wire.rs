@@ -90,6 +90,11 @@ impl Assertion {
                     PrincipalKind::Session { .. } => ("session", None, None, Vec::new()),
                     PrincipalKind::Access => ("access", None, None, Vec::new()),
                     PrincipalKind::Superadmin { .. } => ("superadmin", None, None, Vec::new()),
+                    // A tailnet or Access agent identity: its label names
+                    // it, its orgs and roles say what it may do.
+                    PrincipalKind::Agent { label } => {
+                        ("agent", Some(label.clone()), None, Vec::new())
+                    }
                     // The workspace of an org on this server: the agent
                     // judges it as the workspace it is.
                     PrincipalKind::Workspace { org, name } => (
@@ -148,6 +153,9 @@ impl Assertion {
                 scopes: self.scopes.clone(),
             },
             "access" => PrincipalKind::Access,
+            "agent" => PrincipalKind::Agent {
+                label: self.token_name.clone().unwrap_or_default(),
+            },
             "workspace" => match &self.token_org {
                 Some(org) => PrincipalKind::Workspace {
                     org: org.clone(),

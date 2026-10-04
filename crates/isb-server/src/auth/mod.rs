@@ -16,6 +16,8 @@
 //! External sign-in ([`oauth`]) attaches rows to `user_identities`; passkeys
 //! ([`webauthn`]) live in `passkeys`; [`external`] manages both.
 
+mod actors;
+pub mod agent_identities;
 pub mod cbor;
 pub mod db;
 pub mod external;
@@ -37,6 +39,7 @@ use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 
 use crate::org::OrgId;
+pub use actors::WORKSPACE_ACTOR;
 use limit::{Rate, RateLimiter};
 use secret::{PasswordCost, TokenKind};
 pub use superadmin::{Superadmin, SuperadminSource, SuperadminToken};
@@ -284,6 +287,12 @@ pub enum PrincipalKind {
         /// The workspace's name in its org.
         name: String,
     },
+    /// A tailnet or Cloudflare Access caller an org mapped to a role
+    /// ([`agent_identities`]): `label` is `tailnet:<login or node>` or
+    /// `access:<name>`. Nobody's account, confined to the orgs that mapped it.
+    Agent {
+        label: String,
+    },
 }
 
 /// An authenticated caller: who, how, and what they may reach. For an
@@ -358,40 +367,11 @@ impl Principal {
             PrincipalKind::ApiToken { .. }
             | PrincipalKind::Access
             | PrincipalKind::Superadmin { .. }
+            | PrincipalKind::Agent { .. }
             | PrincipalKind::Workspace { .. } => None,
         }
     }
-
-    /// The principal an org's workspace token authenticates: no account
-    /// (user id 0, named `workspace`), confined to `org` with `role`.
-    pub fn workspace(org: &OrgId, name: &str, role: Role) -> Principal {
-        Principal {
-            user: User {
-                id: 0,
-                email: WORKSPACE_ACTOR.into(),
-                name: format!("workspace {name} in {org}"),
-                platform_admin: false,
-                created_at: 0,
-                disabled: false,
-                has_password: false,
-            },
-            kind: PrincipalKind::Workspace {
-                org: org.clone(),
-                name: name.to_string(),
-            },
-            orgs: vec![(org.clone(), role)],
-            platform_admin: false,
-        }
-    }
-
-    /// An org's workspace, rather than a person or a user's token.
-    pub fn is_workspace(&self) -> bool {
-        matches!(self.kind, PrincipalKind::Workspace { .. })
-    }
 }
-
-/// How audit rows, history and `isb.owner` labels name a workspace.
-pub const WORKSPACE_ACTOR: &str = "workspace";
 
 /// Where a login came from, kept on the session for the user to review.
 #[derive(Debug, Clone, Default)]

@@ -16,9 +16,9 @@ endpoint has neither a tool nor a documented reason in the
 | Category | Count |
 |---|---|
 | Tools in the web UI and MCP | 142 |
-| Account tools, the web UI through the identity endpoints | 17 |
+| Account tools, the web UI through the identity endpoints | 20 |
 | Tools for MCP and the CLI only | 18 |
-| Identity endpoints with a tool | 18 |
+| Identity endpoints with a tool | 21 |
 | Identity endpoints for the browser only | 21 |
 | Other routes with no tool | 4 |
 
@@ -167,6 +167,7 @@ agents call these tools, which run the same code with the same rules.
 | Who am I | Every page (the session) | `whoami` |
 | Members: list, change a role, remove | Org, Members | `member_list`, `member_update`, `member_remove` |
 | Invitations: list, invite, revoke | Org, Members: Invite; Pending | `invitation_list`, `invitation_create`, `invitation_revoke` |
+| Agent identities: list, map a tailnet login or tag or an Access email or service token to a role, remove | Org, Settings: Agent identities; Org, MCP: the Tailnet and Access identity cards show them | `agent_identity_list`, `agent_identity_set`, `agent_identity_remove` |
 | API tokens: list, create, revoke; every token in an org | Account, API tokens; Org, Agents | `token_list`, `token_create`, `token_revoke` |
 | SSH keys | Account, SSH keys | `ssh_key_list`, `ssh_key_add`, `ssh_key_remove` |
 | Sessions | Account, Sessions | `session_list`, `session_revoke` |

@@ -16,6 +16,9 @@ use super::access::{ASSERTION_HEADER, AccessValidator, Identity};
 use super::http::{Peer, Request, Response};
 use crate::error::{Error, Result};
 
+mod ambient;
+pub use ambient::ambient_ok;
+
 pub use isb_core::serve_client::PROTOCOL_VERSIONS;
 
 const PARSE_ERROR: i64 = -32700;
@@ -400,51 +403,6 @@ fn is_mcp_path(path: &str) -> bool {
             .strip_prefix("/orgs/")
             .and_then(|r| r.strip_suffix("/mcp"))
             .is_some_and(|o| !o.is_empty() && !o.contains('/'))
-}
-
-/// The authority (`host[:port]`) of an `Origin`, lowercased.
-fn origin_authority(origin: &str) -> Option<String> {
-    let (scheme, rest) = origin.trim().split_once("://")?;
-    if !(scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https"))
-        || rest.is_empty()
-        || rest.contains(['/', '?', '#', '@'])
-    {
-        return None;
-    }
-    Some(rest.to_ascii_lowercase())
-}
-
-/// Defences for a caller whose credential the browser sends by itself (a
-/// tailnet identity, like a cookie), so a page open on a tailnet machine
-/// cannot drive the API:
-/// - an `Origin`, when sent, must be this server's own (it names the
-///   request's `Host`; the `Host` itself was checked against this server's
-///   names before the identity was granted, which blocks DNS rebinding);
-/// - `/mcp` must be `Content-Type: application/json` (a cross-site page can
-///   send that only after a CORS preflight, which isb never grants);
-/// - other writes must carry `X-Isb-Csrf: 1`, as sessions do.
-pub fn ambient_ok(req: &Request) -> std::result::Result<(), &'static str> {
-    if let Some(o) = req.header("origin") {
-        let host = req.header("host").map(|h| h.trim().to_ascii_lowercase());
-        if origin_authority(o).is_none() || origin_authority(o) != host {
-            return Err("origin not allowed");
-        }
-    }
-    let write = !matches!(req.method.as_str(), "GET" | "HEAD");
-    if is_mcp_path(&req.path) {
-        if write
-            && !req.header("content-type").is_some_and(|ct| {
-                ct.trim()
-                    .to_ascii_lowercase()
-                    .starts_with("application/json")
-            })
-        {
-            return Err("/mcp needs Content-Type: application/json");
-        }
-    } else if write && req.header("x-isb-csrf").map(str::trim) != Some("1") {
-        return Err("missing X-Isb-Csrf header");
-    }
-    Ok(())
 }
 
 /// May `caller` run `tool` with these arguments? Returns the arguments to
@@ -1020,29 +978,26 @@ impl Endpoint {
         };
         let superadmin = |s: Arc<crate::auth::Superadmin>| {
             if s.source.is_ambient() {
-                if let Err(why) = ambient_ok(req) {
-                    eprintln!(
-                        "isb serve: refused superadmin {} on {} {}: {why}",
-                        s.label(),
-                        req.method,
-                        req.path
-                    );
-                    if let Some(a) = &self.hooks.audit {
-                        let caller = Caller::Superadmin(s.clone());
-                        let e = Error::Forbidden(why.to_string());
-                        a(&Audited {
-                            caller: &caller,
-                            action: "superadmin.refused",
-                            tool: None,
-                            args: &json!({}),
-                            outcome: Err(&e),
-                            origin: &origin(req, &caller, is_mcp_path(&req.path)),
-                        });
-                    }
-                    return Err(rest_error(403, "forbidden", why));
-                }
+                return self.refuse_ambient(
+                    req,
+                    &format!("superadmin {}", s.label()),
+                    Caller::Superadmin(s.clone()),
+                );
             }
             Ok(Caller::Superadmin(s))
+        };
+        // An org's tailnet or Access agent is ambient too; people's own
+        // sessions and tokens are not (a cookie has the CSRF header rule).
+        let signed_in = |p: Arc<crate::auth::Principal>| {
+            csrf()?;
+            if p.is_agent() {
+                return self.refuse_ambient(
+                    req,
+                    &format!("agent {}", p.user.email),
+                    Caller::User { principal: p },
+                );
+            }
+            Ok(Caller::User { principal: p })
         };
         if let Some(v) = &self.access {
             let token = req.header(ASSERTION_HEADER).unwrap_or("").trim();
@@ -1065,10 +1020,7 @@ impl Endpoint {
                 }
             };
             return match user(Some(&id)) {
-                Authenticated::User(p) => {
-                    csrf()?;
-                    Ok(Caller::User { principal: p })
-                }
+                Authenticated::User(p) => signed_in(p),
                 Authenticated::Superadmin(s) => superadmin(s),
                 Authenticated::Refused => {
                     Err(rest_error(401, "unauthorized", "invalid credentials"))
@@ -1079,10 +1031,7 @@ impl Endpoint {
         // Asked even without a credential: a tailnet identity is judged
         // from the connection itself.
         match user(None) {
-            Authenticated::User(p) => {
-                csrf()?;
-                return Ok(Caller::User { principal: p });
-            }
+            Authenticated::User(p) => return signed_in(p),
             Authenticated::Superadmin(s) => return superadmin(s),
             Authenticated::Refused => {
                 return Err(rest_error(401, "unauthorized", "invalid credentials"));
@@ -1428,6 +1377,10 @@ fn tool_result(r: crate::Result<Value>) -> Value {
 }
 
 #[cfg(test)]
+#[path = "mcp_agent_tests.rs"]
+mod agent_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::server::access::tests as at;
@@ -1470,7 +1423,13 @@ mod tests {
         }
     }
 
-    fn req(method: &str, path: &str, headers: &[(&str, &str)], body: &[u8], peer: Peer) -> Request {
+    pub(super) fn req(
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: &[u8],
+        peer: Peer,
+    ) -> Request {
         Request {
             method: method.into(),
             path: path.into(),
@@ -1504,7 +1463,7 @@ mod tests {
         (r.status, v)
     }
 
-    fn rpc(method: &str, params: Value) -> Value {
+    pub(super) fn rpc(method: &str, params: Value) -> Value {
         json!({"jsonrpc": "2.0", "id": 7, "method": method, "params": params})
     }
 
@@ -1840,7 +1799,7 @@ mod tests {
 
     /// An endpoint whose authorizer pins `org` for scoped calls and refuses
     /// any org but "alpha", and whose events hook streams two lines.
-    fn hooked() -> Endpoint {
+    pub(super) fn hooked() -> Endpoint {
         let mut ep = endpoint(ToolPolicy::default(), None);
         ep.hooks = Hooks {
             authn: None,

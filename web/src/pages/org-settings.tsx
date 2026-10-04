@@ -16,6 +16,7 @@ import { isolationText, placementLabel } from "@/lib/servers";
 import { errorMessage } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 import { useOrgPage } from "@/pages/org-common";
+import { AgentIdentitiesPanel } from "@/pages/org-agent-identities";
 import { NestingPanel } from "@/pages/org-nesting";
 
 export function SettingsPage() {
@@ -58,6 +59,7 @@ export function SettingsPage() {
           <LimitsPanel org={org} o={o} editable={platform} />
           <NetworkPanel o={o} />
           <EgressPanel org={org} o={o} editable={platform} />
+          <AgentIdentitiesPanel org={org} />
           {o.network && <NestingPanel org={org} o={o} superadmin={!!me.superadmin} />}
           {platform && !isDefault && <DangerPanel org={org} o={o} />}
         </div>

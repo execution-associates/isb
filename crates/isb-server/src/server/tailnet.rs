@@ -1,6 +1,6 @@
-//! Tailnet identity, for `isb serve --superadmin-tailnet`: who is at the
-//! other end of a TCP connection from a tailnet address, asked of the local
-//! tailscaled.
+//! Tailnet identity, for `isb serve --superadmin-tailnet` and orgs' agent
+//! identities: who is at the other end of a TCP connection from a tailnet
+//! address, asked of the local tailscaled.
 //!
 //! - Only the real socket peer counts. Forwarded headers
 //!   (`X-Forwarded-For`, `Tailscale-User-Login`) are never read: anything on
@@ -178,10 +178,11 @@ impl Tailnet {
         &self.hosts
     }
 
-    /// The tailnet identity behind `req` when it is on the allow list:
-    /// a TCP peer on a tailnet address, a `Host` naming this server, and a
-    /// whois that matches.
-    pub fn superadmin(&self, req: &Request) -> Option<Whois> {
+    /// The tailnet identity behind `req`: a TCP peer on a tailnet address,
+    /// a `Host` naming this server, and a whois answer. Who it is allowed
+    /// to be is the caller's question (the superadmin allow list, an org's
+    /// agent identities).
+    pub fn identify(&self, req: &Request) -> Option<Whois> {
         let Peer::Tcp(peer) = &req.peer else {
             return None;
         };
@@ -191,11 +192,17 @@ impl Tailnet {
         let host = req.header("host").map(host_only).unwrap_or_default();
         if !self.hosts.contains(&host) {
             eprintln!(
-                "isb serve: tailnet peer {peer} sent Host {host:?}, not one of this server's names; not a superadmin"
+                "isb serve: tailnet peer {peer} sent Host {host:?}, not one of this server's names; not identified"
             );
             return None;
         }
-        let w = self.whois(*peer)?;
+        self.whois(*peer)
+    }
+
+    /// The tailnet identity behind `req` when it is on the superadmin
+    /// allow list.
+    pub fn superadmin(&self, req: &Request) -> Option<Whois> {
+        let w = self.identify(req)?;
         if self.allow.admits(&w) { Some(w) } else { None }
     }
 
@@ -212,7 +219,7 @@ impl Tailnet {
             Err(e) => {
                 if !self.warned.swap(true, Ordering::Relaxed) {
                     eprintln!(
-                        "isb serve: tailnet superadmins are unavailable until tailscaled answers: {e}"
+                        "isb serve: tailnet identities are unavailable until tailscaled answers: {e}"
                     );
                 }
                 None

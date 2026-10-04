@@ -14,8 +14,8 @@ calling REST, something following the event stream.
   local `isb` CLI. Its callers are the daemon's own user, trusted with
   everything.
 - **HTTP listeners** (`--listen`): loopback addresses, reached through a
-  tunnel or reverse proxy, and tailnet addresses with
-  `--superadmin-tailnet` ([Reach isb serve remotely](../guides/remote-access.md)).
+  tunnel or reverse proxy, and tailnet addresses
+  ([Reach isb serve remotely](../guides/remote-access.md)).
   Each org with a workspace also gets an org-bound listener on its own
   bridge ([below](#the-org-bridge-listener)).
 

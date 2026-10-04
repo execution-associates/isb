@@ -22,10 +22,11 @@ did.
 | Secret reads | `secret_get`, `secret_resolve`, `app_webhook`, and `database_get` with `reveal` | always: they hand out secret material |
 | Reads | the tool's name | only with `--audit-all` (for compliance) |
 | Superadmins | the tool's name; `superadmin.refused` | every call a superadmin makes over HTTP, reads included; and every superadmin request refused by the CSRF, `Origin`, `Content-Type` or `Host` checks ([Access](../concepts/access.md#superadmins)) |
+| Agent identities | the tool's name; `agent.refused` | every call a tailnet or Access agent identity makes, and every request of one refused by those checks ([Agent identities](../concepts/access.md#agent-identities)) |
 | Sign-in | `auth.setup`, `auth.login` (password, passkey, provider), `auth.logout` | success and failure; a failure names the address that was tried |
 | Accounts | `auth.password_change`, `auth.password_reset_request`, `auth.password_reset`, `auth.passkey_add`, `auth.passkey_remove`, `auth.identity_link`, `auth.identity_unlink`, `auth.session_revoke` | |
 | Tokens | `auth.token_create`, `auth.token_revoke`, `auth.superadmin_token_create`, `auth.superadmin_token_revoke` | from the web UI, the API and `isb token` |
-| Orgs | `auth.invitation_create`, `auth.invitation_accept`, `auth.invitation_revoke`, `auth.role_change`, `auth.member_remove` | |
+| Orgs | `auth.invitation_create`, `auth.invitation_accept`, `auth.invitation_revoke`, `auth.role_change`, `auth.member_remove`, `auth.agent_identity_set`, `auth.agent_identity_remove` | |
 | Users | `auth.user_create`, `auth.user_disable`, `auth.user_enable`, `auth.platform_admin_grant`, `auth.platform_admin_revoke` | |
 | Webhooks | `webhook.deploy` | every delivery to `/api/v1/webhooks/<org>/<app>`: `ok` (deployed), `ignored` (another branch, a ping), `unauthorized` |
 | Terminals | `terminal.open`, `terminal.close` | with the app and replica (or the instance) and (on close) how long it ran; never what was typed |
@@ -49,7 +50,7 @@ secret reads, the rest are ordinary reads.
 | `id` | position in the log, from 1, never reused |
 | `time` | unix milliseconds |
 | `org` | the org the call acted in; `null` for platform-level entries (sign-ins, accounts, users, org-spanning tools) |
-| `actor` | the user's email; `local(uid N)` for the unix socket and the host CLI; `access:EMAIL` for a Cloudflare Access identity; `webhook:PROVIDER` (`github`, `gitlab`, `gitea`, `token`); `workspace` for an org's workspace token; a superadmin's source (`token:<name>`, `tailnet:<login>`, `access:<name>`) |
+| `actor` | the user's email; `local(uid N)` for the unix socket and the host CLI; `access:EMAIL` for a Cloudflare Access identity; `webhook:PROVIDER` (`github`, `gitlab`, `gitea`, `token`); `workspace` for an org's workspace token; an agent identity's source (`tailnet:<login or node>`, `access:<email or client id>`); a superadmin's source (`token:<name>`, `tailnet:<login>`, `access:<name>`) |
 | `actor_kind` | `person` (a session, or Access mapped to a user), `agent` (an API token or a workspace token), `local`, `webhook`, `anonymous` (a failed sign-in, an Access identity without an account), `superadmin` |
 | `user_id`, `user_email`, `token_id`, `token_name` | who, when known; a workspace's `token_name` is `workspace:<name>` |
 | `surface` | `mcp`, `rest`, `web` (a browser session), `cli` (the unix socket or the host CLI), `webhook` |

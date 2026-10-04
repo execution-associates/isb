@@ -1,7 +1,7 @@
 // Connecting an agent to the daemon's MCP server (docs/guides/agents.md): the
 // endpoint URLs, who may make an org token, and the install snippets per
 // client. Pure, so the snippets are tested as text.
-import type { Me } from "@/api/auth";
+import type { AgentIdentity, Me } from "@/api/auth";
 
 /** The org-bound endpoint: `org` is filled in, any other is refused. */
 export const orgMcpUrl = (origin: string, org: string) => `${trimSlash(origin)}/orgs/${encodeURIComponent(org)}/mcp`;
@@ -67,6 +67,78 @@ export function orgTokenReach(me: Me, org: string): string {
   if (role === "viewer") return "You are a viewer here, so a token you make only reads: an agent with it can list and inspect, not deploy, exec or read secret values.";
   if (role === "owner" || role === "admin") return `It acts as you (${role}): it administers ${org}'s apps and secrets, and can manage its members and tokens. Narrow it with Access if the agent needs less.`;
   return `It acts as you (${role ?? "member"}): it administers ${org}'s apps and secrets, and nothing outside ${org}.`;
+}
+
+// ---- how an org's agent signs in ----
+
+/** `GET orgs/ORG/agent-identities`: the org's mappings and which front doors the server has. */
+export interface OrgAgentIdentities {
+  identities: AgentIdentity[];
+  available: { tailnet_listen: string[]; access: boolean };
+}
+
+export type Way = "token" | "tailnet" | "access";
+
+export interface WayState {
+  id: Way;
+  label: string;
+  on: boolean;
+  /** When off: what is missing, in a sentence. */
+  why: string | null;
+}
+
+/** The roles an agent identity may have (never owner). */
+export const AGENT_ROLES = ["viewer", "member", "admin"] as const;
+export type AgentRole = (typeof AGENT_ROLES)[number];
+
+export const ROLE_REACH: Record<AgentRole, string> = {
+  viewer: "reads: lists and inspects, no secret values, no deploys, no exec",
+  member: "administers the org's apps, stacks, sandboxes and secrets",
+  admin: "member, and manages the org's members, invitations and tokens",
+};
+
+/**
+ * The three ways an org's agent can sign in, with whether each is on. The
+ * org token is always on. A tailnet identity needs a tailnet `--listen`
+ * address and a tailnet mapping in the org. An Access identity needs Access
+ * on a listener, and either a mapping (a service token, or the email of
+ * someone who is not an isb user) or member users (their email acts as them).
+ * `data` is undefined while it loads.
+ */
+export function orgWays(data: OrgAgentIdentities | undefined, memberCount: number): WayState[] {
+  const maps = (k: AgentIdentity["kind"]) => (data?.identities ?? []).filter((i) => i.kind === k).length;
+  const listens = data?.available.tailnet_listen ?? [];
+  const accessOn = !!data?.available.access;
+  const tailnetWhy: string[] = [];
+  if (listens.length === 0) tailnetWhy.push("The server has no tailnet --listen address (start isb serve with --listen 100.x.y.z:PORT), so no tailnet peer can reach it.");
+  if (maps("tailnet") === 0) tailnetWhy.push("No tailnet login or tag is mapped to a role in this org: an owner or admin adds one in Settings, Agent identities.");
+  const accessWhy: string[] = [];
+  if (!accessOn) accessWhy.push("Cloudflare Access does not guard a listener on this server (set CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD).");
+  if (maps("access") === 0 && memberCount === 0) accessWhy.push("This org has no member users and no Access service token or email mapped: an owner or admin adds one in Settings, Agent identities.");
+  return [
+    { id: "token", label: "Org token", on: true, why: null },
+    { id: "tailnet", label: "Tailnet identity", on: tailnetWhy.length === 0, why: tailnetWhy.join(" ") || null },
+    { id: "access", label: "Access identity", on: accessWhy.length === 0, why: accessWhy.join(" ") || null },
+  ];
+}
+
+/** What a mapping's subject is: a login, a node tag, an email or a service token. */
+export function subjectKind(i: Pick<AgentIdentity, "kind" | "subject">): string {
+  if (i.kind === "tailnet") return i.subject.startsWith("tag:") ? "node tag" : "login";
+  return i.subject.includes("@") ? "email" : "service token";
+}
+
+/** What a new mapping's subject looks like, as the form's placeholder. */
+export const SUBJECT_EXAMPLE = { tailnet: "tag:agents or me@example.com", access: "abc123.access or bob@example.com" } as const;
+
+/** What the form refuses before the server does, or null. */
+export function subjectProblem(kind: AgentIdentity["kind"], raw: string): string | null {
+  const s = raw.trim();
+  if (!s) return "Name a login, tag, email or client id.";
+  if (/[\s*?,]/.test(s)) return "Exact names only: no spaces, commas or wildcards.";
+  if (kind === "tailnet" && !/^tag:[A-Za-z0-9_-]+$/i.test(s) && !/^[^@]+@[^@]+$/.test(s)) return "A tailnet login (someone@example.com) or a tag (tag:name).";
+  if (kind === "access" && s.includes("@") && !/^[^@]+@[^@]+$/.test(s)) return "A whole email address, or a service token's client id.";
+  return null;
 }
 
 // ---- install snippets ----

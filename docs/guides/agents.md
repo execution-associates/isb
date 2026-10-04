@@ -98,6 +98,24 @@ rules: members, viewers (whose token only reads), platform admins; not a
 superadmin without an account, and not a session signed in with a narrowed
 token.
 
+### Without a token: tailnet and Access identities
+
+An org's owners and admins can let an agent in by where it connects from,
+with a role in that org only ([Agent identities](../concepts/access.md#agent-identities)).
+The MCP page's **How the agent signs in** shows three cards, each On or Off,
+and the snippets for the one selected:
+
+| Card | On when | The agent |
+|---|---|---|
+| Org token | always | sends `Authorization: Bearer` (above) |
+| Tailnet identity | the server has a tailnet `--listen` address and the org maps a tailnet login or tag | connects to `http://TAILNET-ADDRESS:PORT/orgs/ORG/mcp` from a mapped node, with no credential |
+| Access identity | Access guards a listener, and the org maps an Access service token or email, or has member users | sends the Access service token's `CF-Access-Client-Id` and `CF-Access-Client-Secret`; a person whose email is a member acts as that member |
+
+An Off card says what is missing: a tailnet `--listen` address on the server,
+or a mapping set in the org's **Settings, Agent identities** (or
+`agent_identity_set`). The client must send `Content-Type: application/json`
+and no foreign `Origin`, as MCP clients do; REST writes need `X-Isb-Csrf: 1`.
+
 ### Behind Cloudflare Access
 
 When the daemon sits behind Access ([Reach isb serve

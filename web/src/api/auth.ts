@@ -24,6 +24,8 @@ export type InvitationInfo = S["InvitationInfo"];
 export type Invitation = S["Invitation"];
 export type Member = S["Member"];
 export type OrgToken = S["OrgToken"];
+/** A tailnet login or tag, an Access email or a service token, mapped to a role in one org. */
+export type AgentIdentity = S["AgentIdentity"];
 export type AdminUser = S["AdminUser"];
 
 /** Where a superadmin's power comes from. */
@@ -47,7 +49,8 @@ export type Me = Omit<S["Me"], "auth" | "superadmin"> & {
     | { kind: "api_token"; id: number; org: string | null; name: string; scopes?: string[] }
     | { kind: "access" }
     | { kind: "superadmin"; source: SuperadminVia }
-    | { kind: "workspace"; org: string; name: string };
+    | { kind: "workspace"; org: string; name: string }
+    | { kind: "agent"; label: string };
   /** The unix socket's reach over HTTP (docs/concepts/access.md#superadmins), or null. */
   superadmin?: Superadmin | null;
 };
@@ -119,6 +122,10 @@ export const auth = {
     call("put", "/api/v1/auth/orgs/{org}/members/{user_id}", { org, user_id: userId }, { role }),
   removeMember: (org: string, userId: number) =>
     call("delete", "/api/v1/auth/orgs/{org}/members/{user_id}", { org, user_id: userId }),
+  agentIdentities: (org: string) => call("get", "/api/v1/auth/orgs/{org}/agent-identities", { org }),
+  setAgentIdentity: (org: string, b: { kind: "tailnet" | "access"; subject: string; role: "admin" | "member" | "viewer"; note?: string }) =>
+    call("put", "/api/v1/auth/orgs/{org}/agent-identities", { org }, b),
+  removeAgentIdentity: (org: string, id: number) => call("delete", "/api/v1/auth/orgs/{org}/agent-identities/{id}", { org, id }),
   orgTokens: (org: string) => call("get", "/api/v1/auth/orgs/{org}/tokens", { org }),
 
   adminUsers: () => call("get", "/api/v1/auth/admin/users", none),

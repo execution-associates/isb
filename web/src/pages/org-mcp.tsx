@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, ChevronRight, Cloud, Crown, ExternalLink, KeyRound, Network, Plug, ShieldAlert, Terminal, Wrench } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import { Link, Navigate } from "react-router";
-import { type ApiToken, auth, type Me } from "@/api/auth";
+import { type AgentIdentity, type ApiToken, auth, type Me } from "@/api/auth";
 import { get } from "@/api/client";
 import { callTool } from "@/api/tools";
 import { PageHeader } from "@/components/app-shell";
@@ -17,7 +17,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { ACCESS, type Access, describeScopes, EXPIRY, scopesFor } from "@/lib/admin";
+import { ACCESS, type Access, describeScopes, EXPIRY, maxGrant, scopesFor } from "@/lib/admin";
 import { errorMessage } from "@/lib/messages";
 import {
   ACCESS_ID_VAR,
@@ -31,6 +31,13 @@ import {
   isTailnetListen,
   listenOrigin,
   orgMcpUrl,
+  orgWays,
+  type OrgAgentIdentities,
+  ROLE_REACH,
+  subjectKind,
+  type AgentRole,
+  type Way,
+  type WayState,
   orgTokenBlocker,
   orgTokenReach,
   rootMcpUrl,
@@ -42,7 +49,8 @@ import { defaultOrg, superadminVia, useMe } from "@/lib/session";
 import { cn } from "@/lib/utils";
 import type { HostPolicy } from "@/pages/host";
 import { useOrgPage } from "@/pages/org-common";
-import { RowsSkeleton, Tag } from "@/pages/org-ui";
+import { RolePill, RowsSkeleton, Tag } from "@/pages/org-ui";
+import { agentIdentitiesKey } from "@/pages/org-agent-identities";
 
 const DOCS = "https://github.com/execution-associates/isb/blob/main/docs";
 const TOKEN_VAR = "ISB_TOKEN";
@@ -91,8 +99,12 @@ export function McpHome() {
 
 function OrgMcp({ me, org }: { me: Me; org: string }) {
   const url = orgMcpUrl(origin(), org);
+  const [way, setWay] = useState<Way>("token");
   const [access, setAccess] = useState(() => !isDirectHost(window.location.hostname));
   const [created, setCreated] = useState<{ token: string; info: ApiToken } | null>(null);
+  const ids = useQuery({ queryKey: agentIdentitiesKey(org), queryFn: () => auth.agentIdentities(org) });
+  const members = useQuery({ queryKey: ["members", org], queryFn: () => auth.members(org) });
+  const ways = orgWays(ids.data, members.data?.members.length ?? 0);
   const opts: SnippetOptions = { name: `isb-${org}`, url, tokenVar: TOKEN_VAR, access };
   return (
     <>
@@ -106,23 +118,158 @@ function OrgMcp({ me, org }: { me: Me; org: string }) {
         }
         description={
           <>
-            For an agent working in {org}: with a token from a member, it administers {org}'s apps, deployments and secrets as that member's role allows, and reaches nothing outside {org}. Every tool's <code className="font-mono text-xs">org</code> is filled in.
+            For an agent working in {org}: it administers {org}'s apps, deployments and secrets as its role allows, and reaches nothing outside {org}. Every tool's <code className="font-mono text-xs">org</code> is filled in.
           </>
         }
       >
-        <div className="grid gap-4 p-5">
+        <div className="grid gap-5 p-5">
           <UrlRow url={url} />
-          <AccessSwitch on={access} onChange={setAccess} />
+          <div className="grid gap-2">
+            <div className="text-[13px] font-medium">How the agent signs in</div>
+            <SourceTabs label="Agent sign-in" items={ways} value={way} onChange={setWay} loading={ids.isLoading} />
+          </div>
+          {ids.error && <FormError>{errorMessage(ids.error)}</FormError>}
         </div>
       </Panel>
-      <TokenPanel me={me} org={org} created={created} onCreated={setCreated} />
-      <Panel icon={<Terminal />} title="Install it" description="Pick the agent's client. Each reads the token from an environment variable, so no file holds it.">
-        <div className="p-5">
-          <Install opts={opts} token={created?.token} where={orgTokenBlocker(me, org) ? "a token an org member made" : "make one above"} />
-        </div>
-      </Panel>
-      <ToolList filter={(t) => !isHostTool(t.name)} title={`Tools at /orgs/${org}/mcp`} hint="What the server lists. A call is still judged by the token's role and scopes: a viewer's or a read-only token's writes are refused." />
+      {way === "token" && (
+        <>
+          <Panel icon={<Plug />} title="Behind Cloudflare Access?">
+            <div className="p-5">
+              <AccessSwitch on={access} onChange={setAccess} />
+            </div>
+          </Panel>
+          <TokenPanel me={me} org={org} created={created} onCreated={setCreated} />
+          <Panel icon={<Terminal />} title="Install it" description="Pick the agent's client. Each reads the token from an environment variable, so no file holds it.">
+            <div className="p-5">
+              <Install opts={opts} token={created?.token} where={orgTokenBlocker(me, org) ? "a token an org member made" : "make one above"} />
+            </div>
+          </Panel>
+        </>
+      )}
+      {way === "tailnet" && <OrgTailnet me={me} org={org} state={ways[1]} data={ids.data} loading={ids.isLoading} />}
+      {way === "access" && <OrgAccess me={me} org={org} state={ways[2]} data={ids.data} loading={ids.isLoading} memberCount={members.data?.members.length ?? 0} />}
+      <ToolList filter={(t) => !isHostTool(t.name)} title={`Tools at /orgs/${org}/mcp`} hint="What the server lists. A call is still judged by the caller's role and scopes: a viewer's or a read-only token's writes are refused." />
     </>
+  );
+}
+
+/** The sign-in cards: each a way in, with On or Off; selecting one shows how. */
+function SourceTabs<T extends string>({ label, items, value, onChange, loading }: { label: string; items: { id: T; label: string; on: boolean }[]; value: T; onChange: (v: T) => void; loading?: boolean }) {
+  const icons: Record<string, typeof KeyRound> = { token: KeyRound, tailnet: Network, access: Cloud };
+  return (
+    <div role="tablist" aria-label={label} className="grid gap-2 sm:grid-cols-3">
+      {items.map((s) => {
+        const Icon = icons[s.id] ?? KeyRound;
+        return (
+          <button
+            key={s.id}
+            type="button"
+            role="tab"
+            aria-selected={value === s.id}
+            onClick={() => onChange(s.id)}
+            className={cn(
+              "flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left text-[13px] transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+              value === s.id && "border-foreground/25 bg-muted/60 shadow-xs",
+            )}
+          >
+            <Icon className="size-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 font-medium">{s.label}</span>
+            {loading ? null : s.on ? <StatusBadge tone="success">On</StatusBadge> : <StatusBadge tone="muted">Off</StatusBadge>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The org's mappings of one kind, and where to change them. */
+function Mappings({ org, me, kind, data }: { org: string; me: Me; kind: AgentIdentity["kind"]; data: OrgAgentIdentities | undefined }) {
+  const items = (data?.identities ?? []).filter((i) => i.kind === kind);
+  const canManage = maxGrant(me, org) !== null;
+  return (
+    <div className="grid gap-2">
+      <div className="flex flex-wrap items-center gap-1.5 text-[13px]">
+        <span className="mr-1 text-muted-foreground">Mapped in {org}:</span>
+        {items.length === 0 && <span className="text-muted-foreground">none</span>}
+        {items.map((i) => (
+          <span key={i.id} className="inline-flex items-center gap-1" title={`${subjectKind(i)}; ${ROLE_REACH[i.role as AgentRole]}`}>
+            <Tag mono className="h-6 text-[12px] text-foreground/85">
+              {i.subject}
+            </Tag>
+            <RolePill role={i.role} />
+          </span>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {canManage ? "Add or remove them in " : "The org's owners and admins add or remove them in "}
+        <Link to={`/orgs/${encodeURIComponent(org)}/settings#agent-identities`} className="text-foreground underline-offset-4 hover:underline">
+          Settings, Agent identities
+        </Link>
+        .
+      </p>
+    </div>
+  );
+}
+
+function OrgTailnet({ me, org, state, data, loading }: { me: Me; org: string; state: WayState; data: OrgAgentIdentities | undefined; loading: boolean }) {
+  const listens = data?.available.tailnet_listen ?? [];
+  const url = listens[0] ? orgMcpUrl(listenOrigin(listens[0]), org) : null;
+  return (
+    <Panel icon={<Network />} title="Tailnet identity" description={`No token: an agent on a tailnet node that ${org} maps to a role is signed in by where it connects from.`}>
+      <div className="grid gap-4 p-5">
+        {loading ? (
+          <RowsSkeleton rows={2} />
+        ) : (
+          <>
+            <SourceHead>
+              The node's login, or one of its tags, is mapped to a role in {org} only; a tagged node is its tags, never its owner's login. The server asks tailscaled who is connecting, so nothing the client sends can claim an identity. The client must send <code className="font-mono text-xs">Content-Type: application/json</code> and no foreign <code className="font-mono text-xs">Origin</code>, as MCP clients do.
+            </SourceHead>
+            <Mappings org={org} me={me} kind="tailnet" data={data} />
+            {!state.on && <WhyOff>{state.why}</WhyOff>}
+            {url && (
+              <>
+                <UrlRow url={url} label="MCP URL on the tailnet" />
+                <Install opts={{ name: `isb-${org}`, url, tokenVar: null, access: false }} envStep={false} />
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+function OrgAccess({ me, org, state, data, loading, memberCount }: { me: Me; org: string; state: WayState; data: OrgAgentIdentities | undefined; loading: boolean; memberCount: number }) {
+  const url = orgMcpUrl(origin(), org);
+  return (
+    <Panel icon={<Cloud />} title="Access identity" description="No isb token: Cloudflare Access signs the identity, and isb trusts only a verified assertion.">
+      <div className="grid gap-4 p-5">
+        {loading ? (
+          <RowsSkeleton rows={2} />
+        ) : (
+          <>
+            <SourceHead>
+              A headless agent uses an Access service token that {org} maps to a role (below), or one of Access's own policies for a person: someone whose email is an isb user acts as that user with their real roles ({memberCount} member{memberCount === 1 ? "" : "s"} here), and anyone else needs their email mapped. Put the service token's client id in Settings and its secret in the agent's environment.
+            </SourceHead>
+            <Mappings org={org} me={me} kind="access" data={data} />
+            {!state.on && <WhyOff>{state.why}</WhyOff>}
+            <UrlRow url={url} label="MCP URL (the public URL)" />
+            <Install opts={{ name: `isb-${org}`, url, tokenVar: null, access: true }} />
+          </>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+function WhyOff({ children }: { children: ReactNode }) {
+  return (
+    <div className="rounded-lg border border-dashed px-4 py-3 text-[13px] leading-relaxed text-muted-foreground">
+      <StatusBadge tone="muted" className="mr-2">
+        Off
+      </StatusBadge>
+      {children}
+    </div>
   );
 }
 
@@ -392,10 +539,10 @@ function SuperadminMcp({ me }: { me: Me }) {
   const p = policy.data;
   const tailnetListens = (p?.listen ?? []).filter(isTailnetListen);
   const behindAccess = !isDirectHost(window.location.hostname);
-  const sources: { id: Source; label: string; icon: typeof KeyRound; on: boolean }[] = [
-    { id: "token", label: "Superadmin token", icon: KeyRound, on: true },
-    { id: "tailnet", label: "Tailnet identity", icon: Network, on: !!p?.superadmin.tailnet },
-    { id: "access", label: "Access identity", icon: Cloud, on: !!p?.superadmin.access },
+  const sources: { id: Source; label: string; on: boolean }[] = [
+    { id: "token", label: "Superadmin token", on: true },
+    { id: "tailnet", label: "Tailnet identity", on: !!p?.superadmin.tailnet },
+    { id: "access", label: "Access identity", on: !!p?.superadmin.access },
   ];
   return (
     <>
@@ -419,25 +566,7 @@ function SuperadminMcp({ me }: { me: Me }) {
           </Alert>
           <div className="grid gap-2">
             <div className="text-[13px] font-medium">How the agent becomes a superadmin</div>
-            <div role="tablist" aria-label="Superadmin source" className="grid gap-2 sm:grid-cols-3">
-              {sources.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={source === s.id}
-                  onClick={() => setSource(s.id)}
-                  className={cn(
-                    "flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left text-[13px] transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
-                    source === s.id && "border-foreground/25 bg-muted/60 shadow-xs",
-                  )}
-                >
-                  <s.icon className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 font-medium">{s.label}</span>
-                  {policy.isLoading ? null : s.on ? <StatusBadge tone="success">On</StatusBadge> : <StatusBadge tone="muted">Off</StatusBadge>}
-                </button>
-              ))}
-            </div>
+            <SourceTabs label="Superadmin source" items={sources} value={source} onChange={setSource} loading={policy.isLoading} />
           </div>
           {policy.error && <FormError>{errorMessage(policy.error)}</FormError>}
           {source === "token" && <TokenSource behindAccess={behindAccess} />}

@@ -13,6 +13,10 @@ import {
   isTailnetListen,
   listenOrigin,
   orgMcpUrl,
+  orgWays,
+  type OrgAgentIdentities,
+  subjectKind,
+  subjectProblem,
   orgTokenBlocker,
   orgTokenReach,
   rootMcpUrl,
@@ -144,5 +148,76 @@ describe("tool list", () => {
     expect(firstSentence("Deploy a stack. Returns changes.")).toBe("Deploy a stack.");
     expect(firstSentence("No full stop")).toBe("No full stop");
     expect(firstSentence(undefined)).toBe("");
+  });
+});
+
+const mapping = (kind: "tailnet" | "access", subject: string) => ({ id: 1, org: "acme", kind, subject, role: "member" as const, note: "", created_at: 0, created_by: "me" });
+const ids = (identities: OrgAgentIdentities["identities"], tailnet_listen: string[], access: boolean): OrgAgentIdentities => ({ identities, available: { tailnet_listen, access } });
+const state = (d: OrgAgentIdentities | undefined, members: number) => Object.fromEntries(orgWays(d, members).map((w) => [w.id, w]));
+
+describe("the org's sign-in cards", () => {
+  it("always have the org token on, in the order token, tailnet, access", () => {
+    expect(orgWays(undefined, 0).map((w) => w.id)).toEqual(["token", "tailnet", "access"]);
+    expect(state(undefined, 0).token.on).toBe(true);
+    expect(state(ids([], [], false), 3).token.why).toBeNull();
+  });
+
+  it("turn the tailnet on with a tailnet listener and a tailnet mapping, and say what is missing", () => {
+    const m = mapping("tailnet", "tag:agents");
+    expect(state(ids([m], ["100.86.22.100:8092"], false), 1).tailnet).toMatchObject({ on: true, why: null });
+    const noListen = state(ids([m], [], false), 1).tailnet;
+    expect(noListen.on).toBe(false);
+    expect(noListen.why).toContain("--listen");
+    expect(noListen.why).not.toContain("Settings");
+    const noMap = state(ids([mapping("access", "svc.access")], ["100.86.22.100:8092"], true), 1).tailnet;
+    expect(noMap.on).toBe(false);
+    expect(noMap.why).toContain("Settings, Agent identities");
+    expect(noMap.why).not.toContain("--listen");
+    const neither = state(ids([], [], false), 1).tailnet;
+    expect(neither.why).toContain("--listen");
+    expect(neither.why).toContain("Settings");
+  });
+
+  it("turn Access on with Access on a listener and a mapping or member users", () => {
+    expect(state(ids([], [], true), 2).access).toMatchObject({ on: true, why: null });
+    expect(state(ids([mapping("access", "svc.access")], [], true), 0).access.on).toBe(true);
+    const none = state(ids([], [], true), 0).access;
+    expect(none.on).toBe(false);
+    expect(none.why).toContain("no member users");
+    const noAccess = state(ids([mapping("access", "svc.access")], [], false), 5).access;
+    expect(noAccess.on).toBe(false);
+    expect(noAccess.why).toContain("CF_ACCESS_TEAM_DOMAIN");
+    // A tailnet mapping does not count for Access.
+    expect(state(ids([mapping("tailnet", "me@example.com")], [], true), 0).access.on).toBe(false);
+  });
+
+  it("show tokenless snippets for the tailnet and service token headers for Access", () => {
+    const tail = { name: "isb-acme", url: orgMcpUrl(listenOrigin("100.86.22.100:8092"), "acme"), tokenVar: null, access: false };
+    expect(claudeCode(tail).blocks[0].code).toBe("claude mcp add --transport http --scope user isb-acme http://100.86.22.100:8092/orgs/acme/mcp");
+    expect(curl(tail).blocks[0].code).not.toContain("Authorization");
+    const acc = { name: "isb-acme", url: orgMcpUrl("https://isb.example.com", "acme"), tokenVar: null, access: true };
+    const code = claudeCode(acc).blocks[0].code;
+    expect(code).toContain('--header "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"');
+    expect(code).toContain('--header "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"');
+    expect(code).not.toContain("Authorization");
+  });
+});
+
+describe("agent identity subjects", () => {
+  it("are named by what they are", () => {
+    expect(subjectKind(mapping("tailnet", "tag:agents"))).toBe("node tag");
+    expect(subjectKind(mapping("tailnet", "me@example.com"))).toBe("login");
+    expect(subjectKind(mapping("access", "bob@example.com"))).toBe("email");
+    expect(subjectKind(mapping("access", "abc.access"))).toBe("service token");
+  });
+
+  it("are checked like the server does", () => {
+    expect(subjectProblem("tailnet", "tag:agents")).toBeNull();
+    expect(subjectProblem("tailnet", "me@example.com")).toBeNull();
+    for (const bad of ["", "nobody", "tag:", "tag:a b", "*@example.com", "a@b,c@d"]) expect(subjectProblem("tailnet", bad), bad).not.toBeNull();
+    expect(subjectProblem("access", "abc123.access")).toBeNull();
+    expect(subjectProblem("access", "bob@example.com")).toBeNull();
+    expect(subjectProblem("access", "@example.com")).not.toBeNull();
+    expect(subjectProblem("access", "a*")).not.toBeNull();
   });
 });
