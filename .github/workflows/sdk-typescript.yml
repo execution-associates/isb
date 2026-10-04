@@ -13,6 +13,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Build and publish this existing v* tag (re-publish a release)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -30,6 +35,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: build isb
@@ -48,7 +55,7 @@ jobs:
 
   binaries:
     name: isb ${{ matrix.target }}
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
     needs: check
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -63,11 +70,14 @@ jobs:
             npm: linux-arm64
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - name: tag matches Cargo.toml and package.json versions
         working-directory: .
         run: |
           want="v$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
-          [ "$GITHUB_REF_NAME" = "$want" ] || { echo "tag $GITHUB_REF_NAME != Cargo.toml $want"; exit 1; }
+          tag="${{ inputs.tag || github.ref_name }}"
+          [ "$tag" = "$want" ] || { echo "tag $tag != Cargo.toml $want"; exit 1; }
           for p in sdk/typescript/package.json sdk/typescript/npm/*/package.json; do
             v="v$(grep -m1 '"version"' "$p" | cut -d'"' -f4)"
             [ "$v" = "$want" ] || { echo "$p is $v, want $want"; exit 1; }
@@ -104,11 +114,13 @@ jobs:
 
   sdk-package:
     name: pack @execution-associates/isb
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
     needs: check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - name: pack
@@ -124,7 +136,7 @@ jobs:
 
   publish:
     name: publish to npm
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
     needs: [binaries, sdk-package]
     runs-on: ubuntu-latest
     permissions:
