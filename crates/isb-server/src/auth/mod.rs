@@ -304,6 +304,8 @@ pub struct Principal {
     pub kind: PrincipalKind,
     pub orgs: Vec<(OrgId, Role)>,
     pub platform_admin: bool,
+    /// Set on an org-bound endpoint for a superadmin or platform admin: an admin of this org only.
+    pub downscoped: Option<OrgId>,
 }
 
 impl Principal {
@@ -327,20 +329,6 @@ impl Principal {
     /// Read-only tools in `org`.
     pub fn can_read_org(&self, org: &OrgId) -> bool {
         self.can(org, Permission::ReadOrg)
-    }
-
-    /// The token's scopes; empty for sessions and unscoped tokens.
-    pub fn scopes(&self) -> &[String] {
-        match &self.kind {
-            PrincipalKind::ApiToken { scopes, .. } => scopes,
-            _ => &[],
-        }
-    }
-
-    /// A token scoped short of `admin`: it may not change who has access.
-    pub fn restricted(&self) -> bool {
-        let s = self.scopes();
-        !s.is_empty() && !s.iter().any(|x| x == "admin")
     }
 
     /// Members, invitations and every token in `org`.
@@ -1058,6 +1046,7 @@ impl AuthStore {
             user,
             kind: PrincipalKind::Access,
             orgs,
+            downscoped: None,
         }))
     }
 
@@ -1076,6 +1065,7 @@ impl AuthStore {
             user,
             kind: PrincipalKind::Session { id: s.id },
             orgs,
+            downscoped: None,
         }))
     }
 
@@ -1617,6 +1607,7 @@ impl AuthStore {
             },
             orgs,
             platform_admin,
+            downscoped: None,
         }))
     }
 

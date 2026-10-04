@@ -37,6 +37,7 @@ pub(super) fn user(orgs: &[(&str, Role)], platform_admin: bool) -> Caller {
                 .map(|(o, r)| (OrgId::new(*o).unwrap(), *r))
                 .collect(),
             platform_admin,
+            downscoped: None,
         }),
     }
 }

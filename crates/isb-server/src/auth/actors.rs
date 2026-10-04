@@ -10,6 +10,40 @@ use crate::audit::{Actor, ActorKind};
 pub const WORKSPACE_ACTOR: &str = "workspace";
 
 impl Principal {
+    /// The token's scopes; empty for sessions and unscoped tokens.
+    pub fn scopes(&self) -> &[String] {
+        match &self.kind {
+            PrincipalKind::ApiToken { scopes, .. } => scopes,
+            _ => &[],
+        }
+    }
+
+    /// A token scoped short of `admin`: it may not change who has access.
+    pub fn restricted(&self) -> bool {
+        let s = self.scopes();
+        !s.is_empty() && !s.iter().any(|x| x == "admin")
+    }
+
+    /// This principal as an org-bound endpoint sees it. A superadmin or a
+    /// platform admin becomes an admin of `org` only (an owner stays one):
+    /// not a platform admin, no other org. Everyone else is unchanged.
+    pub fn downscoped_to(&self, org: &OrgId) -> Principal {
+        let privileged =
+            self.platform_admin || matches!(self.kind, PrincipalKind::Superadmin { .. });
+        if !privileged {
+            return self.clone();
+        }
+        let role = self
+            .role_in(org)
+            .map_or(Role::Admin, |r| r.max(Role::Admin));
+        let mut p = self.clone();
+        p.platform_admin = false;
+        p.user.platform_admin = false;
+        p.orgs = vec![(org.clone(), role)];
+        p.downscoped = Some(org.clone());
+        p
+    }
+
     /// The principal an org's workspace token authenticates: no account
     /// (user id 0, named `workspace`), confined to `org` with `role`.
     pub fn workspace(org: &OrgId, name: &str, role: Role) -> Principal {
@@ -29,6 +63,7 @@ impl Principal {
             },
             orgs: vec![(org.clone(), role)],
             platform_admin: false,
+            downscoped: None,
         }
     }
 
@@ -56,6 +91,7 @@ impl Principal {
             },
             orgs,
             platform_admin: false,
+            downscoped: None,
         }
     }
 

@@ -24,7 +24,7 @@ calling REST, something following the event stream.
 | Path | What |
 |---|---|
 | `POST /mcp` | MCP (Streamable HTTP); every tool takes an `org` argument |
-| `POST /orgs/<org>/mcp` | MCP bound to one org: `org` is filled in, and any other value is refused |
+| `POST /orgs/<org>/mcp` | MCP bound to one org: `org` is filled in, and any other value is refused; a superadmin or platform admin acts as an admin of that org only |
 | `POST /api/v1/tools/<tool>`, `POST /orgs/<org>/api/v1/tools/<tool>` | REST: one tool call, the arguments as a JSON body |
 | `GET /api/v1/tools` | the tools this listener offers, with their schemas and annotations |
 | `GET /api/v1/openapi.json` | an OpenAPI 3.1 document of every route on this page ([below](#the-openapi-document)), without authentication |
@@ -61,6 +61,12 @@ Every HTTP caller is an isb user, or a superadmin:
   valid `Cf-Access-Jwt-Assertion`, and isb's own sign-in applies behind it.
   An Access identity whose email is an isb user's acts as that user. The
   webhook path and `/healthz` are served ahead of Access.
+- **Org-bound paths** (`/orgs/<org>/...`): a superadmin or platform admin is
+  scoped down to an admin of that org. Host, superadmin and platform tools are
+  not listed and are refused there, the remote-spec policy applies, and the
+  audit row records `scope: org <org>` beside the real identity. The unbound
+  paths and the unix socket keep their full reach
+  ([Access](../concepts/access.md#on-an-org-bound-endpoint)).
 - **No credential**: refused (anonymous calls work only with
   `--allow-unauthenticated`, for local testing). A request with a credential
   that does not check out is a 401, even when a valid session cookie rides

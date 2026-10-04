@@ -149,7 +149,7 @@ function OrgMcp({ me, org }: { me: Me; org: string }) {
       )}
       {way === "tailnet" && <OrgTailnet me={me} org={org} state={ways[1]} data={ids.data} loading={ids.isLoading} />}
       {way === "access" && <OrgAccess me={me} org={org} state={ways[2]} data={ids.data} loading={ids.isLoading} memberCount={members.data?.members.length ?? 0} />}
-      <ToolList filter={(t) => !isHostTool(t.name)} title={`Tools at /orgs/${org}/mcp`} hint="What the server lists. A call is still judged by the caller's role and scopes: a viewer's or a read-only token's writes are refused." />
+      <ToolList filter={(t) => !isHostTool(t.name)} title={`Tools at /orgs/${org}/mcp`} hint="What the server lists. A call is still judged by the caller's role and scopes: a viewer's or a read-only token's writes are refused. An org connector is scoped to this org even for a superadmin or platform admin, who act as an admin of the org here: host, superadmin and platform tools stay on the unbound /mcp." />
     </>
   );
 }

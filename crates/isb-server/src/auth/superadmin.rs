@@ -102,6 +102,7 @@ impl Superadmin {
                 },
                 orgs: Vec::new(),
                 platform_admin: true,
+                downscoped: None,
             },
             source,
         }
@@ -122,6 +123,7 @@ impl Superadmin {
                 },
                 orgs,
                 platform_admin: true,
+                downscoped: None,
             },
             source,
         })
