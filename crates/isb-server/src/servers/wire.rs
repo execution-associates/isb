@@ -178,6 +178,7 @@ impl Assertion {
             kind,
             orgs: self.orgs.clone(),
             platform_admin: self.platform_admin,
+            downscoped: None,
         }
     }
 }
@@ -207,6 +208,7 @@ mod tests {
             },
             orgs: vec![(OrgId::new("acme").unwrap(), Role::Member)],
             platform_admin: false,
+            downscoped: None,
         };
         let a = Assertion::for_caller(&Caller::User {
             principal: Arc::new(p),

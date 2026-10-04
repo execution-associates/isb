@@ -17,6 +17,7 @@ use super::http::{Peer, Request, Response};
 use crate::error::{Error, Result};
 
 mod ambient;
+mod downscope;
 pub use ambient::ambient_ok;
 
 pub use isb_core::serve_client::PROTOCOL_VERSIONS;
@@ -412,6 +413,9 @@ pub type Authorize = Arc<
     dyn Fn(&Caller, &Tool, Value, Option<&crate::org::OrgId>) -> crate::Result<Value> + Send + Sync,
 >;
 
+/// Is `tool` listed to `caller` here? For `tools/list` only; [`Authorize`] judges calls.
+pub type Listed = Arc<dyn Fn(&Caller, &str, Option<&crate::org::OrgId>) -> bool + Send + Sync>;
+
 /// The body of `GET /api/v1/events`: a stream of server-sent events for
 /// this caller, starting after `since` (from `?since=` or `Last-Event-ID`).
 pub type Events = Arc<dyn Fn(&Caller, u64) -> crate::Result<super::http::StreamFn> + Send + Sync>;
@@ -458,6 +462,8 @@ pub struct Hooks {
     pub audit: Option<Audit>,
     /// Forwards calls for orgs placed on another server.
     pub route: Option<Route>,
+    /// Which tools `tools/list` shows a caller (all, when unset).
+    pub listed: Option<Listed>,
 }
 
 /// Where a request came from, for the audit log: the surface (`cli` over
@@ -576,7 +582,7 @@ impl Endpoint {
     }
 
     fn mcp(&self, req: &Request, scope: Option<&crate::org::OrgId>) -> Response {
-        let caller = match self.authenticate(req) {
+        let caller = match self.authenticate_in(req, scope) {
             Ok(c) => c,
             Err(r) => return r,
         };
@@ -663,7 +669,7 @@ impl Endpoint {
     }
 
     fn rest_run(&self, req: &Request, name: &str, scope: Option<&crate::org::OrgId>) -> Response {
-        let caller = match self.authenticate(req) {
+        let caller = match self.authenticate_in(req, scope) {
             Ok(c) => c,
             Err(r) => return r,
         };
@@ -754,7 +760,7 @@ impl Endpoint {
         let Some(open) = &self.hooks.terminal else {
             return Response::text(404, "not found");
         };
-        let caller = match self.authenticate(req) {
+        let caller = match self.authenticate_in(req, Some(org)) {
             Ok(c) => c,
             Err(r) => return r,
         };
@@ -799,7 +805,7 @@ impl Endpoint {
         let Some(open) = &self.hooks.ssh else {
             return Response::text(404, "not found");
         };
-        let caller = match self.authenticate(req) {
+        let caller = match self.authenticate_in(req, Some(org)) {
             Ok(c) => c,
             Err(r) => return r,
         };
@@ -1174,14 +1180,7 @@ impl Endpoint {
                 if params.get("cursor").is_some_and(|c| !c.is_string()) {
                     return bad("cursor must be a string");
                 }
-                let tools: Vec<Value> = self
-                    .registry
-                    .tools()
-                    .iter()
-                    .filter(|t| self.policy.allows(&t.name))
-                    .map(Tool::describe)
-                    .collect();
-                Ok(json!({"tools": tools}))
+                Ok(json!({"tools": self.listed_tools(caller, scope)}))
             }
             "tools/call" => {
                 let Some(name) = params.get("name").and_then(Value::as_str) else {
@@ -1825,6 +1824,7 @@ mod tests {
             })),
             audit: None,
             route: None,
+            listed: None,
         };
         ep
     }

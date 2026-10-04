@@ -310,7 +310,7 @@ function CatalogsDialog({ org, open, onOpenChange }: { org: string; open: boolea
     setPending(true);
     setError(null);
     try {
-      await callTool("template_catalog_add", { name: name.trim(), format, location: location.trim() }, org);
+      await callTool("template_catalog_add", { name: name.trim(), format, location: location.trim() });
       await refresh();
       toast.success(`Catalog ${name} added`);
       setName("");
@@ -323,7 +323,7 @@ function CatalogsDialog({ org, open, onOpenChange }: { org: string; open: boolea
   };
   const remove = async (n: string) => {
     try {
-      await callTool("template_catalog_remove", { name: n }, org);
+      await callTool("template_catalog_remove", { name: n });
       await refresh();
       toast.success(`Catalog ${n} removed`);
     } catch (err) {

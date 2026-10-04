@@ -215,6 +215,26 @@ Minting and revoking are in the audit log.
   actor kind `superadmin` and its source as the actor; refusals too. A
   sandbox it creates is labelled `isb.owner=<source>`.
 
+### On an org-bound endpoint
+
+A superadmin's reach is the unbound `/mcp` and `/api/v1/tools/<tool>`. On an
+org-bound endpoint (`/orgs/<org>/mcp`, `/orgs/<org>/api/v1/tools/<tool>`, the
+terminal, SSH and workspace resources under `/orgs/<org>/`) a superadmin over
+HTTP, and a platform admin, acts as an **admin of that org only**, so an org
+connector in an MCP client behaves as an org connector whoever adds it:
+
+- `tools/list` there is an org admin's list: the host, superadmin and platform
+  tools are absent, and calling one is refused.
+- The remote-spec policy applies (no privileged containers, raw incus config,
+  host binds or instances isb does not manage), and `org` is pinned.
+- A platform admin or superadmin gets the admin role in that org. A user who is
+  also a member keeps the higher of their own role and admin, so an owner stays
+  an owner; everyone else keeps their own role.
+- The audit row names who it really was (a superadmin's source, or the user)
+  and records `scope: org <org>` in its details; reads are recorded too.
+- The unix socket is always full, on any path. Workspace tokens, org tokens
+  and agent identities are unchanged.
+
 ## How callers sign in
 
 | Credential | Used by | Notes |

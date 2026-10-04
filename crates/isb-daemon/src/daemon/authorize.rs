@@ -34,6 +34,23 @@ pub(super) const PLATFORM_TOOLS: &[&str] = &[
 /// orgs by the tool itself.
 pub(super) const CROSS_ORG_READS: &[&str] = &["overview", "events", "stack_list", "ingress_status"];
 
+/// Does `tools/list` show `tool`? An org-bound endpoint (`/orgs/<org>/mcp`,
+/// `scope` set) is an org's: host, superadmin and platform tools are not on
+/// it, for anyone but the unix socket. The unbound `/mcp` lists everything.
+pub(super) fn tool_listed(c: &Caller, tool: &str, scope: Option<&crate::org::OrgId>) -> bool {
+    scope.is_none()
+        || c.is_local()
+        || !(superadmin::TOOLS.contains(&tool) || PLATFORM_TOOLS.contains(&tool))
+}
+
+/// An audit row's `details`, saying `scope: org <org>` for a downscoped caller.
+pub(super) fn scoped(mut details: Value, c: &Caller) -> Value {
+    if let Some(org) = c.downscope() {
+        details["scope"] = json!(format!("org {org}"));
+    }
+    details
+}
+
 /// The org a tool call names (`org`, default `default`).
 pub(super) fn arg_org(args: &Value) -> Result<crate::org::OrgId> {
     match args.get("org").and_then(Value::as_str) {

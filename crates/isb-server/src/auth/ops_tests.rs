@@ -32,6 +32,7 @@ fn as_kind(s: &AuthStore, u: &User, kind: PrincipalKind) -> Principal {
         kind,
         orgs,
         platform_admin: u.platform_admin && !confined,
+        downscoped: None,
     }
 }
 

@@ -216,7 +216,7 @@ function LimitsDialog({ org, o, open, onOpenChange }: { org: string; o: OrgView;
     setPending(true);
     setError(null);
     try {
-      await callTool("org_update", { ...args, org }, org);
+      await callTool("org_update", { ...args, org });
       toast.success(`${org}'s quota updated`);
       await qc.invalidateQueries({ queryKey: ["tool", "org_get", org] });
       await qc.invalidateQueries({ queryKey: ["tool", "org_list"] });
@@ -444,7 +444,7 @@ function EgressDialog({ org, o, open, onOpenChange }: { org: string; o: OrgView;
     setPending(true);
     setError(null);
     try {
-      const r = await callTool<OrgView>("org_update", { org, egress: parseEgress(value) }, org);
+      const r = await callTool<OrgView>("org_update", { org, egress: parseEgress(value) });
       toast.success(r.egress.length ? `${org} may reach ${r.egress.length} private destination${r.egress.length === 1 ? "" : "s"}` : `${org}'s egress exceptions cleared`);
       await qc.invalidateQueries({ queryKey: ["tool", "org_get", org] });
       close(false);
@@ -542,7 +542,7 @@ export function DeleteOrgDialog({
       confirm="Delete org"
       typed={org}
       onConfirm={async () => {
-        const r = await callTool<{ notes?: string[]; deleted_vm?: string }>("org_delete", vm ? { org, force, delete_vm: deleteVm } : { org, force }, org);
+        const r = await callTool<{ notes?: string[]; deleted_vm?: string }>("org_delete", vm ? { org, force, delete_vm: deleteVm } : { org, force });
         toast.success(`Org ${org} deleted`, { description: r?.deleted_vm ? `Its VM ${r.deleted_vm} was deleted too.` : undefined });
         for (const n of r?.notes ?? []) toast.info(n);
         // Leave the org's pages before they learn it is gone.

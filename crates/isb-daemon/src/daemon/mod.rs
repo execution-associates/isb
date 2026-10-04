@@ -69,7 +69,7 @@ use crate::sandbox::{EnsureOptions, Sandbox, SandboxInfo};
 use crate::server::{AccessValidator, Caller, Listener, Registry, Tool, ToolPolicy};
 use crate::spec::{ComposeFile, SandboxSpec};
 use crate::stack::{Controller, StackDef, Store, now_secs};
-use authorize::{CROSS_ORG_READS, PLATFORM_TOOLS, arg_org, authorize_class};
+use authorize::{CROSS_ORG_READS, PLATFORM_TOOLS, arg_org, authorize_class, tool_listed};
 use policy::RemotePolicy;
 use tools::Ann;
 
@@ -739,6 +739,7 @@ fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate:
         ssh: Some(ssh),
         audit: None,
         route: None,
+        listed: Some(Arc::new(tool_listed)),
     }
 }
 
@@ -1440,3 +1441,6 @@ mod agent_tests;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod downscope_tests;

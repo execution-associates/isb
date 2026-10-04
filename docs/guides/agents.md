@@ -23,7 +23,11 @@ or compromised agent off the host.
 
 Both serve the same tools, filtered to what the caller may use. The org-bound
 endpoint is what an org token should point at: it cannot be talked into
-another org, whatever the arguments say. Each tool's refusal is an MCP tool
+another org, whatever the arguments say. It is scoped to the org even for a
+superadmin or a platform admin, who act there as an admin of that org only:
+the host, superadmin and platform tools are not listed and are refused, and
+the remote-spec policy applies. A superadmin can therefore add `/mcp` and
+`/orgs/ORG/mcp` connectors side by side, each behaving as its URL says. Each tool's refusal is an MCP tool
 error with the reason, so the agent can explain it.
 
 The transport is MCP's Streamable HTTP with plain JSON responses (no SSE
@@ -267,7 +271,8 @@ three remote sources ([Superadmins](../concepts/access.md#superadmins)):
   needed;
 - a **Cloudflare Access identity** listed in `--superadmin-access`.
 
-Point it at the unbound `/mcp`. A superadmin also sees this endpoint on the
+Point it at the unbound `/mcp`: on `/orgs/ORG/mcp` a superadmin is scoped
+down to an admin of that org. A superadmin also sees this endpoint on the
 MCP page, with a warning, and for each source whether it is on and its
 snippets; the web never makes a superadmin token. Tailnet and Access
 superadmins are ambient credentials, so their `/mcp` calls must be

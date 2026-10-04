@@ -104,7 +104,7 @@ export function NotificationsPage() {
             <ChannelCard key={c.name} org={org} c={c} canWrite={canWrite} expanded={open === c.name} onToggle={() => setOpen((x) => (x === c.name ? null : c.name))} onEdit={() => setEdit({ channel: c })} />
           ))
         )}
-        {admin && <PrivateTargets org={org} />}
+        {admin && <PrivateTargets />}
       </div>
       <ChannelDialog org={org} existing={edit?.channel} open={!!edit} onOpenChange={(o) => !o && setEdit(null)} />
     </>
@@ -294,15 +294,15 @@ function Deliveries({ org, name }: { org: string; name: string }) {
   );
 }
 
-function PrivateTargets({ org }: { org: string }) {
+function PrivateTargets() {
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["notification-settings"], queryFn: () => callTool<{ allow_private_targets: boolean }>("notification_settings", {}, org) });
+  const q = useQuery({ queryKey: ["notification-settings"], queryFn: () => callTool<{ allow_private_targets: boolean }>("notification_settings", {}) });
   const [busy, setBusy] = useState(false);
   const on = !!q.data?.allow_private_targets;
   const flip = async () => {
     setBusy(true);
     try {
-      const r = await callTool<{ allow_private_targets: boolean }>("notification_settings", { allow_private_targets: !on }, org);
+      const r = await callTool<{ allow_private_targets: boolean }>("notification_settings", { allow_private_targets: !on });
       qc.setQueryData(["notification-settings"], r);
       toast.success(r.allow_private_targets ? "Private targets allowed server-wide" : "Private targets refused again");
     } catch (e) {

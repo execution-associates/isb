@@ -229,11 +229,11 @@ pub fn entry(a: &Audited, record_all: bool) -> Option<NewEntry> {
     let cls = a.tool.map(|t| class_for(t, a.args)).unwrap_or_default();
     let refused = matches!(a.outcome, Err(Error::Forbidden(_)));
     // A superadmin over HTTP is recorded whatever it does, reads included.
-    let superadmin = matches!(a.caller, Caller::Superadmin(_));
+    let superadmin = matches!(a.caller, Caller::Superadmin(_)) || a.caller.downscope().is_some();
     if !(terminal || !cls.read_only || record_all || refused || superadmin) {
         return None;
     }
-    let details = safe_details(a.args);
+    let details = super::authorize::scoped(safe_details(a.args), a.caller);
     // The org tools act on the org they name.
     let target = if a.action.starts_with("org_") {
         details.get("org").and_then(Value::as_str).map(String::from)
@@ -771,7 +771,7 @@ mod tests {
                 terminal: None,
                 ssh: None,
                 audit: Some(hook(log.clone(), false)),
-                route: None,
+                ..Default::default()
             },
         };
         T { ep, log, _dir: dir }

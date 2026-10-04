@@ -21,12 +21,12 @@ crates/isb-core/src/sandbox.rs 1375
 crates/isb-core/src/spec.rs 2016
 crates/isb-core/src/stack/controller.rs 2562
 crates/isb-daemon/src/daemon/audit.rs 1063
-crates/isb-daemon/src/daemon/mod.rs 1442
+crates/isb-daemon/src/daemon/mod.rs 1446
 crates/isb-daemon/src/daemon/servers.rs 1263
 crates/isb-daemon/src/daemon/workspaces.rs 1908
 crates/isb-server/src/audit.rs 1154
 crates/isb-server/src/auth/http.rs 1128
-crates/isb-server/src/auth/mod.rs 1773
+crates/isb-server/src/auth/mod.rs 1764
 crates/isb-server/src/history.rs 1581
 crates/isb-server/src/server/http.rs 1163
 crates/isb-server/src/server/mcp.rs 2287
