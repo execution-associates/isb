@@ -2,9 +2,9 @@
 //!
 //! - argv is passed as a list, never joined into `sh -c`.
 //! - Output is streamed as produced, and there is no default timeout.
-//! - stdin is forwarded and closed properly. A caller whose own stdin is an
-//!   inherited pipe that never reaches EOF does not hang: the forwarder polls and
-//!   stops when the command exits.
+//! - stdin, when the caller asks for it, is forwarded and closed properly. A
+//!   caller whose own stdin is an inherited pipe that never reaches EOF does not
+//!   hang: the forwarder polls and stops when the command exits.
 //! - Closing the control websocket kills the command in incus, so it is held open
 //!   until the operation finishes.
 
