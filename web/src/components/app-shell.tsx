@@ -313,7 +313,7 @@ function UserMenu({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
   );
 }
 
-const DOCS_URL = "https://github.com/execution-associates/isb/blob/main/docs/index.md";
+const DOCS_URL = "https://www.executionassociates.com/projects/isb/docs/";
 
 function SearchButton({ className }: { className?: string }) {
   const open = usePalette();

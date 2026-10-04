@@ -16,5 +16,6 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 [ "${1:-}" = --quick ] && exit 0
 cargo test --workspace --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 [ "${1:-}" = --release ] && scripts/build-release.sh
 exit 0

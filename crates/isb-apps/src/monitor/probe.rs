@@ -391,7 +391,7 @@ pub fn dechunk(mut b: &[u8]) -> Vec<u8> {
 
 /// The `notAfter` of a DER X.509 certificate, unix seconds. Walks the
 /// structure by hand: Certificate ::= SEQUENCE { tbsCertificate SEQUENCE
-/// { [0] version OPTIONAL, serial, signature, issuer, validity SEQUENCE {
+/// { \[0\] version OPTIONAL, serial, signature, issuer, validity SEQUENCE {
 /// notBefore, notAfter }, ... }, ... }.
 pub fn cert_not_after(der: &[u8]) -> Option<u64> {
     let (_, cert, _) = tlv(der)?;

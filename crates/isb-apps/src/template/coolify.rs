@@ -4,7 +4,7 @@
 //! in `coollabsio/coolify`, with its metadata in comments at the top
 //! (`# documentation:`, `# slogan:`, `# category:`, `# tags:`, `# logo:`,
 //! `# port:`) and Coolify's "magic" environment variables in the compose
-//! (see [`magic`]): `SERVICE_URL_*` / `SERVICE_FQDN_*` give a service a
+//! (see `magic`): `SERVICE_URL_*` / `SERVICE_FQDN_*` give a service a
 //! domain, `SERVICE_PASSWORD_*` and friends are generated once, and
 //! `${VAR:-default}` is an input with a default. A `volumes:` entry can carry
 //! its file's `content:`.

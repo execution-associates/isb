@@ -66,8 +66,8 @@ fn resolve_in(g: &dyn Guest, instance: &str, user: &str) -> Result<GuestUser> {
     let numeric = u.parse::<u32>().ok();
     // A numeric uid is never looked up with a program: only the file.
     let entry = match numeric {
-        Some(_) => file_entry(g, u),
-        None => passwd_entry(g, u),
+        Some(_) => file_entry(g, u)?,
+        None => passwd_entry(g, u)?,
     };
     let mut gu = entry.unwrap_or_default();
     let found = gu.name.is_some();
@@ -84,7 +84,7 @@ fn resolve_in(g: &dyn Guest, instance: &str, user: &str) -> Result<GuestUser> {
     if let Some(grp) = group {
         gu.gid = match grp.parse::<u32>() {
             Ok(n) => n,
-            Err(_) => group_id(g, grp).ok_or_else(|| no_such("group", grp, instance))?,
+            Err(_) => group_id(g, grp)?.ok_or_else(|| no_such("group", grp, instance))?,
         };
     }
     Ok(gu)
@@ -95,33 +95,39 @@ fn no_such(what: &str, name: &str, instance: &str) -> Error {
 }
 
 /// The passwd entry for a user name: `getent` first, then the file.
-fn passwd_entry(g: &dyn Guest, name: &str) -> Option<GuestUser> {
-    g.getent("passwd", name)
-        .as_deref()
-        .and_then(parse_passwd)
-        .or_else(|| file_entry(g, name))
+fn passwd_entry(g: &dyn Guest, name: &str) -> Result<Option<GuestUser>> {
+    match g.getent("passwd", name).as_deref().and_then(parse_passwd) {
+        Some(u) => Ok(Some(u)),
+        None => file_entry(g, name),
+    }
 }
 
-/// The entry for a name or numeric uid in `/etc/passwd`; a file that
-/// cannot be read is no entry.
-fn file_entry(g: &dyn Guest, key: &str) -> Option<GuestUser> {
-    let text = g.read_file("/etc/passwd").ok()??;
+/// The entry for a name or numeric uid in `/etc/passwd`. A missing file is
+/// no entry; a failed read (incus unreachable, say) is the error itself, not
+/// "no such user".
+fn file_entry(g: &dyn Guest, key: &str) -> Result<Option<GuestUser>> {
+    let Some(text) = g.read_file("/etc/passwd")? else {
+        return Ok(None);
+    };
     let uid = key.parse::<u32>().ok();
-    text.lines().filter_map(parse_passwd).find(|u| match uid {
+    Ok(text.lines().filter_map(parse_passwd).find(|u| match uid {
         Some(n) => u.uid == n,
         None => u.name.as_deref() == Some(key),
-    })
+    }))
 }
 
-fn group_id(g: &dyn Guest, name: &str) -> Option<u32> {
+fn group_id(g: &dyn Guest, name: &str) -> Result<Option<u32>> {
     let from_line = |l: &str| l.split(':').nth(2).and_then(|n| n.parse().ok());
     if let Some(n) = g.getent("group", name).as_deref().and_then(from_line) {
-        return Some(n);
+        return Ok(Some(n));
     }
-    let text = g.read_file("/etc/group").ok()??;
-    text.lines()
+    let Some(text) = g.read_file("/etc/group")? else {
+        return Ok(None);
+    };
+    Ok(text
+        .lines()
         .find(|l| l.split(':').next() == Some(name))
-        .and_then(from_line)
+        .and_then(from_line))
 }
 
 #[cfg(test)]
@@ -200,6 +206,29 @@ mod tests {
         assert!(e.to_string().contains("no such group ghosts in web"), "{e}");
         // No files at all: a name cannot be resolved.
         assert!(resolve_in(&bare(), "web", "dev").is_err());
+    }
+
+    /// incusd unreachable: reading a file fails rather than finding nothing.
+    struct Down;
+
+    impl Guest for Down {
+        fn read_file(&self, _: &str) -> Result<Option<String>> {
+            Err(Error::Connect {
+                socket: "/x".into(),
+                source: std::io::ErrorKind::NotFound.into(),
+            })
+        }
+        fn getent(&self, _: &str, _: &str) -> Option<String> {
+            None
+        }
+    }
+
+    #[test]
+    fn an_unreachable_guest_is_not_a_missing_user() {
+        for user in ["dev", "1000", "1000:staff"] {
+            let e = resolve_in(&Down, "web", user).unwrap_err();
+            assert!(matches!(e, Error::Connect { .. }), "{user}: {e}");
+        }
     }
 
     #[test]

@@ -86,7 +86,7 @@ pub struct Plan {
     /// Top-level fields that differ.
     pub changes: Vec<String>,
     /// What the document takes away from an existing app (see
-    /// [`super::removals::removals`]); empty for a new app.
+    /// `super::removals::removals`); empty for a new app.
     pub removals: Vec<String>,
 }
 
@@ -115,7 +115,7 @@ const ORDER: &[&str] = &[
 /// The YAML document of an app's settings. It goes through JSON so that
 /// `source: {image: ...}` is a plain mapping, as in the tools' arguments
 /// (the YAML serializer would write the enum as a `!image` tag), and the
-/// fields come in [`ORDER`].
+/// fields come in `ORDER`.
 pub fn export_yaml(spec: &AppSpec) -> Result<String> {
     let err = |e: &dyn std::fmt::Display| Error::invalid(format!("app {}: {e}", spec.name));
     let Value::Object(map) = serde_json::to_value(spec).map_err(|e| err(&e))? else {
