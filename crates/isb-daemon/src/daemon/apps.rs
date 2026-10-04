@@ -3,6 +3,8 @@
 
 use std::time::Duration;
 
+pub(crate) mod manifest;
+
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -22,7 +24,7 @@ fn org_of(a: &Value) -> Result<OrgId> {
     super::arg_org(a)
 }
 
-fn trigger(c: &Caller) -> Trigger {
+pub(super) fn trigger(c: &Caller) -> Trigger {
     // The CLI on the host; a superadmin over HTTP is an API call.
     if c.is_local() {
         Trigger::Manual
@@ -80,7 +82,7 @@ pub const NO_INGRESS_WARNING: &str = "This server has no ingress, so domains are
 
 /// Add `ingress_enabled` to an app as the tools show it, and return the
 /// warning when its domains will not be served.
-fn note_ingress(app: &mut Value, ingress: bool) -> Option<&'static str> {
+pub(super) fn note_ingress(app: &mut Value, ingress: bool) -> Option<&'static str> {
     let has_domains = app
         .get("domains")
         .and_then(Value::as_array)
@@ -233,7 +235,7 @@ pub fn register(r: &mut Registry, apps: Apps, ingress: bool) -> Result<()> {
     app_env_set_tool(r, &apps, &ann)?;
     app_webhook_tool(r, &apps, &ann)?;
     app_deploy_key_tool(r, &apps, &ann)?;
-    Ok(())
+    manifest::register(r, apps, ingress)
 }
 
 fn project_create_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {

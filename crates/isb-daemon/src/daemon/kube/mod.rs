@@ -193,7 +193,8 @@ pub(super) fn deploys(tool: &str) -> bool {
 /// An audit row's `details`: the safe arguments, then what these tools add
 /// (see [`audit_details`]), and the scope of a downscoped caller.
 pub(super) fn details(a: &crate::server::mcp::Audited) -> Value {
-    let mut out = audit::safe_details(a.args);
+    // app_apply's details (the app named in its document) come from the manifest helper.
+    let mut out = super::apps::manifest::kept(a.action, a.args);
     if let (Some(extra), Some(o)) = (audit_details(a.action, a.args), out.as_object_mut()) {
         o.extend(extra.as_object().cloned().unwrap_or_default());
     }

@@ -563,6 +563,13 @@ impl Apps {
         Ok(())
     }
 
+    /// What `create` and `update` check about the secrets a spec names,
+    /// for callers that check without writing (`app_apply` with
+    /// `dry_run`).
+    pub fn check_spec(&self, org: &OrgId, spec: &AppSpec) -> Result<()> {
+        self.check_secrets(org, spec)
+    }
+
     /// Change an app's settings with a JSON merge patch (`null` clears a
     /// setting). Name, project and environment are fixed. Takes effect at
     /// the next deploy.
@@ -571,34 +578,9 @@ impl Apps {
         let mut app = self.get(org, name)?;
         let mut v = serde_json::to_value(&app.spec)?;
         super::merge_patch(&mut v, patch);
-        let spec: AppSpec =
+        let mut spec: AppSpec =
             serde_json::from_value(v).map_err(|e| Error::invalid(format!("app {name}: {e}")))?;
-        if spec.name != app.spec.name
-            || spec.project != app.spec.project
-            || spec.environment != app.spec.environment
-        {
-            return Err(Error::invalid(
-                "an app's name, project and environment are fixed; create a new app instead",
-            ));
-        }
-        let mut spec = spec;
-        match (&app.spec.source, &mut spec.source) {
-            (Source::Database(old), Source::Database(new)) => {
-                new.normalize(name);
-                if old.engine != new.engine || old.database != new.database || old.user != new.user
-                {
-                    return Err(Error::invalid(
-                        "a database's engine, database and user are fixed (they live in its data volume); restore a backup into a new database instead",
-                    ));
-                }
-            }
-            (Source::Database(_), _) | (_, Source::Database(_)) => {
-                return Err(Error::invalid(
-                    "an app cannot become a database or stop being one; create a new app",
-                ));
-            }
-            _ => {}
-        }
+        super::manifest::check_update(&app.spec, &mut spec)?;
         spec.validate()?;
         self.check_secrets(org, &spec)?;
         app.spec = spec;

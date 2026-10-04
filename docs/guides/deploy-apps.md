@@ -104,6 +104,61 @@ stack's `domains:` list, so the ingress routes them at the next deploy;
 `app_get` reports `domains_served: true`. A domain from `--domain HOST[/PATH]`
 is served on `--port`.
 
+## An app as YAML
+
+Every setting above is one document: `app_export` (and the app page's **YAML**
+tab) shows it, and `app_apply` takes it back, the way `kubectl get -o yaml`
+and `kubectl apply -f` do. It holds the fields `app_create` takes, with secrets
+by name only (`${{secret.NAME}}` in `env`, never a value):
+
+```yaml
+name: web
+project: shop
+environment: production
+source:
+  image: docker:traefik/whoami:latest
+env: |
+  GREETING=hi
+  TOKEN=${{secret.api-token}}
+replicas: 3
+port: 80
+```
+
+Applying is declarative: the document is the app's whole desired settings, so
+a field you remove goes back to its default (unlike `app_update`, which merges
+a patch). A name that is new creates the app, in an existing project and
+environment; a name that exists updates it. An app's name, project and
+environment, and a database's engine, database and user, cannot change: that
+is a different app. A document pasted from `app_get` is accepted (its
+read-only fields, such as `stack` and `env_vars`, are ignored), and JSON works
+as well as YAML.
+
+```text
+app_apply {definition: "<yaml>", dry_run: true}
+  -> {valid, errors: [{line, column, message}], action: created|updated|unchanged,
+      changes: ["env", "replicas"], diff: "--- current\n+++ proposed\n..."}
+app_apply {definition: "<yaml>", deploy: true}     # apply, then deploy
+```
+
+`dry_run` checks everything a real apply checks (the fields, the project and
+environment, the secrets it names) and writes nothing; a bad document is the
+answer there, with the line it is on where it can be placed, and an error
+otherwise. `deploy: true` queues a deployment after the apply, also when
+nothing changed. A created app's answer carries its webhook secret. Applying
+takes effect at the next deploy, like `app_update`. Members and up can apply;
+viewers can export. Calls are audited under the app's name.
+
+### The YAML tab
+
+The **YAML** tab edits that document in a code editor (CodeMirror, loaded
+when the tab opens): line numbers, folding, highlighting, Ctrl/Cmd-S. As you
+type, the daemon checks the text (`app_apply` with `dry_run`) and marks the
+problems on their lines; the **Changes** view is a line diff against the
+saved definition. **Save** and **Save and deploy** first show the diff for
+review. Save and deploy opens the deployment's live page, like Deploy does.
+Viewers read the document and cannot edit it. A document that names another
+app would create it, so the tab refuses it.
+
 ## The environment editor
 
 `isb app env NAME` (tool `app_env_get`) prints the app's environment as
@@ -274,6 +329,7 @@ See [Reach isb serve remotely](remote-access.md).
 | `app_create` | Create an app (`deploy: true` deploys it too). Returns the app and its webhook secret. |
 | `app_get`, `app_list` | Settings, stack, service name, current deployment, webhook path, `domains_served`; env as a map with `{secret: NAME}` references. |
 | `app_update` | A merge patch of settings (`deploy: true` deploys after). |
+| `app_export`, `app_apply` | The app as a YAML document, and declarative create-or-update from one (`dry_run`, `deploy`); see [An app as YAML](#an-app-as-yaml). |
 | `app_delete` | Its service leaves the stack (the stack goes with its last app); its records, checkout, webhook secret and deploy key go. Named volumes are kept. |
 | `app_deploy`, `app_rollback` | Queue a deployment; `wait: true` returns when it finishes. |
 | `app_deployments`, `app_deployment_log` | History, and one deployment's log from an offset. |

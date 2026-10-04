@@ -208,6 +208,7 @@ The pages over [apps](../guides/deploy-apps.md), in Dokploy's layout:
 | `/orgs/<org>/projects` | The org's projects as cards: environments with their app counts, and health (the worst of the environments' stacks). New project (name, description, environments). |
 | `/orgs/<org>/projects/<project>/<env>` | The project's environments as tabs; the environment's apps with state, source (image and digest, or repository, branch and commit), replicas, domains and last deploy. New app, add an environment, delete an empty environment or project (typed confirm). |
 | `/orgs/<org>/apps/<app>/<tab>` | One app: state, Deploy (or Redeploy), Stop and Start, and the tabs below. |
+| `/orgs/<org>/stacks/<stack>/<tab>` | One compose stack: Compose (editor), Services, Logs; Remove. `/orgs/<org>/stacks/new` creates one. |
 
 An app's tabs:
 
@@ -270,8 +271,20 @@ An app's tabs:
   with its log followed live.
 - **Terminal**: a login shell in a replica, over the daemon's terminal
   websocket ([HTTP API](../reference/http-api.md#the-web-terminal)).
+- **YAML**: the whole app as one document in a code editor (line numbers,
+  folding, highlighting, Ctrl/Cmd-S), checked by the daemon as you type with
+  problems marked on their lines, a **Changes** view (a line diff against the
+  saved app), and Save or Save and deploy after a review of that diff; Save
+  and deploy opens the live deployment. Secrets are names, never values.
+  Viewers read it. See [An app as YAML](../guides/deploy-apps.md#an-app-as-yaml).
 - **Advanced**: named volumes, published ports, and deleting the app (typed
   confirm).
+
+**Compose stacks** (stacks written as a compose file, not the stacks apps run
+in) are listed under the projects, with **New compose stack** to paste YAML. A
+stack's page edits its file with the same editor: Compose, Services and Logs
+tabs, a diff review, and Deploy. See
+[Editing in the web UI](../concepts/stacks.md#editing-in-the-web-ui).
 
 A database app has **Database** and **Backups** tabs in place of General
 and Domains; an app built from git also has **Previews**.

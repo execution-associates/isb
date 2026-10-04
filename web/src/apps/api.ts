@@ -153,6 +153,7 @@ export const keys = {
   deployment: (org: string, app: string, id: number) => ["apps", org, "deployment", app, id] as const,
   stack: (org: string, stack: string) => ["apps", org, "stack", stack] as const,
   env: (org: string, app: string) => ["apps", org, "env", app] as const,
+  yaml: (org: string, app: string) => ["apps", org, "yaml", app] as const,
   secrets: (org: string) => ["apps", org, "secrets"] as const,
   ingress: (org: string) => ["apps", org, "ingress"] as const,
 };

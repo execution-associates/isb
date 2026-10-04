@@ -3459,6 +3459,76 @@
         "x-isb-tool": "agent_identity_set"
       }
     },
+    "/api/v1/tools/app_apply": {
+      "post": {
+        "description": "Declarative create-or-update, like kubectl apply: `definition` (YAML or JSON text, or a JSON object; the document app_export returns) is the app's whole desired settings. The app is created if its name is new (its project and environment must exist) and otherwise replaced by the document: fields the document leaves out go back to their defaults (app_update merges instead). An app's name, project, environment, and a database's engine/database/user cannot change. `dry_run` checks everything and writes nothing, answering {valid, errors: [{line, column, message}], action, changes, diff}; a bad document is an answer there, an error otherwise. `deploy` queues a deploy after (also when nothing changed). Takes effect at the next deploy. The response carries the app as stored and its definition as app_export shows it; a created app's carries its webhook secret.",
+        "operationId": "app_apply",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "definition": {
+                    "description": "The app as YAML or JSON text, or as an object."
+                  },
+                  "deploy": {
+                    "description": "Queue a deploy after applying.",
+                    "type": "boolean"
+                  },
+                  "dry_run": {
+                    "description": "Validate and diff only; change nothing.",
+                    "type": "boolean"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "definition"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Apply an app definition",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "app_apply"
+      }
+    },
     "/api/v1/tools/app_create": {
       "post": {
         "description": "Create an application in a project's environment: an image or a git source (built by a builder), plus its env, domains, volumes, ports, replicas, port, health check, resources and command. Returns the app and its webhook secret (POST <webhook> with it to deploy). Nothing runs until app_deploy (or deploy=true).",
@@ -4245,6 +4315,76 @@
           "tools"
         ],
         "x-isb-tool": "app_exec"
+      }
+    },
+    "/api/v1/tools/app_export": {
+      "post": {
+        "description": "An app's definition as a YAML document: the fields app_create takes (name, project, environment, source, build, env, domains, volumes, ports, replicas, port, healthcheck, resources, command, previews, files, user, working_dir), with secrets by name only (`${{secret.NAME}}` in env), never values. The web UI's YAML tab shows this text. Edit it and hand it to app_apply.",
+        "operationId": "app_export",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "format": {
+                    "description": "Default yaml.",
+                    "enum": [
+                      "yaml",
+                      "json"
+                    ],
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Export an app as YAML",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "app_export"
       }
     },
     "/api/v1/tools/app_get": {
@@ -13262,6 +13402,68 @@
         "x-isb-tool": "stack_deploy"
       }
     },
+    "/api/v1/tools/stack_export": {
+      "post": {
+        "description": "The compose file a stack runs from, as YAML text ready for stack_deploy (the web UI's stack editor shows it): resolved (no ${VAR}), with secrets that came from a file or environment variable named as `external` store secrets, so it deploys again without their values. Also says whether the stack belongs to a project's apps (`managed_by: apps`), in which case change it through the apps, not this file.",
+        "operationId": "stack_export",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Export a stack as YAML",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "stack_export"
+      }
+    },
     "/api/v1/tools/stack_list": {
       "post": {
         "description": "List deployed stacks with each service's replica, health and rollout state.",
@@ -13721,6 +13923,81 @@
           "tools"
         ],
         "x-isb-tool": "stack_status"
+      }
+    },
+    "/api/v1/tools/stack_validate": {
+      "post": {
+        "description": "A dry run of stack_deploy for an editor: parses the compose YAML, checks it the way a deploy would (services, secrets, ports, ingress) and says what would change, without deploying or storing anything. Answers {valid, errors: [{line, column, message}], changes (per service), exists, managed_by, diff (a unified diff from the deployed file, stack_export's text, to this one)}; a bad file is an answer, not a failed call.",
+        "operationId": "stack_validate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "compose": {
+                    "description": "The compose file, as YAML text.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "The stack's name; an unused one is a new stack.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "vars": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Variables for ${VAR}.",
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "name",
+                  "compose"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Check a compose file",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "stack_validate"
       }
     },
     "/api/v1/tools/superadmin_token_list": {

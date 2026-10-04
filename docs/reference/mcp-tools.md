@@ -73,6 +73,8 @@ means every member of the org, *member* means members, admins and owners.
 | `stack_list` | anyone signed in | Every stack in the caller's orgs with its services' replica, health and rollout state. |
 | `stack_status` | viewer | One stack in detail: per service its revision, state, message, every replica (status, health, IP, in rotation, restarts, last probe output), published ports with their backends, and each domain with its URL and certificate state. |
 | `stack_config` | viewer | The deployed compose file, and its secrets as references (store name, driver, version), never values. |
+| `stack_export` | viewer | The compose file a stack runs from as YAML text for `stack_deploy` (what the web UI's stack editor shows): resolved, with file/environment secrets named as `external` store secrets so no value is needed. Also `managed_by` (`apps` for a project environment's stack) and the services. |
+| `stack_validate` | viewer | A dry run of `stack_deploy` for an editor: `{valid, errors: [{line, column, message}], changes, exists, managed_by, diff}`, where `diff` is a unified diff from the deployed file. A bad file is an answer, not an error. Writes nothing. |
 | `stack_logs` | viewer | Recent output of a service's replicas (`slot`, `lines`): the supervised command's journal, or an OCI image's console. |
 | `stack_scale` | member | Set a service's replicas (0 stops it without removing it). |
 | `stack_redeploy` | member | Replace a service's replicas though nothing changed: a moved tag, changed bind-mounted files. |
@@ -164,6 +166,8 @@ There is no `port-forward` tool: run `curl` with `app_exec`, or reach an instanc
 | `app_create` | member | An app: an image or a git source with a builder, plus env, domains, volumes, files, ports, replicas, port, health check, resources, command, user, working directory, previews (`deploy: true` deploys it too). Returns the app and its webhook secret. |
 | `app_get`, `app_list` | viewer | Settings, stack, service name, current deployment, webhook path, `ingress_enabled`; env with `{secret: NAME}` references. |
 | `app_update` | member | A merge patch of settings (`null` clears one); takes effect at the next deploy (`deploy: true`). The result has a `warning` when the app has domains and the server runs without an ingress. |
+| `app_export` | viewer | The app as a YAML (or `format: json`) document: the fields `app_create` takes, secrets by name only. See [An app as YAML](../guides/deploy-apps.md#an-app-as-yaml). |
+| `app_apply` | member | Declarative create-or-update from a `definition` (YAML or JSON text, or an object): the document is the whole desired settings, so omitted fields return to their defaults. Name, project and environment cannot change. `dry_run` answers `{valid, errors: [{line, column, message}], action, changes, diff}` and writes nothing; `deploy` queues a deploy after. Audited under the app's name. |
 | `app_delete` | member | Its service leaves the stack; records, checkout, webhook secret and deploy key go; named volumes are kept. |
 | `app_deploy` | member | Queue a deployment (`wait`, `timeout`). |
 | `app_rollback` | member | Queue a deployment of an earlier one's image and settings, without building (`deployment`, `wait`). |
