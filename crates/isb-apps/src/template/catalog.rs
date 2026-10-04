@@ -22,7 +22,6 @@ pub const BUILTIN: &str = "builtin";
 
 /// The templates compiled into isb (`builtin/` next to this file).
 const BUILTIN_FILES: &[(&str, &str)] = &[
-    ("uptime-kuma", include_str!("builtin/uptime-kuma.yaml")),
     ("plausible", include_str!("builtin/plausible.yaml")),
     ("gitea", include_str!("builtin/gitea.yaml")),
     ("n8n", include_str!("builtin/n8n.yaml")),
@@ -630,7 +629,7 @@ mod tests {
         })
         .unwrap();
         let (all, errors) = c.list();
-        assert!(all.iter().any(|s| s.reference == "builtin/uptime-kuma"));
+        assert!(all.iter().any(|s| s.reference == "builtin/gitea"));
         assert!(
             all.iter()
                 .any(|s| s.reference == "dok/hello" && s.format == Format::Dokploy)
@@ -647,7 +646,7 @@ mod tests {
         assert_eq!(t.apps[0].image, "docker:traefik/whoami:v1.10");
         assert_eq!(r.report.unwrap().status, dokploy::Status::Clean);
         assert!(c.get("echo").unwrap().template.is_some());
-        assert!(c.get("uptime-kuma").unwrap().template.is_some());
+        assert!(c.get("gitea").unwrap().template.is_some());
         assert!(c.get("dok/nope").is_err());
         assert!(
             all.iter()

@@ -1,11 +1,11 @@
 ---
 title: "Templates: one-click apps"
-description: Deploy ready-made sets of apps (Uptime Kuma, Gitea, Umami and more, or Dokploy's catalog) with settings filled in and passwords generated.
+description: Deploy ready-made sets of apps (Gitea, Umami, Ghost and more, or Dokploy's catalog) with settings filled in and passwords generated.
 order: 4
 nav_title: Templates
 ---
 
-A template is a ready-made set of apps (Uptime Kuma, Gitea with its
+A template is a ready-made set of apps (Gitea with its
 Postgres, ...) with the settings filled in and the passwords generated, so a
 working service is one command away. Deploying one into a project
 environment creates ordinary [apps](deploy-apps.md), so everything an app has
@@ -211,7 +211,7 @@ on top.
 
 ## Catalogs
 
-**Built in:** Uptime Kuma, Plausible Analytics (Postgres, ClickHouse),
+**Built in:** Plausible Analytics (Postgres, ClickHouse),
 Gitea (Postgres), n8n, Ghost (MySQL), Umami (Postgres), Vaultwarden, MinIO,
 Postgres with Adminer, and whoami (for checking routing). They are written
 for isb from each project's own documented images and settings, and compiled
