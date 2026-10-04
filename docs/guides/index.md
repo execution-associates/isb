@@ -18,10 +18,12 @@ every flag and field is in the [Reference](../reference/index.md).
   image in a fresh sandbox, with railpack, nixpacks or a Dockerfile.
 - [Preview deployments](previews.md): a preview per pull request, on its own
   URL, removed when the request closes.
-- [Templates](templates.md): one-click apps from the built-in catalog or
-  Dokploy's, with passwords generated and kept as secrets.
+- [Templates](templates.md): one-click apps from the built-in catalog, Dokploy's
+  or Coolify's, with passwords generated and kept as secrets.
 - [Coming from Dokploy](from-dokploy.md): how Dokploy's concepts map onto
   isb, and what differs.
+- [Coming from Coolify](from-coolify.md): the same for Coolify, including its
+  one-click service templates.
 - [Domains and ingress](domains.md): public hostnames with HTTPS, on the
   server's own ports or through an org's Cloudflare Tunnel.
 

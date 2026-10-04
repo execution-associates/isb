@@ -463,10 +463,13 @@ fn umami_translates_cleanly() {
 }
 
 #[test]
-fn uptime_kuma_translates_cleanly() {
+fn uptime_kuma_loses_only_its_relative_health_check() {
     let (t, r) = tr_meta(&meta("uptime-kuma", UPTIME_KUMA, None), UPTIME_KUMA);
-    assert_eq!(r.status, Status::Clean, "{r:?}");
+    assert_eq!(r.status, Status::Notes, "{r:?}");
+    assert_eq!(r.notes.len(), 1, "{r:?}");
+    assert!(r.notes[0].contains("(extra/healthcheck) is dropped"), "{r:?}");
     assert_eq!(t.apps.len(), 1);
+    assert_eq!(t.apps[0].healthcheck, None);
     assert_eq!(t.apps[0].volumes, ["uptime-kuma-data:/app/data"]);
     assert_eq!(t.apps[0].domains[0]["port"], 3001);
     assert_eq!(t.apps[0].port, Some(3001));
@@ -496,4 +499,19 @@ fn searxng_files_and_variables() {
     assert_eq!(var(&t, "instance_name").default.as_deref(), Some("coolify"));
     assert_eq!(var(&t, "password_searxngsecret").length, Some(32));
     assert!(plan_it(&t).is_ok());
+}
+
+#[test]
+fn a_health_check_by_relative_path_is_dropped() {
+    let (t, r) = ok(&svc(
+        "    healthcheck:\n      test: [CMD-SHELL, extra/healthcheck]\n      interval: 5s\n",
+    ));
+    assert_eq!(t.apps[0].healthcheck, None);
+    assert_eq!(r.status, Status::Notes);
+    assert!(r.notes[0].contains("(extra/healthcheck) is dropped"), "{r:?}");
+    for ok_test in ["[CMD, /bin/check, -x]", "[CMD, curl, -f, http://x/a/b]", "[CMD-SHELL, 'curl -f http://x/a']", "[CMD-SHELL, $$HOME/check]"] {
+        let (t, r) = ok(&svc(&format!("    healthcheck:\n      test: {ok_test}\n")));
+        assert!(t.apps[0].healthcheck.is_some(), "{ok_test}");
+        assert_eq!(r.status, Status::Clean, "{ok_test}: {r:?}");
+    }
 }

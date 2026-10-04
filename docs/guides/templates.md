@@ -1,6 +1,6 @@
 ---
 title: "Templates: one-click apps"
-description: Deploy ready-made sets of apps (Gitea, Umami, Ghost and more, or Dokploy's catalog) with settings filled in and passwords generated.
+description: Deploy ready-made sets of apps (Gitea, Umami, Ghost and more, or Dokploy's or Coolify's catalog) with settings filled in and passwords generated.
 order: 4
 nav_title: Templates
 ---
@@ -10,7 +10,8 @@ Postgres, ...) with the settings filled in and the passwords generated, so a
 working service is one command away. Deploying one into a project
 environment creates ordinary [apps](deploy-apps.md), so everything an app has
 (deployments, rollback, the environment editor, webhooks, the web UI's app
-pages) works for them. isb ships its own catalog and can read Dokploy's.
+pages) works for them. isb ships its own catalog and can read Dokploy's and
+Coolify's.
 
 ```console
 $ isb template ls analytics
@@ -35,10 +36,10 @@ umami: done
 
 ```text
 isb template ls [WORDS...] [--tag T] [--catalog C] [--json]
-isb template show REF [--json]             variables, apps, notes; a Dokploy template's translation report
+isb template show REF [--json]             variables, apps, notes; a Dokploy or Coolify template's translation report
 isb template deploy REF --project P [--env E] [--name N] [-s K=V]... [--dry-run] [-d] [--json]
 isb template instances [--json] | rm NAME  deployed templates; rm deletes their apps (volumes kept) and secrets
-isb template catalog ls | add NAME --format native|dokploy LOCATION | rm NAME   (add, rm: platform admins)
+isb template catalog ls | add NAME --format native|dokploy|coolify LOCATION | rm NAME   (add, rm: platform admins)
 ```
 
 All take `--org ORG`. The web UI's **Templates** section does the same, with a
@@ -227,14 +228,21 @@ every caller.
 |---|---|
 | `native` | A directory of `*.yaml` (or `<id>/template.yaml`), or an `https://` URL of one YAML/JSON document `{templates: [...]}`. |
 | `dokploy` | A checkout of [Dokploy/templates](https://github.com/Dokploy/templates) (or its `blueprints/`), or `https://templates.dokploy.com`. |
+| `coolify` | A checkout of [coollabsio/coolify](https://github.com/coollabsio/coolify) (or its `templates/compose/`), or the repository's raw files, `https://raw.githubusercontent.com/coollabsio/coolify/main`; `https://github.com/coollabsio/coolify` is accepted and means the same. |
 
 ```sh
 isb template catalog add dokploy --format dokploy https://templates.dokploy.com
 isb template show dokploy/ntfy
+isb template catalog add coolify --format coolify https://github.com/coollabsio/coolify
+isb template show coolify/umami
 ```
 
 Listings are cached for ten minutes. URLs are fetched over https only, at
-most 4 MiB a file. What a catalog holds is third-party data: it is parsed
+most 4 MiB a file. A Coolify catalog at a URL lists `templates/compose` with
+GitHub's directory listing (which limits anonymous callers to 60 requests an
+hour) and falls back to the repository's generated `service-templates.json`,
+which lacks a few templates; each template's header is then read from its own
+file, a dozen at a time, so the first listing takes a few seconds. What a catalog holds is third-party data: it is parsed
 and translated, never run on the host. A native template in a directory that
 does not parse is skipped, and the daemon logs why.
 
@@ -298,6 +306,106 @@ shared by several services (an app's volumes are its own), `build`, compose
 and ranges, Traefik TCP/UDP routing, rules beyond `Host`/`PathPrefix` and
 other middlewares, and a `template.toml` that is not valid TOML.
 
+## Coolify templates
+
+A Coolify template is one compose file, `templates/compose/<id>.yaml`, with
+its metadata in comments at the top and Coolify's "magic" environment
+variables in the compose. It is translated into this format when it is
+fetched, as strictly as Dokploy's, by the same compose rules, and reported the
+same way (`clean`, `notes` or `refused`; `isb template show coolify/umami`).
+Coming from Coolify in general: [Coming from Coolify](from-coolify.md).
+
+**Metadata** comes from the header comments: `# slogan:` is the description,
+`# category:` and `# tags:` the tags, `# documentation:` the docs link,
+`# logo: svgs/x.svg` the logo (`<location>/public/svgs/x.svg`, for a catalog
+at a URL), `# port:` the port a domain goes to when the compose names none.
+The name is the file name, titled (`uptime-kuma` is Uptime Kuma). A template
+marked `# ignore: true`, which Coolify itself does not offer, is not listed.
+
+**Magic variables** become template variables, one per name, shared by every
+use of it:
+
+| Coolify | isb |
+|---|---|
+| `SERVICE_URL_<NAME>` / `SERVICE_URL_<NAME>_<PORT>` in a service's `environment:` | A domain for that service on that port (the declaring service gets it; `NAME` is only a label, and one `NAME` is one host, so several services can share it on different paths). It is a `domain` variable, `host: auto` by default and settable like a Dokploy template's. A bare entry is set to `https://<host>`; wherever else the name is used, it is that URL. A path given as the value (`SERVICE_URL_API=/v1`) becomes the domain's `path`, with a note. |
+| `SERVICE_FQDN_<NAME>[_<PORT>]` | The same domain; the value is the host name without the scheme. |
+| a `SERVICE_URL_*` used but never declared | The service whose name is `<NAME>` gets the domain. No such service: refused. |
+| a domain without a port | The service's first `expose:` port, else the template's `# port:`, else its first published port, else 80 (with a note). |
+| `SERVICE_NAME_<SERVICE>` | The service's name, `${host:KEY}`. |
+| `SERVICE_PASSWORD_<ID>`, `_64_` | A generated `password`, 32 or 64 letters and digits. |
+| `SERVICE_PASSWORDWITHSYMBOLS_<ID>`, `_64_` | The same without symbols, with a note. |
+| `SERVICE_USER_<ID>`, `SERVICE_LOWERCASEUSER_<ID>` | A generated `username`, 16 lowercase letters. |
+| `SERVICE_BASE64_<ID>`, `_32_`, `_64_`, `_128_` | A generated `password` of 32, 64 or 128 letters and digits (Coolify's "base64" is not base64). |
+| `SERVICE_REALBASE64_<ID>`, `_32_`, `_64_`, `_128_` | A generated `base64` of that many random bytes. |
+| `SERVICE_HEX_32_<ID>`, `_64_`, `_128_` | A generated `hex` of that many characters. |
+| `SERVICE_SUPABASEANON_<ID>`, `SERVICE_SUPABASESERVICE_<ID>` | A generated `jwt` with the role `anon` or `service_role`, signed with the `SERVICE_PASSWORD_JWT` secret (made if the template has none). |
+
+Other `SERVICE_*` names are ordinary variables.
+
+**Ordinary interpolation** makes inputs: `${VAR:-default}` and `${VAR-default}`
+a variable with that default (the first one wins, with a note if another place
+differs), `${VAR}` and `$VAR` an optional variable that is empty, `${VAR:?}`
+a required one, `$$` a literal `$`. A name that says "password", "secret",
+"token", "key" or the like, with a default, is stored as a secret. A bare
+`- NAME` in `environment:` is the variable of that name. `${VAR:+x}` is
+refused.
+
+**Files.** A `volumes:` entry with `content:` is a file in the app
+(`files`), stored as a secret; one that starts with `#!` is executable. In a
+file's content only Coolify's own names and the `${VAR}` the compose file
+uses elsewhere are replaced; `$host`, `$$` and other text are kept as
+written.
+
+**Everything else** is mapped as for [Dokploy templates](#dokploy-templates):
+images, named volumes (a relative bind such as `./data`, an anonymous volume,
+and a directory Coolify makes become named volumes), `command`/`entrypoint`,
+`healthcheck`, `depends_on`, numeric `user`, `working_dir`, resources, and
+other services' names in host positions. A service without a `restart:` is
+kept running, as Coolify does, with no note. `exclude_from_hc` is ignored.
+
+**Notes** (deployable, different) are Dokploy's, plus: a health check that
+runs a path relative to the image's working directory (`extra/healthcheck`)
+is dropped, because isb runs health checks from `/` and the app would never
+be healthy; passwords with symbols have none; a domain path serves only that
+path; labels and `env_file` are not applied; two places with different
+defaults for a variable.
+
+**Refused**, with the reason: what Dokploy templates are refused for, and
+the container runtime's socket (`docker.sock`, `podman.sock`), a mount
+source that is a variable (it may be a host path), an environment variable
+whose name has a dot (`discovery.type`), `${VAR:+x}`, and a compose file whose
+merge keys do not parse.
+
+**What it comes to**, over the 386 files of `templates/compose` in
+`coollabsio/coolify`'s main branch (27 are `# ignore: true`, so 359 are
+offered): 231 are clean, 52 deploy with notes, 76 are refused. Of the 283
+that deploy, 138 are one service and 145 are several. Every one that deploys
+also plans (every variable, domain and file renders). The most common
+reasons:
+
+| Refused for | Templates |
+|---|---|
+| a volume shared by several services (an app's volumes are its own) | 22 |
+| the container runtime's socket | 20 |
+| `restart: "no"`, a one-shot job | 11 |
+| waiting for a one-shot job (`service_completed_successfully`) | 5 |
+| added capabilities (`cap_add`) | 10 |
+| a host path | 10 |
+| host networking, a published UDP port | 6 each |
+| a dotted environment variable name, a user given by name | 4, 3 |
+| privileged mode | 3 |
+
+| Noted for | Templates |
+|---|---|
+| a published port is on `127.0.0.1` only | 22 |
+| a relative bind becomes a named volume | 12 |
+| `platform` is ignored | 11 |
+| `container_name` is ignored | 8 |
+| `security_opt`, `ulimits`, `shm_size`, `hostname`, `restart: on-failure`, a dropped health check | 5 to 7 each |
+
+The numbers come from `COOLIFY_TEMPLATES=<dir> cargo test -p isb-apps
+coolify::tests::survey -- --ignored` over a checkout.
+
 ## Logos
 
 Template cards in the web UI show each template's logo. A browser never
@@ -314,6 +422,8 @@ else's server.
 | A native catalog | The template's `logo:` field, if any. Only an `https://` URL is ever fetched. |
 | Dokploy, from a URL (`https://templates.dokploy.com`) | The file `meta.json` names, under the catalog: `<location>/blueprints/<id>/<logo file>`. |
 | Dokploy, from a checkout | None: the cards show initials. |
+| Coolify, from a URL | The header's `# logo: svgs/x.svg`, under the catalog's location: `<location>/public/svgs/x.svg`. |
+| Coolify, from a checkout | None: the cards show initials. |
 
 **The endpoint:** `GET` (or `HEAD`) `/api/v1/templates/<catalog>/<id>/logo`.
 Whoever may call `template_list` may read it (signed in as for any tool, with
@@ -351,10 +461,10 @@ once a minute, or after five seconds for a template it does not know).
 
 | Tool | Does |
 |---|---|
-| `template_list`, `template_get` | The built-in catalog and added ones (search by words, tag, catalog); a template's variables, apps, notes and, for a Dokploy template, its translation report. |
+| `template_list`, `template_get` | The built-in catalog and added ones (search by words, tag, catalog); a template's variables, apps, notes and, for a Dokploy or Coolify template, its translation report. |
 | `template_deploy` | Deploy a template into a project environment as apps (`template`, `project`, `environment`, `name`, `values`, `dry_run`, `wait`, `timeout`). `dry_run` returns the plan. |
 | `template_instance_list`, `template_instance_delete` | Deployed templates; deleting one removes its apps (named volumes are kept) and the secrets it made. |
-| `template_catalog_list`, `template_catalog_add`, `template_catalog_remove` | The catalogs added to the built-in one: a host directory or an https URL, isb's format or Dokploy's. Adding and removing: platform admins. |
+| `template_catalog_list`, `template_catalog_add`, `template_catalog_remove` | The catalogs added to the built-in one: a host directory or an https URL, isb's format, Dokploy's or Coolify's. Adding and removing: platform admins. |
 
 ## Licensing
 
@@ -369,3 +479,13 @@ adds it as a catalog, and isb fetches it at runtime from its public URL (or
 reads a checkout). Its logos are the projects' trademarks, as are the
 built-in templates' (each links to an image in the project's own repository
 or site); isb links to them and does not copy them into its source.
+
+The [coollabsio/coolify](https://github.com/coollabsio/coolify) repository is
+Apache-2.0 licensed (Copyright 2025 Andras Bacsai). isb does not bundle its
+templates either: a platform admin adds the repository as a catalog, isb
+fetches the compose files at runtime (or reads a checkout) and translates
+them in memory, and none of Coolify's source code is used. The three
+templates in the translator's tests (umami, uptime-kuma and searxng, the last
+shortened) are copied from it as test data, with their notice, and are not
+part of the shipped program. Its logos are the projects' trademarks, linked
+and cached, never copied into isb's source.

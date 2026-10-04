@@ -46,7 +46,16 @@ pub fn translate(
     let (volumes, files) = volumes(cx, &mut acc.vol_users, name, m, tx);
     let ports = shared_svc::ports(name, m, &mut ip, tx);
     let (command, args) = shared_svc::command_line(name, m, &mut ip, tx);
-    let healthcheck = shared_svc::healthcheck(m, &mut ip, tx);
+    let mut healthcheck = shared_svc::healthcheck(m, &mut ip, tx);
+    // Docker runs a health check from the image's working directory; isb
+    // runs it from /, where a relative path is not found and the app would
+    // never be healthy.
+    if let Some(c) = healthcheck.as_ref().and_then(relative_command) {
+        tx.note(format!(
+            "{name}: its health check ({c}) is dropped: it is a path relative to the image's working directory"
+        ));
+        healthcheck = None;
+    }
     let depends_on = shared_svc::dependencies(cx.keys, name, &key, m, tx);
     let user = shared_svc::user(name, m, &mut ip, tx);
     let working_dir = yget(m, "working_dir").and_then(yscalar).map(|w| ip(&w, tx));
@@ -154,7 +163,9 @@ fn volumes(
             ));
             continue;
         }
-        let is_path = source.starts_with(['/', '.', '~']) || kind == "bind" || source.contains('$');
+        let is_path = source.starts_with(['/', '.', '~'])
+            || kind == "bind"
+            || source.contains(['$', '/']);
         if kind == "anon" {
             anon += 1;
             let n = format!("anon-{anon}");
@@ -292,4 +303,18 @@ fn domains(
         .and_then(|d| d["port"].as_u64())
         .map(|p| p as u16);
     (out, port)
+}
+
+/// The command a health check runs, when it is a relative path such as
+/// `extra/healthcheck`.
+fn relative_command(h: &Value) -> Option<String> {
+    let test = h.get("test")?.as_array()?;
+    let words: Vec<&str> = test.iter().filter_map(Value::as_str).collect();
+    let first = match words.as_slice() {
+        ["CMD-SHELL", line, ..] => line.split_whitespace().next()?,
+        ["CMD", cmd, ..] => cmd,
+        _ => return None,
+    };
+    let relative = first.contains('/') && !first.starts_with(['/', '$']);
+    relative.then(|| first.to_string())
 }

@@ -165,12 +165,12 @@ means every member of the org, *member* means members, admins and owners.
 | Tool | Who | Does |
 |---|---|---|
 | `template_list` | viewer | The built-in catalog and added ones; filter by `query` words, `tag`, `catalog`. |
-| `template_get` | viewer | A template's variables, apps, notes and, for a Dokploy template, its translation report (`compatibility`). |
+| `template_get` | viewer | A template's variables, apps, notes and, for a Dokploy or Coolify template, its translation report (`compatibility`). |
 | `template_deploy` | member | Deploy into a project environment as apps (`template`, `project`, `environment`, `name`, `values`, `dry_run`, `wait`, `timeout`); without `wait`, the first app's deployment comes back as `first_deployment`. |
 | `template_instance_list` | viewer | Deployed templates: apps, secret names, non-secret values, URLs. |
 | `template_instance_delete` | member | Its apps (named volumes kept) and its `tpl.<name>.*` secrets. |
 | `template_catalog_list` | viewer | The added catalogs. |
-| `template_catalog_add`, `template_catalog_remove` | platform admin | Add (or replace) or remove a catalog: a host directory or an https URL, `native` or `dokploy` format. |
+| `template_catalog_add`, `template_catalog_remove` | platform admin | Add (or replace) or remove a catalog: a host directory or an https URL, `native`, `dokploy` or `coolify` format. |
 
 ## Databases and backups
 

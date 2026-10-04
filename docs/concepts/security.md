@@ -203,7 +203,7 @@ Details: [Identity API](../reference/identity-api.md).
   build in a VM and receive none of the app's secrets except those named
   ([Previews](../guides/previews.md)).
 - **Templates** from added catalogs are third-party data: parsed and
-  translated, never run on the host; a Dokploy template that asks for
+  translated, never run on the host; a Dokploy or Coolify template that asks for
   privileges, host paths or devices is refused
   ([Templates](../guides/templates.md)).
 - **Sandboxes made through the daemon** expire and are reaped when idle

@@ -342,7 +342,7 @@ The catalog with search and tags; cards show a template's logo, served from
 isb's cached copy ([logos](../guides/templates.md#logos)), so the page makes
 no requests to other servers. A template without a logo, or whose logo fails
 to load, shows its initials. A template's page lists what it creates, its
-links and notes (and a Dokploy template's translation notes or refusals),
+links and notes (and a Dokploy or Coolify template's translation notes or refusals),
 and a form generated from its variables: each typed (email, URL, number,
 domain, choices) and checked as the daemon checks it, generated ones left
 empty to be generated, secret ones as password fields. **Preview plan** is
@@ -352,8 +352,8 @@ the first app's deployment live; when it is done, the page moves on to the
 next app's deployment as it is queued, in dependency order. What the org
 deployed is listed with its apps and URLs, and removing an instance deletes
 its apps and `tpl.NAME.*` secrets. Platform admins manage catalogs there too
-(add a directory or https URL in isb's or Dokploy's format, remove one), with
-a one-click fill for Dokploy's. See [templates](../guides/templates.md).
+(add a directory or https URL in isb's, Dokploy's or Coolify's format, remove
+one), with a one-click fill for Dokploy's and for Coolify's. See [templates](../guides/templates.md).
 
 ## Platform
 

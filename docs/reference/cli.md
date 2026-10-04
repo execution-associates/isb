@@ -323,12 +323,12 @@ isb app previews rm NAME PR
 
 ```text
 isb template ls [WORDS...] [--tag T] [--catalog C] [--json]
-isb template show REF [--json]          variables, apps, notes; a Dokploy template's translation report
+isb template show REF [--json]          variables, apps, notes; a Dokploy or Coolify template's translation report
 isb template deploy REF --project P [--env E] [--name N] [-s KEY=VALUE]... [--dry-run] [-d] [--json]
 isb template instances [--json]
 isb template rm NAME                    its apps (volumes kept) and secrets
 isb template catalog ls
-isb template catalog add NAME [--format native|dokploy] LOCATION   platform admins
+isb template catalog add NAME [--format native|dokploy|coolify] LOCATION   platform admins
 isb template catalog rm NAME                                       platform admins
 ```
 
