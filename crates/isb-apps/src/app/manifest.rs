@@ -85,6 +85,9 @@ pub struct Plan {
     pub diff: String,
     /// Top-level fields that differ.
     pub changes: Vec<String>,
+    /// What the document takes away from an existing app (see
+    /// [`super::removals::removals`]); empty for a new app.
+    pub removals: Vec<String>,
 }
 
 /// The order an app's fields are written in.
@@ -553,6 +556,10 @@ pub fn plan(apps: &Apps, org: &OrgId, text: &str) -> std::result::Result<Plan, P
     spec.validate().map_err(fail)?;
     apps.check_spec(org, &spec).map_err(fail)?;
     let proposed = export_yaml(&spec).map_err(fail)?;
+    let removals = existing
+        .as_ref()
+        .map(|a| super::removals::removals(&a.spec, &spec))
+        .unwrap_or_default();
     let (action, current, changes) = match &existing {
         None => (
             Action::Created,
@@ -580,6 +587,7 @@ pub fn plan(apps: &Apps, org: &OrgId, text: &str) -> std::result::Result<Plan, P
         proposed,
         diff,
         changes,
+        removals,
     })
 }
 
@@ -860,5 +868,35 @@ mod tests {
         assert_eq!(e.line, Some(6), "{e:?}");
         // Nothing of that was stored.
         assert_eq!(ap.get(&org, "web").unwrap().spec.replicas, 1);
+    }
+
+    #[test]
+    fn plans_carry_removals_only_for_an_existing_app() {
+        // Files name org secrets, which must exist; the other fields suffice here.
+        let full = "env: |\n  A=1\n  B=2\ndomains:\n  - host: a.example.com\n    https: true\n  - host: b.example.com\nvolumes: [\"data:/data\"]\nports: [\"127.0.0.1:8080:80\"]\nport: 80\nreplicas: 2\nhealthcheck: {test: [\"CMD\", \"true\"]}\ncommand: [\"run\"]\nuser: \"1000\"\n";
+        let dir = tempfile::tempdir().unwrap();
+        let ap = apps(dir.path());
+        let org = OrgId::default_org();
+        shop(&ap, &org);
+
+        // Create: nothing to remove.
+        let p = plan(&ap, &org, &spec(full)).unwrap();
+        assert_eq!(p.action, Action::Created);
+        assert!(p.removals.is_empty());
+        apply(&ap, &org, &p).unwrap();
+
+        // Unchanged and a pure addition: none.
+        assert!(plan(&ap, &org, &spec(full)).unwrap().removals.is_empty());
+        let more = format!("{full}working_dir: /srv\n");
+        let p = plan(&ap, &org, &spec(&more)).unwrap();
+        assert_eq!(p.action, Action::Updated);
+        assert!(p.removals.is_empty());
+
+        // A short document: the plan says what it drops, and writes nothing.
+        let p = plan(&ap, &org, &spec("replicas: 2\n")).unwrap();
+        assert_eq!(p.action, Action::Updated);
+        assert!(p.removals.contains(&"domains: a.example.com".to_string()));
+        assert!(p.removals.contains(&"env: A".to_string()));
+        assert_eq!(ap.get(&org, "web").unwrap().spec.domains.len(), 2);
     }
 }

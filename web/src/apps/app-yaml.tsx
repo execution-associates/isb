@@ -33,7 +33,7 @@ export function YamlTab({ org, app }: { org: string; app: App }) {
       description={
         <>
           Everything the General, Environment and Domains tabs set, as one YAML document: the same fields <span className="font-mono">app_create</span> takes. Secrets
-          appear by name (<span className="font-mono">{"${{secret.NAME}}"}</span>), never as values. Fields you remove go back to their defaults. The name, project and
+          appear by name (<span className="font-mono">{"${{secret.NAME}}"}</span>), never as values. Fields you remove go back to their defaults, and the review lists anything removed for you to confirm. The name, project and
           environment cannot change.
         </>
       }
@@ -44,8 +44,8 @@ export function YamlTab({ org, app }: { org: string; app: App }) {
         readOnly={!writer}
         note="Saving applies at the next deploy; Save and deploy rolls it out now."
         validate={async (text) => appVerdict(await callTool<DryRun>("app_apply", { definition: text, dry_run: true }, org), app.name)}
-        save={async (text, deploy) => {
-          const r = await callTool<{ app: App; definition: string; deployment?: Deployment }>("app_apply", { definition: text, deploy }, org);
+        save={async (text, deploy, allowRemovals) => {
+          const r = await callTool<{ app: App; definition: string; deployment?: Deployment }>("app_apply", { definition: text, deploy, ...(allowRemovals ? { allow_removals: true } : {}) }, org);
           qc.setQueryData(keys.app(org, app.name), r.app);
           qc.setQueryData(keys.yaml(org, app.name), r.definition);
           qc.removeQueries({ queryKey: keys.env(org, app.name) });

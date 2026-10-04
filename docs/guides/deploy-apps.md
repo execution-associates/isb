@@ -126,7 +126,8 @@ port: 80
 
 Applying is declarative: the document is the app's whole desired settings, so
 a field you remove goes back to its default (unlike `app_update`, which merges
-a patch). A name that is new creates the app, in an existing project and
+a patch). To change a few fields, use `app_update`; to edit fully, run
+`app_export`, edit that YAML, `dry_run`, then apply. A name that is new creates the app, in an existing project and
 environment; a name that exists updates it. An app's name, project and
 environment, and a database's engine, database and user, cannot change: that
 is a different app. A document pasted from `app_get` is accepted (its
@@ -136,9 +137,19 @@ as well as YAML.
 ```text
 app_apply {definition: "<yaml>", dry_run: true}
   -> {valid, errors: [{line, column, message}], action: created|updated|unchanged,
-      changes: ["env", "replicas"], diff: "--- current\n+++ proposed\n..."}
+      changes: ["env", "replicas"], removals: ["env: TOKEN"],
+      diff: "--- current\n+++ proposed\n..."}
 app_apply {definition: "<yaml>", deploy: true}     # apply, then deploy
+app_apply {definition: "<yaml>", allow_removals: true}   # remove on purpose
 ```
+
+Applying to an existing app is refused when the document would take
+something away: a domain, env var, volume, published port or file the app has
+now, or a `port`, `healthcheck`, `resources`, `command`, `previews`, `user` or
+`working_dir` that goes back to its default. The error lists exactly what
+would go, and `dry_run` lists the same as `removals`. Pass `allow_removals:
+true` to apply anyway. Changing an entry (a domain's flags, a port's host
+side) and adding things are never removals, and creating an app has none.
 
 `dry_run` checks everything a real apply checks (the fields, the project and
 environment, the secrets it names) and writes nothing; a bad document is the
@@ -155,7 +166,8 @@ when the tab opens): line numbers, folding, highlighting, Ctrl/Cmd-S. As you
 type, the daemon checks the text (`app_apply` with `dry_run`) and marks the
 problems on their lines; the **Changes** view is a line diff against the
 saved definition. **Save** and **Save and deploy** first show the diff for
-review. Save and deploy opens the deployment's live page, like Deploy does.
+review. When the document removes anything, the review lists it in red and
+Save stays disabled until **Remove these** is ticked. Save and deploy opens the deployment's live page, like Deploy does.
 Viewers read the document and cannot edit it. A document that names another
 app would create it, so the tab refuses it.
 

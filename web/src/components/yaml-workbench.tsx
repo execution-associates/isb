@@ -39,8 +39,8 @@ export function YamlWorkbench({
   readOnly?: boolean;
   /** A server dry run of `text`; rejects on a failed call. */
   validate: (text: string) => Promise<Verdict>;
-  /** Store `text`, and deploy when `deploy`; rejects with the reason. */
-  save: (text: string, deploy: boolean) => Promise<void>;
+  /** Store `text`, and deploy when `deploy`; `allowRemovals` when the review's removals were confirmed. Rejects with the reason. */
+  save: (text: string, deploy: boolean, allowRemovals: boolean) => Promise<void>;
   deployLabel?: string;
   /** There is no saving without deploying (a compose stack): only the deploy button. */
   deployOnly?: boolean;
@@ -60,6 +60,8 @@ export function YamlWorkbench({
   const [view, setView] = useState<"yaml" | "changes">("yaml");
   const [review, setReview] = useState<null | "save" | "deploy">(null);
   const [pending, setPending] = useState(false);
+  // The review's "Remove these" box.
+  const [removeOk, setRemoveOk] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The latest `validate` without restarting the timer every render.
   const validateRef = useRef(validate);
@@ -111,12 +113,18 @@ export function YamlWorkbench({
   const ready = edited && !!verdict?.ok && !checking && !refuse && !readOnly;
   const stats = useMemo(() => diffStats(lineDiff(baseline, text)), [baseline, text]);
   const problems = verdict?.problems ?? [];
+  const removals = verdict?.removals ?? [];
+  const openReview = (r: "save" | "deploy") => {
+    setRemoveOk(false);
+    setError(null);
+    setReview(r);
+  };
 
   const confirm = async (deploy: boolean) => {
     setPending(true);
     setError(null);
     try {
-      await save(text, deploy);
+      await save(text, deploy, removals.length > 0 && removeOk);
       setDraft(null);
       setReview(null);
       setView("yaml");
@@ -164,7 +172,7 @@ export function YamlWorkbench({
 
       {view === "yaml" ? (
         <Suspense fallback={<Skeleton className="h-72 rounded-lg" />}>
-          <YamlEditor value={text} onChange={setDraft} onSave={() => ready && setReview(deployOnly ? "deploy" : "save")} readOnly={readOnly} problems={problems} label={label} />
+          <YamlEditor value={text} onChange={setDraft} onSave={() => ready && openReview(deployOnly ? "deploy" : "save")} readOnly={readOnly} problems={problems} label={label} />
         </Suspense>
       ) : (
         <DiffView oldText={baseline} newText={text} />
@@ -206,12 +214,12 @@ export function YamlWorkbench({
             </Button>
           )}
           {!deployOnly && (
-            <Button type="button" variant="outline" onClick={() => setReview("save")} disabled={!ready}>
+            <Button type="button" variant="outline" onClick={() => openReview("save")} disabled={!ready}>
               <Save />
               Save
             </Button>
           )}
-          <Button type="button" onClick={() => setReview("deploy")} disabled={!ready}>
+          <Button type="button" onClick={() => openReview("deploy")} disabled={!ready}>
             <Rocket />
             {deployLabel}
           </Button>
@@ -227,13 +235,30 @@ export function YamlWorkbench({
               {verdict?.changes.length ? ` Changes: ${verdict.changes.join(", ")}.` : ""}
             </DialogDescription>
           </DialogHeader>
+          {removals.length > 0 && (
+            <div className="grid gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-[13px]" role="alert">
+              <p className="flex gap-2 font-medium text-destructive">
+                <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
+                This removes settings the app has now:
+              </p>
+              <ul className="ml-6 list-disc font-mono text-xs text-destructive">
+                {removals.map((r) => (
+                  <li key={r}>{r}</li>
+                ))}
+              </ul>
+              <label className="ml-6 flex items-center gap-2">
+                <input type="checkbox" checked={removeOk} onChange={(e) => setRemoveOk(e.target.checked)} disabled={pending} />
+                Remove these
+              </label>
+            </div>
+          )}
           <DiffView oldText={baseline} newText={text} />
           <FormError>{error}</FormError>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => setReview(null)} disabled={pending}>
               Keep editing
             </Button>
-            <Button type="button" onClick={() => confirm(review === "deploy")} disabled={pending}>
+            <Button type="button" onClick={() => confirm(review === "deploy")} disabled={pending || (removals.length > 0 && !removeOk)}>
               {pending ? <Loader2 className="animate-spin" /> : review === "deploy" ? <Rocket /> : <Save />}
               {review === "deploy" ? deployLabel : "Save"}
             </Button>

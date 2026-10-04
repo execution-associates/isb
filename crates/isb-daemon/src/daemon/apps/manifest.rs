@@ -85,12 +85,13 @@ fn app_apply_tool(r: &mut Registry, apps: &Apps, ingress: bool) -> Result<()> {
         apps,
         "app_apply",
         "Apply an app definition",
-        "Declarative create-or-update, like kubectl apply: `definition` (YAML or JSON text, or a JSON object; the document app_export returns) is the app's whole desired settings. The app is created if its name is new (its project and environment must exist) and otherwise replaced by the document: fields the document leaves out go back to their defaults (app_update merges instead). An app's name, project, environment, and a database's engine/database/user cannot change. `dry_run` checks everything and writes nothing, answering {valid, errors: [{line, column, message}], action, changes, diff}; a bad document is an answer there, an error otherwise. `deploy` queues a deploy after (also when nothing changed). Takes effect at the next deploy. The response carries the app as stored and its definition as app_export shows it; a created app's carries its webhook secret.",
+        "Replaces the app's whole definition: anything the document leaves out is reset to its default. To change a few fields use app_update (merge). To edit fully: app_export, edit that YAML, dry_run, then apply. `definition` (YAML or JSON text, or an object; what app_export returns) creates the app if its name is new (its project and environment must exist), else replaces it. Name, project, environment and a database's engine/database/user cannot change. Applying to an existing app is refused when it would remove domains, env vars, volumes, ports or files, or reset a port, healthcheck, resources, command, previews, user or working_dir to the default, unless `allow_removals: true`; the error lists them, and `dry_run` reports them as `removals`. `dry_run` writes nothing and answers {valid, errors: [{line, column, message}], action, changes, removals, diff}. `deploy` queues a deploy after. Takes effect at the next deploy. The response carries the app as stored and its definition as app_export shows it; a created app's carries its webhook secret.",
         obj(
             json!({
                 "definition": {"description": "The app as YAML or JSON text, or as an object."},
                 "dry_run": {"type": "boolean", "description": "Validate and diff only; change nothing."},
-                "deploy": {"type": "boolean", "description": "Queue a deploy after applying."}
+                "deploy": {"type": "boolean", "description": "Queue a deploy after applying."},
+                "allow_removals": {"type": "boolean", "description": "Allow the document to remove domains, env vars, volumes, ports, files or settings the app has now. Without it such an apply is refused."}
             }),
             &["definition"]
         ),
@@ -104,6 +105,8 @@ fn app_apply_tool(r: &mut Registry, apps: &Apps, ingress: bool) -> Result<()> {
                 dry_run: bool,
                 #[serde(default)]
                 deploy: bool,
+                #[serde(default)]
+                allow_removals: bool,
                 #[serde(default)]
                 #[allow(dead_code)]
                 org: Option<String>,
@@ -133,12 +136,14 @@ fn app_apply_tool(r: &mut Registry, apps: &Apps, ingress: bool) -> Result<()> {
                 "action": plan.action,
                 "changes": plan.changes,
                 "diff": plan.diff,
+                "removals": plan.removals,
             });
             if a.dry_run {
                 out["dry_run"] = json!(true);
                 out["would_deploy"] = json!(a.deploy);
                 return Ok(out);
             }
+            guard(&plan.spec.name, &plan.removals, a.allow_removals)?;
             let (app, secret) = manifest::apply(ap, &org, &plan)?;
             let mut aj = super::app_json(&org, &app);
             if let Some(w) = note_ingress(&mut aj, ingress) {
@@ -158,6 +163,19 @@ fn app_apply_tool(r: &mut Registry, apps: &Apps, ingress: bool) -> Result<()> {
         }
     );
     Ok(())
+}
+
+/// Refuse an apply that removes things unless it said it may.
+fn guard(app: &str, removals: &[String], allow: bool) -> Result<()> {
+    if removals.is_empty() || allow {
+        return Ok(());
+    }
+    Err(Error::invalid(format!(
+        "applying this to {app} would remove: {}. app_apply replaces the whole definition; \
+         to change a few fields use app_update, or export the app (app_export), edit that \
+         document and apply it. To remove these on purpose, pass allow_removals: true",
+        removals.join("; ")
+    )))
 }
 
 #[cfg(test)]
@@ -182,5 +200,21 @@ mod tests {
         // A document that does not parse names nothing.
         let bad = json!({"org": "acme", "definition": "name: [web"});
         assert_eq!(kept("app_apply", &bad), json!({"org": "acme"}));
+    }
+
+    #[test]
+    fn removals_are_refused_unless_allowed() {
+        let r = vec![
+            "domains: a.example.com".to_string(),
+            "env: TOKEN".to_string(),
+        ];
+        let e = guard("web", &r, false).unwrap_err().to_string();
+        assert!(
+            e.contains("web would remove: domains: a.example.com; env: TOKEN")
+                && e.contains("allow_removals: true"),
+            "{e}"
+        );
+        assert!(guard("web", &r, true).is_ok());
+        assert!(guard("web", &[], false).is_ok());
     }
 }

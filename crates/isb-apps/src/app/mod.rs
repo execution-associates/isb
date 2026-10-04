@@ -30,6 +30,7 @@ pub mod forge;
 pub mod git;
 pub mod manifest;
 pub mod preview;
+mod removals;
 pub mod webhook;
 
 use std::collections::BTreeMap;

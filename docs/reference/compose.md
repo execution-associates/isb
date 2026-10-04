@@ -642,13 +642,16 @@ changes.
 
 User resolution, in the guest, as root:
 
-- `NAME` or `UID`: `getent passwd` gives uid, gid, home and shell. A numeric
-  value with no passwd entry becomes uid = gid = that number, with no home.
-  Anything else missing is an error.
-- `UID:GID` (both numeric): those ids; name, home and shell come from
-  `getent passwd UID` when it exists.
-- `NAME:GROUP`: `NAME` must exist; `GROUP` is numeric or looked up with
-  `getent group`.
+- `UID` or `UID:GID` (numeric): those ids, with no lookup, so an image
+  without `getent` works. The name, home and shell come from `/etc/passwd`
+  when the file is there; a uid with no entry has no home, and gid defaults to
+  the uid.
+- `NAME`: `getent passwd` gives uid, gid, home and shell. Where `getent` is
+  missing or does not know the name, isb reads `/etc/passwd` through the
+  instance's file API (no program runs in the guest). A name in neither is
+  the error `no such user NAME in INSTANCE`.
+- `USER:GROUP`: `GROUP` is numeric or looked up with `getent group`, then
+  `/etc/group` (`no such group GROUP in INSTANCE` when missing).
 
 When the user resolves to a passwd entry, `HOME` (from the home), `USER` and
 `LOGNAME` are set unless already given in the environment or per call. With a

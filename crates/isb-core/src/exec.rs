@@ -146,71 +146,8 @@ pub fn parse_passwd(line: &str) -> Option<GuestUser> {
     })
 }
 
-/// Resolve `dev`, `1000` or `1000:1000` to ids inside the guest.
-#[doc(hidden)]
-pub fn resolve_user(client: &Client, instance: &str, user: &str) -> Result<GuestUser> {
-    if let Some((u, g)) = user.split_once(':') {
-        if let (Ok(uid), Ok(gid)) = (u.parse::<u32>(), g.parse::<u32>()) {
-            let mut gu = lookup_passwd(client, instance, u)?.unwrap_or_default();
-            gu.uid = uid;
-            gu.gid = gid;
-            return Ok(gu);
-        }
-        // `name:group` — resolve both.
-        let mut gu = lookup_passwd(client, instance, u)?
-            .ok_or_else(|| Error::invalid(format!("user {u:?} does not exist in {instance}")))?;
-        gu.gid = match g.parse::<u32>() {
-            Ok(n) => n,
-            Err(_) => lookup_group(client, instance, g)?,
-        };
-        return Ok(gu);
-    }
-    match lookup_passwd(client, instance, user)? {
-        Some(u) => Ok(u),
-        None => match user.parse::<u32>() {
-            Ok(uid) => Ok(GuestUser {
-                uid,
-                gid: uid,
-                ..Default::default()
-            }),
-            Err(_) => Err(Error::invalid(format!(
-                "user {user:?} does not exist in {instance}"
-            ))),
-        },
-    }
-}
-
-fn lookup_passwd(client: &Client, instance: &str, user: &str) -> Result<Option<GuestUser>> {
-    let out = run_captured(
-        client,
-        instance,
-        &["getent".into(), "passwd".into(), user.into()],
-        &Request::root(),
-        Stdin::Null,
-        Some(Duration::from_secs(30)),
-    )?;
-    if !out.success() {
-        return Ok(None);
-    }
-    Ok(out.stdout_text().lines().next().and_then(parse_passwd))
-}
-
-fn lookup_group(client: &Client, instance: &str, group: &str) -> Result<u32> {
-    let out = run_captured(
-        client,
-        instance,
-        &["getent".into(), "group".into(), group.into()],
-        &Request::root(),
-        Stdin::Null,
-        Some(Duration::from_secs(30)),
-    )?;
-    out.stdout_text()
-        .lines()
-        .next()
-        .and_then(|l| l.split(':').nth(2))
-        .and_then(|g| g.parse().ok())
-        .ok_or_else(|| Error::invalid(format!("group {group:?} does not exist in {instance}")))
-}
+mod user;
+pub use user::resolve_user;
 
 /// A fully resolved exec request.
 #[derive(Debug, Clone, Default)]

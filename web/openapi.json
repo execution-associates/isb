@@ -3461,7 +3461,7 @@
     },
     "/api/v1/tools/app_apply": {
       "post": {
-        "description": "Declarative create-or-update, like kubectl apply: `definition` (YAML or JSON text, or a JSON object; the document app_export returns) is the app's whole desired settings. The app is created if its name is new (its project and environment must exist) and otherwise replaced by the document: fields the document leaves out go back to their defaults (app_update merges instead). An app's name, project, environment, and a database's engine/database/user cannot change. `dry_run` checks everything and writes nothing, answering {valid, errors: [{line, column, message}], action, changes, diff}; a bad document is an answer there, an error otherwise. `deploy` queues a deploy after (also when nothing changed). Takes effect at the next deploy. The response carries the app as stored and its definition as app_export shows it; a created app's carries its webhook secret.",
+        "description": "Replaces the app's whole definition: anything the document leaves out is reset to its default. To change a few fields use app_update (merge). To edit fully: app_export, edit that YAML, dry_run, then apply. `definition` (YAML or JSON text, or an object; what app_export returns) creates the app if its name is new (its project and environment must exist), else replaces it. Name, project, environment and a database's engine/database/user cannot change. Applying to an existing app is refused when it would remove domains, env vars, volumes, ports or files, or reset a port, healthcheck, resources, command, previews, user or working_dir to the default, unless `allow_removals: true`; the error lists them, and `dry_run` reports them as `removals`. `dry_run` writes nothing and answers {valid, errors: [{line, column, message}], action, changes, removals, diff}. `deploy` queues a deploy after. Takes effect at the next deploy. The response carries the app as stored and its definition as app_export shows it; a created app's carries its webhook secret.",
         "operationId": "app_apply",
         "requestBody": {
           "content": {
@@ -3469,6 +3469,10 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "allow_removals": {
+                    "description": "Allow the document to remove domains, env vars, volumes, ports, files or settings the app has now. Without it such an apply is refused.",
+                    "type": "boolean"
+                  },
                   "definition": {
                     "description": "The app as YAML or JSON text, or as an object."
                   },

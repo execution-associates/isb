@@ -88,6 +88,13 @@ describe("appVerdict", () => {
     expect(problemText(v.problems[0])).toBe("Line 5: replicas: at most 100");
   });
 
+  it("carries what the document removes, for the review to confirm", () => {
+    const v = appVerdict({ valid: true, action: "updated", name: "web", changes: ["env"], removals: ["env: TOKEN", "domains: a.example.com"] }, "web");
+    expect(v.ok).toBe(true);
+    expect(v.removals).toEqual(["env: TOKEN", "domains: a.example.com"]);
+    expect(appVerdict({ valid: true, action: "updated", name: "web", removals: [] }, "web")).not.toHaveProperty("removals");
+  });
+
   it("refuses to save what would create another app", () => {
     const v = appVerdict({ valid: true, action: "created", name: "api", changes: ["name"] }, "web");
     expect(v.ok).toBe(false);

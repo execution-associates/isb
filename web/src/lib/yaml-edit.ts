@@ -121,6 +121,8 @@ export interface DryRun {
   action?: "created" | "updated" | "unchanged";
   changes?: string[] | { service: string; change: string }[];
   name?: string;
+  /** app_apply: what the document takes away from the app, one line each. */
+  removals?: string[];
   /** stack_validate: a stack by this name is deployed, and who owns it. */
   exists?: boolean;
   managed_by?: string | null;
@@ -134,6 +136,8 @@ export interface Verdict {
   blocked?: string;
   /** What saving changes, as short labels. */
   changes: string[];
+  /** What saving removes from the app (domains, env vars, ...); needs a confirmation. */
+  removals?: string[];
 }
 
 /** The Save buttons' view of an app dry run: valid, and an edit of this very app. */
@@ -149,7 +153,8 @@ export function appVerdict(r: DryRun, app: string): Verdict {
       changes,
     };
   }
-  return { ok: true, problems: [], changes };
+  const removals = r.removals ?? [];
+  return { ok: true, problems: [], changes, ...(removals.length ? { removals } : {}) };
 }
 
 /** A stack dry run: the per-service plan, without services that stay as they are. */

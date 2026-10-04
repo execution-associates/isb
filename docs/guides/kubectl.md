@@ -27,6 +27,7 @@ daemon's host it talks to the unix socket, anywhere else through
 | `describe pod` | `isb instance get NAME` | `instance_get` |
 | `describe deploy` | `isb app show NAME`, `isb stack ps NAME` | `app_get`, `stack_status` |
 | `apply -f`, `create` | `isb app create`, `isb stack deploy`, `isb up` | `app_create`, `app_deploy`, `stack_deploy` |
+| `apply -f app.yaml`, `get -o yaml`, `diff` | the app page's **YAML** tab | `app_apply` (replaces the whole definition, refuses removals without `allow_removals`; `dry_run` first), `app_export` |
 | `edit`, `patch`, `set image`, `set env` | `isb app update -f PATCH`, `isb app env-set` | `app_update`, `app_env_set` |
 | `logs deploy/NAME` | `isb app logs NAME [--replica N] [-n 200] [--since 10m]` | `app_logs` |
 | `logs -f`, `logs` for a compose service | `isb stack logs NAME SERVICE` | `stack_logs` |
