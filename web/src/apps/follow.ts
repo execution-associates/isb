@@ -11,7 +11,7 @@ export interface LogReply extends LogChunk {
   deployment?: Deployment;
 }
 
-const RANK: Record<DeploymentStatus, number> = { queued: 0, building: 1, deploying: 2, done: 3, failed: 3, superseded: 3 };
+const RANK: Record<DeploymentStatus, number> = { queued: 0, building: 1, deploying: 2, done: 3, failed: 3, superseded: 3, cancelled: 3 };
 
 export class DeploymentFollow {
   readonly log = new LogFollower();

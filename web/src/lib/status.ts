@@ -33,7 +33,7 @@ export const TONE_TEXT: Record<Tone, string> = {
   muted: "text-muted-foreground",
 };
 
-export type DeploymentStatus = "queued" | "building" | "deploying" | "done" | "failed" | "superseded";
+export type DeploymentStatus = "queued" | "building" | "deploying" | "done" | "failed" | "superseded" | "cancelled";
 
 export const DEPLOYMENT_TONE: Record<DeploymentStatus, Tone> = {
   queued: "neutral",
@@ -42,6 +42,7 @@ export const DEPLOYMENT_TONE: Record<DeploymentStatus, Tone> = {
   done: "success",
   failed: "danger",
   superseded: "muted",
+  cancelled: "muted",
 };
 
 export const DEPLOYMENT_LABEL: Record<DeploymentStatus, string> = {
@@ -51,6 +52,7 @@ export const DEPLOYMENT_LABEL: Record<DeploymentStatus, string> = {
   done: "Done",
   failed: "Failed",
   superseded: "Superseded",
+  cancelled: "Cancelled",
 };
 
 /** Statuses still moving: their dot pulses. */
@@ -83,6 +85,7 @@ export function stepStates(status: DeploymentStatus, reached: { building: boolea
       out.queued = out.building = out.deploying = out.done = "done";
       break;
     case "superseded":
+    case "cancelled":
       out.queued = "failed";
       out.building = out.deploying = out.done = "skipped";
       break;

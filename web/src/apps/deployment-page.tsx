@@ -160,7 +160,7 @@ function StatusGlyph({ d }: { d: Deployment }) {
     tone === "danger" && "border-destructive/30 bg-destructive/10 text-destructive",
     (tone === "neutral" || tone === "muted") && "bg-muted text-muted-foreground",
   );
-  const Icon = d.status === "done" ? CircleCheck : d.status === "failed" ? CircleX : d.status === "superseded" ? CircleSlash : Loader2;
+  const Icon = d.status === "done" ? CircleCheck : d.status === "failed" ? CircleX : (d.status === "superseded" || d.status === "cancelled") ? CircleSlash : Loader2;
   return (
     <span className={box}>
       <Icon className={cn("size-5", inProgress(d.status) && "animate-spin")} />
@@ -364,6 +364,12 @@ export function DeploymentPage({ org, app, id }: { org: string; app: App; id: nu
         {d.status === "superseded" && (
           <Outcome tone="neutral" icon={CircleSlash} title="Superseded">
             A newer deploy replaced this one before it started{d.error ? `: ${d.error}` : ""}.
+          </Outcome>
+        )}
+
+        {d.status === "cancelled" && (
+          <Outcome tone="neutral" icon={CircleSlash} title="Cancelled">
+            {d.error ?? "Closed before it started."}
           </Outcome>
         )}
 

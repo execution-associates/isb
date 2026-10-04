@@ -18,7 +18,7 @@ use crate::org::OrgId;
 use crate::secrets::Secrets;
 use crate::server::{Caller, Registry, Tool};
 use crate::template::catalog::{CatalogConfig, Catalogs, Format};
-use crate::template::{self, EntrypointFn, Instance, Template};
+use crate::template::{self, EntrypointFn, Instance, Stopped, Template};
 
 /// What the template tools work with.
 #[derive(Clone)]
@@ -182,6 +182,15 @@ impl Templates {
             instance: instance.clone(),
             values: a.values.clone(),
         };
+        // A deploy that stopped early is finished by deploying again under
+        // the same name: only the apps that did not come up are run.
+        if !a.dry_run {
+            if let Some(inst) = self.read_instance(org, &instance)? {
+                if inst.stopped.is_some() && inst.template == reference {
+                    return self.resume(org, inst, &a, c);
+                }
+            }
+        }
         let plan = template::plan(&t, &params, &ctx)?;
         // Nothing may be in the way.
         let mut conflicts = Vec::new();
@@ -282,6 +291,7 @@ impl Templates {
             urls: plan.urls.clone(),
             created_at: crate::stack::now_secs(),
             created_by: caller_name(c),
+            stopped: None,
         };
         if let Err(e) = crate::app::write_atomic(
             &self.instance_path(org, &instance)?,
@@ -290,6 +300,64 @@ impl Templates {
             undo(&made_apps, &made_secrets);
             return Err(e);
         }
+        out["instance"] = serde_json::to_value(&inst)?;
+        self.run_deploy(org, &inst, plan.order.clone(), &a, c, out)
+    }
+
+    fn read_instance(&self, org: &OrgId, name: &str) -> Result<Option<Instance>> {
+        match std::fs::read(self.instance_path(org, name)?) {
+            Ok(b) => Ok(Some(serde_json::from_slice(&b)?)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Record how a deploy ended on the instance: stopped early, or clean.
+    fn record_outcome(&self, org: &OrgId, name: &str, stopped: Option<Stopped>) {
+        let Ok(Some(mut inst)) = self.read_instance(org, name) else {
+            return;
+        };
+        if inst.stopped == stopped {
+            return;
+        }
+        inst.stopped = stopped;
+        let write = self
+            .instance_path(org, name)
+            .and_then(|p| crate::app::write_atomic(&p, &serde_json::to_vec_pretty(&inst)?));
+        if let Err(e) = write {
+            eprintln!("isb serve: template deploy in {org}: instance {name}: {e}");
+        }
+    }
+
+    /// Deploy the apps a stopped instance did not finish: the one that
+    /// failed and those after it.
+    fn resume(&self, org: &OrgId, inst: Instance, a: &DeployArgs, c: &Caller) -> Result<Value> {
+        let stopped = inst.stopped.clone().unwrap_or_else(|| Stopped {
+            app: String::new(),
+            reason: String::new(),
+            not_started: vec![],
+        });
+        let mut order: Vec<String> = inst
+            .apps
+            .iter()
+            .filter(|n| **n == stopped.app || stopped.not_started.contains(n))
+            .cloned()
+            .collect();
+        order.retain(|n| self.apps.get(org, n).is_ok());
+        let out = json!({"instance": serde_json::to_value(&inst)?, "resumed": order});
+        self.run_deploy(org, &inst, order, a, c, out)
+    }
+
+    fn run_deploy(
+        &self,
+        org: &OrgId,
+        inst: &Instance,
+        order: Vec<String>,
+        a: &DeployArgs,
+        c: &Caller,
+        mut out: Value,
+    ) -> Result<Value> {
+        let instance = inst.name.clone();
         let trigger = if c.is_local() {
             Trigger::Manual
         } else {
@@ -300,10 +368,9 @@ impl Templates {
             Some(t) => crate::flex::parse_duration(t).map_err(Error::invalid)?,
             None => Duration::from_secs(1800),
         };
-        out["instance"] = serde_json::to_value(&inst)?;
         // Without `wait`, the first app's deploy is queued before answering,
         // so the caller can open its live log at once.
-        let first = match (a.wait, plan.order.first()) {
+        let first = match (a.wait, order.first()) {
             (false, Some(name)) => {
                 match self
                     .apps
@@ -319,8 +386,14 @@ impl Templates {
             }
             _ => None,
         };
-        let (apps, org2, order) = (self.apps.clone(), org.clone(), plan.order.clone());
-        let run = move || deploy_in_order(&apps, &org2, &order, first, trigger, &by, timeout);
+        let (me, org2, order2) = (self.clone(), org.clone(), order.clone());
+        let name = instance.clone();
+        let run = move || {
+            let (results, stopped) =
+                deploy_in_order(&me.apps, &org2, &order2, first, trigger, &by, timeout);
+            me.record_outcome(&org2, &name, stopped);
+            results
+        };
         if a.wait {
             let results = run();
             out["deployments"] = json!(results);
@@ -331,7 +404,7 @@ impl Templates {
                     run();
                 })
                 .map_err(|e| Error::invalid(format!("start the deploy: {e}")))?;
-            out["deploying"] = json!(plan.order);
+            out["deploying"] = json!(order);
         }
         Ok(out)
     }
@@ -377,11 +450,11 @@ fn default_instance(id: &str) -> String {
     s
 }
 
-/// Deploy apps one after another, each waiting for the one before (so a
-/// database is up before the app that needs it). Stops at a failure.
-/// Deploy `order` one app after another, stopping at the first that does
-/// not finish done. `first` is the first app's deployment when the caller
-/// already queued it.
+/// Deploy `order` one app after another (so a database is up before the
+/// app that needs it), stopping at the first that does not finish done.
+/// `first` is the first app's deployment when the caller already queued
+/// it. On a stop, deployments the template queued for the apps after it
+/// are cancelled, and the stop is returned for the instance record.
 fn deploy_in_order(
     apps: &Apps,
     org: &OrgId,
@@ -390,7 +463,7 @@ fn deploy_in_order(
     trigger: Trigger,
     by: &str,
     timeout: Duration,
-) -> Vec<Value> {
+) -> (Vec<Value>, Option<Stopped>) {
     let mut out = Vec::new();
     for (i, name) in order.iter().enumerate() {
         let queued = match (i, first) {
@@ -398,26 +471,51 @@ fn deploy_in_order(
             _ => apps.deploy(org, name, trigger, by, Some("template".into())),
         };
         let d = queued.and_then(|d| apps.wait(org, name, d.id, timeout));
-        match d {
-            Ok(d) => {
-                let ok = d.status == Status::Done;
+        let reason = match d {
+            Ok(d) if d.status == Status::Done => {
                 out.push(json!({"app": name, "deployment": d.summary()}));
-                if !ok {
-                    eprintln!(
-                        "isb serve: template deploy in {org}: {name} did not deploy ({:?}); stopping",
-                        d.status
-                    );
-                    break;
-                }
+                continue;
+            }
+            Ok(d) => {
+                eprintln!(
+                    "isb serve: template deploy in {org}: {name} did not deploy ({:?}); stopping",
+                    d.status
+                );
+                let why = match (&d.error, d.status.finished()) {
+                    (Some(e), _) => e.clone(),
+                    (None, true) => format!("{:?}", d.status).to_lowercase(),
+                    (None, false) => {
+                        format!("still {:?} after {timeout:?}", d.status).to_lowercase()
+                    }
+                };
+                out.push(json!({"app": name, "deployment": d.summary()}));
+                why
             }
             Err(e) => {
                 eprintln!("isb serve: template deploy in {org}: {name}: {e}");
                 out.push(json!({"app": name, "error": e.to_string()}));
-                break;
+                e.to_string()
+            }
+        };
+        let rest = order[i + 1..].to_vec();
+        let why = format!("template deploy stopped: {name} failed");
+        for app in &rest {
+            for d in apps.deployments(org, app).unwrap_or_default() {
+                if d.status == Status::Queued && d.requested.as_deref() == Some("template") {
+                    let _ = apps.cancel_queued(org, app, d.id, &why);
+                }
             }
         }
+        return (
+            out,
+            Some(Stopped {
+                app: name.clone(),
+                reason,
+                not_started: rest,
+            }),
+        );
     }
-    out
+    (out, None)
 }
 
 #[derive(Debug, Deserialize)]

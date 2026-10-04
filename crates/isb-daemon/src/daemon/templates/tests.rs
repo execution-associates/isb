@@ -90,14 +90,6 @@ fn deploys_and_removes_an_instance() {
         )
         .unwrap();
     assert!(again["error"].as_str().unwrap().contains("already exist"));
-    assert!(
-        t.deploy(
-            &org,
-            deploy_args(json!({"template": "umami", "project": "web"})),
-            &local
-        )
-        .is_err()
-    );
     assert_eq!(t.instances(&org).unwrap().len(), 1);
     // Removing takes the apps, the secrets and the record.
     let gone = t.remove(&org, "umami").unwrap();
@@ -112,6 +104,37 @@ fn deploys_and_removes_an_instance() {
     );
     assert!(t.instances(&org).unwrap().is_empty());
     assert!(t.remove(&org, "umami").is_err());
+}
+
+#[test]
+fn a_stopped_deploy_is_recorded_and_deploying_again_resumes_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let t = templates(dir.path());
+    let org = OrgId::new("acme").unwrap();
+    let local = Caller::Local { uid: None };
+    let args = json!({"template": "umami", "project": "web", "wait": true, "timeout": "20s"});
+    // No incusd here: the first app fails and the second is never started.
+    t.deploy(&org, deploy_args(args.clone()), &local).unwrap();
+    let stopped = t.read_instance(&org, "umami").unwrap().unwrap().stopped;
+    let stopped = stopped.expect("the partial failure is recorded");
+    assert_eq!(stopped.app, "umami-db");
+    assert_eq!(stopped.not_started, vec!["umami".to_string()]);
+    assert!(!stopped.reason.is_empty());
+    assert!(t.apps.deployments(&org, "umami").unwrap().is_empty());
+    let first = t.apps.deployments(&org, "umami-db").unwrap();
+    assert!(first.iter().all(|d| d.status.finished()), "{first:?}");
+    // Deploying again under the name resumes it: the app that failed and
+    // the one never started, nothing recreated.
+    let r = t.deploy(&org, deploy_args(args), &local).unwrap();
+    assert_eq!(r["resumed"], json!(["umami-db", "umami"]), "{r}");
+    assert_eq!(t.apps.deployments(&org, "umami-db").unwrap().len(), 2);
+    assert!(
+        t.read_instance(&org, "umami")
+            .unwrap()
+            .unwrap()
+            .stopped
+            .is_some()
+    );
 }
 
 #[test]

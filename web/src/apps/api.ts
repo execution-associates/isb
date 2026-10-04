@@ -81,7 +81,7 @@ export interface App {
   domains_served: boolean;
 }
 
-export type DeploymentStatus = "queued" | "building" | "deploying" | "done" | "failed" | "superseded";
+export type DeploymentStatus = "queued" | "building" | "deploying" | "done" | "failed" | "superseded" | "cancelled";
 
 export interface Deployment {
   id: number;
@@ -113,7 +113,7 @@ export function currentOf(ds: Deployment[] | undefined, fallback: number | null)
 
 export const isGit = (s: AppSource): s is { git: GitSource } => "git" in s;
 
-export const finished = (s: DeploymentStatus) => s === "done" || s === "failed" || s === "superseded";
+export const finished = (s: DeploymentStatus) => s === "done" || s === "failed" || s === "superseded" || s === "cancelled";
 
 /** The stack_status of one stack, with each service's domains. */
 export interface StackDetail {

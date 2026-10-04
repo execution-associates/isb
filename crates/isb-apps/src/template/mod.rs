@@ -951,6 +951,20 @@ pub struct Instance {
     pub urls: Vec<String>,
     pub created_at: u64,
     pub created_by: String,
+    /// Set when the deploy stopped early: the app that failed, why, and
+    /// the apps never started. Cleared when a redeploy finishes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped: Option<Stopped>,
+}
+
+/// How a template deploy that did not finish stopped.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Stopped {
+    pub app: String,
+    pub reason: String,
+    /// Apps after `app` in the order that were never deployed.
+    #[serde(default)]
+    pub not_started: Vec<String>,
 }
 
 #[cfg(test)]

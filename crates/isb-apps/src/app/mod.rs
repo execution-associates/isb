@@ -22,6 +22,7 @@
 //! sources/<app>/repo, known_hosts           (git checkouts)
 //! ```
 
+mod close;
 pub mod database;
 pub mod deploy;
 pub mod env;

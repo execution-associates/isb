@@ -28,7 +28,7 @@ import { type DeploymentStatus, inProgress } from "@/lib/status";
 import { useCanWrite } from "@/lib/use-role";
 import { formOf, formProblems, isPreviewEvent, pkeys, type Preview, type PreviewForm, type PreviewSettings, settingsOf, usePreviews } from "./api";
 
-const STATUSES = new Set(["queued", "building", "deploying", "done", "failed", "superseded"]);
+const STATUSES = new Set(["queued", "building", "deploying", "done", "failed", "superseded", "cancelled"]);
 const asStatus = (s: string | undefined): DeploymentStatus | null => (s && STATUSES.has(s) ? (s as DeploymentStatus) : null);
 
 type LogTarget = { number: number; deployment: number };

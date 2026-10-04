@@ -73,7 +73,7 @@ export function UptimePage() {
                 )
               }
             >
-              Every app with a domain gets a monitor of its own within a minute of being served{list.data?.settings.auto_monitors === false ? " (turned off for this org)" : ""}. Add one for any URL or TCP port too.
+              Every app with a domain gets a monitor of its own within a minute of its first deploy going live (an app that has not come up yet has none){list.data?.settings.auto_monitors === false ? " (turned off for this org)" : ""}. Add one for any URL or TCP port too.
             </EmptyState>
           </Card>
         ) : (

@@ -64,11 +64,13 @@ pub enum Status {
     Failed,
     /// A newer deploy replaced it before it started.
     Superseded,
+    /// Closed before it started, because what queued it stopped.
+    Cancelled,
 }
 
 impl Status {
     pub fn finished(self) -> bool {
-        matches!(self, Status::Done | Status::Failed | Status::Superseded)
+        !matches!(self, Status::Queued | Status::Building | Status::Deploying)
     }
 
     /// The moves the pipeline makes; anything else is a bug.
@@ -78,6 +80,7 @@ impl Status {
             (self, next),
             (Queued, Building)
                 | (Queued, Superseded)
+                | (Queued, Cancelled)
                 | (Queued, Failed)
                 | (Building, Deploying)
                 | (Building, Failed)
@@ -712,7 +715,7 @@ impl Apps {
         self.deployments_dir(org, app).join(format!("{id}.log"))
     }
 
-    fn save_dep(&self, org: &OrgId, d: &Deployment) -> Result<()> {
+    pub(super) fn save_dep(&self, org: &OrgId, d: &Deployment) -> Result<()> {
         super::write_atomic(
             &self.dep_path(org, &d.app, d.id),
             &serde_json::to_vec_pretty(d)?,
@@ -1248,34 +1251,8 @@ impl Apps {
         }
     }
 
-    /// Mark deployments a stopped daemon left unfinished as failed.
-    fn recover(&self) {
-        let mut orgs = vec![OrgId::default_org()];
-        if let Ok(rd) = std::fs::read_dir(self.inner.state.join("orgs")) {
-            for e in rd.flatten() {
-                if let Some(o) = e.file_name().to_str().and_then(|s| OrgId::new(s).ok()) {
-                    orgs.push(o);
-                }
-            }
-        }
-        for org in orgs {
-            for app in self.list(&org).unwrap_or_default() {
-                for mut d in self.deployments(&org, &app.spec.name).unwrap_or_default() {
-                    if d.status.finished() {
-                        continue;
-                    }
-                    d.error = Some("interrupted: the daemon stopped during it".into());
-                    d.status = Status::Failed;
-                    d.finished_at = Some(crate::stack::controller::now_ms());
-                    let _ = self.save_dep(&org, &d);
-                }
-                self.recover_previews(&org, &app.spec.name);
-            }
-        }
-    }
-
     /// An event about an app on the daemon's feed, under its stack.
-    fn event(&self, org: &OrgId, app: &str, level: &str, message: String) {
+    pub(super) fn event(&self, org: &OrgId, app: &str, level: &str, message: String) {
         let stack = self
             .get(org, app)
             .ok()
