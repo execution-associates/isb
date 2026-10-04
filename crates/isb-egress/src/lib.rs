@@ -21,6 +21,6 @@ pub mod rewrite;
 pub mod sniff;
 pub mod upstream;
 
-pub use manager::{Manager, Status};
+pub use manager::{Filter, Manager, Status};
 pub use proxy::{Config, Env, Proxy, SecretSource};
 pub use upstream::Settings;

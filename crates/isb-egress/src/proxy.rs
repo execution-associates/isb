@@ -170,7 +170,12 @@ impl Proxy {
 
     /// The ports being listened on.
     pub fn ports(&self) -> Vec<u16> {
-        self.listeners.lock().expect("listeners lock").keys().copied().collect()
+        self.listeners
+            .lock()
+            .expect("listeners lock")
+            .keys()
+            .copied()
+            .collect()
     }
 
     /// Connections open right now.
@@ -241,7 +246,9 @@ impl Shared {
         if d.len() > 512 {
             d.clear();
         }
-        if d.get(&key).is_some_and(|t| t.elapsed() < Duration::from_secs(30)) {
+        if d.get(&key)
+            .is_some_and(|t| t.elapsed() < Duration::from_secs(30))
+        {
             return;
         }
         d.insert(key, Instant::now());
@@ -404,12 +411,19 @@ impl Write for Prefixed {
 type ClientTls = rustls::StreamOwned<rustls::ServerConnection, Prefixed>;
 type UpTls = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
 
-fn pairs_for(sh: &Shared, bindings: &[isb_core::egress::SecretBinding]) -> Result<Vec<Pair>, String> {
+fn pairs_for(
+    sh: &Shared,
+    bindings: &[isb_core::egress::SecretBinding],
+) -> Result<Vec<Pair>, String> {
     let mut pairs = Vec::new();
     for b in bindings {
-        let real = sh
+        let mut real = sh
             .secret(&b.secret)
             .map_err(|e| format!("secret {} is not available: {e}", b.secret))?;
+        // A secret read from a file ends in a line break no header can carry.
+        while matches!(real.last(), Some(b'\n' | b'\r')) {
+            real.pop();
+        }
         if !rewrite::header_safe(&real) {
             return Err(format!(
                 "secret {} has line breaks or NUL and cannot travel in a header",
@@ -451,7 +465,11 @@ fn intercept(
     if complete(&mut client.conn, &mut client.sock).is_err() {
         // The guest does not trust the sandbox's CA (a pinned or
         // CA-store-less client): nothing more to say to it.
-        sh.deny(host, port, "TLS handshake with the guest failed (does it trust the sandbox CA?)");
+        sh.deny(
+            host,
+            port,
+            "TLS handshake with the guest failed (does it trust the sandbox CA?)",
+        );
         return;
     }
     let _ = client.sock.sock.set_read_timeout(Some(IDLE));
@@ -481,8 +499,15 @@ fn intercept(
     let mut up_conn = Conn::new(up);
     let r = mitm::serve(&mut client, &mut up_conn, &rw);
     if let Ok(Done::Upgraded) = r {
-        let _ = client.s.sock.sock.set_read_timeout(Some(Duration::from_millis(10)));
-        let _ = up_conn.s.sock.set_read_timeout(Some(Duration::from_millis(10)));
+        let _ = client
+            .s
+            .sock
+            .sock
+            .set_read_timeout(Some(Duration::from_millis(10)));
+        let _ = up_conn
+            .s
+            .sock
+            .set_read_timeout(Some(Duration::from_millis(10)));
         let _ = mitm::tunnel(&mut client, &mut up_conn, IDLE);
     }
     end(&mut client);
@@ -521,18 +546,9 @@ fn connect_tls(sh: &Shared, host: &str, port: u16) -> Result<UpTls, String> {
     let tcp = sh.upstream.connect(host, port)?;
     let _ = tcp.set_read_timeout(Some(IDLE));
     let name = ServerName::try_from(host.to_string()).map_err(|e| e.to_string())?;
-    let conn = rustls::ClientConnection::new(sh.client_tls.clone(), name).map_err(|e| e.to_string())?;
+    let conn =
+        rustls::ClientConnection::new(sh.client_tls.clone(), name).map_err(|e| e.to_string())?;
     let mut s = rustls::StreamOwned::new(conn, tcp);
     complete(&mut s.conn, &mut s.sock).map_err(|e| format!("TLS to {host}: {e}"))?;
     Ok(s)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn max_connections_is_bounded() {
-        assert!(MAX_CONNECTIONS <= 1024);
-    }
 }

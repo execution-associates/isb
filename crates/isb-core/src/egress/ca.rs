@@ -98,7 +98,9 @@ impl Ca {
         let mut p = params(network);
         p.not_before = now - time::Duration::days(1);
         p.not_after = now + time::Duration::days(365 * CA_YEARS);
-        let cert = p.self_signed(&key).map_err(|e| err("sign the certificate", e))?;
+        let cert = p
+            .self_signed(&key)
+            .map_err(|e| err("sign the certificate", e))?;
         let (root, d) = (root(), dir(network));
         make_private_dir(&root)?;
         static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -188,7 +190,9 @@ fn now_nanos() -> String {
 
 /// When [`kick`] last ran, as the daemon sees it.
 pub fn kicked_at() -> Option<std::time::SystemTime> {
-    std::fs::metadata(root().join("kick")).and_then(|m| m.modified()).ok()
+    std::fs::metadata(root().join("kick"))
+        .and_then(|m| m.modified())
+        .ok()
 }
 
 /// Delete a sandbox's CA.

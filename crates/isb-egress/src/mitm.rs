@@ -80,11 +80,16 @@ pub fn serve<C: Read + Write, U: Read + Write>(
         // Inside the tunnel the Host must be the host the handshake named,
         // or a guest could ask a shared front end for another site.
         if req.head.get_str("host").map(host_only).as_deref() != Some(rw.host.as_str()) {
-            reply(client, "421 Misdirected Request", "Host does not match the TLS server name")?;
+            reply(
+                client,
+                "421 Misdirected Request",
+                "Host does not match the TLS server name",
+            )?;
             return Ok(Done::Closed);
         }
         let close_after_req = req.head.has_token("connection", "close") || req.version == 0;
-        let upgrade = req.head.has_token("connection", "upgrade") && req.head.get("upgrade").is_some();
+        let upgrade =
+            req.head.has_token("connection", "upgrade") && req.head.get("upgrade").is_some();
         prepare(&mut req, rw);
         if body != Body::None && req.head.has_token("expect", "100-continue") {
             req.head.remove("expect");
@@ -147,7 +152,8 @@ fn respond<C: Read + Write, U: Read + Write>(
             client.s.flush()?;
             return Ok(Next::Upgraded);
         }
-        let bodiless = method == "HEAD" || (100..200).contains(&status) || status == 204 || status == 304;
+        let bodiless =
+            method == "HEAD" || (100..200).contains(&status) || status == 204 || status == 304;
         if bodiless {
             client.s.write_all(&resp.head.to_bytes())?;
             client.s.flush()?;
@@ -289,15 +295,27 @@ pub fn tunnel<C: Read + Write, U: Read + Write>(
     loop {
         let mut moved = false;
         for dir in 0..2 {
-            let r = if dir == 0 { client.s.read(&mut buf) } else { up.s.read(&mut buf) };
+            let r = if dir == 0 {
+                client.s.read(&mut buf)
+            } else {
+                up.s.read(&mut buf)
+            };
             match r {
                 Ok(0) => return Ok(()),
                 Ok(n) => {
                     moved = true;
-                    let w = if dir == 0 { up.s.write_all(&buf[..n]) } else { client.s.write_all(&buf[..n]) };
+                    let w = if dir == 0 {
+                        up.s.write_all(&buf[..n])
+                    } else {
+                        client.s.write_all(&buf[..n])
+                    };
                     w?;
                 }
-                Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => {}
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                    ) => {}
                 Err(e) => return Err(e),
             }
         }
@@ -376,7 +394,10 @@ mod tests {
         assert!(up.contains("Accept-Encoding: identity\r\n"), "{up}");
         assert!(!down.contains("REALSECRET"), "{down}");
         assert!(down.contains("X-Echo: isb_placeholder_abc"), "{down}");
-        assert!(down.contains("{\"auth\":\"Bearer isb_placeholder_abc\"}"), "{down}");
+        assert!(
+            down.contains("{\"auth\":\"Bearer isb_placeholder_abc\"}"),
+            "{down}"
+        );
         // The length follows the rewritten body.
         let n = "{\"auth\":\"Bearer isb_placeholder_abc\"}\n".len();
         assert!(down.contains(&format!("Content-Length: {n}\r\n")), "{down}");
@@ -398,7 +419,10 @@ mod tests {
             "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nREALS\r\n5\r\nECRET\r\n0\r\n\r\n",
         );
         assert!(up.ends_with("3\r\nabc\r\n0\r\n\r\n"), "{up}");
-        assert!(!down.contains("REALSECRET") && !down.contains("REALS"), "{down}");
+        assert!(
+            !down.contains("REALSECRET") && !down.contains("REALS"),
+            "{down}"
+        );
         assert!(down.contains("isb_placeholder_abc"), "{down}");
         assert!(down.ends_with("0\r\n\r\n"), "{down}");
     }
@@ -431,7 +455,10 @@ mod tests {
             "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nAHTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nB",
         );
         assert_eq!(up.matches("GET /").count(), 2, "{up}");
-        assert!(down.contains("\r\n\r\nA") && down.ends_with("\r\n\r\nB"), "{down}");
+        assert!(
+            down.contains("\r\n\r\nA") && down.ends_with("\r\n\r\nB"),
+            "{down}"
+        );
     }
 
     #[test]
@@ -461,11 +488,16 @@ mod tests {
         body[100..110].copy_from_slice(b"REALSECRET");
         let mut resp = format!("HTTP/1.1 200 OK\r\nContent-Length: {n}\r\n\r\n").into_bytes();
         resp.extend_from_slice(&body);
-        let mut c = Conn::new(Duplex::new(b"GET / HTTP/1.1\r\nHost: api.example.com\r\n\r\n"));
+        let mut c = Conn::new(Duplex::new(
+            b"GET / HTTP/1.1\r\nHost: api.example.com\r\n\r\n",
+        ));
         let mut u = Conn::new(Duplex::new(&resp));
         serve(&mut c, &mut u, &rw()).unwrap();
         let down = String::from_utf8_lossy(&c.s.output).into_owned();
-        assert!(down.contains("Transfer-Encoding: chunked"), "streamed responses are chunked");
+        assert!(
+            down.contains("Transfer-Encoding: chunked"),
+            "streamed responses are chunked"
+        );
         assert!(!down.contains("REALSECRET"));
         assert!(down.contains("isb_placeholder_abc"));
     }

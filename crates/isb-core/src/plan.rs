@@ -896,7 +896,13 @@ pub fn resolve(
     let egress = match &spec.egress {
         Some(e) => {
             let c = crate::egress::contribute(e, &host.project, &name)?;
-            add_dev("eth0".into(), DesiredDevice { props: c.nic, search: None })?;
+            add_dev(
+                "eth0".into(),
+                DesiredDevice {
+                    props: c.nic,
+                    search: None,
+                },
+            )?;
             config.extend(c.config);
             Some(c.plumbing)
         }

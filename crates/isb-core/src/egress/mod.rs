@@ -55,10 +55,11 @@ pub fn contribute(spec: &EgressSpec, project: &str, instance: &str) -> Result<Co
 
 /// Before the instance is created or changed: the bridge, the ACL and the CA.
 pub fn before_apply(client: &Client, p: &Plumbing, report: &mut dyn FnMut(&str)) -> Result<()> {
-    plumb::prepare(client, p, report)?;
+    // The CA first: the proxy looks for it as soon as the network exists.
     if !p.policy.secrets.is_empty() {
         ca::Ca::ensure(&p.network)?;
     }
+    plumb::prepare(client, p, report)?;
     Ok(())
 }
 

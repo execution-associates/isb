@@ -1,7 +1,7 @@
 //! The daemon's side of sandbox egress: the proxy manager, and the secret
 //! store it reads real values from (docs/guides/egress.md).
 
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
@@ -33,17 +33,15 @@ fn parse_pin(s: &str) -> Result<(String, SocketAddr)> {
     let (name, addr) = s
         .split_once('=')
         .ok_or_else(|| Error::invalid(format!("--egress-pin {s:?}: expected NAME=IP[:PORT]")))?;
-    let with_port = if addr.contains(':') && !addr.starts_with('[') && addr.matches(':').count() == 1 {
-        addr.to_string()
-    } else if addr.starts_with('[') {
-        addr.to_string()
-    } else {
-        format!("{addr}:0")
-    };
-    let sa = with_port
-        .to_socket_addrs()
+    // `IP:PORT`, or a bare IP (port 0: the port the guest asked for).
+    let sa = addr
+        .parse::<SocketAddr>()
         .ok()
-        .and_then(|mut a| a.next())
+        .or_else(|| {
+            addr.parse::<std::net::IpAddr>()
+                .ok()
+                .map(|ip| SocketAddr::new(ip, 0))
+        })
         .ok_or_else(|| Error::invalid(format!("--egress-pin {s:?}: {addr:?} is not an address")))?;
     Ok((name.trim().to_ascii_lowercase(), sa))
 }

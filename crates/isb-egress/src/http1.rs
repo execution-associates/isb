@@ -177,7 +177,11 @@ pub fn framing(head: &Head, response: bool) -> Result<Body, String> {
         }
         return Ok(Body::Length(n.unwrap_or(0)));
     }
-    Ok(if response { Body::UntilClose } else { Body::None })
+    Ok(if response {
+        Body::UntilClose
+    } else {
+        Body::None
+    })
 }
 
 /// A connection with a read-ahead buffer.
@@ -341,27 +345,45 @@ mod tests {
     #[test]
     fn framing_rules() {
         let h = |t: &str| parse_request(t.as_bytes()).unwrap().head;
-        assert_eq!(framing(&h("GET / HTTP/1.1\r\n\r\n"), false).unwrap(), Body::None);
         assert_eq!(
-            framing(&h("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n"), false).unwrap(),
+            framing(&h("GET / HTTP/1.1\r\n\r\n"), false).unwrap(),
+            Body::None
+        );
+        assert_eq!(
+            framing(
+                &h("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n"),
+                false
+            )
+            .unwrap(),
             Body::Chunked
         );
-        assert!(framing(
-            &h("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\nContent-Length: 3\r\n\r\n"),
-            false
-        )
-        .is_err());
-        assert!(framing(
-            &h("POST / HTTP/1.1\r\nContent-Length: 3\r\nContent-Length: 4\r\n\r\n"),
-            false
-        )
-        .is_err());
+        assert!(
+            framing(
+                &h("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\nContent-Length: 3\r\n\r\n"),
+                false
+            )
+            .is_err()
+        );
+        assert!(
+            framing(
+                &h("POST / HTTP/1.1\r\nContent-Length: 3\r\nContent-Length: 4\r\n\r\n"),
+                false
+            )
+            .is_err()
+        );
         assert_eq!(
-            framing(&h("POST / HTTP/1.1\r\nContent-Length: 3\r\nContent-Length: 3\r\n\r\n"), false).unwrap(),
+            framing(
+                &h("POST / HTTP/1.1\r\nContent-Length: 3\r\nContent-Length: 3\r\n\r\n"),
+                false
+            )
+            .unwrap(),
             Body::Length(3)
         );
         assert!(framing(&h("POST / HTTP/1.1\r\nContent-Length: x\r\n\r\n"), false).is_err());
-        assert_eq!(framing(&h("X / HTTP/1.1\r\n\r\n"), true).unwrap(), Body::UntilClose);
+        assert_eq!(
+            framing(&h("X / HTTP/1.1\r\n\r\n"), true).unwrap(),
+            Body::UntilClose
+        );
     }
 
     #[test]

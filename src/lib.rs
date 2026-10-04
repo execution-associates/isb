@@ -33,9 +33,9 @@
 pub use isb_apps::{app, backup, build, jobs, monitor, notify, s3, template, volume_backup};
 #[doc(inline)]
 pub use isb_core::{
-    balance, client, compose, cron, discovery, egress, error, exec, foreground, idmap, ingress, interp,
-    lock, machine, metrics, metrics_history, net, org, plan, registry, rpc, sandbox, secrets,
-    shorthand, spec, stack, supervise, volume,
+    balance, client, compose, cron, discovery, egress, error, exec, foreground, idmap, ingress,
+    interp, lock, machine, metrics, metrics_history, net, org, plan, registry, rpc, sandbox,
+    secrets, shorthand, spec, stack, supervise, volume,
 };
 #[doc(inline)]
 pub use isb_daemon::{daemon, workspace};

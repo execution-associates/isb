@@ -62,7 +62,8 @@ fn handshake_bytes(buf: &[u8]) -> Result<Vec<u8>, ()> {
         hs.extend_from_slice(&buf[i + 5..i + 5 + len]);
         i += 5 + len;
         if hs.len() >= 4 {
-            let need = 4 + (usize::from(hs[1]) << 16 | usize::from(hs[2]) << 8 | usize::from(hs[3]));
+            let need =
+                4 + (usize::from(hs[1]) << 16 | usize::from(hs[2]) << 8 | usize::from(hs[3]));
             if hs.len() >= need {
                 return Ok(hs);
             }
@@ -234,7 +235,10 @@ pub(crate) mod tests {
     #[test]
     fn sni_is_read_from_a_real_client_hello() {
         let hello = client_hello("API.Example.com");
-        assert_eq!(classify(&hello), Peek::Done(Kind::Tls(Some("api.example.com".into()))));
+        assert_eq!(
+            classify(&hello),
+            Peek::Done(Kind::Tls(Some("api.example.com".into())))
+        );
     }
 
     #[test]
@@ -266,13 +270,19 @@ pub(crate) mod tests {
             two.extend_from_slice(&(part.len() as u16).to_be_bytes());
             two.extend_from_slice(part);
         }
-        assert_eq!(classify(&two), Peek::Done(Kind::Tls(Some("split.example.com".into()))));
+        assert_eq!(
+            classify(&two),
+            Peek::Done(Kind::Tls(Some("split.example.com".into())))
+        );
     }
 
     #[test]
     fn http_host_is_read_without_its_port() {
         let r = b"GET /x HTTP/1.1\r\nHost: Api.Example.com:8080\r\nAccept: */*\r\n\r\n";
-        assert_eq!(classify(r), Peek::Done(Kind::Http(Some("api.example.com".into()))));
+        assert_eq!(
+            classify(r),
+            Peek::Done(Kind::Http(Some("api.example.com".into())))
+        );
         assert_eq!(classify(b"GET /x HTTP/1.1\r\nHost: a"), Peek::Need);
         let none = b"GET / HTTP/1.0\r\n\r\n";
         assert_eq!(classify(none), Peek::Done(Kind::Http(None)));
@@ -280,9 +290,15 @@ pub(crate) mod tests {
 
     #[test]
     fn other_protocols_are_other() {
-        assert_eq!(classify(&[0, 0, 0, 8, 4, 210, 22, 47]), Peek::Done(Kind::Other));
+        assert_eq!(
+            classify(&[0, 0, 0, 8, 4, 210, 22, 47]),
+            Peek::Done(Kind::Other)
+        );
         assert_eq!(classify(b"SSH-2.0-x\r\n"), Peek::Done(Kind::Other));
-        assert_eq!(classify(b"\x16\x03\x01\x00\x05\x02\x00\x00\x01\x00"), Peek::Done(Kind::Other));
+        assert_eq!(
+            classify(b"\x16\x03\x01\x00\x05\x02\x00\x00\x01\x00"),
+            Peek::Done(Kind::Other)
+        );
         assert_eq!(classify(b""), Peek::Need);
     }
 
@@ -302,7 +318,8 @@ pub(crate) mod tests {
         let (b, k) = read_kind(&mut s, Duration::from_millis(100), Duration::from_secs(1)).unwrap();
         assert!(b.is_empty());
         assert_eq!(k, Kind::Other);
-        c.write_all(b"GET / HTTP/1.1\r\nHost: x.example.com\r\n\r\n").unwrap();
+        c.write_all(b"GET / HTTP/1.1\r\nHost: x.example.com\r\n\r\n")
+            .unwrap();
         let (_, k) = read_kind(&mut s, Duration::from_secs(1), Duration::from_secs(1)).unwrap();
         assert_eq!(k, Kind::Http(Some("x.example.com".into())));
     }

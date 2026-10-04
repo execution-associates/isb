@@ -51,10 +51,14 @@ struct Running {
     status: Status,
 }
 
+/// Which sandboxes a manager looks after, by `project/instance`.
+pub type Filter = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
 /// See the module docs.
 pub struct Manager {
     env: Arc<Env>,
     client: Client,
+    filter: Option<Filter>,
     running: Mutex<BTreeMap<String, Running>>,
     kick: (Mutex<bool>, Condvar),
 }
@@ -69,9 +73,16 @@ fn parse_policy(stored: &str) -> Result<Policy, String> {
 
 impl Manager {
     pub fn new(client: Client, env: Arc<Env>) -> Arc<Manager> {
+        Manager::filtered(client, env, None)
+    }
+
+    /// A manager that looks after only the sandboxes `filter` accepts (the
+    /// integration tests', so they never fight a daemon over a port).
+    pub fn filtered(client: Client, env: Arc<Env>, filter: Option<Filter>) -> Arc<Manager> {
         Arc::new(Manager {
             env,
             client,
+            filter,
             running: Mutex::new(BTreeMap::new()),
             kick: (Mutex::new(false), Condvar::new()),
         })
@@ -140,9 +151,17 @@ impl Manager {
             .collect()
     }
 
+    fn networks(&self) -> isb_core::Result<Vec<Value>> {
+        let mut nets = plumb::list(&self.client)?;
+        if let Some(f) = &self.filter {
+            nets.retain(|n| f(str_of(&n["config"], KEY_FOR)));
+        }
+        Ok(nets)
+    }
+
     /// Bring the proxies to what incus holds: start, update, retry, stop.
     pub fn reconcile(&self) -> isb_core::Result<()> {
-        let nets = plumb::list(&self.client)?;
+        let nets = self.networks()?;
         let mut running = self.running.lock().expect("running lock");
         let live: Vec<&str> = nets.iter().filter_map(|n| n["name"].as_str()).collect();
         running.retain(|name, r| {
@@ -187,7 +206,10 @@ impl Manager {
                 let errors = r.proxy.sync_ports();
                 r.status.error = (!errors.is_empty()).then(|| errors.join("; "));
                 if let Some(e) = &r.status.error {
-                    (self.env.log)(&format!("egress {}/{}: {e}", r.status.project, r.status.instance));
+                    (self.env.log)(&format!(
+                        "egress {}/{}: {e}",
+                        r.status.project, r.status.instance
+                    ));
                 }
             }
         }
@@ -241,7 +263,7 @@ impl Manager {
 
     /// Delete the networks and ACLs of sandboxes that no longer exist.
     pub fn sweep(&self) {
-        let Ok(nets) = plumb::list(&self.client) else {
+        let Ok(nets) = self.networks() else {
             return;
         };
         let now = std::time::SystemTime::now()
@@ -265,7 +287,9 @@ impl Manager {
                 ))
                 .is_ok_and(|i| i.is_none());
             if gone {
-                (self.env.log)(&format!("egress: removing the network of vanished sandbox {owner}"));
+                (self.env.log)(&format!(
+                    "egress: removing the network of vanished sandbox {owner}"
+                ));
                 let _ = plumb::teardown(&c, instance);
             }
         }

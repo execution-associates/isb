@@ -110,7 +110,11 @@ impl Plumbing {
         if self.policy.is_none() {
             return String::new();
         }
-        let mut lines = vec!["no-resolv".to_string(), "no-hosts".into(), "address=/#/".into()];
+        let mut lines = vec![
+            "no-resolv".to_string(),
+            "no-hosts".into(),
+            "address=/#/".into(),
+        ];
         lines.extend(
             self.policy
                 .dns_names()
@@ -120,10 +124,19 @@ impl Plumbing {
         lines.join("\n")
     }
 
-    /// The bridge's config. `ip` is the address incus picked for it.
+    /// The bridge's config. `ip` is the address incus picked for it. With
+    /// no hosts allowed the bridge has no address at all: nothing for the
+    /// guest to reach, not even a DNS port.
     pub fn network_config(&self, ip: Option<&str>, created: u64) -> Props {
         let mut c: Props = [
-            ("ipv4.address", "auto"),
+            (
+                "ipv4.address",
+                if self.policy.is_none() {
+                    "none"
+                } else {
+                    "auto"
+                },
+            ),
             ("ipv4.nat", "false"),
             ("ipv4.routing", "false"),
             ("ipv6.address", "none"),
@@ -134,9 +147,7 @@ impl Plumbing {
         c.insert(KEY_FOR.into(), self.owner());
         c.insert(KEY_POLICY.into(), self.policy_json());
         c.insert(KEY_CREATED.into(), created.to_string());
-        if self.policy.is_none() {
-            c.insert("dns.mode".into(), "none".into());
-        } else if let Some(ip) = ip {
+        if let (false, Some(ip)) = (self.policy.is_none(), ip) {
             c.insert("raw.dnsmasq".into(), self.dnsmasq(ip));
         }
         c
@@ -205,23 +216,54 @@ pub fn prepare(client: &Client, p: &Plumbing, report: &mut dyn FnMut(&str)) -> R
             )));
         }
     } else {
-        report(&format!("{}: creating egress network {}", p.instance, p.network));
+        report(&format!(
+            "{}: creating egress network {}",
+            p.instance, p.network
+        ));
         let body = json!({
             "name": p.network,
             "type": "bridge",
             "description": format!("isb egress for {}", p.owner()),
             "config": p.network_config(None, now()),
         });
-        h.mutate("POST", "/1.0/networks", Some(&body), &format!("create network {}", p.network), t)?;
+        h.mutate(
+            "POST",
+            "/1.0/networks",
+            Some(&body),
+            &format!("create network {}", p.network),
+            t,
+        )?;
         net = Some(h.get(&net_path)?);
     }
-    let net = net.expect("set above");
-    let ip = bridge_ip(&net)
-        .ok_or_else(|| Error::invalid(format!("network {} has no IPv4 address", p.network)))?;
+    let mut net = net.expect("set above");
+    let none = p.policy.is_none();
+    if !none && bridge_ip(&net).is_none() {
+        // It was `egress: none`, with no address: give the bridge one.
+        h.mutate(
+            "PATCH",
+            &net_path,
+            Some(&json!({"config": {"ipv4.address": "auto"}})),
+            &format!("give network {} an address", p.network),
+            t,
+        )?;
+        net = h.get(&net_path)?;
+    }
+    let ip = match bridge_ip(&net) {
+        Some(ip) => ip,
+        None if none => String::new(),
+        None => {
+            return Err(Error::invalid(format!(
+                "network {} has no IPv4 address",
+                p.network
+            )));
+        }
+    };
     // Bring the config to the policy: only keys that differ are written.
     let mut want = p.network_config(Some(&ip), now());
     want.remove(KEY_CREATED);
-    want.remove("ipv4.address");
+    if !none {
+        want.remove("ipv4.address");
+    }
     let have = &net["config"];
     let mut cfg = have.clone();
     let mut changed = false;
@@ -231,14 +273,17 @@ pub fn prepare(client: &Client, p: &Plumbing, report: &mut dyn FnMut(&str)) -> R
             changed = true;
         }
     }
-    for stale in ["raw.dnsmasq", "dns.mode"] {
-        if !want.contains_key(stale) && have.get(stale).is_some() {
-            cfg.as_object_mut().expect("config is a map").remove(stale);
-            changed = true;
-        }
+    if !want.contains_key("raw.dnsmasq") && have.get("raw.dnsmasq").is_some() {
+        cfg.as_object_mut()
+            .expect("config is a map")
+            .remove("raw.dnsmasq");
+        changed = true;
     }
     if changed {
-        report(&format!("{}: updating egress network {}", p.instance, p.network));
+        report(&format!(
+            "{}: updating egress network {}",
+            p.instance, p.network
+        ));
         h.mutate(
             "PUT",
             &net_path,
@@ -258,11 +303,23 @@ fn put_acl(h: &Client, p: &Plumbing, ip: &str) -> Result<()> {
     let path = format!("/1.0/network-acls/{}", encode_segment(&p.acl));
     let body = p.acl_body(ip);
     if h.get_opt(&path)?.is_some() {
-        h.mutate("PUT", &path, Some(&body), &format!("update ACL {}", p.acl), t)?;
+        h.mutate(
+            "PUT",
+            &path,
+            Some(&body),
+            &format!("update ACL {}", p.acl),
+            t,
+        )?;
     } else {
         let mut b = body;
         b["name"] = json!(p.acl);
-        h.mutate("POST", "/1.0/network-acls", Some(&b), &format!("create ACL {}", p.acl), t)?;
+        h.mutate(
+            "POST",
+            "/1.0/network-acls",
+            Some(&b),
+            &format!("create ACL {}", p.acl),
+            t,
+        )?;
     }
     Ok(())
 }
@@ -280,8 +337,14 @@ fn allow_in_project(client: &Client, network: &str, add: bool) -> Result<()> {
     if cfg["restricted"].as_str() != Some("true") {
         return Ok(());
     }
-    let list = cfg["restricted.networks.access"].as_str().unwrap_or_default();
-    let mut names: Vec<&str> = list.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+    let list = cfg["restricted.networks.access"]
+        .as_str()
+        .unwrap_or_default();
+    let mut names: Vec<&str> = list
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
     if add == names.contains(&network) {
         return Ok(());
     }
@@ -296,7 +359,10 @@ fn allow_in_project(client: &Client, network: &str, add: bool) -> Result<()> {
         "PUT",
         &path,
         Some(&json!({"description": p["description"], "config": cfg})),
-        &format!("allow network {network} in project {}", client.project_name()),
+        &format!(
+            "allow network {network} in project {}",
+            client.project_name()
+        ),
         h.get_timeouts().other,
     )?;
     Ok(())
@@ -316,7 +382,13 @@ pub fn teardown(client: &Client, instance: &str) -> Result<()> {
             return Ok(());
         }
         allow_in_project(client, &net, false)?;
-        h.mutate("DELETE", &net_path, None, &format!("delete network {net}"), t)?;
+        h.mutate(
+            "DELETE",
+            &net_path,
+            None,
+            &format!("delete network {net}"),
+            t,
+        )?;
     }
     let acl_path = format!("/1.0/network-acls/{}", encode_segment(&acl));
     if h.get_opt(&acl_path)?.is_some() {
@@ -371,13 +443,15 @@ mod tests {
     }
 
     #[test]
-    fn none_turns_dns_off_and_a_list_turns_it_on() {
-        let none = plumbing(&EgressSpec::none()).network_config(Some("10.9.8.1"), 1);
-        assert_eq!(none["dns.mode"], "none");
+    fn none_leaves_the_bridge_without_an_address_and_a_list_turns_dns_on() {
+        let none = plumbing(&EgressSpec::none()).network_config(None, 1);
+        assert_eq!(none["ipv4.address"], "none");
         assert!(!none.contains_key("raw.dnsmasq"));
-        let some = plumbing(&EgressSpec::allow(["a.example.com"])).network_config(Some("10.9.8.1"), 1);
+        assert!(!none.contains_key("dns.mode"));
+        let some =
+            plumbing(&EgressSpec::allow(["a.example.com"])).network_config(Some("10.9.8.1"), 1);
         assert!(some["raw.dnsmasq"].contains("address=/a.example.com/10.9.8.1"));
-        assert!(!some.contains_key("dns.mode"));
+        assert_eq!(some["ipv4.address"], "auto");
         for c in [&none, &some] {
             assert_eq!(c["ipv4.nat"], "false");
             assert_eq!(c["ipv4.routing"], "false");
@@ -388,7 +462,11 @@ mod tests {
 
     #[test]
     fn the_acl_allows_only_the_proxy_ports_on_the_bridge_address() {
-        let p = plumbing(&EgressSpec::allow(["a.example.com", "b.example.com:8443", "c.example.com:80"]));
+        let p = plumbing(&EgressSpec::allow([
+            "a.example.com",
+            "b.example.com:8443",
+            "c.example.com:80",
+        ]));
         let acl = p.acl_body("10.9.8.1");
         let rules = acl["egress"].as_array().unwrap();
         assert_eq!(rules.len(), 1);
@@ -423,6 +501,9 @@ mod tests {
     fn a_bridge_address_is_read_without_its_prefix() {
         let n = json!({"config": {"ipv4.address": "10.41.184.1/24"}});
         assert_eq!(bridge_ip(&n).as_deref(), Some("10.41.184.1"));
-        assert_eq!(bridge_ip(&json!({"config": {"ipv4.address": "none"}})), None);
+        assert_eq!(
+            bridge_ip(&json!({"config": {"ipv4.address": "none"}})),
+            None
+        );
     }
 }

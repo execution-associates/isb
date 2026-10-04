@@ -76,8 +76,7 @@ fn named_volumes_seed_from_the_image_when_the_server_can() {
     let spec = lasso_spec(web).volume("/srv/plain", Volume::named("plain").nocopy(true));
     let copy = |h: &HostFacts, s: &SandboxSpec| {
         let d = resolve(s, &VolumeDefs::new(), h, Path::new("/")).unwrap();
-        ["bun-cache", "web", "srv-plain"]
-            .map(|k| d.devices[k].props.get("initial.copy").cloned())
+        ["bun-cache", "web", "srv-plain"].map(|k| d.devices[k].props.get("initial.copy").cloned())
     };
     // An older server: no key anywhere, the behavior isb always had.
     assert_eq!(copy(&host(), &spec), [None, None, None]);
@@ -527,8 +526,7 @@ fn shorthand_ports_match_existing_full_form_devices() {
     let d = resolve(&vm, &VolumeDefs::new(), &host(), Path::new("/")).unwrap();
     assert_eq!(d.devices["vite"].props["connect"], "tcp:0.0.0.0:5173");
     // Default names use the expanded address.
-    let spec =
-        lasso_spec(t.path().to_str().unwrap()).port(PortBinding::host("5353/udp", "53/udp"));
+    let spec = lasso_spec(t.path().to_str().unwrap()).port(PortBinding::host("5353/udp", "53/udp"));
     let d = resolve(&spec, &VolumeDefs::new(), &host(), Path::new("/")).unwrap();
     assert!(d.devices.contains_key("port-host-udp-5353"));
 }

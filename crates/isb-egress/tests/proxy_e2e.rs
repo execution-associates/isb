@@ -47,7 +47,11 @@ impl SecretSource for Store {
 }
 
 fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+    TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
 }
 
 fn provider() -> Arc<rustls::crypto::CryptoProvider> {
@@ -131,12 +135,15 @@ fn client_cfg(trust: &str) -> Arc<rustls::ClientConfig> {
 /// A guest's HTTPS request to the proxy: `Ok(response)`, or the error
 /// that ended it.
 fn https_get(proxy: SocketAddr, sni: &str, trust: &str, auth: &str) -> Result<String, String> {
-    let tcp = TcpStream::connect_timeout(&proxy, Duration::from_secs(3)).map_err(|e| e.to_string())?;
+    let tcp =
+        TcpStream::connect_timeout(&proxy, Duration::from_secs(3)).map_err(|e| e.to_string())?;
     tcp.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
     let name = ServerName::try_from(sni.to_string()).unwrap();
     let conn = rustls::ClientConnection::new(client_cfg(trust), name).unwrap();
     let mut s = rustls::StreamOwned::new(conn, tcp);
-    let req = format!("GET /x HTTP/1.1\r\nHost: {sni}\r\nAuthorization: {auth}\r\nConnection: close\r\n\r\n");
+    let req = format!(
+        "GET /x HTTP/1.1\r\nHost: {sni}\r\nAuthorization: {auth}\r\nConnection: close\r\n\r\n"
+    );
     s.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
     let mut out = Vec::new();
     match s.read_to_end(&mut out) {
@@ -170,7 +177,10 @@ fn rig() -> Rig {
             format!("plain.example.test:{plain_port}"),
         ],
         none: false,
-        secrets: vec![EgressSecretSpec::parse(&format!("API_TOKEN=api-token@api.example.test:{tls_port}")).unwrap()],
+        secrets: vec![
+            EgressSecretSpec::parse(&format!("API_TOKEN=api-token@api.example.test:{tls_port}"))
+                .unwrap(),
+        ],
     };
     let policy = Policy::from_spec(&spec, NETWORK).unwrap();
     let placeholder = policy.secrets[0].placeholder.clone();
@@ -224,16 +234,34 @@ fn a_secret_host_gets_the_real_value_and_the_guest_never_sees_it() {
     let r = rig();
     let addr = SocketAddr::from(([127, 0, 0, 1], r.tls_port));
     // The guest trusts only the sandbox CA for this host.
-    let resp = https_get(addr, "api.example.test", &r.sandbox_ca.cert_pem, &format!("Bearer {}", r.placeholder)).unwrap();
+    let resp = https_get(
+        addr,
+        "api.example.test",
+        &r.sandbox_ca.cert_pem,
+        &format!("Bearer {}", r.placeholder),
+    )
+    .unwrap();
     assert!(resp.starts_with("HTTP/1.1 200"), "{resp}");
     // The server got the real value ...
     let seen = r.secret_host.lock().unwrap().join("\n");
-    assert!(seen.contains(&format!("Authorization: Bearer {REAL}")), "{seen}");
+    assert!(
+        seen.contains(&format!("Authorization: Bearer {REAL}")),
+        "{seen}"
+    );
     assert!(!seen.contains("isb_placeholder"), "{seen}");
     // ... and echoed it, but the guest saw the placeholder, in headers and body.
-    assert!(!resp.contains(REAL), "the real value reached the guest: {resp}");
-    assert!(resp.contains(&format!("you sent: Bearer {}", r.placeholder)), "{resp}");
-    assert!(resp.contains(&format!("X-Echo-Auth: Bearer {}", r.placeholder)), "{resp}");
+    assert!(
+        !resp.contains(REAL),
+        "the real value reached the guest: {resp}"
+    );
+    assert!(
+        resp.contains(&format!("you sent: Bearer {}", r.placeholder)),
+        "{resp}"
+    );
+    assert!(
+        resp.contains(&format!("X-Echo-Auth: Bearer {}", r.placeholder)),
+        "{resp}"
+    );
 }
 
 #[test]
@@ -251,10 +279,19 @@ fn an_allowed_host_without_a_secret_is_passed_through_untouched() {
     let r = rig();
     let addr = SocketAddr::from(([127, 0, 0, 1], r.tls_port));
     // The guest verifies the server's own certificate: no interception.
-    let resp = https_get(addr, "other.example.test", &r.other_ca.cert_pem, &format!("Bearer {}", r.placeholder)).unwrap();
+    let resp = https_get(
+        addr,
+        "other.example.test",
+        &r.other_ca.cert_pem,
+        &format!("Bearer {}", r.placeholder),
+    )
+    .unwrap();
     assert!(resp.starts_with("HTTP/1.1 200"), "{resp}");
     let seen = r.other_host.lock().unwrap().join("\n");
-    assert!(seen.contains(&format!("Authorization: Bearer {}", r.placeholder)), "{seen}");
+    assert!(
+        seen.contains(&format!("Authorization: Bearer {}", r.placeholder)),
+        "{seen}"
+    );
     assert!(!seen.contains(REAL));
 }
 
@@ -273,7 +310,10 @@ fn plain_http_goes_by_host_and_never_carries_the_real_value() {
     c.read_to_string(&mut out).unwrap();
     assert!(out.starts_with("HTTP/1.1 200"), "{out}");
     let seen = r.plain_host.lock().unwrap().join("\n");
-    assert!(seen.contains(&r.placeholder) && !seen.contains(REAL), "{seen}");
+    assert!(
+        seen.contains(&r.placeholder) && !seen.contains(REAL),
+        "{seen}"
+    );
 }
 
 #[test]
@@ -297,7 +337,13 @@ fn a_host_that_is_not_on_the_list_gets_nothing() {
 fn a_port_that_is_not_allowed_is_not_listened_on() {
     let r = rig();
     assert!(!r.proxy.ports().contains(&80));
-    assert!(TcpStream::connect_timeout(&SocketAddr::from(([127, 0, 0, 1], free_port())), Duration::from_millis(200)).is_err());
+    assert!(
+        TcpStream::connect_timeout(
+            &SocketAddr::from(([127, 0, 0, 1], free_port())),
+            Duration::from_millis(200)
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -305,7 +351,9 @@ fn a_missing_secret_is_a_clear_error_to_the_guest_not_a_leak() {
     state();
     let port = free_port();
     let spec = EgressSpec {
-        secrets: vec![EgressSecretSpec::parse(&format!("T=missing-secret@gone.example.test:{port}")).unwrap()],
+        secrets: vec![
+            EgressSecretSpec::parse(&format!("T=missing-secret@gone.example.test:{port}")).unwrap(),
+        ],
         ..Default::default()
     };
     let policy = Policy::from_spec(&spec, "isbbrxe2e00003").unwrap();
@@ -327,7 +375,13 @@ fn a_missing_secret_is_a_clear_error_to_the_guest_not_a_leak() {
     );
     proxy.set_policy(policy, Some(ca.clone()));
     assert!(proxy.sync_ports().is_empty());
-    let resp = https_get(SocketAddr::from(([127, 0, 0, 1], port)), "gone.example.test", &ca.cert_pem, "x").unwrap();
+    let resp = https_get(
+        SocketAddr::from(([127, 0, 0, 1], port)),
+        "gone.example.test",
+        &ca.cert_pem,
+        "x",
+    )
+    .unwrap();
     assert!(resp.starts_with("HTTP/1.1 502"), "{resp}");
     assert!(resp.contains("missing-secret"), "{resp}");
 }

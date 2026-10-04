@@ -50,7 +50,9 @@ pub struct Entry {
 pub fn normalize_host(raw: &str) -> Result<String> {
     let h = raw.trim().trim_end_matches('.').to_ascii_lowercase();
     if h.is_empty() || h.len() > 253 {
-        return Err(Error::invalid(format!("egress host {raw:?}: not a hostname")));
+        return Err(Error::invalid(format!(
+            "egress host {raw:?}: not a hostname"
+        )));
     }
     if h.parse::<std::net::IpAddr>().is_ok() || h.starts_with('[') {
         return Err(Error::invalid(format!(
@@ -465,7 +467,10 @@ pub fn placeholder(network: &str, env: &str) -> String {
         &ring::digest::SHA256,
         format!("isb-egress-placeholder\0{network}\0{env}").as_bytes(),
     );
-    let hex: String = d.as_ref()[..16].iter().map(|b| format!("{b:02x}")).collect();
+    let hex: String = d.as_ref()[..16]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
     format!("isb_placeholder_{hex}")
 }
 
@@ -530,7 +535,10 @@ mod tests {
         assert!(wild.allows("a.example.com", 443));
         assert!(wild.allows("a.b.example.com", 443));
         assert!(!wild.allows("example.com", 443), "the apex is not covered");
-        assert!(!wild.allows("badexample.com", 443), "a suffix is a label boundary");
+        assert!(
+            !wild.allows("badexample.com", 443),
+            "a suffix is a label boundary"
+        );
         assert!(!wild.allows("a.example.com.evil.com", 443));
         assert!(!wild.allows("a.example.com", 8443));
     }
@@ -539,14 +547,18 @@ mod tests {
     fn entries_roundtrip_as_strings() {
         let v = serde_json::to_string(&e("*.example.com:8443")).unwrap();
         assert_eq!(v, "\"*.example.com:8443\"");
-        assert_eq!(serde_json::from_str::<Entry>(&v).unwrap(), e("*.example.com:8443"));
+        assert_eq!(
+            serde_json::from_str::<Entry>(&v).unwrap(),
+            e("*.example.com:8443")
+        );
     }
 
     #[test]
     fn spec_forms_deserialize() {
         let none: EgressSpec = serde_yaml_ng::from_str("none").unwrap();
         assert!(none.none);
-        let list: EgressSpec = serde_yaml_ng::from_str("[api.example.com, '*.cdn.net:80']").unwrap();
+        let list: EgressSpec =
+            serde_yaml_ng::from_str("[api.example.com, '*.cdn.net:80']").unwrap();
         assert_eq!(list.allow.len(), 2);
         let full: EgressSpec = serde_yaml_ng::from_str(
             "allow: [api.example.com]\nsecrets:\n  - GH@api.github.com\n  - {env: K, secret: store-k, hosts: [x.example.com:8443]}\n",
@@ -590,10 +602,15 @@ mod tests {
 
     #[test]
     fn secrets_are_validated() {
-        let bad = |s: &str| Policy::from_spec(&EgressSpec {
-            secrets: vec![EgressSecretSpec::parse(s).unwrap()],
-            ..Default::default()
-        }, "n");
+        let bad = |s: &str| {
+            Policy::from_spec(
+                &EgressSpec {
+                    secrets: vec![EgressSecretSpec::parse(s).unwrap()],
+                    ..Default::default()
+                },
+                "n",
+            )
+        };
         assert!(bad("1BAD@a.example.com").is_err());
         assert!(bad("OK@1.2.3.4").is_err());
         assert!(bad("OK=../x@a.example.com").is_err());
@@ -624,13 +641,21 @@ mod tests {
             p.dns_names().into_iter().collect::<Vec<_>>(),
             vec!["api.example.com".to_string(), "cdn.net".to_string()]
         );
-        assert_eq!(p.ports().into_iter().collect::<Vec<_>>(), vec![80, 443, 8443]);
+        assert_eq!(
+            p.ports().into_iter().collect::<Vec<_>>(),
+            vec![80, 443, 8443]
+        );
     }
 
     #[test]
     fn pinned_host_needs_exactly_one_exact_entry_on_the_port() {
         let p = Policy::from_spec(
-            &EgressSpec::allow(["db.example.com:5432", "a.example.com", "b.example.com", "*.w.net:9000"]),
+            &EgressSpec::allow([
+                "db.example.com:5432",
+                "a.example.com",
+                "b.example.com",
+                "*.w.net:9000",
+            ]),
             "n",
         )
         .unwrap();

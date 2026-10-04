@@ -95,10 +95,13 @@ pub fn client_config(settings: &Settings) -> Arc<rustls::ClientConfig> {
     Arc::new(cfg)
 }
 
+/// Resolutions by `(host, port)`, with when they were made.
+type Resolved = BTreeMap<(String, u16), (Instant, Vec<SocketAddr>)>;
+
 /// Resolves and connects, with a short cache of resolutions.
 pub struct Upstream {
     settings: Arc<Settings>,
-    cache: Mutex<BTreeMap<(String, u16), (Instant, Vec<SocketAddr>)>>,
+    cache: Mutex<Resolved>,
 }
 
 impl Upstream {

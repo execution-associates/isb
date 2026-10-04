@@ -145,11 +145,21 @@ pub(crate) struct ServeArgs {
     /// Sandbox egress: connect to NAME at this address instead of resolving
     /// it, and allow it to be a private one: `NAME=IP[:PORT]`, comma-separated
     /// (docs/guides/egress.md).
-    #[arg(long, env = "ISB_EGRESS_PINS", value_delimiter = ',', value_name = "NAME=IP")]
+    #[arg(
+        long,
+        env = "ISB_EGRESS_PINS",
+        value_delimiter = ',',
+        value_name = "NAME=IP"
+    )]
     pub(crate) egress_pin: Vec<String>,
     /// Sandbox egress: PEM certificates to trust for the hosts a sandbox
     /// reaches, besides the system's (a private CA).
-    #[arg(long, env = "ISB_EGRESS_CA", value_delimiter = ',', value_name = "FILE")]
+    #[arg(
+        long,
+        env = "ISB_EGRESS_CA",
+        value_delimiter = ',',
+        value_name = "FILE"
+    )]
     pub(crate) egress_ca: Vec<PathBuf>,
     /// Make workspace homes host folders, `<DIR>/<org>/home`, bound into
     /// the workspace (the host backs them up, e.g. restic) instead of

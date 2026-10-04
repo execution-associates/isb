@@ -142,7 +142,12 @@ pub struct Scrubber {
 
 impl Scrubber {
     pub fn new(patterns: Vec<(Vec<u8>, Vec<u8>)>) -> Scrubber {
-        let hold = patterns.iter().map(|(f, _)| f.len()).max().unwrap_or(1).saturating_sub(1);
+        let hold = patterns
+            .iter()
+            .map(|(f, _)| f.len())
+            .max()
+            .unwrap_or(1)
+            .saturating_sub(1);
         Scrubber {
             patterns,
             hold,
@@ -164,7 +169,11 @@ impl Scrubber {
         let mut out = Vec::with_capacity(buf.len());
         let mut i = 0;
         // Past `limit` a match could still be cut short by the end of `buf`.
-        let limit = if last { buf.len() } else { buf.len().saturating_sub(self.hold) };
+        let limit = if last {
+            buf.len()
+        } else {
+            buf.len().saturating_sub(self.hold)
+        };
         while i < limit {
             match self.matching(&buf[i..]) {
                 Some((from, to)) => {
@@ -212,7 +221,10 @@ mod tests {
     #[test]
     fn headers_get_the_real_value() {
         let p = [pair()];
-        assert_eq!(request_header(b"Bearer isb_placeholder_abc", &p), b"Bearer s3cr3t/value+x");
+        assert_eq!(
+            request_header(b"Bearer isb_placeholder_abc", &p),
+            b"Bearer s3cr3t/value+x"
+        );
         assert_eq!(request_header(b"nothing here", &p), b"nothing here");
         assert_eq!(
             request_header(b"a=isb_placeholder_abc; b=isb_placeholder_abc", &p),
@@ -264,7 +276,11 @@ mod tests {
             out.extend(s.finish());
             let text = String::from_utf8(out).unwrap();
             assert!(!text.contains("s3cr3t"), "cut at {cut}: {text}");
-            assert_eq!(text.matches("isb_placeholder_abc").count(), 2, "cut at {cut}");
+            assert_eq!(
+                text.matches("isb_placeholder_abc").count(),
+                2,
+                "cut at {cut}"
+            );
         }
     }
 

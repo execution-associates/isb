@@ -23,12 +23,23 @@ pub(crate) enum HostCmd {
         /// so `isb serve --ingress-http :80 --ingress-https :443` runs as you.
         #[arg(long)]
         public_ingress: bool,
+        /// Also prepare per-sandbox egress (`egress:`): let sandbox egress
+        /// bridges (isbbrx*) reach the proxy on the host in ufw, and let
+        /// unprivileged users bind ports 80 and up
+        /// (net.ipv4.ip_unprivileged_port_start=80), so `isb serve`'s proxy
+        /// listens on 80 and 443 as you.
+        #[arg(long)]
+        sandbox_egress: bool,
     },
 }
 
 /// The ufw rules org bridges need on a default-deny host, as argv lists.
 /// DHCP is not among them: see [`BEFORE_RULES`].
-pub(crate) fn host_rules(uplink: &str, public_ingress: bool) -> Vec<Vec<String>> {
+pub(crate) fn host_rules(
+    uplink: &str,
+    public_ingress: bool,
+    sandbox_egress: bool,
+) -> Vec<Vec<String>> {
     let v = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
     let mut out = vec![
         v("ufw allow in on isbbr+ to any port 53 comment"),
@@ -60,6 +71,12 @@ pub(crate) fn host_rules(uplink: &str, public_ingress: bool) -> Vec<Vec<String>>
         out.push(v("ufw allow 443/tcp comment"));
         comments.extend(["isb ingress: http", "isb ingress: https"]);
     }
+    if sandbox_egress {
+        // A sandbox's egress bridge reaches the host's proxy on its own
+        // address; the sandbox's network ACL lets it send nothing else.
+        out.push(v("ufw allow in on isbbrx+ comment"));
+        comments.push("isb sandbox egress: proxy");
+    }
     for (r, c) in out.iter_mut().zip(comments) {
         r.push(c.to_string());
     }
@@ -69,6 +86,9 @@ pub(crate) fn host_rules(uplink: &str, public_ingress: bool) -> Vec<Vec<String>>
 /// Lets the daemon's user bind 80 and 443 without root or capabilities.
 pub(crate) const SYSCTL_PATH: &str = "/etc/sysctl.d/60-isb-ingress.conf";
 pub(crate) const SYSCTL_TEXT: &str = "# isb serve's ingress binds 80 and 443 as an ordinary user.\nnet.ipv4.ip_unprivileged_port_start = 80\n";
+/// The same for the sandbox egress proxy, which listens on the ports sandboxes may reach.
+pub(crate) const EGRESS_SYSCTL_PATH: &str = "/etc/sysctl.d/61-isb-egress.conf";
+pub(crate) const EGRESS_SYSCTL_TEXT: &str = "# isb serve's sandbox egress proxy listens on ports 80 and up as an ordinary user.\nnet.ipv4.ip_unprivileged_port_start = 80\n";
 
 /// Rules ufw's own commands cannot express, ahead of its defaults.
 ///
@@ -149,6 +169,7 @@ pub(crate) fn host_setup(
     user: Option<String>,
     dry_run: bool,
     public_ingress: bool,
+    sandbox_egress: bool,
 ) -> Result<u8> {
     let uplink = match uplink {
         Some(u) => u,
@@ -165,7 +186,7 @@ pub(crate) fn host_setup(
         .output()
         .ok()
         .is_some_and(|o| String::from_utf8_lossy(&o.stdout).contains("Status: active"));
-    let rules = host_rules(&uplink, public_ingress);
+    let rules = host_rules(&uplink, public_ingress, sandbox_egress);
     // The local registry's CA, where the skopeo inside incusd looks for it.
     let registry = isb::registry::info(&Client::new()).unwrap_or_else(|e| {
         eprintln!("isb: cannot read the local registry's settings: {e}");
@@ -228,6 +249,11 @@ pub(crate) fn host_setup(
             print!("{SYSCTL_TEXT}");
             println!("sysctl -p {SYSCTL_PATH}");
         }
+        if sandbox_egress {
+            println!("# {EGRESS_SYSCTL_PATH}:");
+            print!("{EGRESS_SYSCTL_TEXT}");
+            println!("sysctl -p {EGRESS_SYSCTL_PATH}");
+        }
         return Ok(if dry_run { 0 } else { 1 });
     }
     if public_ingress {
@@ -241,6 +267,20 @@ pub(crate) fn host_setup(
             return Err(Error::Invalid(format!("sysctl -p {SYSCTL_PATH} failed")));
         }
         println!("{SYSCTL_PATH}: ordinary users may bind ports 80 and up");
+    }
+    if sandbox_egress {
+        std::fs::write(EGRESS_SYSCTL_PATH, EGRESS_SYSCTL_TEXT)?;
+        if !std::process::Command::new("sysctl")
+            .args(["-p", EGRESS_SYSCTL_PATH])
+            .stdout(std::process::Stdio::null())
+            .status()?
+            .success()
+        {
+            return Err(Error::Invalid(format!(
+                "sysctl -p {EGRESS_SYSCTL_PATH} failed"
+            )));
+        }
+        println!("{EGRESS_SYSCTL_PATH}: ordinary users may bind ports 80 and up");
     }
     if !std::process::Command::new(&dns_cmd[0])
         .args(&dns_cmd[1..])
