@@ -23,8 +23,8 @@ pub enum TemplateCmd {
         #[arg(long)]
         json: bool,
     },
-    /// A template's variables, apps and notes (and, for a Dokploy
-    /// template, how its translation went).
+    /// A template's variables, apps and notes (and, for a Dokploy or
+    /// Coolify template, how its translation went).
     #[command(alias = "get")]
     Show {
         /// catalog/id, or a bare id.
@@ -76,7 +76,7 @@ pub enum CatalogCmd {
     /// Add a catalog: a host directory or an https URL.
     Add {
         name: String,
-        /// native (isb templates) or dokploy.
+        /// native (isb templates), dokploy or coolify.
         #[arg(long, default_value = "native")]
         format: String,
         location: String,
@@ -159,7 +159,14 @@ pub fn template(org: &Option<String>, cmd: TemplateCmd) -> Result<u8> {
             println!("{} ({})", s(&t["name"]), s(&t["ref"]));
             println!("{}", s(&t["description"]));
             if let Some(c) = r.get("compatibility") {
-                println!("\nDokploy translation: {}", s(&c["status"]));
+                println!(
+                    "\n{} translation: {}",
+                    match s(&t["format"]).as_str() {
+                        "coolify" => "Coolify",
+                        _ => "Dokploy",
+                    },
+                    s(&c["status"])
+                );
                 for x in c["refusals"].as_array().cloned().unwrap_or_default() {
                     println!("  refused: {}", s(&x));
                 }

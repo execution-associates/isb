@@ -18,9 +18,11 @@
 //! admin adds; [`dokploy`] translates Dokploy's format into this one.
 
 pub mod catalog;
+pub mod coolify;
 pub mod dokploy;
 pub mod generate;
 mod planning;
+mod shared;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;

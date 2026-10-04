@@ -1,5 +1,5 @@
 // Templates: one-click apps (docs/guides/templates.md). Shapes from
-// src/template/{mod,catalog,dokploy}.rs and src/daemon/templates.rs.
+// src/template/{mod,catalog,dokploy,coolify}.rs and src/daemon/templates.rs.
 import { useQuery } from "@tanstack/react-query";
 import { callTool } from "@/api/tools";
 
@@ -14,7 +14,7 @@ export interface TemplateSummary {
   logo?: string;
   tags: string[];
   links: Record<string, string>;
-  format: "native" | "dokploy";
+  format: "native" | "dokploy" | "coolify";
 }
 
 export type VarKind =
@@ -149,7 +149,7 @@ export interface TemplateInstance {
 
 export interface CatalogConfig {
   name: string;
-  format: "native" | "dokploy";
+  format: "native" | "dokploy" | "coolify";
   location: string;
 }
 

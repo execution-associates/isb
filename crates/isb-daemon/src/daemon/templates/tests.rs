@@ -143,3 +143,49 @@ fn a_refused_template_says_why() {
         .unwrap_err();
     assert!(e.to_string().contains("privileged"), "{e}");
 }
+
+#[test]
+fn a_coolify_template_is_described_and_a_refused_one_does_not_deploy() {
+    let dir = tempfile::tempdir().unwrap();
+    let compose = dir.path().join("cool/templates/compose");
+    std::fs::create_dir_all(&compose).unwrap();
+    std::fs::write(
+        compose.join("bad.yaml"),
+        "# slogan: Needs the socket.\nservices:\n  bad:\n    image: x\n    volumes: ['/var/run/docker.sock:/var/run/docker.sock']\n",
+    )
+    .unwrap();
+    std::fs::write(
+        compose.join("good.yaml"),
+        "# slogan: Fine.\nservices:\n  good:\n    image: x\n    restart: always\n    environment:\n      - SERVICE_URL_GOOD_80\n      - SECRET=$SERVICE_PASSWORD_GOOD\n",
+    )
+    .unwrap();
+    let t = templates(dir.path());
+    t.catalogs
+        .add(CatalogConfig {
+            name: "cool".into(),
+            format: Format::Coolify,
+            location: dir.path().join("cool").display().to_string(),
+        })
+        .unwrap();
+    let d = t.describe("cool/good").unwrap();
+    assert_eq!(d["template"]["format"], "coolify");
+    assert_eq!(d["compatibility"]["status"], "clean");
+    assert_eq!(d["main"], "good");
+    let vars: Vec<&str> = d["variables"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|v| v["name"].as_str())
+        .collect();
+    assert_eq!(vars, ["domain_good", "password_good"]);
+    let d = t.describe("cool/bad").unwrap();
+    assert_eq!(d["compatibility"]["status"], "refused");
+    let e = t
+        .deploy(
+            &OrgId::new("acme").unwrap(),
+            deploy_args(json!({"template": "cool/bad", "project": "p"})),
+            &Caller::Local { uid: None },
+        )
+        .unwrap_err();
+    assert!(e.to_string().contains("runtime socket"), "{e}");
+}

@@ -193,6 +193,7 @@ function About({ d }: { d: TemplateDetail }) {
         <div className="flex flex-wrap gap-1">
           <Badge variant="outline">{d.template.catalog}</Badge>
           {d.template.format === "dokploy" && <Badge variant="outline">Dokploy format</Badge>}
+          {d.template.format === "coolify" && <Badge variant="outline">Coolify format</Badge>}
           {d.template.tags.map((g) => (
             <Badge key={g} variant="secondary" className="font-normal">
               {g}
@@ -202,7 +203,7 @@ function About({ d }: { d: TemplateDetail }) {
       </div>
       {compat && (
         <div className="grid gap-1.5">
-          <p className="text-xs font-medium text-muted-foreground">Translated from Dokploy</p>
+          <p className="text-xs font-medium text-muted-foreground">Translated from {d.template.format === "coolify" ? "Coolify" : "Dokploy"}</p>
           <p className="flex items-center gap-1.5">
             <StatusBadge tone={compat.status === "clean" ? "success" : "warning"}>{compat.status === "clean" ? "Means the same here" : "With differences"}</StatusBadge>
           </p>

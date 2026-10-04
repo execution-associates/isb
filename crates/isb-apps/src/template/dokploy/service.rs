@@ -29,7 +29,7 @@ pub(super) struct Acc {
 }
 
 /// Interpolates a compose value against the template's .env.
-type Ip<'a> = dyn FnMut(&str, &mut Tx) -> String + 'a;
+pub(in crate::template) type Ip<'a> = dyn FnMut(&str, &mut Tx) -> String + 'a;
 
 /// The app for compose service `name` (app `key`), or None when it is
 /// not deployed (no image, scale 0); refusals and notes go to `tx`.
@@ -53,7 +53,7 @@ pub(super) fn translate(
     };
     check_keys(name, m, tx);
     let image = image(name, m, &mut ip, tx)?;
-    if !keeps_running(name, m, tx) {
+    if !keeps_running(name, m, true, tx) {
         return None;
     }
     let env = environment(sh, name, m, &mut ip, tx);
@@ -61,7 +61,7 @@ pub(super) fn translate(
     let ports = ports(name, m, &mut ip, tx);
     let (command, args) = command_line(name, m, &mut ip, tx);
     let healthcheck = healthcheck(m, &mut ip, tx);
-    let depends_on = dependencies(sh, name, &key, m, tx);
+    let depends_on = dependencies(sh.keys, name, &key, m, tx);
     let user = user(name, m, &mut ip, tx);
     let working_dir = yget(m, "working_dir").and_then(yscalar).map(|w| ip(&w, tx));
     let (replicas, res) = resources(name, m, &mut ip, tx);
@@ -73,7 +73,13 @@ pub(super) fn translate(
         healthcheck,
         files,
     };
-    rewrite_service_names(sh, name, &key, &mut v, tx);
+    let rewritten = rewrite_service_names(sh.aliases, &key, &mut v);
+    if !rewritten.is_empty() {
+        tx.note(format!(
+            "{name}: references to {} are rewritten to isb's service names (<app>.<stack>); names an image uses by default are not",
+            rewritten.into_iter().collect::<Vec<_>>().join(", ")
+        ));
+    }
     Some(AppTemplate {
         name: key,
         image,
@@ -95,7 +101,7 @@ pub(super) fn translate(
 }
 
 /// Refuse what isb cannot do and note what it ignores, key by key.
-fn check_keys(name: &str, m: &serde_yaml_ng::Mapping, tx: &mut Tx) {
+pub(in crate::template) fn check_keys(name: &str, m: &serde_yaml_ng::Mapping, tx: &mut Tx) {
     for (k, v) in m {
         let k = yscalar(k).unwrap_or_default();
         if k.starts_with("x-") || IGNORED_KEYS.contains(&k.as_str()) {
@@ -126,7 +132,12 @@ fn check_keys(name: &str, m: &serde_yaml_ng::Mapping, tx: &mut Tx) {
 }
 
 /// The service's image; None (refused unless it builds one) without one.
-fn image(name: &str, m: &serde_yaml_ng::Mapping, ip: &mut Ip, tx: &mut Tx) -> Option<String> {
+pub(in crate::template) fn image(
+    name: &str,
+    m: &serde_yaml_ng::Mapping,
+    ip: &mut Ip,
+    tx: &mut Tx,
+) -> Option<String> {
     match yget(m, "image").and_then(yscalar) {
         Some(i) => Some(image_ref(&ip(&i, tx))),
         None => {
@@ -139,7 +150,12 @@ fn image(name: &str, m: &serde_yaml_ng::Mapping, ip: &mut Ip, tx: &mut Tx) -> Op
 }
 
 /// Network mode and restart policy; false for `scale: 0` (not deployed).
-fn keeps_running(name: &str, m: &serde_yaml_ng::Mapping, tx: &mut Tx) -> bool {
+pub(in crate::template) fn keeps_running(
+    name: &str,
+    m: &serde_yaml_ng::Mapping,
+    note_missing_restart: bool,
+    tx: &mut Tx,
+) -> bool {
     // Network mode.
     if let Some(nm) = yget(m, "network_mode").and_then(yscalar) {
         if !matches!(nm.as_str(), "" | "bridge" | "default") {
@@ -156,7 +172,9 @@ fn keeps_running(name: &str, m: &serde_yaml_ng::Mapping, tx: &mut Tx) -> bool {
         Some("on-failure") => tx.note(format!(
             "{name}: restart on-failure becomes always (apps are kept running)"
         )),
-        None => tx.note(format!("{name}: no restart policy; isb keeps it running")),
+        None if note_missing_restart => {
+            tx.note(format!("{name}: no restart policy; isb keeps it running"));
+        }
         _ => {}
     }
     if let Some(sc) = yget(m, "scale").and_then(yscalar) {
@@ -221,7 +239,7 @@ fn environment(
 
 /// A `volumes:` entry as (kind, source, target, read-only): kind is anon,
 /// bind or auto (a name or a path, decided by the caller).
-fn parse_volume(
+pub(in crate::template) fn parse_volume(
     name: &str,
     v: &Y,
     ip: &mut Ip,
@@ -398,7 +416,12 @@ fn volumes(
 }
 
 /// Published ports, on 127.0.0.1 only.
-fn ports(name: &str, m: &serde_yaml_ng::Mapping, ip: &mut Ip, tx: &mut Tx) -> Vec<String> {
+pub(in crate::template) fn ports(
+    name: &str,
+    m: &serde_yaml_ng::Mapping,
+    ip: &mut Ip,
+    tx: &mut Tx,
+) -> Vec<String> {
     let mut ports = Vec::new();
     for p in yget(m, "ports")
         .and_then(Y::as_sequence)
@@ -431,7 +454,11 @@ fn ports(name: &str, m: &serde_yaml_ng::Mapping, ip: &mut Ip, tx: &mut Tx) -> Ve
                 }
             }
         };
-        let ok_port = |s: &str| s.parse::<u16>().is_ok_and(|p| p > 0);
+        // A port number, or one template variable that holds it.
+        let ok_port = |s: &str| {
+            s.parse::<u16>().is_ok_and(|p| p > 0)
+                || (s.starts_with("${") && s.ends_with('}') && s.matches('$').count() == 1)
+        };
         match published.filter(|x| !x.is_empty()) {
             None => tx.note(format!(
                 "{name}: port {target} without a host port is not published (docker would pick a random one)"
@@ -452,7 +479,7 @@ fn ports(name: &str, m: &serde_yaml_ng::Mapping, ip: &mut Ip, tx: &mut Tx) -> Ve
 }
 
 /// `command`, or `entrypoint` and `command` as one command line.
-fn command_line(
+pub(in crate::template) fn command_line(
     name: &str,
     m: &serde_yaml_ng::Mapping,
     ip: &mut Ip,
@@ -484,7 +511,11 @@ fn command_line(
 }
 
 /// The health check, unless disabled.
-fn healthcheck(m: &serde_yaml_ng::Mapping, ip: &mut Ip, tx: &mut Tx) -> Option<Value> {
+pub(in crate::template) fn healthcheck(
+    m: &serde_yaml_ng::Mapping,
+    ip: &mut Ip,
+    tx: &mut Tx,
+) -> Option<Value> {
     let mut healthcheck = None;
     if let Some(Y::Mapping(h)) = yget(m, "healthcheck") {
         let disabled = yget(h, "disable").and_then(Y::as_bool) == Some(true);
@@ -519,8 +550,8 @@ fn healthcheck(m: &serde_yaml_ng::Mapping, ip: &mut Ip, tx: &mut Tx) -> Option<V
 }
 
 /// depends_on and links, as the apps they name.
-fn dependencies(
-    sh: &Shared,
+pub(in crate::template) fn dependencies(
+    keys: &BTreeMap<String, String>,
     name: &str,
     key: &str,
     m: &serde_yaml_ng::Mapping,
@@ -553,7 +584,7 @@ fn dependencies(
     }
     let mut dep_keys = Vec::new();
     for d in depends {
-        match sh.keys.get(&d) {
+        match keys.get(&d) {
             Some(k) if !dep_keys.contains(k) && k != key => dep_keys.push(k.clone()),
             Some(_) => {}
             None => tx.note(format!("{name}: depends on {d}, which is not deployed")),
@@ -563,7 +594,12 @@ fn dependencies(
 }
 
 /// The user: numeric, as an OCI image's must be.
-fn user(name: &str, m: &serde_yaml_ng::Mapping, ip: &mut Ip, tx: &mut Tx) -> Option<String> {
+pub(in crate::template) fn user(
+    name: &str,
+    m: &serde_yaml_ng::Mapping,
+    ip: &mut Ip,
+    tx: &mut Tx,
+) -> Option<String> {
     yget(m, "user")
         .and_then(yscalar)
         .map(|u| ip(&u, tx))
@@ -584,7 +620,7 @@ fn user(name: &str, m: &serde_yaml_ng::Mapping, ip: &mut Ip, tx: &mut Tx) -> Opt
 }
 
 /// Replicas and resource limits (whole CPUs, isb's memory units).
-fn resources(
+pub(in crate::template) fn resources(
     name: &str,
     m: &serde_yaml_ng::Mapping,
     ip: &mut Ip,
@@ -700,22 +736,21 @@ fn domains(
 }
 
 /// A service's values that may name other services.
-struct Values {
-    env: BTreeMap<String, String>,
-    command: Option<Value>,
-    args: Option<Value>,
-    healthcheck: Option<Value>,
-    files: Vec<FileTemplate>,
+pub(in crate::template) struct Values {
+    pub env: BTreeMap<String, String>,
+    pub command: Option<Value>,
+    pub args: Option<Value>,
+    pub healthcheck: Option<Value>,
+    pub files: Vec<FileTemplate>,
 }
 
 /// Other services named in values: rewrite them to isb's service names.
-fn rewrite_service_names(sh: &Shared, name: &str, key: &str, v: &mut Values, tx: &mut Tx) {
-    let others: Vec<(String, String)> = sh
-        .aliases
-        .iter()
-        .filter(|(_, k)| k != key)
-        .cloned()
-        .collect();
+pub(in crate::template) fn rewrite_service_names(
+    aliases: &[(String, String)],
+    key: &str,
+    v: &mut Values,
+) -> BTreeSet<String> {
+    let others: Vec<(String, String)> = aliases.iter().filter(|(_, k)| k != key).cloned().collect();
     let mut rewritten = BTreeSet::new();
     let mut fix = |e: &str, whole: bool| -> String {
         let (out, hits) = rewrite_hosts(e, &others, whole);
@@ -758,10 +793,5 @@ fn rewrite_service_names(sh: &Shared, name: &str, key: &str, v: &mut Values, tx:
     for f in v.files.iter_mut() {
         f.content = fix(&f.content, false);
     }
-    if !rewritten.is_empty() {
-        tx.note(format!(
-            "{name}: references to {} are rewritten to isb's service names (<app>.<stack>); names an image uses by default are not",
-            rewritten.into_iter().collect::<Vec<_>>().join(", ")
-        ));
-    }
+    rewritten
 }

@@ -197,6 +197,7 @@ function TemplateCard({ org, t, dest }: { org: string; t: TemplateSummary; dest:
       <p className="line-clamp-2 min-h-[2lh] text-[13px] leading-relaxed text-muted-foreground">{t.description}</p>
       <div className="mt-auto flex min-w-0 flex-wrap items-center gap-1">
         {t.format === "dokploy" && <Badge variant="outline">Dokploy</Badge>}
+        {t.format === "coolify" && <Badge variant="outline">Coolify</Badge>}
         {t.tags.slice(0, 3).map((g) => (
           <Badge key={g} variant="secondary" className="font-normal">
             {g}
@@ -292,12 +293,35 @@ function Instances({ org, instances, error, byRef }: { org: string; instances: T
 }
 
 const DOKPLOY_URL = "https://templates.dokploy.com";
+const COOLIFY_URL = "https://raw.githubusercontent.com/coollabsio/coolify/main";
+
+type Format = CatalogConfig["format"];
+const FORMATS: Format[] = ["native", "dokploy", "coolify"];
+const FORMAT_LABEL: Record<Format, string> = { native: "isb", dokploy: "Dokploy", coolify: "Coolify" };
+const LOCATION_HINT: Record<Format, string> = {
+  native: "An absolute directory of *.yaml on this server, or an https:// URL of {templates: [...]}.",
+  dokploy: "A checkout of Dokploy/templates, or https://templates.dokploy.com.",
+  coolify: "A checkout of coollabsio/coolify, or its raw files: https://raw.githubusercontent.com/coollabsio/coolify/main.",
+};
+
+/** A ready-made catalog an admin can fill the form with. */
+function CatalogOffer({ title, children, button, onFill }: { title: string; children: React.ReactNode; button: string; onFill: () => void }) {
+  return (
+    <div className="grid gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
+      <p className="font-medium">{title}</p>
+      <p className="text-muted-foreground">{children}</p>
+      <Button type="button" size="sm" variant="outline" className="justify-self-start" onClick={onFill}>
+        {button}
+      </Button>
+    </div>
+  );
+}
 
 function CatalogsDialog({ org, open, onOpenChange }: { org: string; open: boolean; onOpenChange: (o: boolean) => void }) {
   const qc = useQueryClient();
   const cats = useCatalogs(org);
   const [name, setName] = useState("");
-  const [format, setFormat] = useState<CatalogConfig["format"]>("native");
+  const [format, setFormat] = useState<Format>("native");
   const [location, setLocation] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -330,7 +354,12 @@ function CatalogsDialog({ org, open, onOpenChange }: { org: string; open: boolea
       toast.error(errorMessage(err));
     }
   };
-  const hasDokploy = (cats.data?.catalogs ?? []).some((c) => c.format === "dokploy");
+  const has = (f: Format) => (cats.data?.catalogs ?? []).some((c) => c.format === f);
+  const fill = (n: string, f: Format, url: string) => {
+    setName(n);
+    setFormat(f);
+    setLocation(url);
+  };
   return (
     <Dialog open={open} onOpenChange={(o) => !pending && onOpenChange(o)}>
       <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-xl">
@@ -361,28 +390,19 @@ function CatalogsDialog({ org, open, onOpenChange }: { org: string; open: boolea
             </li>
           ))}
         </ul>
-        {!hasDokploy && (
-          <div className="grid gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
-            <p className="font-medium">Dokploy's catalog</p>
-            <p className="text-muted-foreground">
-              About 530 community templates (MIT, Dokploy and Carlos Ortiz), translated to isb as they are fetched. Anything that would weaken isolation (privileged, host
-              paths, the docker socket, devices) is refused with the reason; about 400 deploy, many with notes on what differs. Logos are the projects' trademarks: the
-              daemon fetches and caches them, and the browser only loads isb's copy.
-            </p>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="justify-self-start"
-              onClick={() => {
-                setName("dokploy");
-                setFormat("dokploy");
-                setLocation(DOKPLOY_URL);
-              }}
-            >
-              Fill in Dokploy's catalog
-            </Button>
-          </div>
+        {!has("dokploy") && (
+          <CatalogOffer title="Dokploy's catalog" button="Fill in Dokploy's catalog" onFill={() => fill("dokploy", "dokploy", DOKPLOY_URL)}>
+            About 530 community templates (MIT, Dokploy and Carlos Ortiz), translated to isb as they are fetched. Anything that would weaken isolation (privileged, host
+            paths, the docker socket, devices) is refused with the reason; about 400 deploy, many with notes on what differs. Logos are the projects' trademarks: the
+            daemon fetches and caches them, and the browser only loads isb's copy.
+          </CatalogOffer>
+        )}
+        {!has("coolify") && (
+          <CatalogOffer title="Coolify's catalog" button="Fill in Coolify's catalog" onFill={() => fill("coolify", "coolify", COOLIFY_URL)}>
+            About 360 community templates (Apache-2.0, Andras Bacsai and Coolify), translated to isb as they are fetched from GitHub. Anything that would weaken isolation
+            (privileged, host paths, the docker socket, devices, one-shot jobs, a volume shared by several services) is refused with the reason; about 285 deploy, most
+            with nothing to note. Logos are the projects' trademarks: the daemon fetches and caches them, and the browser only loads isb's copy.
+          </CatalogOffer>
         )}
         <form onSubmit={add} className="grid gap-3">
           <FormError>{error}</FormError>
@@ -393,16 +413,16 @@ function CatalogsDialog({ org, open, onOpenChange }: { org: string; open: boolea
             <Field label="Format">
               {(id) => (
                 <div id={id} className="flex gap-1">
-                  {(["native", "dokploy"] as const).map((f) => (
+                  {FORMATS.map((f) => (
                     <Button key={f} type="button" size="sm" variant="outline" className={cn(format === f && "border-foreground/50 bg-accent")} onClick={() => setFormat(f)}>
-                      {f === "native" ? "isb" : "Dokploy"}
+                      {FORMAT_LABEL[f]}
                     </Button>
                   ))}
                 </div>
               )}
             </Field>
           </div>
-          <Field label="Location" hint={format === "native" ? "An absolute directory of *.yaml on this server, or an https:// URL of {templates: [...]}." : "A checkout of Dokploy/templates, or https://templates.dokploy.com."}>
+          <Field label="Location" hint={LOCATION_HINT[format]}>
             {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={location} onChange={(e) => setLocation(e.target.value)} placeholder="https://…" />}
           </Field>
           <DialogFooter>

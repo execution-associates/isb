@@ -1,10 +1,11 @@
 //! Where templates come from: the catalog built into the binary, and the
 //! catalogs a platform admin adds (a directory on the host or an https
-//! URL; isb's own format or Dokploy's).
+//! URL; isb's own format, Dokploy's or Coolify's).
 //!
 //! Added catalogs are kept in `<state>/templates/catalogs.json`. What they
-//! hold is third-party data: it is parsed, never run, and a Dokploy
-//! template is translated strictly ([`super::dokploy`]).
+//! hold is third-party data: it is parsed, never run, and a Dokploy or
+//! Coolify template is translated strictly ([`super::dokploy`],
+//! [`super::coolify`]).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -14,6 +15,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use super::Template;
+use super::coolify;
 use super::dokploy::{self, Meta, Report};
 use crate::error::{Error, Result};
 
@@ -61,6 +63,11 @@ pub enum Format {
     /// template.toml}`, in a directory (a checkout of Dokploy/templates) or
     /// at a URL (`https://templates.dokploy.com`).
     Dokploy,
+    /// Coolify's: `templates/compose/<id>.yaml` (one compose file with its
+    /// metadata in comments), in a directory (a checkout of
+    /// coollabsio/coolify) or at a URL (its raw files, such as
+    /// `https://raw.githubusercontent.com/coollabsio/coolify/main`).
+    Coolify,
 }
 
 /// An added catalog.
@@ -140,6 +147,25 @@ impl Summary {
         }
     }
 
+    fn coolify(catalog: &str, m: &coolify::Meta) -> Summary {
+        Summary {
+            reference: format!("{catalog}/{}", m.id),
+            catalog: catalog.into(),
+            id: m.id.clone(),
+            name: m.name.clone(),
+            description: m.description.clone(),
+            version: String::new(),
+            logo: m.logo.clone(),
+            tags: m.tags.clone(),
+            links: m
+                .docs
+                .iter()
+                .map(|d| ("docs".to_string(), d.clone()))
+                .collect(),
+            format: Format::Coolify,
+        }
+    }
+
     /// Does it match a search: every word in the name, id, description or
     /// tags.
     pub fn matches(&self, query: &str, tag: Option<&str>) -> bool {
@@ -180,6 +206,11 @@ enum Entry {
     Dokploy {
         meta: Meta,
         base: String,
+    },
+    /// A Coolify template: its metadata and where its compose file is.
+    Coolify {
+        meta: coolify::Meta,
+        file: String,
     },
 }
 
@@ -273,7 +304,10 @@ impl Catalogs {
     }
 
     /// Add (or replace) a catalog.
-    pub fn add(&self, c: CatalogConfig) -> Result<()> {
+    pub fn add(&self, mut c: CatalogConfig) -> Result<()> {
+        if c.format == Format::Coolify {
+            c.location = load_coolify::normalize_location(&c.location);
+        }
         c.validate()?;
         let mut all = self.configs()?;
         all.retain(|x| x.name != c.name);
@@ -291,20 +325,24 @@ impl Catalogs {
         self.save(&all)
     }
 
+    /// An https URL's body, reused for a while.
+    fn fetch_cached(&self, url: &str) -> Result<Arc<Vec<u8>>> {
+        if let Some((at, b)) = self.files.lock().unwrap().get(url) {
+            if at.elapsed() < CACHE_FOR {
+                return Ok(b.clone());
+            }
+        }
+        let b = Arc::new((self.fetch)(url)?);
+        self.files
+            .lock()
+            .unwrap()
+            .insert(url.to_string(), (Instant::now(), b.clone()));
+        Ok(b)
+    }
+
     fn read(&self, cfg: &CatalogConfig, rel: &str) -> Result<Arc<Vec<u8>>> {
         if cfg.is_url() {
-            let url = format!("{}/{rel}", cfg.location.trim_end_matches('/'));
-            if let Some((at, b)) = self.files.lock().unwrap().get(&url) {
-                if at.elapsed() < CACHE_FOR {
-                    return Ok(b.clone());
-                }
-            }
-            let b = Arc::new((self.fetch)(&url)?);
-            self.files
-                .lock()
-                .unwrap()
-                .insert(url, (Instant::now(), b.clone()));
-            Ok(b)
+            self.fetch_cached(&format!("{}/{rel}", cfg.location.trim_end_matches('/')))
         } else {
             let p = Path::new(&cfg.location).join(rel);
             let meta = std::fs::metadata(&p)
@@ -334,6 +372,7 @@ impl Catalogs {
         let entries = match cfg.format {
             Format::Native => self.load_native(cfg)?,
             Format::Dokploy => self.load_dokploy(cfg)?,
+            Format::Coolify => self.load_coolify(cfg)?,
         };
         let e = Arc::new(entries);
         self.cache
@@ -461,6 +500,7 @@ impl Catalogs {
                                         links: meta.links.clone(),
                                         format: Format::Dokploy,
                                     },
+                                    Entry::Coolify { meta, .. } => Summary::coolify(&c.name, meta),
                                 });
                             }
                         }
@@ -533,6 +573,16 @@ impl Catalogs {
                             report: Some(report),
                         });
                     }
+                    Entry::Coolify { meta, file } if meta.id == id => {
+                        let compose = self.read(&c, file)?;
+                        let (t, report) =
+                            coolify::translate(meta, &String::from_utf8_lossy(&compose));
+                        return Ok(Resolved {
+                            summary: Summary::coolify(&c.name, meta),
+                            template: t,
+                            report: Some(report),
+                        });
+                    }
                     _ => {}
                 }
             }
@@ -540,6 +590,8 @@ impl Catalogs {
         Err(Error::NotFound(format!("template {reference}")))
     }
 }
+
+mod load_coolify;
 
 #[cfg(test)]
 mod tests {

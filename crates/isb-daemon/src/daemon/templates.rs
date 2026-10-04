@@ -481,7 +481,7 @@ pub fn register(r: &mut Registry, t: Templates) -> Result<()> {
     tool!(
         "template_list",
         "List templates",
-        "One-click apps: the built-in catalog and any a platform admin added (isb's own format, or Dokploy's, translated). Each has a ref (catalog/id) for template_get and template_deploy. Filter with query (words in the name, description or tags), tag or catalog.",
+        "One-click apps: the built-in catalog and any a platform admin added (isb's own format, or Dokploy's or Coolify's, translated). Each has a ref (catalog/id) for template_get and template_deploy. Filter with query (words in the name, description or tags), tag or catalog.",
         obj(
             json!({
                 "query": {"type": "string"},
@@ -516,7 +516,7 @@ pub fn register(r: &mut Registry, t: Templates) -> Result<()> {
     tool!(
         "template_get",
         "Get a template",
-        "A template's metadata, its variables (what template_deploy takes in values: type, default, required, generated, secret), the apps it creates, notes, and for a Dokploy template how its translation went (compatibility: clean, notes, or refused with reasons).",
+        "A template's metadata, its variables (what template_deploy takes in values: type, default, required, generated, secret), the apps it creates, notes, and for a Dokploy or Coolify template how its translation went (compatibility: clean, notes, or refused with reasons).",
         obj(
             json!({"template": {"type": "string", "description": "catalog/id, or a bare id."}}),
             &["template"]
@@ -588,7 +588,7 @@ pub fn register(r: &mut Registry, t: Templates) -> Result<()> {
     tool!(
         "template_catalog_list",
         "List template catalogs",
-        "The catalogs added to the built-in one: name, format (native or dokploy) and location (a host directory or an https URL).",
+        "The catalogs added to the built-in one: name, format (native, dokploy or coolify) and location (a host directory or an https URL).",
         obj(json!({}), &[]),
         json!({"readOnlyHint": true, "openWorldHint": false}),
         |t: &Templates, _a: Value, _c: &Caller| -> Result<Value> {
@@ -600,11 +600,11 @@ pub fn register(r: &mut Registry, t: Templates) -> Result<()> {
     tool!(
         "template_catalog_add",
         "Add a template catalog",
-        "Platform admins: add (or replace) a catalog every org can deploy from. format native (isb templates: a directory of *.yaml, or an https URL of a {templates: [...]} document) or dokploy (a checkout of Dokploy/templates, or https://templates.dokploy.com). Its templates are third-party content: Dokploy's are translated strictly and refused when they need what isb does not allow.",
+        "Platform admins: add (or replace) a catalog every org can deploy from. format native (isb templates: a directory of *.yaml, or an https URL of a {templates: [...]} document) dokploy (a checkout of Dokploy/templates, or https://templates.dokploy.com) or coolify (a checkout of coollabsio/coolify, or its raw files at https://raw.githubusercontent.com/coollabsio/coolify/main). Its templates are third-party content: Dokploy's and Coolify's are translated strictly and refused when they need what isb does not allow.",
         obj(
             json!({
                 "name": {"type": "string"},
-                "format": {"type": "string", "enum": ["native", "dokploy"]},
+                "format": {"type": "string", "enum": ["native", "dokploy", "coolify"]},
                 "location": {"type": "string"}
             }),
             &["name", "format", "location"]
