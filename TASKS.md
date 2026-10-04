@@ -213,9 +213,6 @@ minime only runs binaries downloaded from our CI runs.
   by default. Fork PRs are off by default; when allowed they build in a VM,
   get no app secrets (only `fork_secrets`) and a per-PR cache, since a PR
   could otherwise poison the cache production builds read.
-- **Known flaky test:** `balance::tests::changing_listen_moves_the_route`
-  failed once in a P4.5 run, then passed three times. Investigate if seen
-  again.
 - **Templates** (P4.4) instantiate as apps (so app pages, deploys and
   rollback work for them); generated values are org secrets
   `tpl.<name>.<var>`, derived values their own secrets. Dokploy's catalog

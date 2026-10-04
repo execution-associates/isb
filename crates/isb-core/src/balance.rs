@@ -637,8 +637,26 @@ mod tests {
         addr
     }
 
-    /// A port nothing listens on.
+    /// An address nothing listens on and nothing will.
+    ///
+    /// A port released by `bind(:0)` can be handed to a concurrent test's
+    /// next `bind(:0)`, and a connect would then reach that test's echo
+    /// server instead of being refused. No test binds 127.0.0.3 (another
+    /// loopback address on Linux; one test uses 127.0.0.2 for a balancer's
+    /// own listener), so a port number is never taken there. macOS has only
+    /// 127.0.0.1 configured, so it keeps the small chance.
     fn dead() -> SocketAddr {
+        let ip = if cfg!(target_os = "macos") {
+            [127, 0, 0, 1]
+        } else {
+            [127, 0, 0, 3]
+        };
+        SocketAddr::from((ip, free().port()))
+    }
+
+    /// A free port for the balancer to bind. Another test can win the port
+    /// between probing and binding, so callers retry on a bind error.
+    fn free() -> SocketAddr {
         TcpListener::bind(any()).unwrap().local_addr().unwrap()
     }
 
@@ -833,13 +851,22 @@ mod tests {
         assert_eq!(status(&lb, "web").listen, first);
         assert_eq!(open(first).1, "a");
 
-        let target = dead();
-        let moved = lb.set_route("web", target, vec![a]).unwrap();
+        let (target, moved) = (0..20)
+            .find_map(|_| {
+                let t = free();
+                lb.set_route("web", t, vec![a]).ok().map(|m| (t, m))
+            })
+            .expect("no free port to move to");
         assert_eq!(moved, target);
         assert_eq!(status(&lb, "web").listen, target);
         assert_eq!(open(moved).1, "a");
-        let err = TcpStream::connect(first).unwrap_err();
-        assert_eq!(err.kind(), io::ErrorKind::ConnectionRefused);
+        // The old listener is gone. Its port is free for any concurrent test
+        // to take, so a connect may reach a stranger; what must hold is that
+        // the balancer never serves it (`accepted` is checked below).
+        match TcpStream::connect(first) {
+            Err(e) => assert_eq!(e.kind(), io::ErrorKind::ConnectionRefused),
+            Ok(_) => eprintln!("old port {first} was reused by another listener"),
+        }
         // Connections made through the old listener are untouched.
         assert_eq!(roundtrip(&mut s, "y"), "y");
         assert_eq!(status(&lb, "web").accepted, 3);
