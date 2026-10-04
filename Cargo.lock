@@ -1336,6 +1336,7 @@ dependencies = [
  "isb-apps",
  "isb-core",
  "isb-daemon",
+ "isb-egress",
  "isb-server",
  "isb-tui",
  "rustix 1.1.5",
@@ -1405,6 +1406,7 @@ dependencies = [
  "httparse",
  "isb-apps",
  "isb-core",
+ "isb-egress",
  "isb-server",
  "libc",
  "ring",
@@ -1414,6 +1416,19 @@ dependencies = [
  "serde_json",
  "serde_yaml_ng",
  "tempfile",
+]
+
+[[package]]
+name = "isb-egress"
+version = "0.7.0"
+dependencies = [
+ "base64 0.23.1",
+ "httparse",
+ "isb-core",
+ "rustls",
+ "serde_json",
+ "tempfile",
+ "webpki-roots",
 ]
 
 [[package]]

@@ -26,6 +26,7 @@ isb-core.workspace = true
 isb-server.workspace = true
 isb-apps.workspace = true
 isb-daemon.workspace = true
+isb-egress.workspace = true
 isb-tui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -64,6 +65,7 @@ isb-server = { path = "crates/isb-server", version = "=0.7.0" }
 isb-apps = { path = "crates/isb-apps", version = "=0.7.0" }
 isb-daemon = { path = "crates/isb-daemon", version = "=0.7.0" }
 isb-tui = { path = "crates/isb-tui", version = "=0.7.0" }
+isb-egress = { path = "crates/isb-egress", version = "=0.7.0" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

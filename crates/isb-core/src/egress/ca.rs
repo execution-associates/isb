@@ -74,22 +74,24 @@ fn err(step: &str, e: rcgen::Error) -> Error {
     Error::invalid(format!("egress CA: {step}: {e}"))
 }
 
+fn make_private_dir(d: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(d)?;
+    std::fs::set_permissions(d, std::fs::Permissions::from_mode(0o700))?;
+    Ok(())
+}
+
 fn write_private(path: &Path, text: &str) -> Result<()> {
     crate::secrets::local::write_atomic(path, text.as_bytes())
 }
 
 impl Ca {
-    /// The CA of `network`, made now when there is none.
+    /// The CA of `network`, made now when there is none. Safe against a
+    /// second process doing the same: the pair of files appears at once
+    /// (one directory renamed into place), and the loser uses the winner's.
     pub fn ensure(network: &str) -> Result<Ca> {
         if let Some(ca) = Ca::load(network)? {
             return Ok(ca);
-        }
-        let d = dir(network);
-        std::fs::create_dir_all(&d)?;
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700))?;
-            std::fs::set_permissions(root(), std::fs::Permissions::from_mode(0o700))?;
         }
         let key = KeyPair::generate().map_err(|e| err("generate the key", e))?;
         let now = time::OffsetDateTime::now_utc();
@@ -97,8 +99,24 @@ impl Ca {
         p.not_before = now - time::Duration::days(1);
         p.not_after = now + time::Duration::days(365 * CA_YEARS);
         let cert = p.self_signed(&key).map_err(|e| err("sign the certificate", e))?;
-        write_private(&d.join("ca.key"), &key.serialize_pem())?;
-        write_private(&d.join("ca.crt"), &cert.pem())?;
+        let (root, d) = (root(), dir(network));
+        make_private_dir(&root)?;
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let tmp = root.join(format!(".{network}.{}.{n}.tmp", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        make_private_dir(&tmp)?;
+        write_private(&tmp.join("ca.key"), &key.serialize_pem())?;
+        write_private(&tmp.join("ca.crt"), &cert.pem())?;
+        if std::fs::rename(&tmp, &d).is_err() {
+            // Another process won the race, or an old empty directory is in the way.
+            let _ = std::fs::remove_dir_all(&tmp);
+            if let Some(ca) = Ca::load(network)? {
+                return Ok(ca);
+            }
+            let _ = std::fs::remove_dir_all(&d);
+            return Ca::ensure(network);
+        }
         Ok(Ca {
             network: network.to_string(),
             cert_pem: cert.pem(),

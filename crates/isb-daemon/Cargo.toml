@@ -12,6 +12,7 @@ homepage.workspace = true
 isb-core.workspace = true
 isb-server.workspace = true
 isb-apps.workspace = true
+isb-egress.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml_ng.workspace = true
