@@ -303,7 +303,13 @@ isb app rm NAME                         named volumes are kept
 isb app deploy NAME [-d]                follows the deployment's log; exit 0 when done
 isb app rollback NAME [ID] [-d]         a previous deployment's image and settings, no build
 isb app deployments NAME [--json]
-isb app logs NAME [ID] [-f]
+isb app deploy-log NAME [ID] [-f]      a deployment's build and rollout log
+isb app logs NAME [--replica N] [-n 200] [--since 10m]   the replicas' output, by app name
+isb app exec NAME [--replica N] [-u USER] [-w DIR] [-e K=V]... [-i] [--timeout D] -- ARGV...
+isb app restart NAME [--wait]           rolling replace, same settings
+isb app scale NAME N                    also saved as the app's replicas
+isb app top NAME [--json]               per replica CPU and memory
+isb app events NAME [--stack-wide] [--json]
 isb app env NAME                        the environment as .env text
 isb app env-set NAME [FILE|-] [--deploy]
 isb app webhook NAME [--rotate]
@@ -318,6 +324,27 @@ isb app previews rm NAME PR
 `app update -f` takes a JSON or YAML merge patch (`-` for stdin). See
 [Deploy apps](../guides/deploy-apps.md) and
 [Preview deployments](../guides/previews.md).
+
+## Instances
+
+What runs in an org, like `kubectl get pods`, `describe`, `exec` and `cp`
+([isb for kubectl users](../guides/kubectl.md)):
+
+```text
+isb instance ls [--app A] [--stack S] [--service V] [--kind K] [--status S] [--json]   aliases list, ps
+isb instance get NAME [--json]          alias describe
+isb instance exec NAME [-u USER] [-w DIR] [-e K=V]... [-i] [--timeout D] -- ARGV...
+isb instance restart NAME [--wait]      a replica is replaced, a sandbox restarts
+isb cp INSTANCE:/path LOCAL             a small file out (at most 4 MiB)
+isb cp LOCAL INSTANCE:/path             and in (at most 2 MiB)
+```
+
+`--kind` is `app`, `database`, `stack`, `tunnel`, `workspace`, `build` or
+`sandbox`. `exec` runs argv with no shell, prints the command's output and exits
+with its status (124 when `--timeout`, default 60s and at most 15m, killed it);
+`-i` feeds this process's stdin (at most 1 MiB). These go through the daemon's
+tools, so they work from anywhere `ISB_URL` and `ISB_TOKEN` reach it, as
+members and up; `isb exec` is the one for sandboxes on this host.
 
 ## Templates
 

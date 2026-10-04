@@ -56,7 +56,7 @@ secret reads, the rest are ordinary reads.
 | `surface` | `mcp`, `rest`, `web` (a browser session), `cli` (the unix socket or the host CLI), `webhook` |
 | `action` | as above |
 | `target` | what it acted on: the first of the arguments `name`, `app`, `stack`, `project`, `service`, `environment`, `id`, `user_id`, `email`; for the `org_*` tools, the org |
-| `details` | whitelisted arguments only: names and identifiers (`org`, `name`, `app`, `service`, `replicas`, `version`, `role`, `slot`, ...), each a scalar of at most 128 characters. `value`, `password`, `token`, `env`, `vars`, `secrets`, `compose`, `argv`, `stdin`, URLs and anything else are dropped |
+| `details` | whitelisted arguments only: names and identifiers (`org`, `name`, `app`, `service`, `replicas`, `version`, `role`, `slot`, ...), each a scalar of at most 128 characters. `value`, `password`, `token`, `env`, `vars`, `secrets`, `compose`, `argv`, `stdin`, URLs and anything else are dropped. The exec and file tools (`app_exec`, `instance_exec`, `instance_file_read`, `instance_file_write`) add what they did: the `argv` (up to 64 arguments of 256 characters), `env_keys` (names only), `stdin_bytes`, the file `path` and `bytes`; never a value or content |
 | `outcome` | `ok`, or the error's code (`forbidden`, `not_found`, `invalid`, `invalid_credentials`, ...). Never the error's message, which can quote arguments |
 | `ip`, `user_agent`, `request_id` | when known: the client address (`Cf-Connecting-IP` behind the tunnel), its agent, and `X-Request-Id` (when sane), `Cf-Ray`, or a fresh id |
 | `prev_hash`, `hash` | the chain (below) |

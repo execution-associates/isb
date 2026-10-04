@@ -311,12 +311,11 @@ enum Cmd {
     /// into its project environment's stack (docs/guides/deploy-apps.md).
     #[command(subcommand)]
     App(apps::AppCmd),
-    /// Instances isb manages in the org, like kubectl's pods: list, describe,
-    /// exec, restart (docs/guides/kubectl.md).
+    /// Instances in the org, like kubectl's pods: ls, get, exec, restart
+    /// (docs/guides/kubectl.md).
     #[command(subcommand)]
     Instance(kube::InstanceCmd),
-    /// Copy a small file between this host and an instance of the org:
-    /// `isb cp ./app.conf web-1:/etc/app.conf`, `isb cp web-1:/var/log/x .`.
+    /// Copy a small file to or from an instance: `isb cp ./f web-1:/etc/f`.
     Cp { src: String, dst: String },
     /// One-click apps: deploy a template from the catalog into a project
     /// environment (docs/guides/templates.md).

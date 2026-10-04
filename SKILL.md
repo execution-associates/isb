@@ -185,6 +185,23 @@ cannot exec or read secrets.
   `app_rollback`, `app_get`, `app_list`.
 - **Stacks:** `stack_deploy` (compose YAML; `dry_run: true` first),
   `stack_status`, `stack_logs`, `stack_scale`, `stack_rollback`.
+- **Look inside and act on what runs (`kubectl` for the org;
+  docs/guides/kubectl.md):** `instance_list` (every instance: kind, app,
+  slot, health, in rotation, IP, restarts, CPU, memory; filter `app`,
+  `kind`), `instance_get` (one in full: env names never values, volumes,
+  domains, history), `app_exec` (`name`, `argv`, `replica`, `stdin`,
+  `cwd`, `user`, `env`, `timeout` default 60s at most 15m; each stream
+  capped at 1 MiB, `truncated`/`timed_out` say so) and `instance_exec`
+  (any instance by name), `app_logs` (`tail`, `since`, `replica`),
+  `app_top`, `app_events`, `app_restart` (rolling, `wait`), `app_scale`,
+  `instance_restart`, `instance_file_read` (at most 4 MiB) and
+  `instance_file_write` (at most 2 MiB; never `/run/isb`, `/run/secrets`,
+  `/etc/isb`, or a file isb delivers from a secret). Exec, restarts and
+  files need a member: a viewer or a `read`/`deploy` token is refused
+  exec and files. argv lands in the audit log: keep passwords in `env` or
+  `stdin`. No port-forward: `curl` through `app_exec`. CLI: `isb instance
+  ls|get|exec|restart`, `isb app exec|logs|restart|scale|top|events`,
+  `isb cp`.
 - **Data:** `database_create`, `database_get`, `backup_*`, `volume_*`,
   `job_*`. **Secrets:** `secret_create`, `secret_set` (values base64; a new
   version rolls the stacks using it), `secret_list` (no values).

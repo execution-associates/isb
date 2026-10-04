@@ -418,7 +418,7 @@ pub(super) fn forwarded_args(tool: &str, mut a: Value, c: &Caller) -> Result<Val
 
 /// Where a control plane runs a call.
 #[derive(Debug, PartialEq, Eq)]
-enum Way {
+pub(super) enum Way {
     Here,
     /// To this server, in this org's endpoint.
     Forward(String, OrgId),
@@ -433,7 +433,7 @@ enum Way {
     OrgOther,
 }
 
-fn decide(name: &str, a: &Value, placement: &dyn Fn(&OrgId) -> Option<String>) -> Way {
+pub(super) fn decide(name: &str, a: &Value, placement: &dyn Fn(&OrgId) -> Option<String>) -> Way {
     let all = name == "secret_reencrypt" && a.get("all").and_then(Value::as_bool) == Some(true);
     if name.starts_with("server_") || LOCAL_ONLY.contains(&name) || all || ACCOUNTS.contains(&name)
     {

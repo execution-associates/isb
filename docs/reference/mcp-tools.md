@@ -51,8 +51,8 @@ fills it in and refuses any other value. Then, in order:
   refused to everyone else, platform admins included.
 - **API token scopes** narrow a token below its role: `read` (read-only
   tools), `deploy` (`read` plus `stack_deploy`, `stack_redeploy`,
-  `stack_rollback`, `stack_scale`, `app_deploy`, `app_rollback`,
-  `build_run`), `admin` (the whole role) and `tool:GLOB`. See
+  `stack_rollback`, `stack_scale`, `app_scale`, `app_restart`,
+  `instance_restart`, `app_deploy`, `app_rollback`, `build_run`), `admin` (the whole role) and `tool:GLOB`. See
   [Scopes](../concepts/access.md#scopes).
 - **Account tools** ([below](#accounts)) are judged by the identity
   endpoints' own rules rather than a role in `org`: a workspace token reaches
@@ -78,6 +78,27 @@ means every member of the org, *member* means members, admins and owners.
 | `stack_redeploy` | member | Replace a service's replicas though nothing changed: a moved tag, changed bind-mounted files. |
 | `stack_rollback` | member | Back to the previous deployment; a second rollback undoes the first. |
 | `stack_remove` | member | Delete a stack's instances and ports (volumes with `volumes: true`), and the `<stack>_<key>` secrets it stored that no other stack uses. |
+
+## Instances
+
+[isb for kubectl users](../guides/kubectl.md): look inside what runs and act on it, by app or by instance. An instance is anything isb manages in the org: an app's replica, a database, a compose service's replica, the workspace, a sandbox, a build, an org's tunnel.
+
+| Tool | Who | Does |
+|---|---|---|
+| `instance_list` | viewer | Every instance of the org, one row each: `kind` (`app`, `database`, `stack`, `tunnel`, `workspace`, `sandbox`, `build`), owning `app` or `stack` and `service`, `slot`, `revision`, `status`, `health`, `in_rotation`, `ip`, `restarts`, `created_at`, `age_s`, `cpu_pct`, `mem_bytes`. Filters: `app`, `stack`, `service`, `kind`, `status`. |
+| `instance_get` | viewer | One instance in full: the row plus image, limits, environment variable **names** (never values), volumes, devices, ports, the domains its service serves and whether traffic reaches it, the last health probe, the files isb delivers into it, labels, and its recent `history` (`history` sets how many rows). |
+| `app_exec` | member | Run argv in one of an app's replicas (default: a running one, healthy and in rotation first; `replica` is the slot, or `instance` its name): exit code, stdout, stderr. `stdin` (at most 1 MiB), `cwd`, `user`, `env`, `timeout` (default 60s, at most 15m; `timed_out` and the output so far when it runs out). Each stream keeps its last 1 MiB (`truncated`). The audit row keeps the argv, the names of `env` and the size of `stdin`. |
+| `instance_exec` | member | The same in any running instance of the org by `name` (a workspace runs as its user, in its home). |
+| `app_logs` | viewer | An app's replicas' recent output by app name (`replica`, `tail` default 200, `since` such as `10m`); `stack_logs` underneath. |
+| `app_top` | viewer | Per replica CPU, memory, disk and network counters now, and the totals next to the app's limits (`history: true` adds CPU samples). |
+| `app_events` | viewer | Events about one app, newest last (`since`, `limit`, `stack_wide: true` adds the stack's own). |
+| `app_restart` | member | A rolling replace of the app's replicas with fresh instances of the same settings, in `update_config`'s order (`wait`, `timeout`). |
+| `app_scale` | member | The replica count (0 stops it); also saved as the app's `replicas` setting. |
+| `instance_restart` | member | Replace one instance: a replica is deleted and the controller makes its replacement (`wait`); a sandbox restarts; the workspace has `workspace_restart`. |
+| `instance_file_read` | member | One file of an instance, at most 4 MiB: `utf8` or `base64` (`encoding`). A secret read: always audited (path, never content). Not `/proc`, `/sys`, `/dev` or a workspace's token. |
+| `instance_file_write` | member | Replace one file (`content`, `encoding`, `mode`, `uid`, `gid`, `parents`), at most 2 MiB. Refused: `/run/isb`, `/run/secrets`, `/etc/isb`, files isb delivers from org secrets, `/proc`, `/sys`, `/dev`. Audited with path and size. |
+
+There is no `port-forward` tool: run `curl` with `app_exec`, or reach an instance's address from the workspace.
 
 ## Sandboxes and workspaces
 

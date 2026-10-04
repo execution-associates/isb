@@ -170,8 +170,8 @@ out, the controller's events about the service (slots created, probed,
 serving, old ones drained), so it tells the whole deploy in one place.
 
 The log is streamed two ways: `app_deployment_log` returns it from a byte
-offset (poll with the returned `offset` until `finished`; `isb app logs NAME
-[ID] -f` does) together with the deployment's record (`deployment`: status,
+offset (poll with the returned `offset` until `finished`; `isb app deploy-log
+NAME [ID] -f` does) together with the deployment's record (`deployment`: status,
 image, commit, timings, read before the text, so a finished record means the
 text is complete), and each line is an event on the daemon's feed (`events`,
 `GET /api/v1/events`) at level `log`, under the app's stack and service, next

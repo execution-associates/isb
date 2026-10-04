@@ -144,7 +144,7 @@ a role:
 | Scope | Allows |
 |---|---|
 | `read` | read-only tools, never secret material (as a viewer) |
-| `deploy` | `read`, plus `stack_deploy`, `stack_redeploy`, `stack_rollback`, `stack_scale`, `app_deploy`, `app_rollback`, `build_run` |
+| `deploy` | `read`, plus `stack_deploy`, `stack_redeploy`, `stack_rollback`, `stack_scale`, `app_scale`, `app_restart`, `instance_restart`, `app_deploy`, `app_rollback`, `build_run` |
 | `admin` | everything the role allows (the same as no scopes) |
 | `tool:GLOB` | tools whose name matches, e.g. `tool:app_*`, `tool:stack_status` |
 
@@ -165,7 +165,7 @@ called. The local socket always has every tool.
 
 ```dotenv
 # ~/.config/isb/serve.env: remote callers never read secret values or exec
-ISB_SERVE_DENY_TOOLS=secret_*,sandbox_exec
+ISB_SERVE_DENY_TOOLS=secret_*,sandbox_exec,app_exec,instance_exec,instance_file_*
 ```
 
 ## What an agent can and cannot do
@@ -175,6 +175,17 @@ stacks, sandboxes (create, exec, remove), secrets (values included),
 databases, backups, volumes, jobs, notifications and, for owners and admins,
 the audit log. It reaches nothing in any other org, and no platform or host
 tool.
+
+It can also look inside what runs, as `kubectl` does for pods:
+`instance_list` and `instance_get` describe every instance of the org,
+`app_exec` and `instance_exec` run a command in a replica (or any instance),
+`app_logs`, `app_top` and `app_events` read an app's output, use and events,
+`app_restart`, `app_scale` and `instance_restart` roll, resize and replace
+replicas, and `instance_file_read` and `instance_file_write` copy small files
+in and out. Viewers and `read` tokens only read what `instance_list`,
+`instance_get`, `app_logs`, `app_top` and `app_events` show; running code,
+restarting and files are for members and up. [isb for kubectl
+users](kubectl.md) maps each to the `kubectl` verb it replaces.
 
 Whatever the role, a remote caller's specs are held to the remote-spec
 policy: no privileged containers, raw config or devices, host bind mounts

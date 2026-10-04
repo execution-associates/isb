@@ -400,7 +400,10 @@ pub fn instance(org: &Option<String>, cmd: InstanceCmd) -> Result<u8> {
             if let Some(d) = r["deleted"].as_str() {
                 eprintln!("deleted {d}; the controller replaces it");
                 if let Some(n) = r["replacement"]["name"].as_str() {
-                    eprintln!("replacement {n} is {}", r["replacement"]["health"]);
+                    eprintln!(
+                        "replacement {n} is {}",
+                        r["replacement"]["health"].as_str().unwrap_or("")
+                    );
                 }
             } else {
                 eprintln!("restarted {name}");

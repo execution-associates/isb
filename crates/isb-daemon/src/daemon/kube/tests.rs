@@ -3,7 +3,10 @@
 
 use super::super::tests::{token, user};
 use super::*;
+use std::collections::BTreeSet;
+
 use crate::auth::{Principal, Role};
+use crate::stack::controller::InstanceStatus;
 
 fn ok(c: &Caller, tool: &str, org: &str) -> bool {
     authorize_class(
@@ -441,4 +444,22 @@ fn the_audit_row_has_the_argv_and_the_path_but_not_the_secrets() {
     );
     assert_eq!(e.outcome, "forbidden");
     assert_eq!(e.details["argv"], json!(["id"]));
+}
+
+#[test]
+fn a_control_plane_sends_them_to_the_server_the_org_lives_on() {
+    use super::super::servers::{Way, decide};
+    let placed = |o: &OrgId| (o.as_str() == "far").then(|| "box".to_string());
+    for t in all() {
+        assert_eq!(
+            decide(t, &json!({"org": "far"}), &placed),
+            Way::Forward("box".into(), OrgId::new("far").unwrap()),
+            "{t}"
+        );
+        assert_eq!(
+            decide(t, &json!({"org": "near"}), &placed),
+            Way::Here,
+            "{t}"
+        );
+    }
 }

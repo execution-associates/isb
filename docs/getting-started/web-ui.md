@@ -215,7 +215,10 @@ An app's tabs:
   token or SSH key secret, submodules, and a deploy key to generate and
   copy), the build (builder, Dockerfile path and target, build arguments,
   VM or container), scale (applies at once: saved with `app_update`, then
-  `stack_scale`), runtime (port, CPUs, memory, command), the health check,
+  `stack_scale`; the replicas are listed below it, each with **Restart**,
+  which replaces that one (`instance_restart`), and **Open terminal**, a
+  shell in it, for members and up), runtime (port, CPUs, memory, command),
+  the health check,
   and the webhook URL with its secret (reveal, rotate). Each card saves on
   its own; settings take effect at the next deploy.
 - **Environment**: the `.env` editor, with line numbers and highlighting,

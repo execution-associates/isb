@@ -549,6 +549,15 @@ pub(super) fn sandbox_list_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) ->
     Ok(())
 }
 
+/// The sandbox tools, and the `kubectl`-shaped ones that look into instances.
+pub(super) fn sandbox_tools(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> {
+    sandbox_list_tool(r, d, ann)?;
+    sandbox_exec_tool(r, d, ann)?;
+    sandbox_remove_tool(r, d, ann)?;
+    sandbox_extend_tool(r, d, ann)?;
+    super::kube::register(r, d, ann)
+}
+
 pub(super) fn sandbox_exec_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> {
     tool!(
         r,
