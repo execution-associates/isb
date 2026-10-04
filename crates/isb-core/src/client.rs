@@ -161,6 +161,20 @@ impl Client {
         self.get("/1.0")
     }
 
+    /// Whether the server lists the API extension `name`.
+    pub fn has_extension(&self, name: &str) -> Result<bool> {
+        Ok(self.server_info()?["api_extensions"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|e| e == name)))
+    }
+
+    /// The server's version (`environment.server_version`), if it says.
+    pub fn server_version(&self) -> Result<Option<String>> {
+        Ok(self.server_info()?["environment"]["server_version"]
+            .as_str()
+            .map(str::to_string))
+    }
+
     /// A sentence saying so when this incus cannot run OCI images
     /// (`docker:`, `ghcr:`, `registry:`), else `None`. Also `None` when
     /// incusd cannot be asked.

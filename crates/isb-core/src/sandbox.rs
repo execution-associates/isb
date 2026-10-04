@@ -158,22 +158,14 @@ pub fn host_facts(client: &Client) -> Result<HostFacts> {
                 .collect()
         })
         .unwrap_or_default();
-    let info = client.server_info()?;
-    let initial_copy = info["api_extensions"]
-        .as_array()
-        .is_some_and(|a| a.iter().any(|e| e == "disk_initial_copy"));
+    let initial_copy = client.has_extension("disk_initial_copy")?;
     Ok(HostFacts {
         subids: SubIds::read_host(),
         pools,
         path_map: HostFacts::detect_path_map(),
         initial_copy,
-        incus_version: info["environment"]["server_version"]
-            .as_str()
-            .map(str::to_string),
-        invoking_ids: (
-            rustix::process::getuid().as_raw(),
-            rustix::process::getgid().as_raw(),
-        ),
+        incus_version: client.server_version()?,
+        invoking_ids: crate::idmap::invoking_ids(),
         shared_root: shared_root(),
         org: crate::org::OrgId::from_incus_project(client.project_name()),
         registry: crate::registry::info(client)?.map(|i| i.addr),

@@ -643,37 +643,15 @@ pub fn resolve(
     }
     let mut idmap_mode = None;
     if vm {
-        if spec.volumes.iter().any(|v| v.mount_type == MountType::Bind) {
-            idmap_mode = match &spec.idmap {
-                Some(crate::spec::IdmapSpec::Mode(m)) => Some(*m),
-                Some(crate::spec::IdmapSpec::Map(m)) => Some(m.mode),
-                Some(crate::spec::IdmapSpec::Raw(_)) => None,
-                None => Some(crate::spec::IdmapMode::Auto),
-            };
-            match idmap::resolve_vm(
-                spec.idmap.as_ref(),
-                host.invoking_ids,
-                idmap::vm_service_ids(spec.user.as_deref()),
-            ) {
-                Some(v) => {
-                    if !idmap::incus_translates_vm_shares(host.incus_version.as_deref()) {
-                        return Err(Error::invalid(format!(
-                            "{name}: this VM bind-mounts host directories, and incus {} is not known to \
-                             translate their ids (needs {}.{} or later): guest root would own files on \
-                             the host and could plant setuid binaries. Upgrade incus, or set \
-                             `idmap: none` to share them untranslated (unsafe for untrusted code)",
-                            host.incus_version.as_deref().unwrap_or("(unknown version)"),
-                            idmap::VM_IDMAP_MIN_INCUS.0,
-                            idmap::VM_IDMAP_MIN_INCUS.1,
-                        )));
-                    }
-                    config.insert("raw.idmap".into(), v);
-                }
-                None => eprintln!(
-                    "isb: warning: {name}: idmap: none shares host bind mounts into a VM untranslated: \
-                     guest root creates root-owned files, and setuid binaries, on the host"
-                ),
-            }
+        let (mode, raw) = idmap::plan_vm(
+            &name,
+            spec,
+            host.incus_version.as_deref(),
+            host.invoking_ids,
+        )?;
+        idmap_mode = mode;
+        if let Some(v) = raw {
+            config.insert("raw.idmap".into(), v);
         }
     } else if let Some(i) = spec.idmap.as_ref() {
         idmap_mode = match i {

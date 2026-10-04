@@ -17,7 +17,8 @@
 //! that permits `raw.idmap` to map 1000 at all, not a range the default map draws
 //! from; treating it as one answers "not needed" on exactly the host that needs it.
 
-use crate::spec::{IdmapMode, IdmapSpec};
+use crate::error::{Error, Result};
+use crate::spec::{IdmapMode, IdmapSpec, MountType, SandboxSpec};
 
 /// Whether `id` falls inside a subordinate id RANGE (count > 1) owned by `owner`
 /// (`root` or `0`) in subuid/subgid file content.
@@ -107,6 +108,55 @@ pub fn incus_translates_vm_shares(server_version: Option<&str>) -> bool {
         return false;
     };
     (major, minor) >= VM_IDMAP_MIN_INCUS
+}
+
+/// The (uid, gid) of the user running isb.
+pub fn invoking_ids() -> (u32, u32) {
+    (
+        rustix::process::getuid().as_raw(),
+        rustix::process::getgid().as_raw(),
+    )
+}
+
+/// What a VM spec decides about `raw.idmap`: the mode that applies (for the
+/// plan's "unset by hand" note) and the value to set. A VM with no host bind
+/// mount needs neither. An incus that may not translate VM shares is an error
+/// unless the spec opts out with `idmap: none`, which warns.
+pub fn plan_vm(
+    name: &str,
+    spec: &SandboxSpec,
+    incus_version: Option<&str>,
+    invoking: (u32, u32),
+) -> Result<(Option<IdmapMode>, Option<String>)> {
+    if !spec.volumes.iter().any(|v| v.mount_type == MountType::Bind) {
+        return Ok((None, None));
+    }
+    let mode = match &spec.idmap {
+        Some(IdmapSpec::Mode(m)) => Some(*m),
+        Some(IdmapSpec::Map(m)) => Some(m.mode),
+        Some(IdmapSpec::Raw(_)) => None,
+        None => Some(IdmapMode::Auto),
+    };
+    let guest = vm_service_ids(spec.user.as_deref());
+    let Some(value) = resolve_vm(spec.idmap.as_ref(), invoking, guest) else {
+        eprintln!(
+            "isb: warning: {name}: idmap: none shares host bind mounts into a VM untranslated: \
+             guest root creates root-owned files, and setuid binaries, on the host"
+        );
+        return Ok((mode, None));
+    };
+    if !incus_translates_vm_shares(incus_version) {
+        return Err(Error::invalid(format!(
+            "{name}: this VM bind-mounts host directories, and incus {} is not known to \
+             translate their ids (needs {}.{} or later): guest root would own files on \
+             the host and could plant setuid binaries. Upgrade incus, or set \
+             `idmap: none` to share them untranslated (unsafe for untrusted code)",
+            incus_version.unwrap_or("(unknown version)"),
+            VM_IDMAP_MIN_INCUS.0,
+            VM_IDMAP_MIN_INCUS.1,
+        )));
+    }
+    Ok((mode, Some(value)))
 }
 
 /// The guest (uid, gid) a VM's host shares map to by default: the service
