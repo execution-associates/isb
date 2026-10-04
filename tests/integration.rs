@@ -1051,6 +1051,37 @@ fn virtual_machine() {
         std::fs::read_to_string(share.path().join("from-vm")).unwrap(),
         "back\n"
     );
+    // The share is translated by virtiofsd: guest root (the mapped id, no
+    // `user:`) owns its files on the host as whoever runs the test, any other
+    // guest id is refused, and root cannot chown to a third id or make a device
+    // node. A setuid bit may be set, but only on a file the invoker owns.
+    {
+        use std::os::unix::fs::MetadataExt;
+        let me = std::fs::metadata(share.path()).unwrap();
+        let out = sb
+            .exec([
+                "sh",
+                "-c",
+                "cp /bin/true /mnt/share/suid && chmod 4755 /mnt/share/suid; \
+                 chown 1234:1234 /mnt/share/suid 2>/dev/null && echo CHOWN-OK; \
+                 mknod /mnt/share/dev c 1 3 2>/dev/null && echo MKNOD-OK; \
+                 setpriv --reuid=1234 --regid=1234 --clear-groups \
+                   touch /mnt/share/other 2>/dev/null && echo OTHER-OK; true",
+            ])
+            .unwrap();
+        let o = out.stdout_text();
+        assert!(
+            !o.contains("-OK"),
+            "guest escalated through the share: {o} {}",
+            out.stderr_text()
+        );
+        let m = std::fs::metadata(share.path().join("suid")).unwrap();
+        assert_eq!((m.uid(), m.gid()), (me.uid(), me.gid()));
+        assert!(!share.path().join("dev").exists());
+        assert!(!share.path().join("other").exists());
+        let from_vm = std::fs::metadata(share.path().join("from-vm")).unwrap();
+        assert_eq!(from_vm.uid(), me.uid());
+    }
     let out = sb
         .exec_with(["tty"], ExecOptions::default().tty(true))
         .unwrap();

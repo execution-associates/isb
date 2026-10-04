@@ -13,6 +13,8 @@ fn host() -> HostFacts {
         pools: vec!["container-roots".into(), "default".into()],
         path_map: None,
         initial_copy: false,
+        incus_version: Some("7.5.1".into()),
+        invoking_ids: (1000, 1000),
         shared_root: None,
         org: None,
         registry: None,
@@ -674,12 +676,14 @@ fn vm_rules() {
     let r = |s: &SandboxSpec| resolve(s, &VolumeDefs::new(), &host(), Path::new("/"));
     let mut s = lasso_spec(t.path().to_str().unwrap());
     s.instance_type = InstanceType::VirtualMachine;
-    // privileged and explicit idmap are container-only.
+    // privileged is container-only.
     assert!(r(&s).unwrap_err().to_string().contains("container-only"));
     s.privileged = None;
     let d = r(&s).unwrap();
-    // idmap: auto is a no-op for a VM; the default readiness waits for the agent.
-    assert!(!d.config.contains_key("raw.idmap"));
+    // A host bind mount into a VM is translated by virtiofsd: only the service
+    // user (root here, no `user:`) exists on the host side, as the invoking
+    // user. The default readiness waits for the agent.
+    assert_eq!(d.config["raw.idmap"], "both 1000 0");
     assert_eq!(d.ready, vec![ReadyCheck::Running, ReadyCheck::Agent]);
     assert_eq!(d.ready_timeout, Duration::from_secs(300));
     let s2 = s
@@ -690,8 +694,12 @@ fn vm_rules() {
         .clone()
         .port(PortBinding::guest("tcp:127.0.0.1:1", "tcp:127.0.0.1:2"));
     assert!(r(&s3).is_err());
-    s.idmap = Some(IdmapSpec::Mode(IdmapMode::Always));
-    assert!(r(&s).is_err());
+    // `idmap: none` opts out; a VM with no host bind mounts needs no map.
+    s.idmap = Some(IdmapSpec::Mode(IdmapMode::None));
+    assert!(!r(&s).unwrap().config.contains_key("raw.idmap"));
+    s.idmap = None;
+    s.volumes.clear();
+    assert!(!r(&s).unwrap().config.contains_key("raw.idmap"));
     // `vm` is accepted as shorthand in YAML.
     let f: crate::spec::ComposeFile =
         serde_yaml_ng::from_str("services:\n  a: {image: x, type: vm}\n").unwrap();
@@ -756,4 +764,33 @@ fn image_sources() {
     assert_eq!(i.to_api(Some("abc"))["fingerprint"], "abc");
     assert!(ImageSource::parse("nope:x").is_err());
     assert!(ImageSource::parse("").is_err());
+}
+
+#[test]
+fn vm_bind_mounts_refuse_an_incus_that_may_not_translate() {
+    use crate::spec::InstanceType;
+    let t = tmp();
+    let mut s = lasso_spec(t.path().to_str().unwrap());
+    s.instance_type = InstanceType::VirtualMachine;
+    s.privileged = None;
+    let mut h = host();
+    h.invoking_ids = (1001, 1002);
+    let d = resolve(&s, &VolumeDefs::new(), &h, Path::new("/")).unwrap();
+    s.idmap = None;
+    let d2 = resolve(&s, &VolumeDefs::new(), &h, Path::new("/")).unwrap();
+    // Unset and `auto` both map the service user to whoever runs isb.
+    assert_eq!(d.config["raw.idmap"], "uid 1001 0\ngid 1002 0");
+    assert_eq!(d2.config["raw.idmap"], d.config["raw.idmap"]);
+    s.user = Some("dev".into());
+    let d3 = resolve(&s, &VolumeDefs::new(), &h, Path::new("/")).unwrap();
+    assert_eq!(d3.config["raw.idmap"], "uid 1001 1000\ngid 1002 1000");
+    for v in [Some("6.0.4"), Some("7.4.0"), None] {
+        h.incus_version = v.map(str::to_string);
+        let e = resolve(&s, &VolumeDefs::new(), &h, Path::new("/")).unwrap_err();
+        assert!(e.to_string().contains("translate"), "{e}");
+        // Opting out stays possible.
+        s.idmap = Some(IdmapSpec::Mode(IdmapMode::None));
+        resolve(&s, &VolumeDefs::new(), &h, Path::new("/")).unwrap();
+        s.idmap = None;
+    }
 }
