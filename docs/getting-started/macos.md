@@ -36,8 +36,8 @@ isb machine rm           # deletes the VM and everything in it
 
 The machine also needs a Linux isb for its daemon. `init` downloads the
 release asset matching your isb's version from GitHub
-(`isb-vX.Y.Z-<arch>-unknown-linux-musl.tar.gz`, checked against
-`SHA256SUMS`); a development build passes its own with
+(`isb-vX.Y.Z-<arch>-unknown-linux-musl.tar.gz`, checked against the
+release's signed `SHA256SUMS`); a development build passes its own with
 `--isb-binary PATH` (an aarch64 or x86_64 `*-unknown-linux-musl` build, the
 same architecture as the Mac). `--timeout` (default `20m`) bounds the first
 boot.

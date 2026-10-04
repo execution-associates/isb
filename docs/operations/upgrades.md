@@ -9,7 +9,7 @@ installed the old one (`mise`, `cargo install isb`, or the
 [releases page](https://github.com/execution-associates/isb/releases)) and
 then pointing whatever runs it at the new file. A binary from the releases
 page updates itself: `isb update` replaces it in place with the latest
-release, checked against the release's `SHA256SUMS` (`isb update --check`
+release, checked against the release's signed `SHA256SUMS` (`isb update --check`
 only reports; see [the CLI reference](../reference/cli.md#updating-isb)). Workloads keep running
 throughout: stopping or restarting the daemon never stops an app.
 

@@ -60,7 +60,7 @@ user with passwordless sudo. Over SSH it:
    build, checked to be one for the box's architecture), `--self-binary`
    (the daemon's own executable: the same build as the control plane), or
    by default this version's release, checked against the release's
-   `SHA256SUMS`. The box checks the upload's SHA-256 again before installing it
+   signed `SHA256SUMS`. The box checks the upload's SHA-256 again before installing it
    at `/usr/local/bin/isb`;
 2. creates the system user `isb` (home `/var/lib/isb`), gives the incus
    containers their uid range, installs incus from Zabbly's stable channel
@@ -217,7 +217,7 @@ upgrade it with `isb server upgrade NAME`".
 ```sh
 isb server upgrade hel-1                     # to this control plane's own build
 isb server upgrade --all
-isb server upgrade hel-1 --isb-version 1.0.1 # a release, checked against its SHA256SUMS
+isb server upgrade hel-1 --isb-version 1.0.1 # a release, checked against its signed SHA256SUMS
 isb server upgrade hel-1 --isb-binary ./isb  # a Linux build on this host
 ```
 

@@ -1,7 +1,8 @@
 //! `isb update`: replace the running isb with a release from GitHub.
 //!
-//! The release's tarball for this build's target is checked against the
-//! release's SHA256SUMS, unpacked next to the running binary (so the final
+//! The release's SHA256SUMS must carry a signature (SHA256SUMS.sig) by a
+//! release key compiled into isb; the tarball for this build's target is then
+//! checked against it, unpacked next to the running binary (so the final
 //! rename stays on one filesystem and is atomic), smoke-tested with
 //! `--version`, and renamed over it. A binary a package manager owns is left
 //! to that manager: replacing it underneath mise, cargo, npm or pip leaves
@@ -17,6 +18,15 @@ use crate::error::{Error, Result};
 use crate::machine::set_mode;
 
 const RELEASES: &str = "https://github.com/execution-associates/isb/releases/download";
+/// Ed25519 public keys (hex) that sign each release's SHA256SUMS. The
+/// signature is SHA256SUMS.sig, 64 raw bytes; the private key is the repo
+/// secret ISB_RELEASE_SIGNING_KEY (master copy in the maintainers' vault).
+/// A list, so a new key can ship in a release before the old one retires.
+pub const RELEASE_KEYS: &[&str] =
+    &["4f08d05a2ffaf58f40d4d0e658a9934e5246de1b472ccd2143af6c928adfd51a"];
+/// The first release whose SHA256SUMS is signed; older ones cannot be installed.
+const FIRST_SIGNED: &str = "1.1.1";
+
 const LATEST_API: &str = "https://api.github.com/repos/execution-associates/isb/releases/latest";
 
 /// The version of this build.
@@ -213,8 +223,15 @@ pub(crate) fn download_asset(
     dst: &Path,
 ) -> Result<()> {
     let base = format!("{RELEASES}/v{version}");
-    let sums =
-        String::from_utf8_lossy(&fetch(&format!("{base}/SHA256SUMS"), 1 << 20)?).into_owned();
+    let sums = fetch(&format!("{base}/SHA256SUMS"), 1 << 20)?;
+    let sig = fetch(&format!("{base}/SHA256SUMS.sig"), 1 << 10).map_err(|e| {
+        Error::invalid(format!(
+            "release v{version} is not signed ({e}); isb installs only signed releases, \
+             {FIRST_SIGNED} and later"
+        ))
+    })?;
+    verify_sums(&sums, &sig).map_err(|e| Error::invalid(format!("release v{version}: {e}")))?;
+    let sums = String::from_utf8_lossy(&sums).into_owned();
     let want = sums
         .lines()
         .find_map(|l| {
@@ -253,6 +270,34 @@ pub(crate) fn download_asset(
     set_mode(dst, 0o755)
 }
 
+/// Whether `sig` is a release key's signature of `sums`.
+pub fn verify_sums(sums: &[u8], sig: &[u8]) -> std::result::Result<(), String> {
+    use ring::signature::{ED25519, UnparsedPublicKey};
+    let ok = RELEASE_KEYS.iter().any(|k| {
+        unhex(k).is_some_and(|k| {
+            UnparsedPublicKey::new(&ED25519, k)
+                .verify(sums, sig)
+                .is_ok()
+        })
+    });
+    if ok {
+        Ok(())
+    } else {
+        Err("SHA256SUMS.sig is not a valid signature by an isb release key".into())
+    }
+}
+
+fn unhex(s: &str) -> Option<Vec<u8>> {
+    (s.len() % 2 == 0)
+        .then(|| {
+            (0..s.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok())
+                .collect()
+        })
+        .flatten()
+}
+
 #[doc(hidden)]
 pub fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
@@ -272,6 +317,23 @@ mod tests {
         assert!(!is_newer("garbage", "1.0.0"));
         assert!(!is_newer("1.0", "0.9.0"));
         assert!(is_newer("1.1.0-rc.1", "1.0.0"));
+    }
+
+    #[test]
+    fn release_signature() {
+        // Signed with the release key: `openssl pkeyutl -sign -rawin`.
+        let msg = b"isb release signing key test vector\n";
+        let sig = unhex(
+            "9f14551d10534d2d1a5485b58726a1eda35a874008fc95efcc63d064a5beedca\
+             ea5b8030f892056a63d3da4492e35d6f4d3d699b4408e13d80821f78caa0ed0b",
+        )
+        .unwrap();
+        assert!(verify_sums(msg, &sig).is_ok());
+        assert!(verify_sums(b"isb release signing key test vector!\n", &sig).is_err());
+        let mut bad = sig.clone();
+        bad[0] ^= 1;
+        assert!(verify_sums(msg, &bad).is_err());
+        assert!(verify_sums(msg, &sig[..63]).is_err());
     }
 
     #[test]
