@@ -86,20 +86,47 @@ pub fn one_line(text: &str, n: usize, max: usize) -> String {
     format!("...{tail}")
 }
 
-/// The failed instance's output, read before it is deleted. An empty
-/// string when it has none or cannot be read: the failure is explained
-/// without it.
-fn read_output(client: &Client, name: &str, service: &str, oci: bool) -> String {
-    for attempt in 0..2 {
-        let read = Sandbox::get(client, name)
-            .and_then(|sb| supervise::logs(&sb, service, oci, READ_LINES));
-        match read {
-            Ok(t) => return t,
-            Err(_) if attempt == 0 => std::thread::sleep(Duration::from_millis(300)),
-            Err(_) => {}
+/// How long a failed instance's output is waited for. incus gives the
+/// console of a container that has just exited only after a moment: an
+/// early read is an error or empty.
+const OUTPUT_WAIT: Duration = if cfg!(test) {
+    Duration::from_millis(100)
+} else {
+    Duration::from_secs(8)
+};
+
+/// Poll `read` until it yields text, for at most `within`. An empty string
+/// when the instance printed nothing or cannot be read: the failure is
+/// explained without it.
+fn poll_output(
+    read: &mut dyn FnMut() -> Result<String>,
+    within: Duration,
+    poll: Duration,
+) -> String {
+    let until = std::time::Instant::now() + within;
+    loop {
+        if let Ok(t) = read() {
+            if !t.trim().is_empty() {
+                return t;
+            }
         }
+        if std::time::Instant::now() >= until {
+            return String::new();
+        }
+        std::thread::sleep(poll);
     }
-    String::new()
+}
+
+/// The failed instance's output, read before it is deleted.
+fn read_output(client: &Client, name: &str, service: &str, oci: bool) -> String {
+    poll_output(
+        &mut || {
+            let sb = Sandbox::get(client, name)?;
+            supervise::logs(&sb, service, oci, READ_LINES)
+        },
+        OUTPUT_WAIT,
+        Duration::from_millis(500),
+    )
 }
 
 /// The failure of replica `name` with its last output in the message, and
@@ -249,5 +276,33 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn output_that_arrives_late_is_waited_for_and_silence_ends() {
+        let mut n = 0;
+        let got = poll_output(
+            &mut || {
+                n += 1;
+                match n {
+                    1 => Err(Error::invalid("connection refused")),
+                    2 => Ok("\n".into()),
+                    _ => Ok("Error: getaddrinfo ENOTFOUND db\n".into()),
+                }
+            },
+            Duration::from_secs(5),
+            Duration::from_millis(1),
+        );
+        assert_eq!(got, "Error: getaddrinfo ENOTFOUND db\n");
+        assert_eq!(n, 3);
+        // An instance that prints nothing is not waited on for long.
+        let t = std::time::Instant::now();
+        let none = poll_output(
+            &mut || Ok(String::new()),
+            Duration::from_millis(30),
+            Duration::from_millis(10),
+        );
+        assert_eq!(none, "");
+        assert!(t.elapsed() < Duration::from_secs(2));
     }
 }

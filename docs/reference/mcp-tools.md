@@ -22,7 +22,7 @@ answer 401 to a caller with no credential, unless the daemon runs with
 
 Three counts differ for that reason, and none is a fault:
 
-- The daemon's startup line (`... (196 tools)`) counts every tool the
+- The daemon's startup line (`... (N tools)`) counts every tool the
   listener could offer: the unix socket's full list.
 - `/mcp` lists the same tools to a signed-in caller (a call is still judged
   by role and scopes).

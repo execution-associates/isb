@@ -209,6 +209,7 @@ pub(crate) fn stack(ctx: &Ctx, cmd: StackCmd) -> Result<u8> {
                 println!("==> {inst} <==");
                 println!("{}", text.as_str().unwrap_or("").trim_end());
             }
+            super::kube::print_failed_attempt(&r["last_failed_attempt"]);
             Ok(0)
         }
         StackCmd::Config { name } => {

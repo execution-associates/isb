@@ -199,7 +199,7 @@ pub fn logs(org: &Option<String>, a: AppLogs) -> Result<u8> {
 }
 
 /// The last replica that failed to come up: it is deleted, so this is what it printed.
-fn print_failed_attempt(f: &Value) {
+pub(crate) fn print_failed_attempt(f: &Value) {
     let Some(out) = f["output"].as_str() else {
         return;
     };

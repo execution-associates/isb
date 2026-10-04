@@ -107,7 +107,7 @@ so there is nothing to read from it later. isb reads its output before it
 deletes it, puts the last lines in the failure message (the deployment log,
 the app's status message) and keeps them: while the app is not converged,
 `app_logs` answers `last_failed_attempt` with the instance, the reason and
-the output, and `isb app logs` prints it after the live replicas' logs.
+the output, and `isb app logs` and `isb stack logs` print it after the live replicas' logs.
 
 The CLI's old `isb app logs` (a deployment's build and rollout log) is now
 `isb app deploy-log NAME [ID] [-f]`.
