@@ -51,6 +51,8 @@ mod ssh;
 mod stack;
 #[path = "isb/templates.rs"]
 mod templates;
+#[path = "isb/update.rs"]
+mod update;
 
 use audit::*;
 use auth::*;
@@ -355,6 +357,9 @@ enum Cmd {
     /// A live dashboard of stacks and sandboxes (`isb serve`'s view; with no
     /// daemon, sandboxes only).
     Tui,
+    /// Replace this isb with the latest release (or VERSION), checked
+    /// against the release's SHA256SUMS.
+    Update(update::UpdateArgs),
     /// Users of `isb serve` (its identity store, `<state>/isb.db`).
     #[command(subcommand)]
     User(UserCmd),
@@ -480,6 +485,15 @@ impl Ctx {
     }
 }
 
+/// Apply `f` to each named sandbox in turn, stopping at the first error.
+fn each(ctx: &Ctx, names: Vec<String>, f: impl Fn(&Client, &str) -> Result<()>) -> Result<u8> {
+    let c = ctx.client(None);
+    for n in names {
+        f(&c, &n)?;
+    }
+    Ok(0)
+}
+
 fn print_json<T: Serialize>(v: &T) {
     println!("{}", serde_json::to_string_pretty(v).expect("serializable"));
 }
@@ -575,6 +589,7 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
             isb::tui::run(ctx.client(None), isb::server::default_socket_path())?;
             Ok(0)
         }
+        Cmd::Update(a) => update::update(ctx, a),
         Cmd::User(c) => user_cmd(c),
         Cmd::Invite {
             org,
@@ -593,38 +608,14 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         Cmd::Audit(c) => audit_cmd(c),
         Cmd::History(a) => history_cmd(a),
         Cmd::Create(a) => create(ctx, a),
-        Cmd::Start { names } => {
-            let c = ctx.client(None);
-            for n in names {
-                Sandbox::get(&c, &n)?.start()?;
-            }
-            Ok(0)
-        }
+        Cmd::Start { names } => each(ctx, names, |c, n| Sandbox::get(c, n)?.start()),
         Cmd::Stop {
             names,
             force,
             timeout,
-        } => {
-            let c = ctx.client(None);
-            for n in names {
-                Sandbox::get(&c, &n)?.stop(force, timeout)?;
-            }
-            Ok(0)
-        }
-        Cmd::Restart { names } => {
-            let c = ctx.client(None);
-            for n in names {
-                Sandbox::get(&c, &n)?.restart()?;
-            }
-            Ok(0)
-        }
-        Cmd::Rm { names, force } => {
-            let c = ctx.client(None);
-            for n in names {
-                Sandbox::remove(&c, &n, force)?;
-            }
-            Ok(0)
-        }
+        } => each(ctx, names, |c, n| Sandbox::get(c, n)?.stop(force, timeout)),
+        Cmd::Restart { names } => each(ctx, names, |c, n| Sandbox::get(c, n)?.restart()),
+        Cmd::Rm { names, force } => each(ctx, names, |c, n| Sandbox::remove(c, n, force)),
         Cmd::Ls { labels, json } => {
             let filters: Vec<LabelFilter> = labels.iter().map(|l| LabelFilter::parse(l)).collect();
             let list = Sandbox::list_with(&ctx.client(None), &filters)?;

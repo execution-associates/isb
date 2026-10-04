@@ -11,7 +11,7 @@ crates/isb-apps/src/s3.rs 1263
 crates/isb-core/src/compose.rs 1244
 crates/isb-core/src/ingress/caddy.rs 1130
 crates/isb-core/src/ingress/mod.rs 1032
-crates/isb-core/src/machine.rs 1156
+crates/isb-core/src/machine.rs 1097
 crates/isb-core/src/metrics_history.rs 1024
 crates/isb-core/src/plan.rs 1523
 crates/isb-core/src/registry/mod.rs 1105

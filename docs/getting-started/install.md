@@ -78,7 +78,8 @@ cargo install isb
 Prebuilt static (musl) binaries for x86_64 and aarch64 Linux, and macOS
 binaries for Apple silicon and Intel, are on the
 [releases page](https://github.com/execution-associates/isb/releases), with
-a `SHA256SUMS` file.
+a `SHA256SUMS` file. A binary installed from there keeps itself current with
+`isb update`.
 
 ```console
 $ isb --version

@@ -69,6 +69,7 @@ directory's file; with none, the command says so and names the directory.
 | 0 | success |
 | 1 | an error |
 | 2 | `isb plan --exit-code` found changes |
+| 2 | `isb update --check` found a newer release |
 | the command's own | `isb exec`, and a foreground `isb up` (the first failing `command`) |
 | 125 | `isb exec`: isb itself failed (no such sandbox, incusd unreachable), not the command |
 | 128 + N | a foreground `isb up` stopped by signal N (130 for Ctrl-C) |
@@ -528,6 +529,22 @@ isb history [--object NAME [--exact]] [--org ORG | --platform] [--source audit,c
 
 See [The audit log](../operations/audit.md) and
 [The history](../operations/history.md).
+
+## Updating isb
+
+```text
+isb update [VERSION] [--check] [--force]
+```
+
+Replaces the running binary with the latest release (or `VERSION`, which may
+be older). The tarball for this platform is checked against the release's
+`SHA256SUMS`, unpacked next to the binary, run once with `--version`, then
+renamed over it, so a failed update leaves the old binary in place.
+`--check` only compares versions. A binary installed by mise, cargo, npm or
+pip is refused with that manager's upgrade command, since replacing it would
+leave the manager's record wrong; `--force` replaces it anyway, and also
+reinstalls the same version. A running `isb serve` keeps the old binary
+until it restarts ([Upgrading isb](../operations/upgrades.md)).
 
 ## macOS: the isb machine
 
