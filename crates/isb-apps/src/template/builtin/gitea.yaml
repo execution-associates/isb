@@ -1,0 +1,51 @@
+id: gitea
+name: Gitea
+description: A self-hosted Git service (repositories, pull requests, issues, packages, actions), with Postgres.
+version: "1"
+logo: https://raw.githubusercontent.com/go-gitea/gitea/7641fc3a8c908e9399b40c2927c58b4b5d95707e/assets/logo.svg
+tags: [git, devtools]
+links:
+  website: https://about.gitea.com
+  source: https://github.com/go-gitea/gitea
+  docs: https://docs.gitea.com/installation/install-with-docker
+variables:
+  - name: domain
+    type: domain
+    label: Domain
+    description: The public hostname; empty for a generated one.
+  - name: db_password
+    type: password
+apps:
+  - name: db
+    image: docker:postgres:16-alpine
+    volumes: ["data:/var/lib/postgresql/data"]
+    env:
+      POSTGRES_DB: gitea
+      POSTGRES_USER: gitea
+      POSTGRES_PASSWORD: "${db_password}"
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U gitea -d gitea"]
+      interval: 5s
+      retries: 10
+  - name: gitea
+    image: docker:gitea/gitea:1
+    port: 3000
+    depends_on: [db]
+    volumes: ["data:/data"]
+    env:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      GITEA__database__DB_TYPE: postgres
+      GITEA__database__HOST: "${host:db}:5432"
+      GITEA__database__NAME: gitea
+      GITEA__database__USER: gitea
+      GITEA__database__PASSWD: "${db_password}"
+      GITEA__server__DOMAIN: "${domain}"
+      GITEA__server__ROOT_URL: "https://${domain}/"
+      GITEA__server__DISABLE_SSH: "true"
+    domains:
+      - {host: "${domain}"}
+main: gitea
+notes:
+  - The first visit shows the install page with the database filled in; create the admin account there.
+  - SSH is off (the ingress carries HTTP only); clone over HTTPS.

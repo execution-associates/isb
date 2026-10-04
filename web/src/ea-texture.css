@@ -1,0 +1,256 @@
+/*
+ * The Execution Associates theme's texture and polish: what makes it feel
+ * printed rather than painted, taken from executionassociates.com.
+ *
+ *   - A still film grain and an ordered-dither glow under the page, drawn by
+ *     WebGL (lib/texture-gl.ts) onto a fixed canvas BEHIND the app, or by CSS
+ *     where there is no GPU (`data-texture-fx` on <html>: gl, css or none;
+ *     `data-texture` there is the viewer's choice: on, subtle or off).
+ *   - Behind, not over: the shell is transparent, so the texture shows in the
+ *     sidebar and on the page, and every opaque surface (cards, tables,
+ *     dialogs, menus, the terminal and logs) is a clean plate. Nothing
+ *     dense ever has grain under it.
+ *   - Dithered fades in 2px cells, from ea-ramps.css, where a gradient would
+ *     be smooth: meter tails, the deployment strip, dialogs' top edge, the
+ *     sign-in panel's edge, empty states' floor, initials badges.
+ *   - Peach selection, a line of light under page titles, a neon bar on the
+ *     current page, and a glow on the primary button.
+ * All of it is scoped to `html.ea`; light and dark are untouched.
+ */
+@import "./ea-ramps.css";
+@import "./ea-gradients.css";
+
+html.ea {
+  --ea-peach: #febe75;
+  --ea-coral: #f78478;
+  --ea-magenta: #dd519b;
+  --ea-glow: #f099bf;
+  /* The CSS grain: white specks, as faint as the shader's. */
+  --ea-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+html.ea[data-texture="subtle"] {
+  --ea-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .035 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ---- the ground: ink, with the shell transparent so the texture shows ---- */
+
+html.ea body {
+  background-color: var(--background);
+}
+html.ea #root {
+  position: relative;
+  z-index: 1;
+}
+html.ea [data-shell],
+html.ea [data-shell-panel] {
+  background-color: transparent;
+}
+/* The sidebar's deeper ink, as a fixed column behind everything. */
+@media (min-width: 48rem) {
+  html.ea body:has([data-shell="app"])::before {
+    content: "";
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: 15rem;
+    z-index: -1;
+    background-color: var(--sidebar);
+  }
+}
+
+/* The WebGL layer: a fixed canvas behind the app, one pixel per CSS pixel. */
+.ea-fx {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+  image-rendering: pixelated;
+}
+
+/* Without WebGL: the grain on the page, and a soft (undithered) glow. */
+html.ea[data-texture-fx="css"] body {
+  background-image:
+    var(--ea-grain),
+    radial-gradient(60% 560px at 78% -140px, rgb(254 190 117 / 0.1), rgb(221 81 155 / 0.06) 45%, transparent 75%);
+  background-repeat: repeat, no-repeat;
+  background-size: 240px 240px, 100% 100%;
+}
+@media (min-width: 48rem) {
+  html.ea[data-texture-fx="css"] body:has([data-shell="app"])::before {
+    background-image: var(--ea-grain);
+    background-size: 240px 240px;
+  }
+}
+html.ea[data-texture="subtle"][data-texture-fx="css"] body {
+  background-image:
+    var(--ea-grain),
+    radial-gradient(60% 560px at 78% -140px, rgb(254 190 117 / 0.05), rgb(221 81 155 / 0.03) 45%, transparent 75%);
+}
+
+/* ---- the site's small signatures ---- */
+
+html.ea ::selection {
+  background: var(--ea-peach);
+  color: #1b0a2c;
+}
+
+/* A line of light under each page title: peach, coral, magenta, then the rule. */
+html.ea [data-slot="page-header"] {
+  position: relative;
+}
+html.ea [data-slot="page-header"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -0.875rem;
+  height: 1px;
+  background: linear-gradient(90deg, var(--ea-peach), var(--ea-coral) 14%, rgb(221 81 155 / 0.55) 30%, rgb(253 246 250 / 0.14) 55%, rgb(253 246 250 / 0.06));
+  pointer-events: none;
+}
+
+/* The current page in the sidebar: a lit bar, as the site's sign is lit. */
+html.ea nav[aria-label="Main"] a[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.45rem;
+  bottom: 0.45rem;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--ea-peach), var(--ea-glow));
+  box-shadow: 0 0 10px 1px rgb(240 153 191 / 0.55);
+}
+
+/* The solid button: peach on hover (index.css), now with light around it. */
+html.ea [data-slot="button"][data-variant="default"]:hover {
+  --tw-shadow: 0 0 0 1px rgb(254 190 117 / 0.55), 0 4px 22px -4px rgb(240 153 191 / 0.55);
+}
+
+/* ---- plates: cards and dialogs take a little light on their top edge ---- */
+
+html.ea [data-slot="card"] {
+  position: relative;
+}
+html.ea [data-slot="card"],
+html.ea [data-slot="dialog-content"] {
+  isolation: isolate;
+}
+html.ea [data-slot="card"]::before,
+html.ea [data-slot="dialog-content"]::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 48px;
+  z-index: -1;
+  border-radius: inherit;
+  background: rgb(240 153 191 / 0.08);
+  mask-image: var(--ea-ramp-y-s);
+  mask-size: 16px 48px;
+  mask-repeat: repeat-x;
+  pointer-events: none;
+}
+html.ea [data-slot="dialog-content"]::before {
+  height: 128px;
+  background: linear-gradient(90deg, rgb(254 190 117 / 0.1), rgb(240 153 191 / 0.1) 50%, rgb(119 76 167 / 0.12));
+  mask-image: var(--ea-ramp-y-l);
+  mask-size: 16px 128px;
+}
+
+/* ---- meters: the fill trails off past its end in dither, like light falling off ---- */
+
+html.ea [role="meter"] > * {
+  position: relative;
+  overflow: visible;
+}
+html.ea [role="meter"] > *::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(100% - 4px);
+  width: 128px;
+  background-color: inherit;
+  mask-image: var(--ea-ramp-x-l);
+  mask-size: 128px 16px;
+  mask-repeat: repeat-y;
+  pointer-events: none;
+}
+
+/* ---- the deployment page's progress strip ---- */
+
+html.ea ol[aria-label="Progress"] > li > .bg-success\/50 {
+  height: 4px;
+  border-radius: 0;
+  background: linear-gradient(90deg, var(--success), var(--ea-glow));
+  mask-image: linear-gradient(#000, #000), var(--ea-ramp-x-s);
+  mask-size: calc(100% - 48px) 100%, 48px 16px;
+  mask-position: left top, right top;
+  mask-repeat: no-repeat, repeat-y;
+}
+html.ea ol[aria-label="Progress"] [aria-label$=": current"] {
+  box-shadow: 0 0 14px -1px color-mix(in oklch, var(--info) 70%, transparent);
+}
+html.ea ol[aria-label="Progress"] [aria-label$=": done"] {
+  box-shadow: 0 0 10px -2px color-mix(in oklch, var(--success) 60%, transparent);
+}
+
+/* ---- empty states: a floor of dithered light ---- */
+
+html.ea [data-slot="empty-state"] {
+  position: relative;
+  isolation: isolate;
+}
+html.ea [data-slot="empty-state"]::before {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 128px;
+  z-index: -1;
+  background: radial-gradient(ellipse 55% 100% at 50% 100%, rgb(240 153 191 / 0.2), rgb(119 76 167 / 0.12) 60%, transparent 85%);
+  mask-image: var(--ea-ramp-y-l);
+  mask-size: 16px 128px;
+  mask-repeat: repeat-x;
+  /* the ramp is opaque at its top; the floor is lit at its bottom */
+  transform: scaleY(-1);
+  pointer-events: none;
+}
+
+/* ---- the sign-in panel melts into the form's ink along a dithered edge ---- */
+
+html.ea .auth-panel::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 128px;
+  background: var(--background);
+  mask-image: var(--ea-ramp-x-l);
+  mask-size: 128px 16px;
+  mask-repeat: repeat-y;
+  transform: scaleX(-1);
+  pointer-events: none;
+}
+
+/* ---- initials and org marks: a three-tone dither print over their gradient ---- */
+
+html.ea [data-print],
+html.ea [data-slot="avatar-fallback"] {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+html.ea [data-print]::after,
+html.ea [data-slot="avatar-fallback"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(135deg, transparent 20%, rgb(18 7 31 / 0.55));
+  mask-image: var(--ea-ramp-x-l);
+  /* the middle of the ramp: a halftone from half-lit to a third */
+  mask-size: 128px 16px;
+  mask-position: -48px 0;
+  mask-repeat: repeat-y;
+  pointer-events: none;
+}

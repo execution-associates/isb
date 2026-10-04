@@ -46,6 +46,63 @@ class Deploy(TypedDict, total=False):
     update_config: Optional[UpdateConfig]
 
 
+class _DomainSpecRequired(TypedDict):
+    #: The hostname, e.g. `app.example.com`; `*.example.com` where the org
+    #: allows wildcards; or `auto` for a generated
+    #: `<service>-<stack>-<org>.<ip>.sslip.io` name.
+    host: str
+
+
+class DomainSpec(_DomainSpecRequired, total=False):
+    """A hostname (and path) the ingress serves a service on."""
+    #: Serve over HTTPS with a certificate the ingress obtains (default
+    #: true), redirecting plain HTTP to it. `false` serves plain HTTP.
+    https: Optional[BoolOrString]
+    #: Path prefix (default `/`): `/api` matches `/api` and `/api/...`.
+    path: Optional[str]
+    #: The port the service listens on inside its replicas. Not needed with
+    #: `redirect`.
+    port: Optional[int]
+    #: Answer every request with a permanent redirect (308) to this URL
+    #: instead of proxying. A URL without a path keeps the request's path
+    #: and query (`https://example.com`); one with a path is used as is.
+    redirect: Optional[str]
+    #: Remove `path` from the request before passing it on.
+    strip_prefix: BoolOrString
+    #: Also serve `www.<host>`, redirecting it to `host`.
+    www_redirect: BoolOrString
+
+
+class _EgressSecretSpec1Required(TypedDict):
+    #: The environment variable the guest sees (holding a placeholder).
+    env: str
+    #: Hosts the real value may be sent to: `host[:port]`, port 443 by default.
+    hosts: Sequence[str]
+
+
+class EgressSecretSpec1(_EgressSecretSpec1Required, total=False):
+    """A secret with its fields spelled out."""
+    #: The secret in the org's store (default: the variable's name).
+    secret: Optional[str]
+
+
+class EgressSpec2(TypedDict, total=False):
+    """Hosts and secrets."""
+    #: The hosts the sandbox may reach: `host[:port]`.
+    allow: Sequence[str]
+    #: Secrets the guest sees only as placeholders.
+    secrets: Sequence[EgressSecretSpec]
+
+
+class _EnvValueSecretRequired(TypedDict):
+    #: A top-level secret's key.
+    secret: str
+
+
+class EnvValueSecret(_EnvValueSecretRequired, total=False):
+    pass
+
+
 class ExecSpec(TypedDict, total=False):
     """The `exec:` block of a service: exec defaults with no docker equivalent."""
     #: Environment for exec only (merged over `environment`, never stored in
@@ -211,14 +268,27 @@ class SandboxSpec(TypedDict, total=False):
     depends_on: DependsOnRepr
     #: Replicas, rolling updates and restart policy for `isb stack deploy`.
     deploy: Optional[Deploy]
+    #: Public hostnames `isb serve`'s ingress routes to this service's
+    #: replicas (docs/guides/domains.md). Only stacks use them; `isb up` ignores
+    #: them.
+    domains: Sequence[DomainSpec]
+    #: Which hostnames the sandbox may reach, and secrets that never enter
+    #: it (docs/guides/egress.md). `none` denies all network; a list of
+    #: `host[:port]` (port 443 by default; `*.example.com` for subdomains)
+    #: denies everything else, public and private; `{allow, secrets}` adds
+    #: secrets the guest sees only as placeholders, put on the wire towards
+    #: their approved hosts. Omitted: open egress, as before. Needs
+    #: `isb serve` running for its proxy.
+    egress: Optional[EgressSpec]
     #: OCI images only: the entrypoint, run with `command` as its arguments.
     #: On an OCI image `command` alone replaces the whole command line,
     #: including the image's own entrypoint.
     entrypoint: Optional[Command]
     #: Instance environment (`environment.<KEY>`), seen by every exec: a map, or
-    #: a list of `KEY=VALUE`. Not for secrets: it is plain instance config,
-    #: readable by anyone who can read the instance.
-    environment: MapOrList
+    #: a list of `KEY=VALUE`. A plain value is instance config, readable by
+    #: anyone who can read the instance. `KEY: {secret: NAME}` delivers the
+    #: top-level secret NAME as the variable (docs/guides/secrets.md).
+    environment: EnvMapOrList
     #: More exec defaults: an exec-only environment and the login shell.
     exec: ExecSpec
     #: A recurring health test, as in docker compose. `isb stack deploy`
@@ -282,11 +352,26 @@ class SandboxSpec(TypedDict, total=False):
 
 class SecretDef(TypedDict, total=False):
     """Where a secret's value comes from. Exactly one source."""
+    #: The value, age-encrypted to the daemon's recipients (`isb secret
+    #: encrypt`): ASCII-armored, or base64 of the binary format.
+    age: Optional[str]
+    #: Read through this secrets driver, from `name`.
+    driver: Optional[str]
     #: An environment variable of whoever deploys the file (`isb up`, or the
     #: client calling `isb stack deploy`).
     environment: Optional[str]
+    #: The secret already exists in the org's secret store (`isb secret
+    #: create`), under `name` (default: the key).
+    external: BoolOrString
     #: A host file holding the value (relative to the compose file).
     file: Optional[str]
+    #: With `external`: the store's name for it. With `driver`: the
+    #: driver's reference (a 1Password `op://` path, say).
+    name: Optional[str]
+    #: With `driver`: how often `isb serve` checks the driver for a new
+    #: version (`30m`, `1h`; default 1h). A new version rolls the services
+    #: using it.
+    refresh: Optional[str]
 
 
 class _SecretRefRequired(TypedDict):
@@ -398,14 +483,27 @@ class SandboxSpecFields(TypedDict, total=False):
     depends_on: DependsOnRepr
     #: Replicas, rolling updates and restart policy for `isb stack deploy`.
     deploy: Optional[Deploy]
+    #: Public hostnames `isb serve`'s ingress routes to this service's
+    #: replicas (docs/guides/domains.md). Only stacks use them; `isb up` ignores
+    #: them.
+    domains: Sequence[DomainSpec]
+    #: Which hostnames the sandbox may reach, and secrets that never enter
+    #: it (docs/guides/egress.md). `none` denies all network; a list of
+    #: `host[:port]` (port 443 by default; `*.example.com` for subdomains)
+    #: denies everything else, public and private; `{allow, secrets}` adds
+    #: secrets the guest sees only as placeholders, put on the wire towards
+    #: their approved hosts. Omitted: open egress, as before. Needs
+    #: `isb serve` running for its proxy.
+    egress: Optional[EgressSpec]
     #: OCI images only: the entrypoint, run with `command` as its arguments.
     #: On an OCI image `command` alone replaces the whole command line,
     #: including the image's own entrypoint.
     entrypoint: Optional[Command]
     #: Instance environment (`environment.<KEY>`), seen by every exec: a map, or
-    #: a list of `KEY=VALUE`. Not for secrets: it is plain instance config,
-    #: readable by anyone who can read the instance.
-    environment: MapOrList
+    #: a list of `KEY=VALUE`. A plain value is instance config, readable by
+    #: anyone who can read the instance. `KEY: {secret: NAME}` delivers the
+    #: top-level secret NAME as the variable (docs/guides/secrets.md).
+    environment: EnvMapOrList
     #: More exec defaults: an exec-only environment and the login shell.
     exec: ExecSpec
     #: A recurring health test, as in docker compose. `isb stack deploy`
@@ -464,6 +562,10 @@ class SandboxSpecFields(TypedDict, total=False):
 
 
 DependsOnRepr = Union[Sequence[str], Mapping[str, Dependency]]
+EgressSecretSpec = Union[str, EgressSecretSpec1]
+EgressSpec = Union[str, Sequence[str], EgressSpec2]
+EnvValue = Union[Scalar, EnvValueSecret]
+EnvMapOrList = Union[Mapping[str, EnvValue], Sequence[str]]
 IdmapSpec = Union[IdmapMode, IdmapMap, IdmapRaw]
 PortSpec = Union[str, PortMapping, ProxyPort]
 ReadyCheck = Union[Literal["running", "agent", "default_route"], ReadyCheckUserExists, ReadyCheckPathWritable, ReadyCheckCommand]
@@ -477,6 +579,14 @@ __all__ = [
     "Dependency",
     "DependsOnRepr",
     "Deploy",
+    "DomainSpec",
+    "EgressSecretSpec",
+    "EgressSecretSpec1",
+    "EgressSpec",
+    "EgressSpec2",
+    "EnvMapOrList",
+    "EnvValue",
+    "EnvValueSecret",
     "ExecSpec",
     "FailureAction",
     "Healthcheck",

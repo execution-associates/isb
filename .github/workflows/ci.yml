@@ -14,6 +14,31 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
+  # The web UI (web/): typecheck and oxlint (`bun run lint`), unit tests and
+  # the production build that release binaries embed. Rust jobs below build
+  # without it (a placeholder page), so they never need bun.
+  web:
+    name: web UI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run test
+      - run: bun run build
+
+  # docs/: front matter, and every relative link and anchor resolves.
+  docs:
+    name: docs links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/check-docs.py
+
   check:
     name: fmt, clippy, test
     runs-on: ubuntu-latest
@@ -33,6 +58,26 @@ jobs:
           RUSTDOCFLAGS: -D warnings
       - name: package (publish dry run, never uploads)
         run: cargo package --locked --allow-dirty --target-dir "$RUNNER_TEMP/package"
+
+  # On a Mac isb drives incus in a Lima VM, so only host code differs: build
+  # everything and run the unit tests on both architectures.
+  macos:
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-latest
+          - arch: x86_64
+            runner: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --locked --all-targets
+      - run: cargo test --locked --lib --bins
 
   msrv:
     name: MSRV 1.85

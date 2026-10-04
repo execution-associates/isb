@@ -1,0 +1,39 @@
+[package]
+name = "isb-core"
+description = "isb's foundation: the incus client, the sandbox spec and planner, compose projects, stacks, orgs, the registry and ingress. Use the `isb` crate."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml_ng.workspace = true
+schemars.workspace = true
+thiserror.workspace = true
+tungstenite.workspace = true
+httparse.workspace = true
+rustix.workspace = true
+signal-hook.workspace = true
+base64.workspace = true
+ring.workspace = true
+ureq.workspace = true
+age.workspace = true
+toml.workspace = true
+rusqlite.workspace = true
+rcgen.workspace = true
+rustls.workspace = true
+webpki-roots.workspace = true
+time.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -179,7 +179,17 @@ class Gen:
             emitted.add(n)
             out.append(f"{n} = {t}\n")
 
-        simple = [n for n, (_, deps) in self.aliases.items() if not deps & set(self.typeddicts)]
+        def needs_typeddict(n: str, seen: set[str]) -> bool:
+            # Through other aliases too: an alias of an alias of a TypedDict
+            # must come after the classes.
+            if n in self.typeddicts:
+                return True
+            if n in seen or n not in self.aliases:
+                return False
+            seen.add(n)
+            return any(needs_typeddict(d, seen) for d in self.aliases[n][1])
+
+        simple = [n for n in self.aliases if not needs_typeddict(n, set())]
         for n in sorted(simple):
             emit_alias(n)
         out.append("\n")

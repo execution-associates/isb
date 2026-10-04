@@ -1,0 +1,40 @@
+[package]
+name = "isb-server"
+description = "isb serve's HTTP side: users and sessions, the audit log, history, the MCP and REST server, fleet servers and the embedded web UI. Use the `isb` crate."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[features]
+# Test helpers (signed Access JWTs) for the daemon's tests.
+test-support = []
+
+[dependencies]
+isb-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tungstenite.workspace = true
+httparse.workspace = true
+rustix.workspace = true
+signal-hook.workspace = true
+base64.workspace = true
+ring.workspace = true
+ureq.workspace = true
+rustls.workspace = true
+rusqlite.workspace = true
+argon2.workspace = true
+rcgen.workspace = true
+time.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

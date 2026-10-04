@@ -1,17 +1,17 @@
 [package]
 name = "isb"
-version = "0.7.0"
-edition = "2024"
-rust-version = "1.85"
 description = "Declarative incus sandboxes: a library, a CLI and a compose-style YAML spec that talk to incusd over its unix socket"
-license = "MIT"
-repository = "https://github.com/execution-associates/isb"
-homepage = "https://github.com/execution-associates/isb"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 documentation = "https://docs.rs/isb"
 readme = "README.md"
 keywords = ["incus", "sandbox", "containers", "lxc", "compose"]
 categories = ["command-line-utilities", "virtualization", "development-tools"]
-exclude = ["NOTES.md", ".github/", "target/", "sdk/"]
+exclude = ["NOTES.md", ".github/", "target/", "sdk/", "web/", "crates/", "scripts/"]
 
 [lib]
 name = "isb"
@@ -22,6 +22,52 @@ name = "isb"
 path = "src/bin/isb.rs"
 
 [dependencies]
+isb-core.workspace = true
+isb-server.workspace = true
+isb-apps.workspace = true
+isb-daemon.workspace = true
+isb-egress.workspace = true
+isb-tui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml_ng.workspace = true
+clap.workspace = true
+rustix.workspace = true
+time.workspace = true
+
+[dev-dependencies]
+age.workspace = true
+rustls.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true
+
+# The library and CLI are split into crates so an edit recompiles less and
+# independent crates build in parallel: core <- {server, apps, tui} <-
+# daemon <- isb (the CLI, and a library re-exporting the others' modules
+# under their old paths). See docs/contributing/index.md.
+[workspace]
+members = ["crates/*"]
+# Plain `cargo test`, `clippy`, `doc` and `build` cover every crate.
+default-members = [".", "crates/*"]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/execution-associates/isb"
+homepage = "https://github.com/execution-associates/isb"
+
+[workspace.dependencies]
+isb-core = { path = "crates/isb-core", version = "=1.0.0" }
+isb-server = { path = "crates/isb-server", version = "=1.0.0" }
+isb-apps = { path = "crates/isb-apps", version = "=1.0.0" }
+isb-daemon = { path = "crates/isb-daemon", version = "=1.0.0" }
+isb-tui = { path = "crates/isb-tui", version = "=1.0.0" }
+isb-egress = { path = "crates/isb-egress", version = "=1.0.0" }
+
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml_ng = "0.10"
@@ -37,10 +83,63 @@ signal-hook = "0.4"
 base64 = { version = "0.23", default-features = false, features = ["alloc"] }
 ring = { version = "0.17", default-features = false, features = ["alloc"] }
 ureq = { version = "3", default-features = false, features = ["rustls"] }
+# Notifications (isb-apps notify): direct TLS for SMTP and for webhooks sent
+# to an address checked against the SSRF policy. The same rustls (on ring)
+# and Mozilla roots ureq already uses: no new crates.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+webpki-roots = "1"
 ratatui = "0.29.0"
+# The secrets store: age encryption to the daemon's key plus break-glass
+# recipients (age X25519 keys, or ssh-ed25519/ssh-rsa public keys).
+age = { version = "0.12", default-features = false, features = ["armor", "ssh"] }
+# ~/.config/isb/secrets.toml
+toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
 
-[dev-dependencies]
+# isb serve's identity store (isb-server auth): SQLite compiled from source,
+# so the static musl build needs no system library; argon2id for passwords,
+# salted from ring's OS randomness, so no getrandom/password-hash features.
+rusqlite = { version = "0.40", features = ["bundled"] }
+argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
+
+# The local registry's TLS: an isb CA and the registry's certificate, on ring.
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
+time = { version = "0.3", default-features = false, features = ["std"] }
+
+# Database backups: gzip and zstd in pure Rust (no C toolchain for the
+# static build). ruzstd 0.8.2 needs Rust 1.87 despite its metadata.
+flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
+ruzstd = "=0.8.1"
+
+# macOS has no /proc: process info, host stats and peer credentials come from
+# libproc, mach and getpeereid.
+libc = "0.2"
+
 tempfile = "3"
+
+# The legibility ratchet: thresholds live in clippy.toml, and CI denies
+# warnings. See docs/contributing/index.md.
+[workspace.lints.clippy]
+cognitive_complexity = "warn"
+too_many_lines = "warn"
+excessive_nesting = "warn"
+too_many_arguments = "warn"
+type_complexity = "warn"
+
+# Debug builds keep line tables (backtraces with file:line) but no variable
+# or type info, which halves the debuginfo rustc emits and the linker reads;
+# dependencies get none. Set `debug = true` locally to step through code.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+# argon2 is unusably slow unoptimised, and debug builds hash passwords too.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
 
 [profile.release]
 lto = "thin"

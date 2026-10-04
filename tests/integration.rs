@@ -23,17 +23,8 @@ use isb::{
     Timeouts, Volume,
 };
 
-fn enabled() -> bool {
-    if std::env::var("ISB_INTEGRATION").as_deref() == Ok("1") {
-        return true;
-    }
-    eprintln!("skipped: set ISB_INTEGRATION=1 to run against incusd");
-    false
-}
-
-fn image() -> String {
-    std::env::var("ISB_TEST_IMAGE").unwrap_or_else(|_| "dev-base".into())
-}
+mod common;
+use common::{default_org_client, enabled, image};
 
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
@@ -265,6 +256,11 @@ fn create_ready_and_noop_ensure_keeps_watches() {
 
 /// Streaming, exit codes, argv fidelity, users, tty and stdin handling.
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    clippy::cognitive_complexity,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn exec_semantics() {
     if !enabled() {
         return;
@@ -491,6 +487,10 @@ fn cli_exec() {
 
 /// A named volume with an owner, and both proxy directions.
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn named_volume_owner_and_proxies() {
     if !enabled() {
         return;
@@ -773,6 +773,11 @@ fn stuck_operation_paths() {
 
 /// Compose: up, plan, exec a service, down, through the CLI.
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    clippy::cognitive_complexity,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn compose_cli() {
     if !enabled() {
         return;
@@ -1150,6 +1155,15 @@ fn long_running_service() {
     );
 }
 
+/// A secret store under `state` with a throwaway key.
+fn test_secrets(state: &std::path::Path) -> std::sync::Arc<isb::secrets::Secrets> {
+    let k = isb::secrets::Keyring::new(age::x25519::Identity::generate(), vec![]);
+    std::sync::Arc::new(isb::secrets::Secrets::new(isb::secrets::LocalDriver::new(
+        state,
+        std::sync::Arc::new(k),
+    )))
+}
+
 /// The stack controller: replicas behind the balancer, a forced rolling
 /// redeploy with no failed request, scale down, remove.
 #[test]
@@ -1160,7 +1174,9 @@ fn stack_controller() {
     let client = Client::new();
     let state = tempfile::tempdir().unwrap();
     let store = isb::stack::Store::open(state.path()).unwrap();
-    let ctl = isb::stack::Controller::start(client.clone(), store, Duration::from_secs(2)).unwrap();
+    let secrets = test_secrets(state.path());
+    let ctl = isb::stack::Controller::start(client.clone(), store, Duration::from_secs(2), secrets)
+        .unwrap();
     let stack = format!("isb-test-{}", std::process::id() % 100000);
     let port = free_port();
     let yaml = format!(
@@ -1180,10 +1196,12 @@ fn stack_controller() {
     .unwrap();
     let def = isb::stack::StackDef {
         name: stack.clone(),
+        org: isb::org::OrgId::default_org(),
         file: p.file,
         base_dir: state.path().to_path_buf(),
         secrets: Default::default(),
         force: Default::default(),
+        images: Default::default(),
         deployed_at: 0,
         deployed_by: "test".into(),
         previous: None,
@@ -1237,10 +1255,1095 @@ fn stack_controller() {
         std::thread::sleep(Duration::from_secs(1));
     }
     ctl.remove(&stack, true, Duration::from_secs(120)).unwrap();
-    let left = Sandbox::list_with(&client, &[LabelFilter::parse("isb-test")])
+    let org_client = default_org_client(&client);
+    let left = Sandbox::list_with(&org_client, &[LabelFilter::parse("isb-test")])
         .unwrap()
         .into_iter()
         .filter(|i| i.name.starts_with(&stack))
         .count();
     assert_eq!(left, 0);
+}
+
+/// Two orgs: each sees only its own instances, members of one org reach
+/// each other by name, and nothing in one org reaches the other.
+/// Needs `isb host setup` on a host with a default-deny firewall.
+#[test]
+fn orgs_isolate() {
+    if !enabled() {
+        return;
+    }
+    let base = Client::new();
+    let a = isb::org::OrgId::new(format!("isbtest-a{}", std::process::id() % 100000)).unwrap();
+    let b = isb::org::OrgId::new(format!("isbtest-b{}", std::process::id() % 100000)).unwrap();
+    struct Rm(Client, Vec<isb::org::OrgId>);
+    impl Drop for Rm {
+        fn drop(&mut self) {
+            for o in &self.1 {
+                let _ = isb::org::remove(&self.0, o, true, &mut |_| {});
+            }
+        }
+    }
+    let _rm = Rm(base.clone(), vec![a.clone(), b.clone()]);
+    let opts = isb::org::OrgOptions {
+        cpus: Some(4),
+        memory: Some("4GiB".into()),
+        ..Default::default()
+    };
+    isb::org::ensure(&base, &a, &opts, &mut |l| eprintln!("{l}")).unwrap();
+    isb::org::ensure(&base, &b, &opts, &mut |l| eprintln!("{l}")).unwrap();
+    let (ca, cb) = (isb::org::client(&base, &a), isb::org::client(&base, &b));
+    let mk = |c: &Client, n: &str| {
+        let spec =
+            SandboxSpec::new(n, image()).ready(vec![ReadyCheck::Running, ReadyCheck::DefaultRoute]);
+        Sandbox::create(c, &spec).unwrap()
+    };
+    let web = mk(&ca, "web");
+    let db = mk(&ca, "db");
+    let other = mk(&cb, "other");
+    // Visibility: org b cannot see org a's instances.
+    assert!(Sandbox::get(&cb, "web").is_err());
+    assert_eq!(Sandbox::list(&ca).unwrap().len(), 2);
+    let ip = |sb: &Sandbox| {
+        let o = sb
+            .exec([
+                "sh",
+                "-c",
+                "ip -4 -o addr show eth0 | awk '{print $4}' | cut -d/ -f1",
+            ])
+            .unwrap();
+        o.stdout_text().trim().to_string()
+    };
+    let other_ip = ip(&other);
+    let ping =
+        |sb: &Sandbox, target: &str| sb.exec(["ping", "-c1", "-W2", target]).unwrap().success();
+    assert!(ping(&web, &format!("db.{a}.isb")), "same-org name");
+    assert!(!ping(&web, &other_ip), "cross-org reachable");
+    assert!(!ping(&other, &ip(&web)), "cross-org reachable (b to a)");
+    // TCP too: ICMP alone passes a host firewall that drops bridged TCP
+    // (br_netfilter with ufw's routed default-deny; `isb host setup` fixes it).
+    let serve = db
+        .exec([
+            "systemd-run",
+            "--unit",
+            "isbtest-http",
+            "python3",
+            "-m",
+            "http.server",
+            "8000",
+        ])
+        .unwrap();
+    assert!(serve.success(), "{}", serve.stderr_text());
+    let tcp = |sb: &Sandbox, target: &str| {
+        let probe = format!("exec 3<>/dev/tcp/{target}/8000");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let ok = sb
+                .exec(["timeout", "3", "bash", "-c", &probe])
+                .unwrap()
+                .success();
+            if ok || Instant::now() > deadline {
+                return ok;
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+    };
+    assert!(
+        tcp(&web, &ip(&db)),
+        "same-org TCP refused: run `sudo isb host setup`"
+    );
+    assert!(!tcp(&other, &ip(&db)), "cross-org TCP reachable");
+    // A restricted org refuses what would reach the host.
+    let bad = SandboxSpec::new("bad", image()).privileged(true);
+    assert!(Sandbox::create(&ca, &bad).is_err());
+    let bind = SandboxSpec::new("bind", image()).volume("/hostetc", Volume::bind("/etc"));
+    assert!(Sandbox::create(&ca, &bind).is_err());
+}
+
+/// Removes test orgs (and everything in them) when dropped.
+struct OrgsRm(Client, Vec<isb::org::OrgId>);
+
+impl Drop for OrgsRm {
+    fn drop(&mut self) {
+        for o in &self.1 {
+            assert!(o.as_str().starts_with("isbtest-"));
+            if let Err(e) = isb::org::remove(&self.0, o, true, &mut |_| {}) {
+                if !e.is_not_found() {
+                    eprintln!("cleanup: org {o}: {e}");
+                }
+            }
+        }
+    }
+}
+
+/// What a name resolves to inside an instance (IPv4, deduplicated).
+fn resolve(sb: &Sandbox, name: &str) -> std::collections::BTreeSet<String> {
+    let o = sb.exec(["getent", "ahostsv4", name]).unwrap();
+    o.stdout_text()
+        .lines()
+        .filter_map(|l| l.split_whitespace().next().map(String::from))
+        .collect()
+}
+
+/// Wait until `name` resolves to exactly `want` inside `sb`.
+fn wait_resolves(sb: &Sandbox, name: &str, want: &std::collections::BTreeSet<String>) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let got = resolve(sb, name);
+        if got == *want {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{name} resolves to {got:?}, want {want:?}"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+/// Service discovery: `<service>.<stack>.<org>.isb` (and `<service>.<stack>`)
+/// resolves to every in-rotation replica, follows a rolling replacement, and
+/// goes away with the stack. Needs `isb host setup` (the hosts directory).
+#[test]
+fn service_names() {
+    if !enabled() {
+        return;
+    }
+    let base = Client::new();
+    let org = isb::org::OrgId::new(format!("isbtest-d{}", std::process::id() % 100000)).unwrap();
+    let _rm = OrgsRm(base.clone(), vec![org.clone()]);
+    let info = isb::org::ensure(
+        &base,
+        &org,
+        &isb::org::OrgOptions {
+            cpus: Some(8),
+            memory: Some("8GiB".into()),
+            ..Default::default()
+        },
+        &mut |l| eprintln!("{l}"),
+    )
+    .unwrap();
+    assert!(
+        info.dns_dir.is_some(),
+        "no service names: run `sudo isb host setup` first"
+    );
+    let oc = isb::org::client(&base, &org);
+    let client = Sandbox::create(
+        &oc,
+        &SandboxSpec::new("client", image())
+            .ready(vec![ReadyCheck::Running, ReadyCheck::DefaultRoute]),
+    )
+    .unwrap();
+
+    let state = tempfile::tempdir().unwrap();
+    let store = isb::stack::Store::open(state.path()).unwrap();
+    let ctl = isb::stack::Controller::start(
+        base.clone(),
+        store,
+        Duration::from_secs(2),
+        test_secrets(state.path()),
+    )
+    .unwrap();
+    let stack = format!("isb-test-{}", std::process::id() % 100000);
+    let yaml = format!(
+        "services:\n  web:\n    image: {}\n    user: dev\n\
+         \x20   command: [sh, -c, 'exec python3 -m http.server 8000 -d /tmp']\n\
+         \x20   healthcheck: {{test: [CMD, python3, -c, \"import urllib.request as u; u.urlopen('http://127.0.0.1:8000')\"], interval: 2s, start_interval: 1s}}\n\
+         \x20   deploy: {{replicas: 2, update_config: {{order: start-first, monitor: 2s}}}}\n",
+        image()
+    );
+    let p = isb::compose::load_docs(
+        &[(state.path().join("isb.yaml"), yaml)],
+        state.path(),
+        Some(&stack),
+        &|_| None,
+    )
+    .unwrap();
+    let def = isb::stack::StackDef {
+        name: stack.clone(),
+        org: org.clone(),
+        file: p.file,
+        base_dir: state.path().to_path_buf(),
+        secrets: Default::default(),
+        force: Default::default(),
+        images: Default::default(),
+        deployed_at: 0,
+        deployed_by: "test".into(),
+        previous: None,
+    };
+    let q = def.qualified();
+    struct Rm(isb::stack::Controller, String);
+    impl Drop for Rm {
+        fn drop(&mut self) {
+            let _ = self.0.remove(&self.1, true, Duration::from_secs(120));
+            self.0.shutdown();
+        }
+    }
+    let _rmstack = Rm(ctl.clone(), q.clone());
+    ctl.deploy(def).unwrap();
+    let in_rotation = |ctl: &isb::stack::Controller| -> std::collections::BTreeSet<String> {
+        ctl.status(&q).unwrap().services[0]
+            .instances
+            .iter()
+            .filter(|i| i.in_rotation)
+            .filter_map(|i| i.ip.clone())
+            .collect()
+    };
+    let st = isb::daemon::wait_settled(&ctl, &q, Duration::from_secs(300)).unwrap();
+    assert!(st.converged, "{st:?}");
+    let first = in_rotation(&ctl);
+    assert_eq!(first.len(), 2, "{st:?}");
+    let full = format!("web.{stack}.{org}.isb");
+    let short = format!("web.{stack}");
+    wait_resolves(&client, &full, &first);
+    wait_resolves(&client, &short, &first);
+
+    // A rolling replacement: the name follows the new replicas.
+    ctl.redeploy(&q, "web").unwrap();
+    let st = isb::daemon::wait_settled(&ctl, &q, Duration::from_secs(300)).unwrap();
+    assert!(st.converged, "{st:?}");
+    let second = in_rotation(&ctl);
+    assert_eq!(second.len(), 2, "{st:?}");
+    assert!(second.is_disjoint(&first), "{second:?} vs {first:?}");
+    wait_resolves(&client, &full, &second);
+
+    // Gone with the stack.
+    ctl.remove(&q, true, Duration::from_secs(120)).unwrap();
+    wait_resolves(&client, &full, &Default::default());
+}
+
+/// An egress exception lets one org reach a private address the default
+/// deny blocks, on the given port only, while another org stays blocked.
+/// The target is a host address in a private range where sshd listens
+/// (`ISB_TEST_EGRESS_IP`, default incusbr0's), reached from the org bridge
+/// through the host's INPUT chain.
+#[test]
+fn egress_exceptions() {
+    if !enabled() {
+        return;
+    }
+    let target = std::env::var("ISB_TEST_EGRESS_IP").unwrap_or_else(|_| {
+        let o = Command::new("ip")
+            .args(["-4", "-o", "addr", "show", "incusbr0"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&o.stdout)
+            .split_whitespace()
+            .nth(3)
+            .and_then(|a| a.split('/').next())
+            .expect("no incusbr0 address; set ISB_TEST_EGRESS_IP")
+            .to_string()
+    });
+    let base = Client::new();
+    let n = std::process::id() % 100000;
+    let a = isb::org::OrgId::new(format!("isbtest-e{n}")).unwrap();
+    let b = isb::org::OrgId::new(format!("isbtest-f{n}")).unwrap();
+    let _rm = OrgsRm(base.clone(), vec![a.clone(), b.clone()]);
+    let opts = |egress: Option<Vec<&str>>| isb::org::OrgOptions {
+        cpus: Some(2),
+        memory: Some("2GiB".into()),
+        egress: egress.map(|v| {
+            v.into_iter()
+                .map(|e| isb::org::Egress::parse(e).unwrap())
+                .collect()
+        }),
+        ..Default::default()
+    };
+    let port_only = format!("{target}:22/tcp");
+    let info = isb::org::ensure(&base, &a, &opts(Some(vec![&port_only])), &mut |l| {
+        eprintln!("{l}")
+    })
+    .unwrap();
+    assert_eq!(info.egress, vec![format!("{target}/32:22/tcp")]);
+    isb::org::ensure(&base, &b, &opts(None), &mut |l| eprintln!("{l}")).unwrap();
+    let mk = |o: &isb::org::OrgId, n: &str| {
+        let spec =
+            SandboxSpec::new(n, image()).ready(vec![ReadyCheck::Running, ReadyCheck::DefaultRoute]);
+        Sandbox::create(&isb::org::client(&base, o), &spec).unwrap()
+    };
+    let in_a = mk(&a, "probe");
+    let in_b = mk(&b, "probe");
+    let ssh = |sb: &Sandbox| {
+        let o = sb
+            .exec([
+                "timeout",
+                "5",
+                "bash",
+                "-c",
+                &format!("exec 3<>/dev/tcp/{target}/22 && head -c 4 <&3"),
+            ])
+            .unwrap();
+        o.stdout_text()
+    };
+    let ping = |sb: &Sandbox| sb.exec(["ping", "-c1", "-W2", &target]).unwrap().success();
+    assert_eq!(
+        ssh(&in_a),
+        "SSH-",
+        "the exception lets org a reach {target}:22"
+    );
+    assert_eq!(ssh(&in_b), "", "org b reached {target}:22");
+    assert!(!ping(&in_a), "a port-limited exception let ICMP through");
+    assert!(!ping(&in_b));
+
+    // Replaced by a whole-address exception: everything to it passes.
+    let info = isb::org::ensure(&base, &a, &opts(Some(vec![&target])), &mut |_| {}).unwrap();
+    assert_eq!(info.egress, vec![format!("{target}/32")]);
+    assert!(ping(&in_a), "a whole-address exception blocked ICMP");
+    // Kept by an ensure that does not mention it.
+    let info = isb::org::ensure(&base, &a, &opts(None), &mut |_| {}).unwrap();
+    assert_eq!(info.egress, vec![format!("{target}/32")]);
+    assert_eq!(ssh(&in_b), "");
+}
+
+/// Deploys a compose file as a stack on its own controller and store, the
+/// way `stack_deploy` does: bind the secrets, then deploy. Removes the stack
+/// when dropped.
+struct SecretStack {
+    ctl: isb::stack::Controller,
+    secrets: std::sync::Arc<isb::secrets::Secrets>,
+    name: String,
+    state: tempfile::TempDir,
+}
+
+impl SecretStack {
+    fn new(what: &str) -> SecretStack {
+        let state = tempfile::tempdir().unwrap();
+        let store = isb::stack::Store::open(state.path()).unwrap();
+        let secrets = test_secrets(state.path());
+        let ctl = isb::stack::Controller::start(
+            Client::new(),
+            store,
+            Duration::from_secs(2),
+            secrets.clone(),
+        )
+        .unwrap();
+        SecretStack {
+            ctl,
+            secrets,
+            name: format!("isb-test-{what}{}", std::process::id() % 100000),
+            state,
+        }
+    }
+
+    fn deploy(&self, yaml: &str, given: &[(&str, &str)]) {
+        let dir = self.state.path();
+        let p = isb::compose::load_docs(
+            &[(dir.join("isb.yaml"), yaml.to_string())],
+            dir,
+            Some(&self.name),
+            &|_| None,
+        )
+        .unwrap();
+        let org = isb::org::OrgId::default_org();
+        let given = given
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.as_bytes().to_vec()))
+            .collect();
+        let secrets =
+            isb::stack::secrets::bind(&self.secrets, &org, &self.name, &p.file, &given, false)
+                .unwrap();
+        let def = isb::stack::StackDef {
+            name: self.name.clone(),
+            org,
+            file: p.file,
+            base_dir: dir.to_path_buf(),
+            secrets,
+            force: Default::default(),
+            images: Default::default(),
+            deployed_at: 0,
+            deployed_by: "test".into(),
+            previous: None,
+        };
+        self.ctl.deploy(def).unwrap();
+        self.settle();
+    }
+
+    fn settle(&self) -> isb::stack::controller::StackStatus {
+        let st =
+            isb::daemon::wait_settled(&self.ctl, &self.name, Duration::from_secs(300)).unwrap();
+        assert!(st.converged, "{st:?}");
+        st
+    }
+
+    /// The one instance of a service.
+    fn instance(&self, service: &str) -> Sandbox {
+        let st = self.ctl.status(&self.name).unwrap();
+        let s = st.services.iter().find(|s| s.service == service).unwrap();
+        assert_eq!(s.instances.len(), 1, "{s:?}");
+        let org_client = default_org_client(&Client::new());
+        Sandbox::get(&org_client, &s.instances[0].name).unwrap()
+    }
+}
+
+impl Drop for SecretStack {
+    fn drop(&mut self) {
+        let _ = self.ctl.remove(&self.name, true, Duration::from_secs(120));
+        self.ctl.shutdown();
+    }
+}
+
+fn read(sb: &Sandbox, path: &str) -> String {
+    let o = sb.exec(["cat", path]).unwrap();
+    assert!(o.success(), "cat {path}: {}", o.stderr_text());
+    o.stdout_text().trim().to_string()
+}
+
+/// Wait until a file in the guest is non-empty.
+fn wait_file(sb: &Sandbox, path: &str) {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !sb.exec(["test", "-s", path]).is_ok_and(|o| o.success()) {
+        assert!(
+            Instant::now() < deadline,
+            "{}: {path} never written",
+            sb.name()
+        );
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
+/// A stack using an `external` secret: the value lands in /run/secrets, and
+/// `isb secret set` (the store's set, then the controller told, as the
+/// `secret_set` tool does) rolls the service to a new instance holding the
+/// new value.
+#[test]
+fn stack_external_secret_rolls() {
+    if !enabled() {
+        return;
+    }
+    let s = SecretStack::new("ext");
+    let org = isb::org::OrgId::default_org();
+    let store_name = format!("{}.db", s.name);
+    s.secrets
+        .create(&org, &store_name, None, b"first", &Default::default())
+        .unwrap();
+    s.deploy(
+        &format!(
+            "secrets: {{db: {{external: true, name: {store_name}}}}}\n\
+             services:\n  app:\n    image: {}\n    labels: {{isb-test: '1'}}\n\
+             \x20   command: [sleep, infinity]\n    secrets: [db]\n",
+            image()
+        ),
+        &[],
+    );
+    let before = s.instance("app");
+    assert_eq!(read(&before, "/run/secrets/db"), "first");
+    // The definition holds the reference, never the value.
+    let def = s.ctl.definition(&s.name).unwrap();
+    assert_eq!(def.secrets["db"].name, store_name);
+    assert_eq!(def.secrets["db"].version, 1);
+    assert!(!serde_json::to_string(&def).unwrap().contains("first"));
+    let rev = def.revision("app").unwrap();
+
+    s.secrets.set(&org, &store_name, b"second").unwrap();
+    assert_eq!(
+        s.ctl.secret_changed(&org, &store_name),
+        std::slice::from_ref(&s.name)
+    );
+    let st = s.settle();
+    assert_ne!(st.services[0].rev, rev);
+    let after = s.instance("app");
+    assert_ne!(after.name(), before.name(), "a new instance");
+    assert_eq!(read(&after, "/run/secrets/db"), "second");
+    // An unchanged version rolls nothing.
+    assert!(s.ctl.secret_changed(&org, &store_name).is_empty());
+    // A reboot restores the file from the guest's own copy.
+    after.restart().unwrap();
+    wait_file(&after, "/run/secrets/db");
+    assert_eq!(read(&after, "/run/secrets/db"), "second");
+}
+
+/// `environment: {KEY: {secret: NAME}}`: on a system image the variable
+/// reaches the supervised command through its 0600 unit env file and never
+/// instance config; on an OCI image it is instance config. A new value
+/// rolls both.
+#[test]
+fn stack_env_secret_delivery() {
+    if !enabled() {
+        return;
+    }
+    let s = SecretStack::new("env");
+    s.deploy(
+        &format!(
+            "secrets: {{tok: {{environment: ISB_TEST_TOK}}}}\n\
+             services:\n\
+             \x20 sys:\n    image: {}\n    labels: {{isb-test: '1'}}\n\
+             \x20   command: [sh, -c, 'printf %s \"$$TOKEN\" > /tmp/t; exec sleep infinity']\n\
+             \x20   environment: {{TOKEN: {{secret: tok}}, PLAIN: p}}\n\
+             \x20 oci:\n    image: docker:busybox\n    labels: {{isb-test: '1'}}\n\
+             \x20   command: [sh, -c, 'printf %s \"$$TOKEN\" > /tmp/t; exec sleep 3600']\n\
+             \x20   environment: {{TOKEN: {{secret: tok}}}}\n",
+            image()
+        ),
+        &[("tok", "t0k-value")],
+    );
+    let org = isb::org::OrgId::default_org();
+    // Stored as the stack's own secret.
+    let owned = format!("{}_tok", s.name);
+    assert_eq!(s.secrets.get(&org, &owned).unwrap().0, b"t0k-value");
+
+    let sys = s.instance("sys");
+    wait_file(&sys, "/tmp/t");
+    assert_eq!(read(&sys, "/tmp/t"), "t0k-value");
+    let mode = sys
+        .exec(["stat", "-c", "%a", "/etc/isb/sys.env"])
+        .unwrap()
+        .stdout_text();
+    assert_eq!(mode.trim(), "600");
+    let info = sys.info().unwrap();
+    assert!(
+        !info.config.contains_key("environment.TOKEN"),
+        "{:?}",
+        info.config
+    );
+    assert_eq!(
+        info.config.get("environment.PLAIN").map(String::as_str),
+        Some("p")
+    );
+
+    let oci = s.instance("oci");
+    assert_eq!(
+        oci.info()
+            .unwrap()
+            .config
+            .get("environment.TOKEN")
+            .map(String::as_str),
+        Some("t0k-value")
+    );
+    wait_file(&oci, "/tmp/t");
+    assert_eq!(read(&oci, "/tmp/t"), "t0k-value");
+
+    // A new value: both services roll to it.
+    s.secrets.set(&org, &owned, b"rotated").unwrap();
+    assert_eq!(
+        s.ctl.secret_changed(&org, &owned),
+        std::slice::from_ref(&s.name)
+    );
+    s.settle();
+    let oci2 = s.instance("oci");
+    assert_ne!(oci2.name(), oci.name());
+    assert_eq!(
+        oci2.info()
+            .unwrap()
+            .config
+            .get("environment.TOKEN")
+            .map(String::as_str),
+        Some("rotated")
+    );
+    let sys2 = s.instance("sys");
+    assert_ne!(sys2.name(), sys.name());
+    wait_file(&sys2, "/tmp/t");
+    assert_eq!(read(&sys2, "/tmp/t"), "rotated");
+}
+
+/// Runs a command in `dir`, panicking with its output on failure.
+fn run_in(dir: &std::path::Path, argv: &[&str]) -> String {
+    let out = Command::new(argv[0])
+        .args(&argv[1..])
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{argv:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// A `git daemon` serving `base` read-only on a loopback port, killed on
+/// drop: the app layer refuses file:// and local paths, so the test repo
+/// is fetched over git://.
+struct GitDaemon(std::process::Child, u16);
+
+impl GitDaemon {
+    fn start(base: &std::path::Path) -> GitDaemon {
+        let port = free_port();
+        let child = Command::new("git")
+            .args([
+                "daemon",
+                "--export-all",
+                "--reuseaddr",
+                "--listen=127.0.0.1",
+                &format!("--port={port}"),
+                &format!("--base-path={}", base.display()),
+            ])
+            .arg(base)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
+            assert!(Instant::now() < deadline, "git daemon did not start");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        GitDaemon(child, port)
+    }
+}
+
+impl Drop for GitDaemon {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// The app layer end to end on incusd: an image app deployed (pinned to
+/// its digest), its env edited and redeployed with only its own service
+/// rolling, rolled back; a git app fetched from a served repository and
+/// "built" by a stand-in builder; a signed webhook deploying it and a
+/// forged one refused.
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    clippy::cognitive_complexity,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
+fn apps_deploy_edit_rollback_git_webhook() {
+    if !enabled() {
+        return;
+    }
+    use isb::app::deploy::{Status, Trigger};
+    use std::sync::Arc;
+    let client = Client::new();
+    let state = tempfile::tempdir().unwrap();
+    let store = isb::stack::Store::open(state.path()).unwrap();
+    let secrets = test_secrets(state.path());
+    let ctl = isb::stack::Controller::start(
+        client.clone(),
+        store,
+        Duration::from_secs(2),
+        secrets.clone(),
+    )
+    .unwrap();
+    let builds = Arc::new(std::sync::Mutex::new(Vec::<(PathBuf, String)>::new()));
+    let seen = builds.clone();
+    let build: isb::app::BuildFn = Arc::new(
+        move |_c: &Client, r: &isb::build::BuildRequest, log: &mut dyn FnMut(&str)| {
+            log("fake build");
+            seen.lock()
+                .unwrap()
+                .push((r.context.clone(), r.tag.clone()));
+            Ok(isb::build::BuiltImage {
+                image: "docker:traefik/whoami".into(),
+                digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                    .into(),
+            })
+        },
+    );
+    let apps = isb::app::Apps::new(state.path(), client.clone(), ctl.clone(), secrets.clone())
+        .with_build(build)
+        .with_timeout(Duration::from_secs(400));
+    let org = isb::org::OrgId::default_org();
+    let org_client = default_org_client(&client);
+    let project = format!("isbt{}", std::process::id() % 100000);
+    let stack = format!("{project}-test");
+    struct Rm(isb::app::Apps, isb::stack::Controller, String);
+    impl Drop for Rm {
+        fn drop(&mut self) {
+            let org = isb::org::OrgId::default_org();
+            for a in ["web", "other", "src"] {
+                let _ = self.0.delete(&org, a);
+            }
+            let _ = self.1.remove(&self.2, true, Duration::from_secs(120));
+            self.1.shutdown();
+        }
+    }
+    let _rm = Rm(apps.clone(), ctl.clone(), stack.clone());
+    apps.project_create(&org, &project, "", &["test".into()])
+        .unwrap();
+    let port = free_port();
+    let spec = |v: serde_json::Value| serde_json::from_value::<isb::app::AppSpec>(v).unwrap();
+    apps.create(
+        &org,
+        spec(serde_json::json!({
+            "name": "web", "project": project, "environment": "test",
+            "source": {"image": "docker:traefik/whoami"},
+            "env": "# first\nA=1\n", "port": 80,
+            "ports": [format!("127.0.0.1:{port}:80")],
+        })),
+    )
+    .unwrap();
+    apps.create(
+        &org,
+        spec(serde_json::json!({
+            "name": "other", "project": project, "environment": "test",
+            "source": {"image": "docker:traefik/whoami"},
+        })),
+    )
+    .unwrap();
+    let deploy = |app: &str| {
+        let d = apps.deploy(&org, app, Trigger::Api, "test", None).unwrap();
+        let d = apps
+            .wait(&org, app, d.id, Duration::from_secs(600))
+            .unwrap();
+        let log = apps.log(&org, app, d.id, 0).unwrap().0;
+        assert_eq!(d.status, Status::Done, "{d:?}\n{log}");
+        d
+    };
+    let instances = |svc: &str| -> Vec<String> {
+        let st = ctl.status(&stack).unwrap();
+        let s = st.services.iter().find(|s| s.service == svc).unwrap();
+        let mut v: Vec<String> = s.instances.iter().map(|i| i.name.clone()).collect();
+        v.sort();
+        v
+    };
+    let env_a = |svc: &str| -> Option<String> {
+        let n = &instances(svc)[0];
+        Sandbox::get(&org_client, n)
+            .unwrap()
+            .info()
+            .unwrap()
+            .config
+            .get("environment.A")
+            .cloned()
+    };
+
+    let d1 = deploy("web");
+    // Pinned to the digest when the registry tells it (skopeo on the host).
+    if let Some(dg) = &d1.digest {
+        assert!(d1.image.as_deref().unwrap().ends_with(dg), "{d1:?}");
+    }
+    assert!(
+        http_get(&format!("127.0.0.1:{port}"))
+            .unwrap()
+            .contains("Hostname")
+    );
+    deploy("other");
+    let other = instances("other");
+    let web1 = instances("web");
+    assert_eq!(env_a("web").as_deref(), Some("1"));
+
+    // Edit the env and redeploy: web rolls, other does not.
+    apps.env_set(&org, "web", "# first\nA=2\n").unwrap();
+    assert_eq!(apps.env_get(&org, "web").unwrap(), "# first\nA=2\n");
+    deploy("web");
+    let web2 = instances("web");
+    assert_ne!(web1, web2);
+    assert_eq!(env_a("web").as_deref(), Some("2"));
+    assert_eq!(instances("other"), other, "only the deployed app rolls");
+
+    // Roll back: deployment 1's image and settings, no build.
+    let rb = apps
+        .rollback(&org, "web", Some(d1.id), Trigger::Manual, "test")
+        .unwrap();
+    let rb = apps
+        .wait(&org, "web", rb.id, Duration::from_secs(600))
+        .unwrap();
+    assert_eq!(rb.status, Status::Done, "{rb:?}");
+    assert_eq!(rb.rollback_of, Some(d1.id));
+    assert_eq!(rb.image, d1.image);
+    assert_eq!(env_a("web").as_deref(), Some("1"));
+    assert_eq!(instances("other"), other);
+    assert_eq!(apps.get(&org, "web").unwrap().current, Some(rb.id));
+
+    // A git app, from a repository served over git://.
+    let repos = tempdir();
+    let work = repos.path().join("work");
+    std::fs::create_dir(&work).unwrap();
+    run_in(&work, &["git", "init", "-q", "-b", "main"]);
+    std::fs::write(work.join("hello.txt"), "one\n").unwrap();
+    run_in(&work, &["git", "add", "."]);
+    let commit = |msg: &str| {
+        run_in(
+            &work,
+            &[
+                "git",
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-qam",
+                msg,
+            ],
+        )
+    };
+    commit("first commit");
+    run_in(
+        repos.path(),
+        &["git", "clone", "-q", "--bare", "work", "repo.git"],
+    );
+    let daemon = GitDaemon::start(repos.path());
+    let (_, secret) = apps
+        .create(
+            &org,
+            spec(serde_json::json!({
+                "name": "src", "project": project, "environment": "test",
+                "source": {"git": {"url": format!("git://127.0.0.1:{}/repo.git", daemon.1), "ref": "main"}},
+                "build": {"builder": {"type": "railpack"}},
+            })),
+        )
+        .unwrap();
+    let g1 = deploy("src");
+    let c = g1.commit.clone().unwrap();
+    assert_eq!(c.message, "first commit");
+    let (ctx, tag) = builds.lock().unwrap().last().cloned().unwrap();
+    assert_eq!(tag, c.sha);
+    assert_eq!(
+        std::fs::read_to_string(ctx.join("hello.txt")).unwrap(),
+        "one\n"
+    );
+
+    // A new commit, pushed; a webhook signed with the app's secret deploys
+    // it, a forged one does nothing.
+    std::fs::write(work.join("hello.txt"), "two\n").unwrap();
+    commit("second commit");
+    run_in(&work, &["git", "push", "-q", "../repo.git", "main"]);
+    let body =
+        br#"{"ref":"refs/heads/main","after":"x","head_commit":{"message":"second commit"}}"#;
+    let hdr = |sig: String| {
+        move |n: &str| match n {
+            "x-hub-signature-256" => Some(sig.clone()),
+            "x-github-event" => Some("push".to_string()),
+            _ => None,
+        }
+    };
+    let bad = hdr(format!(
+        "sha256={}",
+        isb::app::webhook::sign(b"guess", body)
+    ));
+    let (st, _) = apps.webhook("default", "src", &bad, None, body);
+    assert_eq!(st, 401);
+    assert_eq!(apps.deployments(&org, "src").unwrap().len(), 1);
+    let good = hdr(format!(
+        "sha256={}",
+        isb::app::webhook::sign(secret.as_bytes(), body)
+    ));
+    let (st, v) = apps.webhook("default", "src", &good, None, body);
+    assert_eq!(st, 202, "{v}");
+    let id = v["deployment"].as_u64().unwrap();
+    let g2 = apps
+        .wait(&org, "src", id, Duration::from_secs(600))
+        .unwrap();
+    assert_eq!(g2.status, Status::Done, "{g2:?}");
+    assert_eq!(g2.trigger, Trigger::Webhook);
+    assert_eq!(g2.commit.as_ref().unwrap().message, "second commit");
+    assert_ne!(g2.commit.unwrap().sha, c.sha);
+    assert_eq!(apps.deployments(&org, "src").unwrap().len(), 2);
+
+    // Deleting the apps takes their services, and the stack with the last.
+    apps.delete(&org, "src").unwrap();
+    assert!(
+        ctl.status(&stack)
+            .unwrap()
+            .services
+            .iter()
+            .all(|s| s.service != "src")
+    );
+    apps.delete(&org, "other").unwrap();
+    apps.delete(&org, "web").unwrap();
+    assert!(
+        ctl.status(&stack).is_err(),
+        "the stack went with its last app"
+    );
+    apps.project_delete(&org, &project).unwrap();
+}
+
+/// One HTTP(S) request through curl (which checks the certificate against
+/// `cacert`): status code and body.
+fn curl(url: &str, resolve: &str, cacert: Option<&std::path::Path>) -> (u16, String) {
+    let mut c = Command::new("curl");
+    c.args([
+        "-sS",
+        "--max-time",
+        "5",
+        "--resolve",
+        resolve,
+        "-w",
+        "\n%{http_code}",
+    ]);
+    if let Some(ca) = cacert {
+        c.arg("--cacert").arg(ca);
+    }
+    let out = c.arg(url).stdin(Stdio::null()).output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    let (body, code) = text.rsplit_once('\n').unwrap_or(("", "0"));
+    (code.trim().parse().unwrap_or(0), body.trim().to_string())
+}
+
+/// The ingress: a 2-replica stack with an HTTPS and a plain-HTTP domain on
+/// Caddy (loopback listeners, Caddy's internal CA), requests spread over
+/// both replicas, HTTP redirects to HTTPS, a rolling redeploy loses no
+/// request, and removing the stack removes its routes. `ISB_CADDY_BIN`
+/// skips the download of the pinned Caddy.
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
+fn ingress_routes_rolls_and_removes() {
+    if !enabled() {
+        return;
+    }
+    let client = Client::new();
+    let state = tempfile::tempdir().unwrap();
+    let store = isb::stack::Store::open(state.path()).unwrap();
+    let secrets = test_secrets(state.path());
+    let (hp, sp) = (free_port(), free_port());
+    let cfg = isb::ingress::IngressConfig {
+        http: Some(format!("127.0.0.1:{hp}").parse().unwrap()),
+        https: Some(format!("127.0.0.1:{sp}").parse().unwrap()),
+        ca: isb::ingress::caddy::Ca::Internal,
+        caddy_bin: std::env::var_os("ISB_CADDY_BIN").map(PathBuf::from),
+        ..Default::default()
+    };
+    let m = isb::ingress::Manager::new(cfg, client.clone(), secrets.clone(), state.path()).unwrap();
+    let ctl = isb::stack::Controller::start_with(
+        client.clone(),
+        store,
+        Duration::from_secs(2),
+        secrets,
+        Some(m.clone()),
+    )
+    .unwrap();
+    m.start(ctl.clone()).unwrap();
+    let stack = format!("isb-test-{}", std::process::id() % 100000);
+    let host = format!("{stack}.ingress.test");
+    let plain = format!("plain-{stack}.ingress.test");
+    let yaml = format!(
+        "services:\n  web:\n    image: {}\n    labels: {{isb-test: '1'}}\n    user: dev\n\
+         \x20   command: [sh, -c, 'hostname > /tmp/index.html && exec python3 -m http.server 8000 -d /tmp']\n\
+         \x20   healthcheck: {{test: [CMD, python3, -c, \"import urllib.request as u; u.urlopen('http://127.0.0.1:8000')\"], interval: 2s, start_interval: 1s}}\n\
+         \x20   deploy: {{replicas: 2, update_config: {{order: start-first, monitor: 2s}}}}\n\
+         \x20   domains:\n\
+         \x20     - {{host: {host}, port: 8000}}\n\
+         \x20     - {{host: {plain}, port: 8000, https: false}}\n",
+        image()
+    );
+    let p = isb::compose::load_docs(
+        &[(state.path().join("isb.yaml"), yaml)],
+        state.path(),
+        Some(&stack),
+        &|_| None,
+    )
+    .unwrap();
+    let def = isb::stack::StackDef {
+        name: stack.clone(),
+        org: isb::org::OrgId::default_org(),
+        file: p.file,
+        base_dir: state.path().to_path_buf(),
+        secrets: Default::default(),
+        force: Default::default(),
+        images: Default::default(),
+        deployed_at: 0,
+        deployed_by: "test".into(),
+        previous: None,
+    };
+    struct Rm(
+        isb::stack::Controller,
+        String,
+        std::sync::Arc<isb::ingress::Manager>,
+    );
+    impl Drop for Rm {
+        fn drop(&mut self) {
+            let _ = self.0.remove(&self.1, true, Duration::from_secs(120));
+            self.0.shutdown();
+            self.2.shutdown();
+        }
+    }
+    let _rm = Rm(ctl.clone(), stack.clone(), m.clone());
+    m.check(&def).unwrap();
+    ctl.deploy(def).unwrap();
+    let st = isb::daemon::wait_settled(&ctl, &stack, Duration::from_secs(300)).unwrap();
+    assert!(st.converged, "{st:?}");
+
+    let ca = state
+        .path()
+        .join("ingress/caddy/pki/authorities/local/root.crt");
+    let url = format!("https://{host}:{sp}/");
+    let resolve = format!("{host}:{sp}:127.0.0.1");
+    // The certificate and the route come within seconds.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let (code, _) = curl(&url, &resolve, Some(&ca));
+        if code == 200 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "no 200 from {url}: {code}");
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    let seen: std::collections::BTreeSet<String> =
+        (0..10).map(|_| curl(&url, &resolve, Some(&ca)).1).collect();
+    assert_eq!(seen.len(), 2, "{seen:?}");
+
+    let st = ctl.status(&stack).unwrap();
+    let doms = &st.services[0].domains;
+    let d = doms.iter().find(|d| d.host == host).unwrap();
+    assert_eq!(d.state, "serving", "{d:?}");
+    assert_eq!(d.cert, "issued", "{d:?}");
+    assert_eq!(d.upstreams.len(), 2, "{d:?}");
+    assert_eq!(d.url.as_deref(), Some(url.as_str()));
+    let dp = doms.iter().find(|d| d.host == plain).unwrap();
+    assert_eq!(dp.cert, "none");
+
+    // Plain HTTP: the HTTPS domain redirects, the http one serves.
+    let out = Command::new("curl")
+        .args([
+            "-sS",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code} %{redirect_url}",
+            "--resolve",
+        ])
+        .arg(format!("{host}:{hp}:127.0.0.1"))
+        .arg(format!("http://{host}:{hp}/x?y=1"))
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        format!("308 https://{host}:{sp}/x?y=1")
+    );
+    let purl = format!("http://{plain}:{hp}/");
+    let presolve = format!("{plain}:{hp}:127.0.0.1");
+    let (code, body) = curl(&purl, &presolve, None);
+    assert_eq!(code, 200);
+    assert!(seen.contains(&body), "{body}");
+
+    // A forced redeploy replaces both replicas while requests keep landing.
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let load = {
+        let (stop, url, resolve, ca) = (stop.clone(), url.clone(), resolve.clone(), ca.clone());
+        std::thread::spawn(move || {
+            let (mut ok, mut failed) = (0, Vec::new());
+            while !stop.load(Ordering::SeqCst) {
+                match curl(&url, &resolve, Some(&ca)) {
+                    (200, b) if !b.is_empty() => ok += 1,
+                    other => failed.push(other),
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            (ok, failed)
+        })
+    };
+    ctl.redeploy(&stack, "web").unwrap();
+    // wait_settled can return before the rollout starts: give it a beat.
+    std::thread::sleep(Duration::from_secs(3));
+    let st = isb::daemon::wait_settled(&ctl, &stack, Duration::from_secs(300)).unwrap();
+    std::thread::sleep(Duration::from_secs(2));
+    stop.store(true, Ordering::SeqCst);
+    let (ok, failed) = load.join().unwrap();
+    assert!(st.converged, "{st:?}");
+    eprintln!("during the roll: {ok} ok, {} failed", failed.len());
+    assert!(ok > 0 && failed.is_empty(), "ok {ok}, failed {failed:?}");
+    let after: std::collections::BTreeSet<String> =
+        (0..10).map(|_| curl(&url, &resolve, Some(&ca)).1).collect();
+    assert!(after.is_disjoint(&seen), "{after:?} vs {seen:?}");
+    assert_eq!(after.len(), 2, "{after:?}");
+
+    // Removal takes the routes away.
+    ctl.remove(&stack, true, Duration::from_secs(120)).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let routes = m.status(None)["routes"].as_array().unwrap().len();
+        let (code, body) = curl(&purl, &presolve, None);
+        if routes == 0 && (code != 200 || body.is_empty()) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "still routed: {code} {body}");
+        std::thread::sleep(Duration::from_millis(500));
+    }
 }

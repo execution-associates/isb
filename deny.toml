@@ -7,6 +7,18 @@ all-features = true
 # Unmaintained crates are reported for direct dependencies only.
 unmaintained = "workspace"
 yanked = "deny"
+ignore = [
+    # rsa (via age's ssh feature): the Marvin timing attack recovers keys
+    # from RSA *decryption* or signing. isb only encrypts to ssh-rsa
+    # break-glass public keys; the daemon decrypts with its X25519 key, and
+    # nothing in isb holds an RSA private key. No fixed rsa release exists.
+    { id = "RUSTSEC-2023-0071", reason = "isb never decrypts or signs with RSA keys" },
+    # time (via rcgen, for the local registry's certificates): stack
+    # exhaustion parsing RFC 2822 dates. isb parses no dates with it, only
+    # formats certificate validity; the fix (0.3.47) needs Rust newer than
+    # the 1.85 MSRV.
+    { id = "RUSTSEC-2026-0009", reason = "isb never parses RFC 2822 input with time" },
+]
 
 [licenses]
 allow = [

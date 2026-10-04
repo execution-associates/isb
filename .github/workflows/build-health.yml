@@ -1,0 +1,42 @@
+name: Build health
+
+# The legibility ratchet and compile-cost visibility, kept apart from ci.yml.
+# Clippy's ratcheted lints (Cargo.toml [workspace.lints], thresholds in
+# clippy.toml) run in ci.yml's clippy step; this checks the budgets that keep
+# their exemptions and file sizes from growing, and records where a full
+# build spends its time. See docs/contributing/index.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ratchet:
+    name: ratchet (file sizes, lint exemptions)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/ratchet.sh
+
+  # A clean build (no cache, so every crate shows) with cargo's timing
+  # report: which crates are on the critical path and how well they overlap.
+  timings:
+    name: build timings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --workspace --all-targets --locked --timings
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cargo-timings
+          path: target/cargo-timings/cargo-timing.html
+          if-no-files-found: error

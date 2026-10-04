@@ -1,0 +1,33 @@
+[package]
+name = "isb-daemon"
+description = "The isb serve daemon: the tools behind its API, MCP server and web UI. Use the `isb` crate."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+isb-core.workspace = true
+isb-server.workspace = true
+isb-apps.workspace = true
+isb-egress.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml_ng.workspace = true
+rustls.workspace = true
+age.workspace = true
+httparse.workspace = true
+ring.workspace = true
+rustix.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+isb-server = { workspace = true, features = ["test-support"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true

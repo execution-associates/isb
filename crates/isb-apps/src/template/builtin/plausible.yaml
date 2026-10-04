@@ -1,0 +1,61 @@
+id: plausible
+name: Plausible Analytics
+description: Privacy-friendly web analytics (Community Edition), with Postgres and ClickHouse.
+version: "3"
+logo: https://raw.githubusercontent.com/plausible/docs/8c3b2383026e3826d0921d32957ce9140e613c2e/static/img/plausible_logo.png
+tags: [analytics]
+links:
+  website: https://plausible.io
+  source: https://github.com/plausible/community-edition
+variables:
+  - name: domain
+    type: domain
+    label: Domain
+    description: The public hostname; empty for a generated one.
+  - name: db_password
+    type: password
+  - name: secret_key_base
+    type: base64
+    bytes: 64
+  - name: totp_vault_key
+    type: base64
+    bytes: 32
+apps:
+  - name: db
+    image: docker:postgres:16-alpine
+    volumes: ["data:/var/lib/postgresql/data"]
+    env:
+      POSTGRES_PASSWORD: "${db_password}"
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+  - name: events
+    image: docker:clickhouse/clickhouse-server:24.12-alpine
+    volumes: ["data:/var/lib/clickhouse", "logs:/var/log/clickhouse-server"]
+    env:
+      CLICKHOUSE_SKIP_USER_SETUP: "1"
+    healthcheck:
+      test: [CMD-SHELL, "wget --no-verbose --tries=1 -O - http://127.0.0.1:8123/ping || exit 1"]
+      interval: 10s
+      retries: 10
+      start_period: 10s
+  - name: plausible
+    image: ghcr:plausible/community-edition:v3.0.1
+    port: 8000
+    depends_on: [db, events]
+    command: [sh, -c, "/entrypoint.sh db createdb && /entrypoint.sh db migrate && /entrypoint.sh run"]
+    volumes: ["data:/var/lib/plausible"]
+    env:
+      TMPDIR: /var/lib/plausible/tmp
+      BASE_URL: "https://${domain}"
+      SECRET_KEY_BASE: "${secret_key_base}"
+      TOTP_VAULT_KEY: "${totp_vault_key}"
+      DATABASE_URL: "postgres://postgres:${db_password}@${host:db}:5432/plausible_db"
+      CLICKHOUSE_DATABASE_URL: "http://${host:events}:8123/plausible_events_db"
+      HTTP_PORT: "8000"
+    domains:
+      - {host: "${domain}"}
+main: plausible
+notes:
+  - The first visit registers the admin account.

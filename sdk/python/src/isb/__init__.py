@@ -1,6 +1,6 @@
 """Python SDK for isb: declarative incus sandboxes.
 
-A thin asyncio client of `isb rpc` (docs/rpc.md). Zero runtime dependencies.
+A thin asyncio client of `isb rpc` (docs/reference/rpc.md). Zero runtime dependencies.
 
     import asyncio, isb
 
@@ -62,7 +62,7 @@ from ._types import (
 from ._util import Duration
 from .volumes import Volumes
 
-__version__ = "0.7.0"
+__version__ = "1.0.0"
 
 __all__ = [
     "PROTOCOL",

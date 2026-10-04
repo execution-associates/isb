@@ -15,10 +15,64 @@ use isb::shorthand;
 use isb::spec::{IdmapMode, IdmapRaw, IdmapSpec, InstanceType, SandboxSpec};
 use isb::{Client, Error, ExecOptions, Result, Stdin, Timeouts};
 
+#[path = "isb/apps.rs"]
+mod apps;
+#[path = "isb/audit.rs"]
+mod audit;
+#[path = "isb/auth.rs"]
+mod auth;
+#[path = "isb/data.rs"]
+mod data;
+#[path = "isb/host.rs"]
+mod host;
+#[path = "isb/instances.rs"]
+mod instances;
+#[path = "isb/kube.rs"]
+mod kube;
+#[path = "isb/machine.rs"]
+mod machine;
+#[path = "isb/notify.rs"]
+mod notify;
+#[path = "isb/org.rs"]
+mod org;
+#[path = "isb/project.rs"]
+mod project;
+#[path = "isb/registry.rs"]
+mod registry;
+#[path = "isb/secret.rs"]
+mod secret;
+#[path = "isb/serve.rs"]
+mod serve;
+#[path = "isb/servers.rs"]
+mod servers;
+#[path = "isb/ssh.rs"]
+mod ssh;
+#[path = "isb/stack.rs"]
+mod stack;
+#[path = "isb/templates.rs"]
+mod templates;
+
+use audit::*;
+use auth::*;
+use host::*;
+use instances::*;
+use machine::*;
+use org::*;
+use project::*;
+use registry::*;
+use secret::*;
+use serve::*;
+use stack::*;
+#[path = "isb/volumes.rs"]
+mod volumes;
+#[path = "isb/workspaces.rs"]
+mod workspaces;
+
 /// Declarative incus sandboxes.
 ///
 /// Talks to incusd over its unix socket ($INCUS_SOCKET, else
-/// $INCUS_DIR/unix.socket, else /var/lib/incus/unix.socket).
+/// $INCUS_DIR/unix.socket, else /var/lib/incus/unix.socket; on macOS, the
+/// isb machine's ~/.isb/machine/isb/incus.sock).
 #[derive(Parser)]
 #[command(name = "isb", version, about, long_about = None, propagate_version = true)]
 struct Cli {
@@ -37,6 +91,13 @@ struct Global {
     /// incus project (default: `default`, or the compose file's `project`).
     #[arg(long, global = true, env = "INCUS_PROJECT")]
     project: Option<String>,
+
+    /// The org to work in: its incus project, `isb-<org>` (`isb org ls`).
+    /// Without it, `isb create` and `isb up` make plain sandboxes in incus'
+    /// `default` project, outside every org; `--org default` is the
+    /// default org, `isb-default`.
+    #[arg(long, global = true, env = "ISB_ORG")]
+    org: Option<String>,
 
     /// Compose file(s), merged in order (default: ./isb.yaml or ./isb.yml).
     /// Also accepted after the compose-aware subcommands.
@@ -73,6 +134,7 @@ fn dur(s: &str) -> std::result::Result<Duration, String> {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)] // parsed once per run
 enum Cmd {
     /// Create and start a sandbox from flags (fails if it exists, unless --ensure).
     Create(CreateArgs),
@@ -224,296 +286,120 @@ enum Cmd {
     /// Deploy and manage stacks on the `isb serve` daemon.
     #[command(subcommand)]
     Stack(StackCmd),
+    /// Orgs: isolated tenants, each an incus project with its own network.
+    #[command(subcommand)]
+    Org(OrgCmd),
+    /// The ingress of `isb serve`: routed domains, certificates, conflicts,
+    /// tunnels (docs/guides/domains.md).
+    Ingress {
+        #[arg(long)]
+        json: bool,
+    },
+    /// One-time host preparation (needs root).
+    #[command(subcommand)]
+    Host(HostCmd),
+    /// macOS: the Lima VM that runs incus and isb serve for isb.
+    #[command(subcommand)]
+    Machine(MachineCmd),
+    /// Manage an org's secrets on the `isb serve` daemon (docs/guides/secrets.md).
+    #[command(subcommand)]
+    Secret(SecretCmd),
+    /// Projects and their environments, for apps (docs/guides/deploy-apps.md).
+    #[command(subcommand)]
+    Project(apps::ProjectCmd),
+    /// Apps on the `isb serve` daemon: an image or a repository, deployed
+    /// into its project environment's stack (docs/guides/deploy-apps.md).
+    #[command(subcommand)]
+    App(apps::AppCmd),
+    /// Instances in the org, like kubectl's pods: ls, get, exec, restart
+    /// (docs/guides/kubectl.md).
+    #[command(subcommand)]
+    Instance(kube::InstanceCmd),
+    /// Copy a small file to or from an instance: `isb cp ./f web-1:/etc/f`.
+    Cp { src: String, dst: String },
+    /// One-click apps: deploy a template from the catalog into a project
+    /// environment (docs/guides/templates.md).
+    #[command(subcommand)]
+    Template(templates::TemplateCmd),
+    /// Databases: Postgres, MySQL, MariaDB, MongoDB, Redis as apps with
+    /// generated credentials (docs/guides/databases.md).
+    #[command(subcommand)]
+    Db(data::DbCmd),
+    /// Database backups to S3-compatible storage, and restores
+    /// (docs/guides/databases.md).
+    #[command(subcommand)]
+    Backup(data::BackupCmd),
+    /// Scheduled jobs: commands on a cron schedule (docs/guides/jobs.md).
+    #[command(subcommand)]
+    Job(data::JobCmd),
+    /// Build a source directory into an image in the org's local registry,
+    /// in a fresh sandbox, through `isb serve` (docs/guides/builds.md).
+    Build(BuildArgs),
+    /// The local OCI registry builds push to and stacks pull from
+    /// (docs/guides/builds.md).
+    #[command(subcommand)]
+    Registry(RegistryCmd),
+    /// Notification channels of an org on the `isb serve` daemon: webhook,
+    /// Slack, Discord, Telegram, email (docs/guides/notifications.md).
+    #[command(subcommand)]
+    Notify(notify::NotifyCmd),
+    /// Servers this control plane places orgs on: add one over SSH, list,
+    /// show, remove, rotate its certificate (docs/guides/servers.md).
+    #[command(subcommand)]
+    Server(servers::ServerCmd),
+    /// The org's workspace on the `isb serve` daemon: its long-lived
+    /// machine with a home and an org token, and the sandboxes beside it
+    /// (docs/concepts/workspaces.md).
+    #[command(subcommand)]
+    Workspace(workspaces::WorkspaceCmd),
     /// A live dashboard of stacks and sandboxes (`isb serve`'s view; with no
     /// daemon, sandboxes only).
     Tui,
-}
-
-#[derive(Args)]
-struct ServeArgs {
+    /// Users of `isb serve` (its identity store, `<state>/isb.db`).
     #[command(subcommand)]
-    action: Option<ServeAction>,
-    /// Loopback address for remote MCP (`/mcp`) and `/healthz`.
-    #[arg(long, env = "ISB_SERVE_LISTEN")]
-    listen: Option<String>,
-    /// Unix socket for the local CLI.
-    #[arg(long = "serve-socket", env = "ISB_SERVE_SOCKET")]
-    serve_socket: Option<PathBuf>,
-    /// Where stack definitions are kept.
-    #[arg(long, env = "ISB_SERVE_STATE_DIR")]
-    state_dir: Option<PathBuf>,
-    /// How often each service is reconciled and health-checked.
-    #[arg(long, value_parser = dur, default_value = "5s")]
-    interval: Duration,
-    /// Cloudflare Access team domain (https://TEAM.cloudflareaccess.com).
-    #[arg(long, env = "CF_ACCESS_TEAM_DOMAIN")]
-    access_team_domain: Option<String>,
-    /// Cloudflare Access application audience (AUD tag).
-    #[arg(long, env = "CF_ACCESS_AUD")]
-    access_aud: Option<String>,
-    /// Serve remote MCP with no Access validation (local testing only).
-    #[arg(long, env = "ISB_SERVE_ALLOW_UNAUTHENTICATED")]
-    allow_unauthenticated: bool,
-    /// Tools remote callers may use: names or globs, comma-separated.
-    #[arg(long, env = "ISB_SERVE_ALLOW_TOOLS", default_value = "")]
-    allow_tools: String,
-    /// Tools hidden from remote callers (wins over --allow-tools).
-    #[arg(long, env = "ISB_SERVE_DENY_TOOLS", default_value = "")]
-    deny_tools: String,
-    /// Host directories remote callers may bind-mount from (comma-separated).
-    #[arg(long, env = "ISB_SERVE_BIND_ROOTS", value_delimiter = ',')]
-    bind_root: Vec<PathBuf>,
-    /// Host addresses remote callers may publish ports on, besides loopback.
-    #[arg(long, env = "ISB_SERVE_PUBLISH_ADDRESSES", value_delimiter = ',')]
-    publish_address: Vec<String>,
-    /// Let remote callers create privileged containers.
-    #[arg(long, env = "ISB_SERVE_ALLOW_PRIVILEGED")]
-    allow_privileged: bool,
-    /// Let remote callers use raw_config, raw_devices, incus_profiles,
-    /// idmap maps and guest-bound ports.
-    #[arg(long, env = "ISB_SERVE_ALLOW_RAW")]
-    allow_raw: bool,
-    /// Let remote callers reach every instance, not only managed ones.
-    #[arg(long, env = "ISB_SERVE_ANY_INSTANCE")]
-    any_instance: bool,
-}
-
-#[derive(Subcommand)]
-enum ServeAction {
-    /// Install (or update) `isb serve` as a systemd user service and start it.
-    Install {
-        /// The loopback address to serve on (default: the env file's, else 127.0.0.1:8092).
-        #[arg(long)]
-        listen: Option<String>,
-    },
-}
-
-#[derive(Subcommand)]
-enum StackCmd {
-    /// Deploy (or update) a stack from the compose file. Waits for the
-    /// rollout unless -d.
-    Deploy {
+    User(UserCmd),
+    /// Invite someone to an org: prints the invitation token, shown once
+    /// (and its link when ISB_PUBLIC_URL is set).
+    Invite {
+        org: String,
+        email: String,
+        /// viewer, member, admin or owner.
+        #[arg(long, default_value = "member")]
+        role: String,
         #[command(flatten)]
-        f: Files,
-        /// Stack name (default: the compose project name).
-        name: Option<String>,
-        /// Return once the deployment is accepted.
-        #[arg(short, long)]
-        detach: bool,
-        /// How long to wait for the rollout.
-        #[arg(long, default_value = "10m")]
-        timeout: String,
+        db: AuthDb,
     },
-    /// List stacks.
-    #[command(alias = "list")]
-    Ls {
-        #[arg(long)]
-        json: bool,
+    /// API tokens for `isb serve`.
+    #[command(subcommand)]
+    Token(TokenCmd),
+    /// SSH public keys on isb accounts: what `isb ssh-proxy` lets into an
+    /// org's instances (docs/guides/ssh.md).
+    #[command(subcommand)]
+    Key(ssh::KeyCmd),
+    /// SSH's stdio over isb serve's websocket to an instance of an org, for
+    /// ssh's ProxyCommand (`isb ssh-config` writes it). Nothing listens in
+    /// the instance and no port opens anywhere.
+    SshProxy {
+        /// ORG/INSTANCE, or INSTANCE in --org.
+        target: String,
+        /// Whose isb SSH keys to let in, for the local socket (which has no
+        /// account of its own).
+        #[arg(long = "as")]
+        keys_of: Option<String>,
+        #[command(flatten)]
+        remote: ssh::RemoteArgs,
     },
-    /// A stack's services and replicas.
-    Ps {
-        name: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Remove a stack (its instances and ports; volumes with --volumes).
-    #[command(alias = "remove")]
-    Rm {
-        name: String,
-        #[arg(long)]
-        volumes: bool,
-    },
-    /// Go back to the previous deployment.
-    Rollback { name: String },
-    /// Set replica counts: SERVICE=N ...
-    Scale {
-        name: String,
-        #[arg(required = true)]
-        services: Vec<String>,
-    },
-    /// Replace a service's replicas even though nothing changed (a moved tag).
-    Redeploy { name: String, service: String },
-    /// Recent output of a service's replicas.
-    Logs {
-        name: String,
-        service: String,
-        #[arg(long)]
-        slot: Option<u32>,
-        #[arg(short = 'n', long, default_value = "100")]
-        lines: usize,
-    },
-    /// The compose file a stack runs, as deployed.
-    Config { name: String },
-}
-
-#[derive(Args)]
-struct CreateArgs {
-    name: String,
-    /// Image: local alias/fingerprint, or `images:debian/12` style.
-    #[arg(short, long)]
-    image: String,
-    /// Number of CPUs (limits.cpu).
-    #[arg(long)]
-    cpus: Option<String>,
-    /// CPUs to pin to, e.g. 0-3 (limits.cpu).
-    #[arg(long)]
-    cpuset_cpus: Option<String>,
-    /// Memory limit: 512m, 8g, 8GiB.
-    #[arg(short, long)]
-    memory: Option<String>,
-    /// Storage pool (`auto`: incus-zfs, else default, else first).
-    #[arg(short, long)]
-    storage: Option<String>,
-    /// `auto`, `none`, `always`, or a raw.idmap value.
-    #[arg(long)]
-    idmap: Option<String>,
-    #[arg(long)]
-    privileged: Option<bool>,
-    /// Label `key=value` (stored as user.key).
-    #[arg(short, long = "label")]
-    labels: Vec<String>,
-    /// Instance environment `KEY=VALUE`.
-    #[arg(short, long = "env")]
-    env: Vec<String>,
-    /// `SRC:GUEST[:ro,owner=U,device=N]` (SRC is a host path or a volume name).
-    #[arg(short, long = "volume")]
-    volumes: Vec<String>,
-    /// `[IP:]PUBLISHED:TARGET[/udp]` (PUBLISHED may be a range), or
-    /// `listen=..,connect=..[,bind=guest][,name=][,search=]`.
-    #[arg(short, long = "port")]
-    ports: Vec<String>,
-    /// Readiness check (repeatable): running, default_route, user_exists=U,
-    /// path_writable=P, command=ARG,ARG.
-    #[arg(long)]
-    ready: Vec<String>,
-    #[arg(long)]
-    ready_timeout: Option<String>,
-    /// Raw config `key=value`.
-    #[arg(short, long = "config")]
-    config: Vec<String>,
-    #[arg(long = "profile")]
-    profiles: Vec<String>,
-    /// Create a virtual machine.
-    #[arg(long)]
-    vm: bool,
-    /// Reconcile if it exists instead of failing.
-    #[arg(long)]
-    ensure: bool,
-    /// Skip readiness checks.
-    #[arg(long)]
-    no_ready: bool,
-}
-
-#[derive(Args)]
-struct ExecArgs {
-    #[command(flatten)]
-    f: Files,
-    /// Compose service or instance name.
-    target: String,
-    /// Guest user (name, uid or uid:gid).
-    #[arg(short, long)]
-    user: Option<String>,
-    /// Working directory.
-    #[arg(short = 'w', long)]
-    cwd: Option<String>,
-    /// `KEY=VALUE` (repeatable).
-    #[arg(short, long = "env")]
-    env: Vec<String>,
-    /// Run via the user's login shell.
-    #[arg(short, long)]
-    login: bool,
-    /// Force a pseudo-terminal.
-    #[arg(short = 't', long, conflicts_with = "no_tty")]
-    tty: bool,
-    /// Never allocate a pseudo-terminal.
-    #[arg(short = 'T', long)]
-    no_tty: bool,
-    /// Do not forward stdin (the command sees EOF).
-    #[arg(short = 'n', long)]
-    no_stdin: bool,
-    /// Kill the command after this long (default: no limit).
-    #[arg(long, value_parser = dur)]
-    timeout: Option<Duration>,
-    /// The command and its arguments, passed as-is (no shell).
-    #[arg(last = true, required = true)]
-    argv: Vec<String>,
-}
-
-#[derive(Subcommand)]
-enum VolumeCmd {
-    /// Create a named volume (no-op if it exists).
-    Create {
-        name: String,
-        #[arg(long)]
-        pool: Option<String>,
-        #[arg(short, long = "config")]
-        config: Vec<String>,
-    },
-    /// List named volumes.
-    #[command(alias = "list")]
-    Ls {
-        #[arg(long)]
-        pool: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show a named volume.
-    Inspect {
-        name: String,
-        #[arg(long)]
-        pool: Option<String>,
-    },
-    /// Delete a named volume (refused while in use).
-    #[command(alias = "remove")]
-    Rm {
-        name: String,
-        #[arg(long)]
-        pool: Option<String>,
-    },
-}
-
-#[derive(Subcommand)]
-enum PortCmd {
-    /// Add a proxy device (a correct one is left as is). Prints the listen address.
-    Add {
-        name: String,
-        /// `[IP:]HOST:GUEST[/udp]` or `listen=..,connect=..[,bind=guest][,search=N]`.
-        spec: String,
-        /// Device name.
-        #[arg(long = "name")]
-        device: Option<String>,
-        /// Step past up to N taken host ports.
-        #[arg(long)]
-        search: Option<u16>,
-    },
-    /// Remove proxy devices by name.
-    Rm { name: String, devices: Vec<String> },
-    /// Print one property of a proxy device (default: its listen address).
-    Get {
-        name: String,
-        device: String,
-        /// Property to print (listen, connect, bind, ...).
-        #[arg(default_value = "listen")]
-        key: String,
-    },
-    /// List proxy devices.
-    Ls {
-        name: String,
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-#[derive(Subcommand)]
-enum DeviceCmd {
-    /// List instance-local devices.
-    Ls {
-        name: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Remove instance-local devices by name.
-    Rm { name: String, devices: Vec<String> },
+    /// `Host` blocks for ~/.ssh/config (ProxyCommand isb ssh-proxy, the
+    /// instance's host key pinned in isb's known_hosts), so plain ssh, scp,
+    /// editors and `herdr machine add` reach an org's instances.
+    SshConfig(ssh::ConfigArgs),
+    /// The audit log of `isb serve` (`<state>/audit.db`): who did what.
+    #[command(subcommand)]
+    Audit(AuditCmd),
+    /// The history of `isb serve`: the controller's events, incus lifecycle
+    /// events in every project (with who requested them), audit rows, and
+    /// markers for when nothing was watching (docs/operations/history.md).
+    History(HistoryArgs),
 }
 
 impl Cmd {
@@ -543,7 +429,19 @@ impl Ctx {
             Some(s) => Client::with_socket(s),
             None => Client::new(),
         };
-        if let Some(p) = self.global.project.as_deref().or(project) {
+        let org = self
+            .global
+            .org
+            .as_deref()
+            .and_then(|o| isb::org::OrgId::new(o).ok());
+        let org_project = org.map(|o| o.incus_project());
+        if let Some(p) = self
+            .global
+            .project
+            .as_deref()
+            .or(org_project.as_deref())
+            .or(project)
+        {
             c = c.project(p);
         }
         let mut t = Timeouts::default();
@@ -629,20 +527,71 @@ fn main() -> ExitCode {
         Ok(code) => ExitCode::from(code),
         Err(e) => {
             eprintln!("isb: {e}");
+            if cfg!(target_os = "macos") && matches!(e, Error::Connect { .. }) {
+                eprintln!(
+                    "isb: on macOS incus runs in the isb machine: `isb machine init` creates \
+                     it, `isb machine start` starts it"
+                );
+            }
             ExitCode::from(1)
         }
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
 fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
     match cmd {
         Cmd::Logs { service, lines, .. } => logs(ctx, &service, lines),
         Cmd::Serve(a) => serve(ctx, a),
         Cmd::Stack(s) => stack(ctx, s),
+        Cmd::Org(o) => org(ctx, o),
+        Cmd::Ingress { json } => ingress_status(json),
+        Cmd::Host(HostCmd::Setup {
+            uplink,
+            user,
+            dry_run,
+            public_ingress,
+            sandbox_egress,
+        }) => host_setup(uplink, user, dry_run, public_ingress, sandbox_egress),
+        Cmd::Machine(m) => machine(ctx, m),
+        Cmd::Secret(s) => secret(ctx, s),
+        Cmd::Project(p) => apps::project(&ctx.global.org, p),
+        Cmd::App(a) => apps::app(&ctx.global.org, a),
+        Cmd::Instance(c) => kube::instance(&ctx.global.org, c),
+        Cmd::Cp { src, dst } => kube::cp(&ctx.global.org, &src, &dst),
+        Cmd::Template(t) => templates::template(&ctx.global.org, t),
+        Cmd::Db(c) => data::db(&ctx.global.org, c),
+        Cmd::Backup(c) => data::backup(&ctx.global.org, c),
+        Cmd::Job(c) => data::job(&ctx.global.org, c),
+        Cmd::Build(a) => build_cmd(ctx, a),
+        Cmd::Registry(r) => registry_cmd(ctx, r),
+        Cmd::Notify(n) => notify::notify(&ctx.global.org, n),
+        Cmd::Server(c) => servers::server(c),
+        Cmd::Workspace(w) => workspaces::workspace(&ctx.global.org, w),
         Cmd::Tui => {
             isb::tui::run(ctx.client(None), isb::server::default_socket_path())?;
             Ok(0)
         }
+        Cmd::User(c) => user_cmd(c),
+        Cmd::Invite {
+            org,
+            email,
+            role,
+            db,
+        } => invite_cmd(&org, &email, &role, &db),
+        Cmd::Token(c) => token_cmd(c),
+        Cmd::Key(c) => ssh::key(c),
+        Cmd::SshProxy {
+            target,
+            keys_of,
+            remote,
+        } => ssh::proxy(&ctx.global.org, &target, keys_of, &remote),
+        Cmd::SshConfig(a) => ssh::config(&ctx.global.org, a),
+        Cmd::Audit(c) => audit_cmd(c),
+        Cmd::History(a) => history_cmd(a),
         Cmd::Create(a) => create(ctx, a),
         Cmd::Start { names } => {
             let c = ctx.client(None);
@@ -806,191 +755,7 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
     }
 }
 
-fn create(ctx: &Ctx, a: CreateArgs) -> Result<u8> {
-    let mut spec = SandboxSpec::new(&a.name, &a.image);
-    spec.cpus = a.cpus;
-    spec.cpuset = a.cpuset_cpus;
-    spec.memory = a.memory;
-    spec.storage = a.storage;
-    spec.privileged = a.privileged;
-    spec.idmap = a.idmap.map(|s| match s.as_str() {
-        "auto" => IdmapSpec::Mode(IdmapMode::Auto),
-        "none" => IdmapSpec::Mode(IdmapMode::None),
-        "always" => IdmapSpec::Mode(IdmapMode::Always),
-        raw => IdmapSpec::Raw(IdmapRaw { raw: raw.into() }),
-    });
-    if a.vm {
-        spec.instance_type = InstanceType::VirtualMachine;
-    }
-    for l in &a.labels {
-        let (k, v) = shorthand::key_value(l)?;
-        spec.labels.insert(k, v);
-    }
-    for e in &a.env {
-        let (k, v) = shorthand::key_value(e)?;
-        spec.env.insert(k, v);
-    }
-    for c in &a.config {
-        let (k, v) = shorthand::key_value(c)?;
-        spec.raw_config.insert(k, v);
-    }
-    for v in &a.volumes {
-        spec.volumes.push(shorthand::volume(v)?);
-    }
-    for p in &a.ports {
-        spec.ports.push(shorthand::port(p)?);
-    }
-    if !a.ready.is_empty() {
-        spec.ready = Some(
-            a.ready
-                .iter()
-                .map(|r| shorthand::ready(r))
-                .collect::<Result<_>>()?,
-        );
-    }
-    spec.ready_timeout = a.ready_timeout;
-    if !a.profiles.is_empty() {
-        spec.profiles = Some(a.profiles);
-    }
-    let c = ctx.client(None);
-    let mut rep = ctx.report();
-    let opts = EnsureOptions {
-        wait_ready: !a.no_ready,
-        ..Default::default()
-    };
-    if a.ensure {
-        Sandbox::connect_or_create_with(&c, &spec, &Default::default(), opts, &mut rep)?;
-    } else {
-        Sandbox::create_with(&c, &spec, &Default::default(), opts, &mut rep)?;
-    }
-    Ok(0)
-}
-
-fn ps(ctx: &Ctx, services: Vec<String>, json: bool) -> Result<u8> {
-    #[derive(Serialize)]
-    struct Row {
-        service: Option<String>,
-        name: String,
-        status: String,
-    }
-    let mut rows = Vec::new();
-    match ctx.maybe_load()? {
-        Some(p) => {
-            let c = ctx.client(p.file.incus_project.as_deref());
-            let all: BTreeMap<String, SandboxInfo> = Sandbox::list(&c)?
-                .into_iter()
-                .map(|i| (i.name.clone(), i))
-                .collect();
-            for s in p.select_exact(&services)? {
-                let name = p.service(&s)?.name.clone().unwrap_or_default();
-                let status = all
-                    .get(&name)
-                    .map(|i| i.status.clone())
-                    .unwrap_or_else(|| "missing".into());
-                rows.push(Row {
-                    service: Some(s),
-                    name,
-                    status,
-                });
-            }
-        }
-        None => {
-            if !services.is_empty() {
-                return Err(Error::Invalid(
-                    "no compose file; `isb ps` without one lists running sandboxes".into(),
-                ));
-            }
-            for i in Sandbox::list(&ctx.client(None))? {
-                if i.status.eq_ignore_ascii_case("running") {
-                    rows.push(Row {
-                        service: None,
-                        name: i.name,
-                        status: i.status,
-                    });
-                }
-            }
-        }
-    }
-    if json {
-        print_json(&rows);
-    } else {
-        let mut t = vec![vec!["SERVICE".into(), "NAME".into(), "STATUS".into()]];
-        for r in rows {
-            t.push(vec![
-                r.service.unwrap_or_else(|| "-".into()),
-                r.name,
-                r.status.to_uppercase(),
-            ]);
-        }
-        table(t);
-    }
-    Ok(0)
-}
-
-fn exec(ctx: &Ctx, a: ExecArgs) -> Result<u8> {
-    // A compose service if a file was named (or exists here) and defines it;
-    // otherwise an instance name.
-    let (client, sb) = match ctx.maybe_load()? {
-        Some(p) if p.file.services.contains_key(&a.target) => {
-            let spec = p.service(&a.target)?;
-            let c = ctx.client(p.file.incus_project.as_deref());
-            let name = spec.name.clone().unwrap_or_default();
-            let sb = Sandbox::get(&c, &name)?.with_exec_defaults(spec.exec_defaults());
-            (c, sb)
-        }
-        Some(p) if !ctx.global.files.is_empty() => {
-            return Err(Error::Invalid(format!(
-                "no sandbox {:?} in {}",
-                a.target,
-                p.files_display()
-            )));
-        }
-        _ => {
-            let c = ctx.client(None);
-            let sb = Sandbox::get(&c, &a.target)?;
-            (c, sb)
-        }
-    };
-    let _ = client;
-    let tty = if a.tty {
-        true
-    } else if a.no_tty {
-        false
-    } else {
-        isb::exec::stdio_is_tty()
-    };
-    let mut env = BTreeMap::new();
-    for e in &a.env {
-        let (k, v) = shorthand::key_value(e)?;
-        env.insert(k, v);
-    }
-    let (width, height) = isb::exec::terminal_size().unzip();
-    let opts = ExecOptions {
-        cwd: a.cwd,
-        user: a.user,
-        env,
-        login: a.login.then_some(true),
-        tty,
-        width,
-        height,
-        timeout: a.timeout,
-        stdin: if a.no_stdin {
-            Stdin::Null
-        } else {
-            Stdin::Inherit
-        },
-    };
-    match sb.attach(a.argv, opts) {
-        Ok(code) => Ok(code.clamp(0, 255) as u8),
-        Err(e) => {
-            eprintln!("isb: {e}");
-            // Distinguish isb's own failure from the command's exit status.
-            Ok(125)
-        }
-    }
-}
-
-fn volume(ctx: &Ctx, v: VolumeCmd) -> Result<u8> {
+fn volume_local(ctx: &Ctx, v: VolumeCmd) -> Result<u8> {
     let c = ctx.client(None);
     let pool =
         |p: Option<String>| -> Result<String> { sandbox::host_facts(&c)?.pick_pool(p.as_deref()) };
@@ -1043,280 +808,37 @@ fn volume(ctx: &Ctx, v: VolumeCmd) -> Result<u8> {
             let pool = pool(p)?;
             isb::volume::remove(&c, &pool, &name)?;
         }
+        _ => unreachable!("isb serve's volume commands are handled in volume()"),
     }
-    Ok(0)
-}
-
-fn port(ctx: &Ctx, p: PortCmd) -> Result<u8> {
-    let c = ctx.client(None);
-    match p {
-        PortCmd::Add {
-            name,
-            spec,
-            device,
-            search,
-        } => {
-            let mut ps = shorthand::port(&spec)?;
-            if device.is_some() {
-                ps.name = device;
-            }
-            if search.is_some() {
-                ps.search = search;
-            }
-            let listen = Sandbox::get(&c, &name)?.add_port(&ps)?;
-            println!("{listen}");
-        }
-        PortCmd::Get { name, device, key } => {
-            let info = Sandbox::get(&c, &name)?.info()?;
-            let dev = info
-                .devices
-                .get(&device)
-                .filter(|p| p.get("type").map(String::as_str) == Some("proxy"))
-                .ok_or_else(|| Error::NotFound(format!("proxy device {device} on {name}")))?;
-            let v = dev
-                .get(&key)
-                .ok_or_else(|| Error::NotFound(format!("property {key} of {name}/{device}")))?;
-            println!("{v}");
-        }
-        PortCmd::Rm { name, devices } => {
-            let sb = Sandbox::get(&c, &name)?;
-            for d in devices {
-                if !sb.remove_device(&d)? && !ctx.global.quiet {
-                    eprintln!("{name}: no device {d}");
-                }
-            }
-        }
-        PortCmd::Ls { name, json } => {
-            let info = Sandbox::get(&c, &name)?.info()?;
-            let ports: BTreeMap<_, _> = info
-                .devices
-                .into_iter()
-                .filter(|(_, p)| p.get("type").map(String::as_str) == Some("proxy"))
-                .collect();
-            if json {
-                print_json(&ports);
-            } else {
-                let mut t = vec![vec![
-                    "DEVICE".into(),
-                    "BIND".into(),
-                    "LISTEN".into(),
-                    "CONNECT".into(),
-                ]];
-                for (n, p) in ports {
-                    let g = |k: &str| p.get(k).cloned().unwrap_or_default();
-                    t.push(vec![n.clone(), g("bind"), g("listen"), g("connect")]);
-                }
-                table(t);
-            }
-        }
-    }
-    Ok(0)
-}
-
-fn device(ctx: &Ctx, d: DeviceCmd) -> Result<u8> {
-    let c = ctx.client(None);
-    match d {
-        DeviceCmd::Ls { name, json } => {
-            let info = Sandbox::get(&c, &name)?.info()?;
-            if json {
-                print_json(&info.devices);
-            } else {
-                let mut t = vec![vec!["DEVICE".into(), "TYPE".into(), "PROPERTIES".into()]];
-                for (n, p) in info.devices {
-                    let props = p
-                        .iter()
-                        .filter(|(k, _)| k.as_str() != "type")
-                        .map(|(k, v)| format!("{k}={v}"))
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    t.push(vec![n, p.get("type").cloned().unwrap_or_default(), props]);
-                }
-                table(t);
-            }
-        }
-        DeviceCmd::Rm { name, devices } => {
-            let sb = Sandbox::get(&c, &name)?;
-            for d in devices {
-                if !sb.remove_device(&d)? && !ctx.global.quiet {
-                    eprintln!("{name}: no device {d}");
-                }
-            }
-        }
-    }
-    Ok(0)
-}
-
-struct UpFlags {
-    detach: bool,
-    no_log_prefix: bool,
-    timeout: Duration,
-    prune_devices: bool,
-    no_ready: bool,
-    json: bool,
-}
-
-fn up(ctx: &Ctx, services: Vec<String>, flags: UpFlags) -> Result<u8> {
-    let p = ctx.load()?;
-    let opts = EnsureOptions {
-        diff: DiffOptions {
-            prune_devices: flags.prune_devices,
-        },
-        wait_ready: !flags.no_ready,
-        ..Default::default()
-    };
-    let mut rep = ctx.report();
-    let ups = compose::up_handles(&ctx.client(None), &p, &services, opts, &mut rep)?;
-    if flags.json {
-        let r: Vec<_> = ups.iter().map(|(_, r, _)| r).collect();
-        print_json(&r);
-    } else {
-        for (s, r, _) in &ups {
-            for (dev, listen) in &r.ports {
-                println!("{s} {dev} {listen}");
-            }
-        }
-    }
-    if flags.detach {
-        return Ok(0);
-    }
-    let held = ups
-        .into_iter()
-        .map(|(s, _, sandbox)| {
-            use isb::foreground::Run;
-            let spec = p.service(&s)?;
-            let oci = isb::plan::ImageSource::parse(&spec.image)?.is_oci();
-            let run = match &spec.command {
-                _ if oci => Run::Console,
-                Some(_) if spec.long_running() => Run::Follow(isb::supervise::follow_argv(&s)),
-                Some(argv) => Run::Command(argv.clone()),
-                None => Run::Hold,
-            };
-            Ok(isb::foreground::Service {
-                run,
-                name: s,
-                sandbox,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let fg = isb::foreground::Options {
-        log_prefix: !flags.no_log_prefix,
-        stop_timeout: flags.timeout,
-        ..Default::default()
-    };
-    isb::foreground::run(&held, fg, &mut rep)
-}
-
-fn down(ctx: &Ctx, services: Vec<String>, volumes: bool) -> Result<u8> {
-    let p = ctx.load()?;
-    let mut rep = ctx.report();
-    compose::down(&ctx.client(None), &p, &services, volumes, &mut rep)?;
-    Ok(0)
-}
-
-fn plan(
-    ctx: &Ctx,
-    services: Vec<String>,
-    prune_devices: bool,
-    json: bool,
-    exit_code: bool,
-) -> Result<u8> {
-    let p = ctx.load()?;
-    let plans = compose::plan(
-        &ctx.client(None),
-        &p,
-        &services,
-        DiffOptions { prune_devices },
-    )?;
-    let changes = plans.iter().any(|p| !p.is_noop());
-    if json {
-        print_json(&plans);
-    } else {
-        for pl in &plans {
-            let state = pl.status.clone().unwrap_or_else(|| "missing".into());
-            println!("{} ({}):", pl.name, state.to_lowercase());
-            if pl.actions.is_empty() {
-                println!("  up to date");
-            }
-            for a in &pl.actions {
-                println!("  {a}");
-            }
-        }
-    }
-    Ok(if exit_code && changes { 2 } else { 0 })
-}
-
-fn logs(ctx: &Ctx, service: &str, lines: usize) -> Result<u8> {
-    let p = ctx.load()?;
-    let spec = p.service(service)?;
-    let c = ctx.client(p.file.incus_project.as_deref());
-    let name = spec.name.clone().unwrap_or_default();
-    let oci = isb::plan::ImageSource::parse(&spec.image)?.is_oci();
-    if !oci && !spec.long_running() {
-        return Err(Error::Invalid(format!(
-            "{service} is not long-running (no restart), so its output went to `isb up`"
-        )));
-    }
-    let sb = Sandbox::get(&c, &name)?;
-    let out = isb::supervise::logs(&sb, service, oci, lines)?;
-    println!("{}", out.trim_end());
-    Ok(0)
-}
-
-fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
-    use isb::daemon::{ServeConfig, policy::RemotePolicy};
-    if let Some(ServeAction::Install { listen }) = a.action {
-        let r =
-            isb::server::service::install_user_service(&isb::server::service::ServiceOptions {
-                listen,
-                health_timeout: None,
-            })?;
-        println!(
-            "installed {} (runs {})",
-            r.unit_path.display(),
-            r.exe.display()
-        );
-        println!("settings: {}", r.env_path.display());
-        println!("healthy at {}", r.health_url);
-        for n in r.notes {
-            println!("note: {n}");
-        }
-        return Ok(0);
-    }
-    let access = match (a.access_team_domain, a.access_aud) {
-        (Some(t), Some(aud)) if !t.is_empty() && !aud.is_empty() => Some((t, aud)),
-        (Some(t), None) | (None, Some(t)) if !t.is_empty() => {
-            return Err(Error::Invalid(
-                "Cloudflare Access needs both CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD".into(),
-            ));
-        }
-        _ => None,
-    };
-    let cfg = ServeConfig {
-        listen: a.listen.filter(|l| !l.is_empty()),
-        socket: a
-            .serve_socket
-            .unwrap_or_else(isb::server::default_socket_path),
-        access,
-        allow_unauthenticated: a.allow_unauthenticated,
-        remote_tools: isb::server::ToolPolicy::from_lists(&a.allow_tools, &a.deny_tools),
-        policy: RemotePolicy {
-            allow_privileged: a.allow_privileged,
-            allow_raw: a.allow_raw,
-            bind_roots: a.bind_root,
-            publish_addresses: a.publish_address,
-            any_instance: a.any_instance,
-        },
-        state_dir: a.state_dir.unwrap_or_else(isb::daemon::default_state_dir),
-        interval: a.interval,
-    };
-    isb::daemon::serve(ctx.client(None), cfg)?;
     Ok(0)
 }
 
 /// Call a tool on the local daemon.
 fn call(tool: &str, args: serde_json::Value, timeout: Duration) -> Result<serde_json::Value> {
     let socket = isb::server::default_socket_path();
+    // Inside an org's workspace there is no daemon socket: isb serve's URL
+    // (the org bridge's, `$ISB_URL`) with the workspace's token
+    // (`$ISB_TOKEN`), as `isb ssh-config` and `isb key` use it.
+    if !socket.exists() {
+        let remote = ssh::RemoteArgs::default().or_env();
+        if remote.url.is_some() {
+            let org = args
+                .get("org")
+                .and_then(serde_json::Value::as_str)
+                .map(String::from)
+                .or_else(|| std::env::var("ISB_ORG").ok().filter(|o| !o.is_empty()))
+                .unwrap_or_else(|| "default".into());
+            return remote.remote()?.call_tool(&org, tool, args);
+        }
+    }
     isb::server::client::call_tool(&socket, tool, args, timeout).map_err(|e| match e {
+        Error::Io(_) | Error::Connect { .. } if cfg!(target_os = "macos") => {
+            Error::Invalid(format!(
+                "no isb serve on {} ({e}); it runs in the isb machine: `isb machine start`, \
+                 or `isb machine init` to create it",
+                socket.display()
+            ))
+        }
         Error::Io(_) | Error::Connect { .. } => Error::Invalid(format!(
             "no isb serve on {} ({e}); start it with `isb serve`, or install it with `isb serve install`",
             socket.display()
@@ -1327,214 +849,35 @@ fn call(tool: &str, args: serde_json::Value, timeout: Duration) -> Result<serde_
 
 const SHORT: Duration = Duration::from_secs(60);
 
-fn stack(ctx: &Ctx, cmd: StackCmd) -> Result<u8> {
-    use serde_json::json;
-    match cmd {
-        StackCmd::Deploy {
-            name,
-            detach,
-            timeout,
-            ..
-        } => {
-            let p0 = ctx.load()?;
-            let name = name.unwrap_or_else(|| p0.name.clone());
-            // Load again under the stack's name, so named volumes are
-            // `<stack>_<volume>`, as `isb up -P <stack>` would name them.
-            let p = compose::load(&LoadOptions {
-                files: p0.files.clone(),
-                env_files: ctx.global.env_files.clone(),
-                project_name: Some(name.clone()),
-                ..Default::default()
-            })?;
-            let wait_for = isb::parse_duration(&timeout).map_err(Error::Invalid)?;
-            let args = isb::daemon::local_deploy_args(&p, &name, !detach, Some(&timeout))?;
-            let r = call("stack_deploy", args, wait_for + SHORT)?;
-            for c in r["changes"].as_array().into_iter().flatten() {
-                eprintln!(
-                    "{}: {} (rev {}, {} replicas)",
-                    c["service"].as_str().unwrap_or(""),
-                    c["change"].as_str().unwrap_or(""),
-                    c["rev"].as_str().unwrap_or(""),
-                    c["replicas"]
-                );
-            }
-            if detach {
-                return Ok(0);
-            }
-            let st = &r["status"];
-            print_stack(st);
-            let ok = st["services"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .all(|s| s["state"] == "converged");
-            Ok(if ok { 0 } else { 1 })
-        }
-        StackCmd::Ls { json } => {
-            let r = call("stack_list", json!({}), SHORT)?;
-            if json {
-                print_json(&r["stacks"]);
-                return Ok(0);
-            }
-            let mut rows = vec![vec![
-                "NAME".into(),
-                "SERVICES".into(),
-                "CONVERGED".into(),
-                "DEPLOYED BY".into(),
-            ]];
-            for s in r["stacks"].as_array().into_iter().flatten() {
-                rows.push(vec![
-                    s["name"].as_str().unwrap_or("").into(),
-                    s["services"]
-                        .as_array()
-                        .map(|a| a.len())
-                        .unwrap_or(0)
-                        .to_string(),
-                    s["converged"].to_string(),
-                    s["deployed_by"].as_str().unwrap_or("").into(),
-                ]);
-            }
-            table(rows);
-            Ok(0)
-        }
-        StackCmd::Ps { name, json } => {
-            let r = call("stack_status", json!({"name": name}), SHORT)?;
-            if json {
-                print_json(&r);
-            } else {
-                print_stack(&r);
-            }
-            Ok(0)
-        }
-        StackCmd::Rm { name, volumes } => {
-            call(
-                "stack_remove",
-                json!({"name": name, "volumes": volumes}),
-                Duration::from_secs(400),
-            )?;
-            Ok(0)
-        }
-        StackCmd::Rollback { name } => {
-            let r = call("stack_rollback", json!({"name": name}), SHORT)?;
-            for c in r["changes"].as_array().into_iter().flatten() {
-                eprintln!(
-                    "{}: {}",
-                    c["service"].as_str().unwrap_or(""),
-                    c["change"].as_str().unwrap_or("")
-                );
-            }
-            Ok(0)
-        }
-        StackCmd::Scale { name, services } => {
-            for s in services {
-                let (svc, n) = s
-                    .split_once('=')
-                    .ok_or_else(|| Error::Invalid(format!("{s:?}: expected SERVICE=REPLICAS")))?;
-                let n: u32 = n
-                    .parse()
-                    .map_err(|_| Error::Invalid(format!("{s:?}: replicas must be a number")))?;
-                call(
-                    "stack_scale",
-                    json!({"name": name, "service": svc, "replicas": n}),
-                    SHORT,
-                )?;
-            }
-            Ok(0)
-        }
-        StackCmd::Redeploy { name, service } => {
-            call(
-                "stack_redeploy",
-                json!({"name": name, "service": service}),
-                SHORT,
-            )?;
-            Ok(0)
-        }
-        StackCmd::Logs {
-            name,
-            service,
-            slot,
-            lines,
-        } => {
-            let mut a = json!({"name": name, "service": service, "lines": lines});
-            if let Some(s) = slot {
-                a["slot"] = json!(s);
-            }
-            let r = call("stack_logs", a, Duration::from_secs(120))?;
-            for (inst, text) in r["logs"].as_object().into_iter().flatten() {
-                println!("==> {inst} <==");
-                println!("{}", text.as_str().unwrap_or("").trim_end());
-            }
-            Ok(0)
-        }
-        StackCmd::Config { name } => {
-            let r = call("stack_config", json!({"name": name}), SHORT)?;
-            let yaml =
-                serde_yaml_ng::to_string(&r["file"]).map_err(|e| Error::Invalid(e.to_string()))?;
-            print!("{yaml}");
-            Ok(0)
-        }
-    }
+/// `YYYY-MM-DD HH:MM:SSZ` from unix seconds.
+fn fmt_time(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    // Howard Hinnant's civil_from_days.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!(
+        "{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
 }
 
-fn print_stack(st: &serde_json::Value) {
-    let mut rows = vec![vec![
-        "SERVICE".into(),
-        "STATE".into(),
-        "REPLICAS".into(),
-        "INSTANCE".into(),
-        "STATUS".into(),
-        "HEALTH".into(),
-        "IP".into(),
-    ]];
-    for s in st["services"].as_array().into_iter().flatten() {
-        let svc = s["service"].as_str().unwrap_or("").to_string();
-        let reps = format!("{}/{}", s["healthy"], s["replicas"]);
-        let state = s["state"].as_str().unwrap_or("").to_string();
-        let insts = s["instances"].as_array().cloned().unwrap_or_default();
-        if insts.is_empty() {
-            rows.push(vec![
-                svc.clone(),
-                state.clone(),
-                reps.clone(),
-                "-".into(),
-                "-".into(),
-                "-".into(),
-                "-".into(),
-            ]);
-        }
-        for (n, i) in insts.iter().enumerate() {
-            let first = n == 0;
-            rows.push(vec![
-                if first { svc.clone() } else { String::new() },
-                if first { state.clone() } else { String::new() },
-                if first { reps.clone() } else { String::new() },
-                i["name"].as_str().unwrap_or("").into(),
-                i["status"].as_str().unwrap_or("").to_uppercase(),
-                i["health"].as_str().unwrap_or("").into(),
-                i["ip"].as_str().unwrap_or("-").into(),
-            ]);
-        }
-    }
-    table(rows);
-    for s in st["services"].as_array().into_iter().flatten() {
-        if let Some(m) = s["message"].as_str() {
-            eprintln!("{}: {m}", s["service"].as_str().unwrap_or(""));
-        }
-        for p in s["ports"].as_array().into_iter().flatten() {
-            eprintln!(
-                "{}: {} -> :{} ({} backends){}",
-                s["service"].as_str().unwrap_or(""),
-                p["listen"].as_str().unwrap_or(""),
-                p["target"],
-                p["backends"].as_array().map(|a| a.len()).unwrap_or(0),
-                p["error"]
-                    .as_str()
-                    .map(|e| format!(": {e}"))
-                    .unwrap_or_default()
-            );
-        }
-    }
-}
+// ---- identity: users, invitations, tokens ----
+//
+// These open `<state>/isb.db` directly rather than calling the daemon: the
+// first admin has to exist before anyone can authenticate to the daemon, they
+// work while it is down, and the file is the daemon's own (same uid, 0600).
+// SQLite in WAL mode lets the daemon and the CLI use it at once, and the
+// daemon reads sessions and tokens per request, so changes apply immediately.
 
 #[cfg(test)]
 mod tests {
@@ -1542,8 +885,85 @@ mod tests {
     use clap::CommandFactory;
 
     #[test]
+    fn auth_commands_parse() {
+        let c = Cli::try_parse_from([
+            "isb",
+            "token",
+            "create",
+            "ci",
+            "--org",
+            "ocai",
+            "--expires",
+            "90d",
+        ])
+        .unwrap();
+        match c.cmd {
+            Cmd::Token(TokenCmd::Create { org, expires, .. }) => {
+                assert_eq!(org.as_deref(), Some("ocai"));
+                assert_eq!(expires, Some(Duration::from_secs(90 * 86400)));
+            }
+            _ => panic!("wrong command"),
+        }
+        // A superadmin token is nobody's and unscoped.
+        let c = Cli::try_parse_from(["isb", "token", "create", "agent", "--superadmin"]).unwrap();
+        assert!(matches!(
+            c.cmd,
+            Cmd::Token(TokenCmd::Create {
+                superadmin: true,
+                ..
+            })
+        ));
+        for extra in [["--org", "ocai"], ["--user", "a@x.io"], ["--scope", "read"]] {
+            let mut argv = vec!["isb", "token", "create", "agent", "--superadmin"];
+            argv.extend(extra);
+            assert!(Cli::try_parse_from(argv).is_err(), "{extra:?}");
+        }
+        let c = Cli::try_parse_from(["isb", "invite", "ocai", "a@x.io"]).unwrap();
+        assert!(matches!(c.cmd, Cmd::Invite { ref role, .. } if role == "member"));
+        // No way to pass a password on the command line.
+        assert!(
+            Cli::try_parse_from(["isb", "user", "create", "a@x.io", "--password", "x"]).is_err()
+        );
+        assert_eq!(fmt_time(1_800_000_000), "2027-01-15 08:00:00Z");
+    }
+
+    #[test]
     fn cli_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn secret_commands_parse() {
+        let c = Cli::try_parse_from([
+            "isb", "secret", "create", "db", "-", "--label", "a=b", "--org", "ocai",
+        ])
+        .unwrap();
+        match c.cmd {
+            Cmd::Secret(SecretCmd::Create {
+                name,
+                file,
+                driver,
+                labels,
+            }) => {
+                assert_eq!((name.as_str(), driver.as_str()), ("db", "local"));
+                assert_eq!(file, Some(PathBuf::from("-")));
+                assert_eq!(labels, vec!["a=b".to_string()]);
+                assert_eq!(c.global.org.as_deref(), Some("ocai"));
+            }
+            _ => unreachable!(),
+        }
+        let ls = Cli::try_parse_from(["isb", "secret", "ls"]).unwrap();
+        assert!(ls.global.org.is_none());
+        assert!(Cli::try_parse_from(["isb", "secret", "reencrypt", "--all"]).is_ok());
+        // A value is never an argument.
+        assert!(Cli::try_parse_from(["isb", "secret", "set", "db", "file", "extra"]).is_err());
+    }
+
+    #[test]
+    fn times_format() {
+        assert_eq!(fmt_time(0), "1970-01-01 00:00:00Z");
+        assert_eq!(fmt_time(1_791_000_000), "2026-10-03 04:00:00Z");
+        assert_eq!(fmt_time(951_825_600), "2000-02-29 12:00:00Z");
     }
 
     #[test]
@@ -1559,5 +979,22 @@ mod tests {
             Cmd::Exec(a) => assert_eq!(a.argv, vec!["ls", "-la"]),
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn before_rules_insertion() {
+        let t = "*filter\n:ufw-before-input - [0:0]\n# allow all on loopback\n-A ufw-before-input -i lo -j ACCEPT\nCOMMIT\n";
+        let out = with_before_rules(t).unwrap();
+        let block = out.find("# isb org bridges: begin").unwrap();
+        assert!(block < out.find("-A ufw-before-input -i lo").unwrap());
+        assert!(with_before_rules(&out).is_none());
+        assert!(with_before_rules("no rules here\n").is_none());
+        // An older block (DHCP only) is replaced in place, once.
+        let old = "*filter\n# isb org bridges: begin\n-A ufw-before-input -i isbbr+ -p udp --dport 67 -j ACCEPT\n# isb org bridges: end\n-A ufw-before-input -i lo -j ACCEPT\nCOMMIT\n";
+        let up = with_before_rules(old).unwrap();
+        assert!(up.contains("--physdev-is-bridged"));
+        assert_eq!(up.matches("# isb org bridges: begin").count(), 1);
+        assert!(up.ends_with("-A ufw-before-input -i lo -j ACCEPT\nCOMMIT\n"));
+        assert!(with_before_rules(&up).is_none());
     }
 }

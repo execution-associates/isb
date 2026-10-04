@@ -1,0 +1,37 @@
+id: vaultwarden
+name: Vaultwarden
+description: A lightweight server compatible with the Bitwarden password manager clients.
+version: "1"
+logo: https://raw.githubusercontent.com/dani-garcia/vaultwarden/1c89e1772bfe51edf362fd033cf9c492ccd7ee55/resources/vaultwarden-icon.svg
+tags: [security, passwords]
+links:
+  source: https://github.com/dani-garcia/vaultwarden
+  docs: https://github.com/dani-garcia/vaultwarden/wiki
+variables:
+  - name: domain
+    type: domain
+    label: Domain
+    description: The public hostname (Bitwarden clients need HTTPS); empty for a generated one.
+  - name: signups_allowed
+    label: Allow sign-ups
+    description: Whether anyone who reaches the server may create an account.
+    default: "true"
+    choices: ["true", "false"]
+  - name: admin_token
+    type: password
+    length: 48
+    description: The token for /admin.
+apps:
+  - name: server
+    image: docker:vaultwarden/server:latest
+    port: 80
+    volumes: ["data:/data"]
+    env:
+      DOMAIN: "https://${domain}"
+      SIGNUPS_ALLOWED: "${signups_allowed}"
+      ADMIN_TOKEN: "${admin_token}"
+    domains:
+      - {host: "${domain}"}
+notes:
+  - The admin page is /admin; its token is the org secret tpl.<name>.admin_token.
+  - Turn sign-ups off (the app's SIGNUPS_ALLOWED) once your accounts exist.

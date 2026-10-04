@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional, Type
 
 
 class IsbError(Exception):
-    """Base class. `code` is the protocol's stable error code (docs/rpc.md)."""
+    """Base class. `code` is the protocol's stable error code (docs/reference/rpc.md)."""
 
     code: str
     message: str

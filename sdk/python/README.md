@@ -3,7 +3,7 @@
 An asyncio SDK for [isb](https://github.com/execution-associates/isb):
 declarative incus sandboxes (containers and VMs). It is a thin client of
 `isb rpc`, a line-delimited JSON protocol over the isb binary's stdin and stdout
-([docs/rpc.md](https://github.com/execution-associates/isb/blob/main/docs/rpc.md)).
+([docs/reference/rpc.md](https://github.com/execution-associates/isb/blob/main/docs/reference/rpc.md)).
 All the work (planning, reconciling, readiness, exec) happens in isb; this
 package starts it, sends requests and maps the answers to Python types.
 
@@ -142,7 +142,7 @@ directory at the time of the call, and compose file paths are made absolute.
 
 `name` is the incus instance name (the spec's `container_name`). `**spec` are
 the fields of a compose service
-([docs/spec.md](https://github.com/execution-associates/isb/blob/main/docs/spec.md)),
+([docs/reference/compose.md](https://github.com/execution-associates/isb/blob/main/docs/reference/compose.md)),
 named as in docker compose: `cpus` (a count) or `cpuset` (`"0-3"`),
 `mem_limit` (`"512m"`, `"8g"`, `"8GiB"`), `storage`, `type` (`"container"`,
 `"virtual-machine"` or `"vm"`), `privileged`, `idmap`, `incus_profiles`,

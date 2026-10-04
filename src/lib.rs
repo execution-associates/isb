@@ -29,34 +29,28 @@
 //! YAML, and [`plan`] turns a spec plus the instance's actual state into the
 //! minimal set of changes. A device that is already correct is never touched.
 
-pub mod balance;
-pub mod client;
-pub mod compose;
-pub mod daemon;
-pub mod error;
-pub mod exec;
-mod flex;
-pub mod foreground;
-pub mod idmap;
-pub mod interp;
-pub mod lock;
-pub mod metrics;
-pub mod plan;
-pub mod rpc;
-pub mod sandbox;
-pub mod server;
-pub mod shorthand;
-pub mod spec;
-pub mod stack;
-pub mod supervise;
-pub mod tui;
-pub mod volume;
+#[doc(inline)]
+pub use isb_apps::{app, backup, build, jobs, monitor, notify, s3, template, volume_backup};
+#[doc(inline)]
+pub use isb_core::{
+    balance, client, compose, cron, discovery, egress, error, exec, foreground, idmap, ingress,
+    interp, lock, machine, metrics, metrics_history, net, org, plan, registry, rpc, sandbox,
+    secrets, shorthand, spec, stack, supervise, volume,
+};
+#[doc(inline)]
+pub use isb_daemon::{daemon, workspace};
+#[doc(inline)]
+pub use isb_egress as egress_proxy;
+#[doc(inline)]
+pub use isb_server::{audit, auth, history, server, servers, web};
+#[doc(inline)]
+pub use isb_tui::tui;
 
 pub use client::{Client, Timeouts};
 pub use compose::{LoadOptions, Project};
 pub use error::{Error, Result};
 pub use exec::{ExecController, ExecEvent, ExecOptions, ExecOutput, ExecStream, Stdin};
-pub use flex::parse_duration;
+pub use isb_core::flex::parse_duration;
 pub use plan::{Action, DiffOptions, SandboxPlan};
 pub use sandbox::{ApplyReport, EnsureOptions, LabelFilter, Sandbox, SandboxInfo};
 pub use spec::{

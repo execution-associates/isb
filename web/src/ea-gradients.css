@@ -1,0 +1,92 @@
+/*
+ * The Execution Associates theme's surfaces: lit from above, with a hint of
+ * the brand glow. Every component surface paints one of these over its own
+ * flat colour (background-image on top of background-color), so the tokens
+ * keep their contrast and Texture: Off is simply the flat colour.
+ *
+ * Tune it here: `--ea-gk` scales every layer's alpha (1 on, 0.5 subtle, 0
+ * off, following `data-texture`); the recipes below are the look.
+ *   --ea-surface-gradient  plates: cards, dialogs, sheets, menus, palette
+ *   --ea-sheen             solid controls: top-lit buttons
+ *   --ea-field-gradient    recessed fields: inputs, selects
+ * Contrast is worked out for the lightest point under text in each recipe
+ * (docs/contributing/web-ui.md). A few percent of lightness across a large
+ * plate would band in 8 bits, so plates add a faint noise (--ea-dither).
+ * Everything is scoped to `html.ea`; light and dark are untouched.
+ */
+html.ea {
+  --ea-gk: 1;
+  --ea-dither: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  /* a peach wash at the top right corner, a lift along the top edge, a settle at the foot */
+  --ea-surface-gradient:
+    var(--ea-dither),
+    radial-gradient(90% 70% at 100% 0%, rgb(254 190 117 / calc(0.05 * var(--ea-gk))), transparent 70%),
+    linear-gradient(180deg, rgb(255 244 250 / calc(0.04 * var(--ea-gk))) 0%, transparent 45%, rgb(18 7 31 / calc(0.1 * var(--ea-gk))) 100%);
+  --ea-sheen: linear-gradient(180deg, rgb(255 255 255 / calc(0.45 * var(--ea-gk))) 0%, transparent 55%, rgb(120 60 110 / calc(0.1 * var(--ea-gk))) 100%);
+  --ea-field-gradient: linear-gradient(180deg, rgb(18 7 31 / calc(0.16 * var(--ea-gk))) 0%, transparent 70%);
+}
+html.ea[data-texture="subtle"] {
+  --ea-gk: 0.5;
+}
+/* Off is flat: no gradients, no noise. */
+html.ea[data-texture="off"] {
+  --ea-gk: 0;
+  --ea-dither: linear-gradient(transparent, transparent);
+}
+
+/* ---- plates ---- */
+html.ea [data-slot="card"],
+html.ea [data-slot="dialog-content"],
+html.ea [data-slot="sheet-content"],
+html.ea [data-slot="dropdown-menu-content"],
+html.ea [data-slot="dropdown-menu-sub-content"],
+html.ea [data-slot="select-content"] {
+  background-image: var(--ea-surface-gradient);
+}
+
+/* ---- the sidebar's current page: lit from the bar side ---- */
+html.ea nav[aria-label="Main"] a[aria-current="page"] {
+  background-image:
+    linear-gradient(90deg, rgb(240 153 191 / calc(0.11 * var(--ea-gk))), rgb(254 190 117 / calc(0.04 * var(--ea-gk))) 60%, transparent),
+    linear-gradient(180deg, rgb(255 244 250 / calc(0.04 * var(--ea-gk))), transparent);
+}
+
+/* ---- buttons: a top-lit sheen ---- */
+html.ea [data-slot="button"][data-variant="default"] {
+  background-image: var(--ea-sheen);
+}
+html.ea [data-slot="button"][data-variant="secondary"] {
+  background-image: linear-gradient(180deg, rgb(255 244 250 / calc(0.07 * var(--ea-gk))) 0%, transparent 60%, rgb(18 7 31 / calc(0.12 * var(--ea-gk))) 100%);
+}
+html.ea [data-slot="button"][data-variant="outline"] {
+  background-image: linear-gradient(180deg, rgb(255 244 250 / calc(0.04 * var(--ea-gk))), transparent 80%);
+}
+
+/* ---- fields: faintly recessed ---- */
+html.ea [data-slot="input"],
+html.ea [data-slot="textarea"],
+html.ea [data-slot="select-trigger"] {
+  background-image: var(--ea-field-gradient);
+}
+
+/* ---- table header rows ---- */
+html.ea [data-slot="table-header"] {
+  background-image:
+    radial-gradient(70% 160% at 0% 0%, rgb(254 190 117 / calc(0.05 * var(--ea-gk))), transparent 70%),
+    linear-gradient(180deg, rgb(253 246 250 / calc(0.055 * var(--ea-gk))), rgb(253 246 250 / calc(0.015 * var(--ea-gk))));
+}
+
+/* ---- page headers: a faint wash of glow, noised against banding (they sit on the grain, not on a plate) ---- */
+html.ea [data-slot="page-header"] {
+  isolation: isolate;
+}
+html.ea [data-slot="page-header"]::before {
+  content: "";
+  position: absolute;
+  inset: -0.5rem 0 -0.5rem 0;
+  z-index: -1;
+  background:
+    var(--ea-dither),
+    linear-gradient(90deg, transparent, rgb(240 153 191 / calc(0.07 * var(--ea-gk))) 12%, rgb(254 190 117 / calc(0.04 * var(--ea-gk))) 50%, transparent);
+  pointer-events: none;
+}

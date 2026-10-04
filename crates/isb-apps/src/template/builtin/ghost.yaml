@@ -1,0 +1,51 @@
+id: ghost
+name: Ghost
+description: A publishing platform for blogs and newsletters, with MySQL.
+version: "5"
+logo: https://raw.githubusercontent.com/TryGhost/Ghost/23041798149f42b6d9a950e5385821bcc54ca2e5/apps/admin/src/assets/img/apple-touch-icon.png
+tags: [cms, blog]
+links:
+  website: https://ghost.org
+  source: https://github.com/TryGhost/Ghost
+  docs: https://ghost.org/docs/install/docker/
+variables:
+  - name: domain
+    type: domain
+    label: Domain
+    description: The public hostname; empty for a generated one.
+  - name: db_password
+    type: password
+  - name: db_root_password
+    type: password
+apps:
+  - name: db
+    image: docker:mysql:8.0
+    volumes: ["data:/var/lib/mysql"]
+    env:
+      MYSQL_ROOT_PASSWORD: "${db_root_password}"
+      MYSQL_DATABASE: ghost
+      MYSQL_USER: ghost
+      MYSQL_PASSWORD: "${db_password}"
+    healthcheck:
+      test: [CMD, mysqladmin, ping, -h, 127.0.0.1]
+      interval: 5s
+      retries: 20
+      start_period: 30s
+  - name: ghost
+    image: docker:ghost:5-alpine
+    port: 2368
+    depends_on: [db]
+    volumes: ["content:/var/lib/ghost/content"]
+    env:
+      url: "https://${domain}"
+      database__client: mysql
+      database__connection__host: "${host:db}"
+      database__connection__user: ghost
+      database__connection__password: "${db_password}"
+      database__connection__database: ghost
+    domains:
+      - {host: "${domain}"}
+main: ghost
+notes:
+  - Set up the owner account at /ghost.
+  - Ghost sends no email until mail__* settings are added to the app's environment.

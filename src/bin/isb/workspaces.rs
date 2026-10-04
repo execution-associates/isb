@@ -1,0 +1,734 @@
+//! `isb workspace ...`: an org's workspace on the `isb serve` daemon
+//! (docs/concepts/workspaces.md), and the sandboxes beside it.
+
+use std::time::Duration;
+
+use clap::Subcommand;
+use serde_json::{Value, json};
+
+use isb::Result;
+
+use super::{SHORT, call, print_json, table};
+
+#[path = "workspaces/images.rs"]
+mod images;
+pub use images::ImageCmd;
+
+/// Creating and rebuilding pull an image and start a machine.
+const LONG: Duration = Duration::from_secs(900);
+
+#[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)] // parsed once per run
+pub enum WorkspaceCmd {
+    /// Create the org's workspace: a container with a home volume and an
+    /// org token delivered inside.
+    Create {
+        /// Image: an incus alias (isb-workspace, dev-base), images:ubuntu/24.04,
+        /// registry:APP:TAG. Default: isb-workspace, then dev-base, when the
+        /// host has it, else images:ubuntu/24.04.
+        #[arg(long)]
+        image: Option<String>,
+        /// Default: workspace.
+        #[arg(long)]
+        name: Option<String>,
+        /// The workspace user (default dev).
+        #[arg(long)]
+        user: Option<String>,
+        #[arg(long)]
+        cpus: Option<u32>,
+        #[arg(long)]
+        memory: Option<String>,
+        #[arg(long)]
+        root_size: Option<String>,
+        /// The home volume (default 20GiB).
+        #[arg(long)]
+        home_size: Option<String>,
+        /// `KEY=VALUE` for login shells (repeatable).
+        #[arg(short, long = "env")]
+        env: Vec<String>,
+        /// An org secret delivered as /run/isb/secrets/NAME (repeatable).
+        #[arg(long = "secret")]
+        secrets: Vec<String>,
+        /// The workspace token's role: viewer, member or admin (default).
+        #[arg(long)]
+        token_role: Option<String>,
+        /// Superadmins, for migrating a box: a host directory as the home.
+        #[arg(long)]
+        home_bind: Option<String>,
+        /// A first-boot script (a file, or - for stdin), run once as root
+        /// on the first start and after each rebuild.
+        #[arg(long, value_name = "FILE")]
+        setup: Option<String>,
+    },
+    /// The workspace: status, resources, sessions, token metadata, connect.
+    #[command(alias = "get")]
+    Show {
+        name: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// The org's workspaces.
+    #[command(alias = "list")]
+    Ls {
+        #[arg(long)]
+        json: bool,
+    },
+    Start {
+        name: Option<String>,
+    },
+    /// Stop it, ending every session on it.
+    Stop {
+        name: Option<String>,
+        /// Do it even though it ends live sessions.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Restart it, ending every session on it.
+    Restart {
+        name: Option<String>,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Replace the machine from its image, keeping the home and the token.
+    Rebuild {
+        name: Option<String>,
+        /// Rebuild from this image instead (it becomes the workspace's).
+        #[arg(long)]
+        image: Option<String>,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Change sizes, environment, secrets or the image (applied on rebuild).
+    Update {
+        name: Option<String>,
+        #[arg(long)]
+        image: Option<String>,
+        #[arg(long)]
+        cpus: Option<u32>,
+        #[arg(long)]
+        memory: Option<String>,
+        #[arg(long)]
+        root_size: Option<String>,
+        #[arg(long)]
+        home_size: Option<String>,
+        #[arg(long)]
+        token_role: Option<String>,
+        /// Replace the first-boot script (a file, or - for stdin).
+        #[arg(long, value_name = "FILE", conflicts_with = "no_setup")]
+        setup: Option<String>,
+        /// Remove the first-boot script.
+        #[arg(long)]
+        no_setup: bool,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// The first-boot script's state; --run runs it again as root.
+    Setup {
+        name: Option<String>,
+        #[arg(long)]
+        run: bool,
+    },
+    /// Workspace images: build one from a recipe script, list, remove
+    /// (platform admins; docs/guides/workspace-images.md).
+    Image {
+        #[command(subcommand)]
+        cmd: ImageCmd,
+    },
+    /// Delete it and revoke its token; the home too unless --keep-home.
+    #[command(alias = "delete")]
+    Rm {
+        name: Option<String>,
+        #[arg(long)]
+        keep_home: bool,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Mint the workspace a new token (delivered inside, never printed).
+    RotateToken {
+        name: Option<String>,
+    },
+    /// The org's workspace settings; flags change them.
+    Settings {
+        /// Platform admins.
+        #[arg(long)]
+        max_workspaces: Option<u32>,
+        /// A new sandbox's lifetime, e.g. 24h.
+        #[arg(long)]
+        sandbox_expiry: Option<String>,
+        /// Idle timeout for sandboxes, e.g. 2h, or none.
+        #[arg(long)]
+        sandbox_idle: Option<String>,
+        /// Platform admins: new homes as a `volume` or a `host` folder
+        /// ("" for the daemon's default).
+        #[arg(long)]
+        home_kind: Option<String>,
+        /// Platform admins: the storage pool for new home volumes.
+        #[arg(long)]
+        home_pool: Option<String>,
+    },
+    /// SSH's stdio to the workspace over isb serve's websocket: the
+    /// ProxyCommand `isb workspace ssh-config` writes (`isb ssh-proxy`
+    /// for the org's workspace; docs/guides/ssh.md).
+    Ssh {
+        /// The workspace (default: the org's).
+        #[arg(long)]
+        name: Option<String>,
+        /// Whose isb SSH keys to let in, for the local socket.
+        #[arg(long = "as")]
+        keys_of: Option<String>,
+        #[command(flatten)]
+        remote: super::ssh::RemoteArgs,
+    },
+    /// The `Host` block for the org's workspace (`isb ssh-config` for it),
+    /// so plain ssh, scp, editors and `herdr machine add` reach it.
+    SshConfig {
+        /// The workspace (default: the org's).
+        #[arg(long)]
+        name: Option<String>,
+        #[command(flatten)]
+        args: super::ssh::ConfigArgs,
+    },
+    /// The org's sandboxes, with creator, age, expiry and resources.
+    Sandboxes {
+        #[arg(long)]
+        json: bool,
+    },
+    /// The ports the workspace publishes: previews through isb, and
+    /// hostnames through the org's ingress (docs/concepts/workspaces.md#ports).
+    Port {
+        #[command(subcommand)]
+        cmd: PortCmd,
+    },
+    /// Push a sandbox's expiry out.
+    Extend {
+        sandbox: String,
+        /// e.g. 24h (default 24h).
+        #[arg(long)]
+        by: Option<String>,
+        /// A new idle timeout, e.g. 4h, or none.
+        #[arg(long)]
+        idle_timeout: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum PortCmd {
+    /// The published ports.
+    #[command(alias = "list")]
+    Ls {
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Publish a port: previewed through isb, and with --host served
+    /// through the org's ingress (a hostname, `default` or `auto`).
+    Add {
+        port: u16,
+        #[arg(long)]
+        host: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Stop publishing a port.
+    #[command(alias = "remove")]
+    Rm {
+        port: u16,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// A one-time link that opens the port's preview in a browser (60 s).
+    Open {
+        port: u16,
+        /// isb's URL as the browser reaches it (when isb serve has no
+        /// --preview-domain), e.g. http://127.0.0.1:8192.
+        #[arg(long)]
+        origin: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+    },
+}
+
+fn port(org: &Option<String>, cmd: PortCmd) -> Result<u8> {
+    let c = |tool: &str, args: Value| call(tool, with_org(org, args), SHORT);
+    match cmd {
+        PortCmd::Ls { name, json } => {
+            let mut a = json!({});
+            opt(&mut a, "name", name);
+            let v = c("workspace_port_list", a)?;
+            if json {
+                print_json(&v);
+                return Ok(0);
+            }
+            let mut rows = vec![vec![
+                "PORT".into(),
+                "PREVIEW HOST".into(),
+                "URL".into(),
+                "STATE".into(),
+            ]];
+            for p in v["ports"].as_array().into_iter().flatten() {
+                rows.push(vec![
+                    p["port"].to_string(),
+                    p["preview_host"].as_str().unwrap_or("-").into(),
+                    p["url"].as_str().unwrap_or("-").into(),
+                    p["domain"][0]["state"].as_str().unwrap_or("-").into(),
+                ]);
+            }
+            table(rows);
+        }
+        PortCmd::Add { port, host, name } => {
+            let mut a = json!({"port": port});
+            opt(&mut a, "host", host);
+            opt(&mut a, "name", name);
+            println!(
+                "{}",
+                c("workspace_port_add", a)?["message"]
+                    .as_str()
+                    .unwrap_or("published")
+            );
+        }
+        PortCmd::Rm { port, name } => {
+            let mut a = json!({"port": port});
+            opt(&mut a, "name", name);
+            println!(
+                "{}",
+                c("workspace_port_remove", a)?["message"]
+                    .as_str()
+                    .unwrap_or("unpublished")
+            );
+        }
+        PortCmd::Open { port, origin, name } => {
+            let mut a = json!({"port": port});
+            opt(&mut a, "origin", origin);
+            opt(&mut a, "name", name);
+            println!(
+                "{}",
+                c("workspace_port_open", a)?["url"].as_str().unwrap_or("")
+            );
+        }
+    }
+    Ok(0)
+}
+
+/// The org and instance of the org's workspace (the one named, else its
+/// only one), asked of isb serve where ssh will reach it.
+fn workspace_target(
+    org: &Option<String>,
+    name: Option<String>,
+    remote: &super::ssh::RemoteArgs,
+) -> Result<(String, String)> {
+    let o = org
+        .clone()
+        .or_else(|| std::env::var("ISB_ORG").ok().filter(|o| !o.is_empty()))
+        .unwrap_or_else(|| "default".into());
+    if let Some(n) = name {
+        isb::workspace::check_name(&n)?;
+        return Ok((o, n));
+    }
+    let v = remote
+        .clone()
+        .or_env()
+        .remote()?
+        .call_tool(&o, "workspace_get", json!({}))?;
+    match v["workspace"]["name"].as_str() {
+        Some(n) => Ok((o, n.to_string())),
+        None => Err(isb::Error::Invalid(format!(
+            "org {o} has no workspace: isb workspace create"
+        ))),
+    }
+}
+
+/// A file's text, or stdin's for `-`.
+fn read_file(path: &str) -> Result<String> {
+    if path == "-" {
+        let mut s = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut s)?;
+        return Ok(s);
+    }
+    std::fs::read_to_string(path).map_err(|e| isb::Error::Invalid(format!("{path}: {e}")))
+}
+
+/// `isb workspace setup`: the script's state, or `--run` it again.
+fn setup(
+    c: &dyn Fn(&str, Value, Duration) -> Result<Value>,
+    name: Option<String>,
+    run: bool,
+) -> Result<u8> {
+    let mut a = json!({});
+    opt(&mut a, "name", name);
+    if run {
+        let v = c("workspace_setup_run", a, SHORT)?;
+        println!("{}", v["message"].as_str().unwrap_or("requested"));
+        return Ok(0);
+    }
+    let v = c("workspace_get", a, SHORT)?;
+    let w = &v["workspace"];
+    let Some(script) = w["setup"].as_str() else {
+        println!("no setup script (isb workspace update --setup FILE)");
+        return Ok(0);
+    };
+    let st = &w["setup_state"];
+    println!(
+        "setup      {} ({} run(s)), {}{}",
+        st["status"].as_str().unwrap_or("not run"),
+        st["runs"].as_u64().unwrap_or(0),
+        ago(st["at"].as_u64()),
+        match (st["exit_code"].as_i64(), st["message"].as_str()) {
+            (Some(c), _) => format!(", exit {c}"),
+            (_, Some(m)) => format!(": {m}"),
+            _ => String::new(),
+        }
+    );
+    println!(
+        "script     {} bytes; its output is in the history (workspace.setup)",
+        script.len()
+    );
+    Ok(0)
+}
+
+fn with_org(org: &Option<String>, mut args: Value) -> Value {
+    if let Some(o) = org {
+        args["org"] = json!(o);
+    }
+    args
+}
+
+fn opt(v: &mut Value, k: &str, x: Option<impl serde::Serialize>) {
+    if let Some(x) = x {
+        v[k] = json!(x);
+    }
+}
+
+fn ago(t: Option<u64>) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    match t {
+        Some(t) if t <= now => format!("{} ago", isb::workspace::human(now - t)),
+        Some(t) => format!("in {}", isb::workspace::human(t - now)),
+        None => "-".into(),
+    }
+}
+
+fn show(v: &Value) {
+    let w = &v["workspace"];
+    if w.is_null() {
+        println!(
+            "org {} has no workspace: isb workspace create",
+            v["org"].as_str().unwrap_or("?")
+        );
+        return;
+    }
+    let s = |k: &str| w[k].as_str().unwrap_or("-").to_string();
+    println!("workspace  {} (org {})", s("name"), s("org"));
+    println!("status     {}", s("status"));
+    println!("image      {} as user {}", s("image"), s("user"));
+    println!(
+        "home       {} at {} ({})",
+        w["home"]["volume"]
+            .as_str()
+            .or(w["home"]["bind"].as_str())
+            .unwrap_or("-"),
+        s("home_dir"),
+        w["home"]["size"].as_str().unwrap_or("-")
+    );
+    println!(
+        "size       cpus {}, memory {}",
+        w["resources"]["cpus"].as_str().unwrap_or("-"),
+        w["resources"]["memory"].as_str().unwrap_or("-")
+    );
+    let ss = &w["sessions"];
+    println!(
+        "sessions   {} terminal(s){}",
+        ss["terminals"].as_u64().unwrap_or(0),
+        match ss["ssh"].as_u64() {
+            Some(n) => format!(", {n} SSH"),
+            None => String::new(),
+        }
+    );
+    println!(
+        "token      role {}, created {}, last used {} ({} inside)",
+        w["token"]["role"].as_str().unwrap_or("-"),
+        ago(w["token"]["created_at"].as_u64()),
+        ago(w["token"]["last_used"].as_u64()),
+        w["token"]["path"].as_str().unwrap_or("-")
+    );
+    println!(
+        "isb url    {}",
+        w["connect"]["mcp_url"]
+            .as_str()
+            .unwrap_or("- (the org has no bridge address)")
+    );
+    println!("sandboxes  {}", w["sandboxes"].as_u64().unwrap_or(0));
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "predates the lint ratchet; split it when next changed"
+)]
+pub fn workspace(org: &Option<String>, cmd: WorkspaceCmd) -> Result<u8> {
+    let c = |tool: &str, args: Value, t: Duration| call(tool, with_org(org, args), t);
+    match cmd {
+        WorkspaceCmd::Create {
+            image,
+            name,
+            user,
+            cpus,
+            memory,
+            root_size,
+            home_size,
+            env,
+            secrets,
+            token_role,
+            home_bind,
+            setup,
+        } => {
+            let mut a = json!({});
+            opt(
+                &mut a,
+                "setup",
+                setup.as_deref().map(read_file).transpose()?,
+            );
+            opt(&mut a, "image", image);
+            opt(&mut a, "name", name);
+            opt(&mut a, "user", user);
+            opt(&mut a, "cpus", cpus);
+            opt(&mut a, "memory", memory);
+            opt(&mut a, "root_size", root_size);
+            opt(&mut a, "home_size", home_size);
+            opt(&mut a, "token_role", token_role);
+            opt(&mut a, "home_bind", home_bind);
+            if !env.is_empty() {
+                let mut m = serde_json::Map::new();
+                for kv in env {
+                    let (k, v) = kv.split_once('=').ok_or_else(|| {
+                        isb::Error::Invalid(format!("--env {kv:?}: expected KEY=VALUE"))
+                    })?;
+                    m.insert(k.into(), json!(v));
+                }
+                a["env"] = Value::Object(m);
+            }
+            if !secrets.is_empty() {
+                a["secrets"] = json!(secrets);
+            }
+            let v = c("workspace_create", a, LONG)?;
+            println!("{}", v["message"].as_str().unwrap_or("created"));
+            Ok(0)
+        }
+        WorkspaceCmd::Show { name, json } => {
+            let mut a = json!({});
+            opt(&mut a, "name", name);
+            let v = c("workspace_get", a, SHORT)?;
+            if json {
+                print_json(&v);
+            } else {
+                show(&v);
+            }
+            Ok(0)
+        }
+        WorkspaceCmd::Ls { json } => {
+            let v = c("workspace_list", json!({}), SHORT)?;
+            if json {
+                print_json(&v);
+                return Ok(0);
+            }
+            let mut rows = vec![vec![
+                "NAME".into(),
+                "STATUS".into(),
+                "IMAGE".into(),
+                "USER".into(),
+                "TOKEN ROLE".into(),
+                "CREATED".into(),
+            ]];
+            for w in v["workspaces"].as_array().into_iter().flatten() {
+                rows.push(vec![
+                    w["name"].as_str().unwrap_or("").into(),
+                    w["status"].as_str().unwrap_or("").into(),
+                    w["image"].as_str().unwrap_or("").into(),
+                    w["user"].as_str().unwrap_or("").into(),
+                    w["token_role"].as_str().unwrap_or("").into(),
+                    ago(w["created_at"].as_u64()),
+                ]);
+            }
+            table(rows);
+            Ok(0)
+        }
+        WorkspaceCmd::Start { name } => {
+            let mut a = json!({});
+            opt(&mut a, "name", name);
+            c("workspace_start", a, LONG)?;
+            Ok(0)
+        }
+        WorkspaceCmd::Stop { name, yes } => {
+            // Without --yes the daemon refuses, saying what would end.
+            let mut a = json!({"confirm": yes});
+            opt(&mut a, "name", name);
+            c("workspace_stop", a, LONG)?;
+            Ok(0)
+        }
+        WorkspaceCmd::Restart { name, yes } => {
+            let mut a = json!({"confirm": yes});
+            opt(&mut a, "name", name);
+            c("workspace_restart", a, LONG)?;
+            Ok(0)
+        }
+        WorkspaceCmd::Rebuild { name, image, yes } => {
+            let mut a = json!({"confirm": yes});
+            opt(&mut a, "name", name);
+            opt(&mut a, "image", image);
+            c("workspace_rebuild", a, LONG)?;
+            Ok(0)
+        }
+        WorkspaceCmd::Update {
+            name,
+            image,
+            cpus,
+            memory,
+            root_size,
+            home_size,
+            token_role,
+            setup,
+            no_setup,
+            yes,
+        } => {
+            let mut a = json!({"confirm": yes});
+            opt(
+                &mut a,
+                "setup",
+                setup.as_deref().map(read_file).transpose()?,
+            );
+            if no_setup {
+                a["setup"] = json!("");
+            }
+            opt(&mut a, "name", name);
+            opt(&mut a, "image", image);
+            opt(&mut a, "cpus", cpus);
+            opt(&mut a, "memory", memory);
+            opt(&mut a, "root_size", root_size);
+            opt(&mut a, "home_size", home_size);
+            opt(&mut a, "token_role", token_role);
+            let v = c("workspace_update", a, SHORT)?;
+            println!(
+                "changed: {}",
+                v["changed"]
+                    .as_array()
+                    .map(|a| a
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(", "))
+                    .unwrap_or_default()
+            );
+            Ok(0)
+        }
+        WorkspaceCmd::Rm {
+            name,
+            keep_home,
+            yes,
+        } => {
+            let mut a = json!({"confirm": yes, "keep_home": keep_home});
+            opt(&mut a, "name", name);
+            let v = c("workspace_delete", a, LONG)?;
+            println!(
+                "deleted {}; token revoked; home {}",
+                v["name"].as_str().unwrap_or(""),
+                if v["home_deleted"].as_bool() == Some(true) {
+                    "deleted".to_string()
+                } else {
+                    format!("kept ({})", v["home_volume"].as_str().unwrap_or("bind"))
+                }
+            );
+            Ok(0)
+        }
+        WorkspaceCmd::Setup { name, run } => setup(&c, name, run),
+        WorkspaceCmd::Image { cmd } => images::image(cmd),
+        WorkspaceCmd::RotateToken { name } => {
+            let mut a = json!({});
+            opt(&mut a, "name", name);
+            let v = c("workspace_token_rotate", a, SHORT)?;
+            println!("{}", v["message"].as_str().unwrap_or("rotated"));
+            Ok(0)
+        }
+        WorkspaceCmd::Settings {
+            max_workspaces,
+            sandbox_expiry,
+            sandbox_idle,
+            home_kind,
+            home_pool,
+        } => {
+            let mut a = json!({});
+            opt(&mut a, "home_kind", home_kind);
+            opt(&mut a, "home_pool", home_pool);
+            opt(&mut a, "max_workspaces", max_workspaces);
+            opt(&mut a, "sandbox_expiry", sandbox_expiry);
+            opt(&mut a, "sandbox_idle", sandbox_idle);
+            print_json(&c("workspace_settings", a, SHORT)?["settings"]);
+            Ok(0)
+        }
+        WorkspaceCmd::Sandboxes { json } => {
+            let v = c("sandbox_list", json!({"kind": "sandbox"}), SHORT)?;
+            if json {
+                print_json(&v);
+                return Ok(0);
+            }
+            let mut rows = vec![vec![
+                "NAME".into(),
+                "STATUS".into(),
+                "OWNER".into(),
+                "AGE".into(),
+                "EXPIRES".into(),
+                "CPUS".into(),
+                "MEMORY".into(),
+            ]];
+            for s in v["sandboxes"].as_array().into_iter().flatten() {
+                rows.push(vec![
+                    s["name"].as_str().unwrap_or("").into(),
+                    s["status"].as_str().unwrap_or("").into(),
+                    s["owner"].as_str().unwrap_or("-").into(),
+                    s["age_secs"]
+                        .as_u64()
+                        .map(isb::workspace::human)
+                        .unwrap_or_else(|| "-".into()),
+                    ago(s["expires_at"].as_u64()),
+                    s["cpus"].as_str().unwrap_or("-").into(),
+                    s["memory"].as_str().unwrap_or("-").into(),
+                ]);
+            }
+            table(rows);
+            Ok(0)
+        }
+        WorkspaceCmd::Ssh {
+            name,
+            keys_of,
+            remote,
+        } => {
+            let (o, w) = workspace_target(org, name, &remote)?;
+            super::ssh::proxy(&None, &format!("{o}/{w}"), keys_of, &remote)
+        }
+        WorkspaceCmd::SshConfig { name, mut args } => {
+            if !args.targets.is_empty() {
+                return Err(isb::Error::Invalid(
+                    "isb workspace ssh-config takes --name, not instances (isb ssh-config does)"
+                        .into(),
+                ));
+            }
+            let (o, w) = workspace_target(org, name, &args.remote)?;
+            args.targets = vec![format!("{o}/{w}")];
+            super::ssh::config(&None, args)
+        }
+        WorkspaceCmd::Port { cmd } => port(org, cmd),
+        WorkspaceCmd::Extend {
+            sandbox,
+            by,
+            idle_timeout,
+        } => {
+            let mut a = json!({"name": sandbox});
+            opt(&mut a, "by", by);
+            opt(&mut a, "idle_timeout", idle_timeout);
+            let v = c("sandbox_extend", a, SHORT)?;
+            println!("{}", v["message"].as_str().unwrap_or("extended"));
+            Ok(0)
+        }
+    }
+}

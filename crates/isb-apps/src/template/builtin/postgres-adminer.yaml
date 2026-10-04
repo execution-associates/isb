@@ -1,0 +1,43 @@
+id: postgres-adminer
+name: Postgres with Adminer
+description: A PostgreSQL database and Adminer, a web UI to browse and query it.
+version: "17"
+logo: https://wiki.postgresql.org/images/a/a4/PostgreSQL_logo.3colors.svg
+tags: [database, postgres]
+links:
+  website: https://www.postgresql.org
+  docs: https://www.adminer.org
+variables:
+  - name: domain
+    type: domain
+    label: Adminer domain
+    description: The public hostname for Adminer; empty for a generated one.
+  - name: database
+    label: Database
+    default: app
+    max_length: 63
+  - name: password
+    type: password
+    description: The postgres user's password.
+apps:
+  - name: db
+    image: docker:postgres:17-alpine
+    volumes: ["data:/var/lib/postgresql/data"]
+    env:
+      POSTGRES_DB: "${database}"
+      POSTGRES_PASSWORD: "${password}"
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+  - name: adminer
+    image: docker:adminer:latest
+    port: 8080
+    depends_on: [db]
+    env:
+      ADMINER_DEFAULT_SERVER: "${host:db}"
+    domains:
+      - {host: "${domain}"}
+notes:
+  - Apps in the org reach the database at <name>-db.<project>-<env>:5432 as user postgres; the password is the org secret tpl.<name>.password.
+  - Adminer asks for those credentials on its login page.
