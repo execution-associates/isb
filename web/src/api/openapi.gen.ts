@@ -1088,6 +1088,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/app_events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * An app's events
+         * @description The events about one app (kubectl get events --for): deploys, rollouts, health changes, restarts, newest last. `since` is the last seq you saw; stack_wide=true adds the events of its whole stack.
+         */
+        post: operations["app_events"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/app_exec": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a command in an app
+         * @description Run argv in one of an app's replicas and return its exit code and output (kubectl exec, not interactive): by default a running replica, healthy and in rotation first; `replica` (slot) or `instance` choose one. stdout and stderr are each capped at 1 MiB (the end is kept; `truncated` says so). Images built FROM scratch have no shell or tools to run. Members and up.
+         */
+        post: operations["app_exec"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/app_get": {
         parameters: {
             query?: never;
@@ -1128,6 +1168,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/app_logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * An app's logs
+         * @description Recent output of an app's replicas, by app name (kubectl logs deploy/NAME): all replicas, or one with `replica`. `tail` lines (default 200, at most 5000); `since` keeps lines newer than a duration like 10m (for system images; an OCI image's console log has no timestamps). A replaced replica's logs go with it, so there is no `previous`: app_events and history_query say what happened.
+         */
+        post: operations["app_logs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/app_restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restart an app
+         * @description Replace an app's replicas one by one with fresh instances of the same settings (kubectl rollout restart): in the order its update_config says (stop-first by default, start-first for no downtime). Picks up a moved image tag. wait=true blocks until the rollout settles (at most `timeout`, default 10m). Members and up.
+         */
+        post: operations["app_restart"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/app_rollback": {
         parameters: {
             query?: never;
@@ -1142,6 +1222,46 @@ export interface paths {
          * @description Redeploy a previous successful deployment's image (by digest when known) and settings, without building. The app's saved settings are not changed, so the next deploy applies them again.
          */
         post: operations["app_rollback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/app_scale": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Scale an app
+         * @description Set an app's replica count (kubectl scale; 0 stops it without removing it). The app's own replicas setting changes too, so a later deploy keeps the count.
+         */
+        post: operations["app_scale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/app_top": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * An app's resource use
+         * @description Per replica CPU (percent of one core), memory, disk and network counters now, and the totals, next to the app's limits (kubectl top pods). history=true adds each replica's recent CPU samples; metrics_query has the long history.
+         */
+        post: operations["app_top"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1742,6 +1862,126 @@ export interface paths {
          * @description The HTTP(S) edge: its listeners, CA and Caddy process; every routed domain with its URL, certificate state (issued, pending, failed, unsupported, cloudflare, none) and live upstreams; domain conflicts and refusals; and each Cloudflare-tunnel org's cloudflared and API sync. Shows the caller's orgs only.
          */
         post: operations["ingress_status"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/instance_exec": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a command in an instance
+         * @description Run argv in any running instance of the org (a replica, a database, the workspace, a sandbox) and return its exit code and output: as sandbox_exec, with a 60s default timeout (at most 15m) and each stream capped at 1 MiB. A workspace's commands run as its user, in its home. Members and up.
+         */
+        post: operations["instance_exec"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/instance_file_read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read a file in an instance
+         * @description Read one file of an instance, running or stopped (kubectl cp from it, for small files): at most 4 MiB. Text comes back as `utf8`, anything else as `base64` (or ask with `encoding`). It can hold secrets, so it is for members and up, and recorded in the audit log. Not the kernel's /proc, /sys, /dev, nor a workspace's token. For larger files run `head`, `tail` or `split` with instance_exec.
+         */
+        post: operations["instance_file_read"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/instance_file_write": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write a file in an instance
+         * @description Write one file into an instance, running or stopped, replacing it (kubectl cp into it, for small files): at most 2 MiB, as utf8 text or base64, owned by uid/gid (default root) with `mode` (default 0644); missing parent directories are created unless parents=false. Refused: /run/isb, /run/secrets, /etc/isb, files isb delivers from org secrets (an app's `files`, a stack's secrets), the kernel's /proc, /sys, /dev. The audit log records the path and size, not the content. Members and up.
+         */
+        post: operations["instance_file_write"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/instance_get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Describe an instance
+         * @description One instance in full (kubectl describe pod): everything instance_list shows plus image and revision, resource limits, the names of its environment variables (never values), volumes and devices, ports, the domains its service serves and whether traffic reaches this replica, the last health probe, the files isb delivers into it, labels, and its recent history (controller events, incus lifecycle events, restarts).
+         */
+        post: operations["instance_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/instance_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List instances
+         * @description Every instance isb manages in the org, one row each (kubectl get pods): kind (app replica `app`, `database`, a compose service's `stack`, `tunnel`, `workspace`, `sandbox`, `build`), the owning app or stack and service, replica slot, revision, status, health (healthy, unhealthy, starting, none) and whether it is in rotation (receiving traffic), IP, restarts, age, CPU and memory now. Filter by app, stack, service, kind or status. instance_get describes one.
+         */
+        post: operations["instance_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/instance_restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restart an instance
+         * @description Replace one instance (kubectl delete pod): a stack or app replica is deleted and the controller creates its replacement for the slot (wait=true blocks until that one runs, at most `timeout`, default 2m); a sandbox is restarted in place. The workspace has workspace_restart. Members and up.
+         */
+        post: operations["instance_restart"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7029,6 +7269,104 @@ export interface operations {
             };
         };
     };
+    app_events: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    limit?: number;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    since?: number;
+                    stack_wide?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    app_exec: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The command and its arguments; no shell unless you run one: ["sh", "-c", "..."]. */
+                    argv: string[];
+                    cwd?: string;
+                    env?: {
+                        [key: string]: string;
+                    };
+                    /** @description Or the replica's instance name. */
+                    instance?: string;
+                    /** @description The app. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description The replica's slot (default: a running one, preferring healthy replicas in rotation). */
+                    replica?: number;
+                    /** @description Text fed to the command's stdin (at most 1 MiB). */
+                    stdin?: string;
+                    /** @description Kill the command after this long, e.g. 30s (default 60s, at most 15m). A command that runs out answers timed_out with the output so far. */
+                    timeout?: string;
+                    /** @description A guest user name, uid or uid:gid (default: the instance's default, root). */
+                    user?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
     app_get: {
         parameters: {
             query?: never;
@@ -7108,6 +7446,93 @@ export interface operations {
             };
         };
     };
+    app_logs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The app. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description One replica's slot. */
+                    replica?: number;
+                    /** @description e.g. 10m, 2h. */
+                    since?: string;
+                    tail?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    app_restart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description How long wait may take, e.g. 5m. */
+                    timeout?: string;
+                    wait?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
     app_rollback: {
         parameters: {
             query?: never;
@@ -7127,6 +7552,86 @@ export interface operations {
                     timeout?: string;
                     /** @description Wait until the deployment finishes (default false). */
                     wait?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    app_scale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    replicas: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    app_top: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    history?: boolean;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
                 };
             };
         };
@@ -8470,6 +8975,282 @@ export interface operations {
                 "application/json": {
                     /** @description The org to act in (default: default). */
                     org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    instance_exec: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The command and its arguments; no shell unless you run one: ["sh", "-c", "..."]. */
+                    argv: string[];
+                    cwd?: string;
+                    env?: {
+                        [key: string]: string;
+                    };
+                    /** @description The instance's name, from instance_list. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description Text fed to the command's stdin (at most 1 MiB). */
+                    stdin?: string;
+                    /** @description Kill the command after this long, e.g. 30s (default 60s, at most 15m). A command that runs out answers timed_out with the output so far. */
+                    timeout?: string;
+                    /** @description A guest user name, uid or uid:gid (default: the instance's default, root). */
+                    user?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    instance_file_read: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    encoding?: "auto" | "utf8" | "base64";
+                    /** @description The instance's name. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description Absolute path in the instance. */
+                    path: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    instance_file_write: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    content: string;
+                    /** @enum {string} */
+                    encoding?: "utf8" | "base64";
+                    gid?: number;
+                    /** @description Octal, e.g. 0644. */
+                    mode?: string;
+                    /** @description The instance's name. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description Create missing directories (default true). */
+                    parents?: boolean;
+                    /** @description Absolute path in the instance. */
+                    path: string;
+                    uid?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    instance_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description History rows to return (default 25). */
+                    history?: number;
+                    /** @description The instance's name, from instance_list. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    instance_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    app?: string;
+                    /** @enum {string} */
+                    kind?: "app" | "database" | "stack" | "tunnel" | "workspace" | "build" | "sandbox";
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    service?: string;
+                    stack?: string;
+                    /** @description Running, Stopped, ... */
+                    status?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    instance_restart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The instance's name, from instance_list. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    timeout?: string;
+                    wait?: boolean;
                 };
             };
         };

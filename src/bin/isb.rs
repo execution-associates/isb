@@ -27,6 +27,8 @@ mod data;
 mod host;
 #[path = "isb/instances.rs"]
 mod instances;
+#[path = "isb/kube.rs"]
+mod kube;
 #[path = "isb/machine.rs"]
 mod machine;
 #[path = "isb/notify.rs"]
@@ -309,6 +311,13 @@ enum Cmd {
     /// into its project environment's stack (docs/guides/deploy-apps.md).
     #[command(subcommand)]
     App(apps::AppCmd),
+    /// Instances isb manages in the org, like kubectl's pods: list, describe,
+    /// exec, restart (docs/guides/kubectl.md).
+    #[command(subcommand)]
+    Instance(kube::InstanceCmd),
+    /// Copy a small file between this host and an instance of the org:
+    /// `isb cp ./app.conf web-1:/etc/app.conf`, `isb cp web-1:/var/log/x .`.
+    Cp { src: String, dst: String },
     /// One-click apps: deploy a template from the catalog into a project
     /// environment (docs/guides/templates.md).
     #[command(subcommand)]
@@ -552,6 +561,8 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         Cmd::Secret(s) => secret(ctx, s),
         Cmd::Project(p) => apps::project(&ctx.global.org, p),
         Cmd::App(a) => apps::app(&ctx.global.org, a),
+        Cmd::Instance(c) => kube::instance(&ctx.global.org, c),
+        Cmd::Cp { src, dst } => kube::cp(&ctx.global.org, &src, &dst),
         Cmd::Template(t) => templates::template(&ctx.global.org, t),
         Cmd::Db(c) => data::db(&ctx.global.org, c),
         Cmd::Backup(c) => data::backup(&ctx.global.org, c),

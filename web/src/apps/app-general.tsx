@@ -1,7 +1,8 @@
 // The General tab: source, build, webhook, scale and runtime settings.
 import { useQueryClient } from "@tanstack/react-query";
-import { Eye, KeyRound, Loader2, Minus, Plus, RefreshCw } from "lucide-react";
+import { Eye, KeyRound, Loader2, Minus, Plus, RefreshCw, RotateCw, TerminalSquare } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
 import { CopyField, Field, FormError } from "@/components/form";
@@ -426,6 +427,7 @@ function ScaleSection({ org, app, writer }: Props) {
           </div>
         )}
       </div>
+      {svc && instances.length > 0 && <ReplicaList org={org} app={app} instances={instances} writer={writer} />}
       {(n === 0 || app.volumes?.length) && (
         <p className="mt-3 text-xs text-muted-foreground">
           {n === 0 ? "0 stops the app without removing it. " : ""}
@@ -438,6 +440,56 @@ function ScaleSection({ org, app, writer }: Props) {
         </div>
       )}
     </Section>
+  );
+}
+
+/** The app's replicas, each with Restart (the controller replaces it) and a terminal in it. */
+function ReplicaList({ org, app, instances, writer }: { org: string; app: App; instances: InstanceDetail[]; writer: boolean }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState<string | null>(null);
+  const restart = async (i: InstanceDetail) => {
+    setBusy(i.name);
+    try {
+      await callTool("instance_restart", { name: i.name }, org);
+      await qc.invalidateQueries({ queryKey: keys.org(org) });
+      toast.success(`Replacing replica ${i.slot}: its successor starts now`);
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <ul className="mt-4 divide-y rounded-lg border" aria-label="Replicas">
+      {instances.map((i) => (
+        <li key={i.name} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 text-[13px]">
+          <StatusDot tone={replicaTone(i)} className="size-2.5" title={i.status} />
+          <span className="font-medium">Replica {i.slot}</span>
+          <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">{i.name}</span>
+          <span className="text-muted-foreground">
+            {i.status.toLowerCase()}
+            {i.health !== "none" ? `, ${i.health}` : ""}
+            {i.in_rotation ? "" : ", out of rotation"}
+            {i.restarts > 0 ? `, ${i.restarts} restart${i.restarts === 1 ? "" : "s"}` : ""}
+            {i.ip ? `, ${i.ip}` : ""}
+          </span>
+          {writer && (
+            <span className="ml-auto flex items-center gap-1">
+              <Button type="button" variant="ghost" size="sm" disabled={busy !== null} onClick={() => restart(i)} aria-label={`Restart replica ${i.slot}`}>
+                {busy === i.name ? <Loader2 className="animate-spin" /> : <RotateCw />}
+                Restart
+              </Button>
+              <Button asChild variant="ghost" size="sm" disabled={i.status !== "Running"}>
+                <Link to={`/orgs/${org}/apps/${app.name}/terminal?replica=${i.slot}`} aria-label={`Open a terminal in replica ${i.slot}`}>
+                  <TerminalSquare />
+                  Open terminal
+                </Link>
+              </Button>
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }
 

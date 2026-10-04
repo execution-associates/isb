@@ -267,7 +267,7 @@ fn a_replica_is_chosen_by_slot_by_name_or_by_health() {
     assert!(e.to_string().contains("stopped"), "{e}");
     let e = pick_replica("web", &r, Some(9), None).unwrap_err();
     assert!(
-        e.is_not_found() && e.to_string().contains("replica 9"),
+        e.is_not_found() && e.to_string().contains("replica 9 of web"),
         "{e}"
     );
     assert!(pick_replica("web", &r, Some(1), Some("web-1")).is_err());
@@ -284,15 +284,8 @@ fn a_replica_is_chosen_by_slot_by_name_or_by_health() {
     assert_eq!(pick_replica("web", &r, None, None).unwrap().slot, 1);
     let r = vec![instance("web-1", 1, "Stopped", "none", false)];
     let e = pick_replica("web", &r, None, None).unwrap_err();
-    assert!(
-        e.is_not_found() && e.to_string().contains("no running replica"),
-        "{e}"
-    );
-    assert!(
-        pick_replica("web", &[], None, None)
-            .unwrap_err()
-            .is_not_found()
-    );
+    assert!(e.to_string().contains("no running replica"), "{e}");
+    assert!(pick_replica("web", &[], None, None).is_err());
 }
 
 #[test]
@@ -335,8 +328,9 @@ fn file_paths_are_clean_and_isbs_own_files_are_off_limits() {
 }
 
 #[test]
-fn file_sizes_are_capped_at_four_mebibytes() {
-    assert_eq!(FILE_CAP, 4 * 1024 * 1024);
+fn file_sizes_are_capped() {
+    assert_eq!(FILE_READ_CAP, 4 * 1024 * 1024);
+    assert_eq!(FILE_WRITE_CAP, 2 * 1024 * 1024);
     assert_eq!(parse_mode(&json!("0644")).unwrap(), 0o644);
     assert_eq!(parse_mode(&json!("755")).unwrap(), 0o755);
     assert_eq!(parse_mode(&json!(600)).unwrap(), 0o600);

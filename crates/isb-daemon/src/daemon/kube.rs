@@ -27,8 +27,11 @@ pub(super) const EXEC_STDIN_CAP: usize = 1024 * 1024;
 /// Default and largest exec timeouts.
 pub(super) const EXEC_TIMEOUT_DEFAULT: Duration = Duration::from_secs(60);
 pub(super) const EXEC_TIMEOUT_MAX: Duration = Duration::from_secs(15 * 60);
-/// The largest file `instance_file_read` returns and `instance_file_write` takes.
-pub(super) const FILE_CAP: usize = 4 * 1024 * 1024;
+/// The largest file `instance_file_read` returns.
+pub(super) const FILE_READ_CAP: usize = 4 * 1024 * 1024;
+/// The largest file `instance_file_write` takes: base64 of it, in a request,
+/// must fit the HTTP body limit (4 MiB).
+pub(super) const FILE_WRITE_CAP: usize = 2 * 1024 * 1024;
 
 /// Tools that only read.
 pub(super) const READS: &[&str] = &[
@@ -223,13 +226,13 @@ pub(super) fn pick_replica<'a>(
             return Err(Error::invalid("give replica or instance, not both"));
         }
         (Some(n), None) => Some(replicas.iter().find(|i| i.slot == n).ok_or_else(|| {
-            Error::NotFound(format!("{app} has no replica {n} (replicas: {})", list()))
+            Error::NotFound(format!("replica {n} of {app} (it has: {})", list()))
         })?),
         (None, Some(n)) => Some(
             replicas
                 .iter()
                 .find(|i| i.name == n)
-                .ok_or_else(|| Error::NotFound(format!("{app} has no replica {n}")))?,
+                .ok_or_else(|| Error::NotFound(format!("replica {n} of {app}")))?,
         ),
         (None, None) => None,
     };
@@ -245,7 +248,7 @@ pub(super) fn pick_replica<'a>(
             .filter(|i| i.status == "Running")
             .min_by_key(|i| (!i.in_rotation, i.health != "healthy", i.slot))
             .ok_or_else(|| {
-                Error::NotFound(format!(
+                Error::invalid(format!(
                     "{app} has no running replica{}",
                     if replicas.is_empty() {
                         String::new()
@@ -916,7 +919,7 @@ fn app_logs(d: &Daemon, a: Value, _c: &Caller) -> Result<Value> {
     let (_, stack, svc) = app_service(d, &org, &a.name)?;
     if let Some(n) = a.replica {
         if !svc.instances.iter().any(|i| i.slot == n) {
-            return Err(Error::NotFound(format!("{} has no replica {n}", a.name)));
+            return Err(Error::NotFound(format!("replica {n} of {}", a.name)));
         }
     }
     let cutoff = match &a.since {
@@ -1292,11 +1295,11 @@ fn instance_file_read(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     let body = oc
         .read_file(&a.name, &path)?
         .ok_or_else(|| Error::NotFound(format!("{path} in {}", a.name)))?;
-    if body.len() > FILE_CAP {
+    if body.len() > FILE_READ_CAP {
         return Err(Error::invalid(format!(
             "{path} is {} bytes; instance_file_read returns at most {} MiB (instance_exec with head, tail or split reads a part)",
             body.len(),
-            FILE_CAP / 1024 / 1024
+            FILE_READ_CAP / 1024 / 1024
         )));
     }
     let text = std::str::from_utf8(&body)
@@ -1332,11 +1335,11 @@ fn instance_file_write(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
             .map_err(|e| Error::invalid(format!("content is not base64: {e}")))?,
         _ => return Err(Error::invalid("encoding is utf8 or base64")),
     };
-    if data.len() > FILE_CAP {
+    if data.len() > FILE_WRITE_CAP {
         return Err(Error::invalid(format!(
             "{} bytes is over the {} MiB limit of instance_file_write",
             data.len(),
-            FILE_CAP / 1024 / 1024
+            FILE_WRITE_CAP / 1024 / 1024
         )));
     }
     if let Some(why) = refuse_path(&path, true, &managed_for(d, &org, &info)) {
@@ -1513,7 +1516,7 @@ pub(super) fn register(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<(
         d,
         "app_restart",
         "Restart an app",
-        "Replace an app's replicas one by one with fresh instances of the same revision (kubectl rollout restart): in the order its update_config says (stop-first by default, start-first for no downtime). Picks up a moved image tag. wait=true blocks until the rollout settles (at most `timeout`, default 10m). Members and up.",
+        "Replace an app's replicas one by one with fresh instances of the same settings (kubectl rollout restart): in the order its update_config says (stop-first by default, start-first for no downtime). Picks up a moved image tag. wait=true blocks until the rollout settles (at most `timeout`, default 10m). Members and up.",
         obj(
             json!({
                 "name": {"type": "string"},
@@ -1577,7 +1580,7 @@ pub(super) fn register(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<(
         d,
         "instance_file_write",
         "Write a file in an instance",
-        "Write one file into an instance, running or stopped, replacing it (kubectl cp into it, for small files): at most 4 MiB, as utf8 text or base64, owned by uid/gid (default root) with `mode` (default 0644); missing parent directories are created unless parents=false. Refused: /run/isb, /run/secrets, /etc/isb, files isb delivers from org secrets (an app's `files`, a stack's secrets), the kernel's /proc, /sys, /dev. The audit log records the path and size, not the content. Members and up.",
+        "Write one file into an instance, running or stopped, replacing it (kubectl cp into it, for small files): at most 2 MiB, as utf8 text or base64, owned by uid/gid (default root) with `mode` (default 0644); missing parent directories are created unless parents=false. Refused: /run/isb, /run/secrets, /etc/isb, files isb delivers from org secrets (an app's `files`, a stack's secrets), the kernel's /proc, /sys, /dev. The audit log records the path and size, not the content. Members and up.",
         obj(
             json!({
                 "name": {"type": "string", "description": "The instance's name."},

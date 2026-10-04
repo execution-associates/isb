@@ -15,9 +15,9 @@ endpoint has neither a tool nor a documented reason in the
 
 | Category | Count |
 |---|---|
-| Tools in the web UI and MCP | 142 |
+| Tools in the web UI and MCP | 143 |
 | Account tools, the web UI through the identity endpoints | 20 |
-| Tools for MCP and the CLI only | 18 |
+| Tools for MCP and the CLI only | 29 |
 | Identity endpoints with a tool | 21 |
 | Identity endpoints for the browser only | 21 |
 | Other routes with no tool | 4 |
@@ -46,6 +46,22 @@ a person on the web does not need it.
 | Extend or remove a sandbox | Workspace, Sandboxes: Extend by, Delete | `sandbox_extend`, `sandbox_remove` |
 | Create a sandbox, run a command in it | *MCP/CLI only*: sandboxes are agents' scratch machines; a person opens a shell in one from Workspace, Sandboxes, Shell (the terminal websocket) | `sandbox_create`, `sandbox_exec` |
 | Sandbox defaults (lifetime, idle limit) | Workspace, Sandboxes: Defaults (admins) | `workspace_settings` |
+
+### Instances: look inside and act on what runs
+
+The tools behind [isb for kubectl users](../docs/guides/kubectl.md): an agent
+inspects and drives an org's running instances the way `kubectl` does a
+cluster's pods. A person has the app page.
+
+| Capability | Web UI | MCP |
+|---|---|---|
+| List the org's instances, describe one | *MCP/CLI only*: the app page shows its replicas (General: Scale) with their health, and Monitoring their CPU and memory | `instance_list`, `instance_get` |
+| Run a command in an app's replica or any instance | *MCP/CLI only*: a person opens a shell: App, Terminal (the terminal websocket) | `app_exec`, `instance_exec` |
+| An app's logs by app name, its resource use, its events | *MCP/CLI only*: the Logs tab calls `stack_logs`, Monitoring reads `metrics_query`, and the activity feed shows the events | `app_logs`, `app_top`, `app_events` |
+| Restart an app's replicas, rolling | *MCP/CLI only*: a person deploys, or restarts one replica at a time | `app_restart` |
+| Scale an app by its name | *MCP/CLI only*: the Scale control saves the setting and calls `stack_scale` | `app_scale` |
+| Replace one replica | App, General: Scale, a replica's Restart | `instance_restart` |
+| Copy a small file into or out of an instance | *MCP/CLI only*: the terminal and `isb cp` serve the same need | `instance_file_read`, `instance_file_write` |
 
 ### Workspaces
 

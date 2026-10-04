@@ -3,6 +3,7 @@
 // Loaded on demand: xterm is the biggest thing on this page.
 import { TerminalSquare } from "lucide-react";
 import { useState } from "react";
+import { useSearchParams } from "react-router";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -15,7 +16,9 @@ import { terminalUrl } from "./util";
 export default function TerminalTab({ org, app }: { org: string; app: App }) {
   const stack = useStack(org, app.stack);
   const svc = serviceOf(stack.data, app.name);
-  const [slot, setSlot] = useState("auto");
+  // `?replica=N` opens it on that replica (the General tab's Open terminal).
+  const [params] = useSearchParams();
+  const [slot, setSlot] = useState(() => (/^\d+$/.test(params.get("replica") ?? "") ? params.get("replica")! : "auto"));
 
   if (stack.isLoading) return <Skeleton className="h-[min(60svh,32rem)] rounded-xl" />;
   if (!svc || svc.replicas === 0) {

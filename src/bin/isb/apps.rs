@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 
 use isb::{Error, Result};
 
+use super::kube;
 use super::{SHORT, call, print_json, table};
 
 #[derive(Subcommand)]
@@ -160,11 +161,46 @@ pub enum AppCmd {
         json: bool,
     },
     /// A deployment's log (default: the latest); -f follows it.
-    Logs {
+    DeployLog {
         name: String,
         deployment: Option<u64>,
         #[arg(short, long)]
         follow: bool,
+    },
+    /// The app's replicas' recent output (kubectl logs): all of them, or
+    /// one with --replica; --tail N, --since 10m.
+    Logs(kube::AppLogs),
+    /// Run a command in one of the app's replicas, as kubectl exec does
+    /// (not interactive): `isb app exec web -- ls -l`; -i feeds stdin.
+    Exec {
+        name: String,
+        #[command(flatten)]
+        a: kube::ExecArgs,
+    },
+    /// Replace the app's replicas one by one with the same settings
+    /// (kubectl rollout restart).
+    Restart {
+        name: String,
+        /// Wait until the rollout settles.
+        #[arg(long)]
+        wait: bool,
+    },
+    /// Set the app's replica count (kubectl scale); 0 stops it.
+    Scale { name: String, replicas: u32 },
+    /// Per replica CPU and memory now (kubectl top pods).
+    Top {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Events about the app: deploys, rollouts, health, restarts.
+    Events {
+        name: String,
+        /// Also the events of the whole stack.
+        #[arg(long)]
+        stack_wide: bool,
+        #[arg(long)]
+        json: bool,
     },
     /// Print the app's environment as .env text.
     Env { name: String },
@@ -623,7 +659,17 @@ pub fn app(org: &Option<String>, cmd: AppCmd) -> Result<u8> {
             }
             table(rows);
         }
-        AppCmd::Logs {
+        AppCmd::Logs(a) => return kube::logs(org, a),
+        AppCmd::Exec { name, a } => return kube::exec(org, "app_exec", &name, &a),
+        AppCmd::Restart { name, wait } => return kube::restart(org, &name, wait),
+        AppCmd::Scale { name, replicas } => return kube::scale(org, &name, replicas),
+        AppCmd::Top { name, json } => return kube::top(org, &name, json),
+        AppCmd::Events {
+            name,
+            stack_wide,
+            json,
+        } => return kube::events(org, &name, stack_wide, json),
+        AppCmd::DeployLog {
             name,
             deployment,
             follow: f,
