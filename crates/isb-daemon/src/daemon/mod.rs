@@ -35,6 +35,7 @@ pub mod data;
 mod default_org;
 mod dns;
 mod egress;
+mod kube;
 mod monitors;
 mod notify;
 mod orgs;
@@ -858,6 +859,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
     tools::sandbox_exec_tool(&mut r, &d, &ann)?;
     tools::sandbox_remove_tool(&mut r, &d, &ann)?;
     tools::sandbox_extend_tool(&mut r, &d, &ann)?;
+    kube::register(&mut r, &d, &ann)?;
     apps::register(&mut r, d.apps.clone(), d.ingress.is_some())?;
     previews::register(&mut r, d.apps.clone())?;
     let mut t = templates::Templates::new(

@@ -29,6 +29,9 @@ pub const DEPLOY_TOOLS: &[&str] = &[
     "stack_redeploy",
     "stack_rollback",
     "stack_scale",
+    "app_scale",
+    "app_restart",
+    "instance_restart",
     "app_deploy",
     "app_rollback",
     "preview_redeploy",
@@ -233,7 +236,15 @@ pub fn entry(a: &Audited, record_all: bool) -> Option<NewEntry> {
     if !(terminal || !cls.read_only || record_all || refused || superadmin) {
         return None;
     }
-    let details = super::authorize::scoped(safe_details(a.args), a.caller);
+    let mut details = safe_details(a.args);
+    // What these calls did, beyond the usual names: the argv, a path, sizes.
+    if let (Some(extra), Some(o)) = (
+        super::kube::audit_details(a.action, a.args),
+        details.as_object_mut(),
+    ) {
+        o.extend(extra.as_object().cloned().unwrap_or_default());
+    }
+    let details = super::authorize::scoped(details, a.caller);
     // The org tools act on the org they name.
     let target = if a.action.starts_with("org_") {
         details.get("org").and_then(Value::as_str).map(String::from)
