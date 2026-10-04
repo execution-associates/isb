@@ -174,7 +174,8 @@ shown read-only. When the host lacks isb's default image, the form says so
 and platform admins get **Build the default image**, which follows the
 build's log and picks the image when it is published ([Workspace
 images](../guides/workspace-images.md)). Members and viewers see the form
-read-only with why.
+read-only with why. Creating the workspace leaves it running, and the
+Terminal tab opens its first shell by itself.
 
 The header shows the status, image, user, live sessions and sandbox count,
 and the warning badge **Nesting allowed** when a superadmin lets the

@@ -20,7 +20,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { errorMessage } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 import { type Workspace, wsCall } from "./api";
-import { detached, modeLabel, nextShellName, sessionNameProblem, type TerminalSession, terminalKeys, terminalUrl, useTerminals } from "./terminal-sessions";
+import { detached, justCreated, modeLabel, nextShellName, sessionNameProblem, type TerminalSession, terminalKeys, terminalUrl, useTerminals } from "./terminal-sessions";
 
 interface Tab {
   id: number;
@@ -60,7 +60,7 @@ function Terminals({ org, ws, herdr, sessions, mode }: { org: string; ws: Worksp
   const [tabs, setTabs] = useState<Tab[]>(() =>
     herdr && sessions.length
       ? sessions.map((s) => ({ id: next++, kind: "workspace" as const, name: ws.name, auto: true, session: s.name }))
-      : [{ id: next++, kind: "workspace", name: ws.name, auto: false, n: 1, session: herdr ? "Shell 1" : undefined }],
+      : [{ id: next++, kind: "workspace", name: ws.name, auto: ws.status.toLowerCase() === "running" && justCreated(org), n: 1, session: herdr ? "Shell 1" : undefined }],
   );
   const [active, setActive] = useState(tabs[0].id);
   const [closing, setClosing] = useState<Tab | null>(null);

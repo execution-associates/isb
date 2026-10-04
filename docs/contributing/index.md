@@ -36,6 +36,38 @@ create (as `isb serve` does) if the host lacks it and leave in place. Because th
 the incus socket, build the test binaries in the sandbox without it
 (`cargo test --no-run`) and run them on the host.
 
+## Build prerequisites
+
+A sandbox image such as `dev-base` has `mise` and a `dev` user but no Rust.
+Inside the sandbox, as `dev` (except `apt`, which is root's):
+
+```sh
+mise use -g rust@stable bun@latest                     # cargo, rustc, rustup, bun
+rustup toolchain install 1.85 --profile minimal \
+  -c clippy -c rustfmt                                 # the minimum supported version: cargo +1.85 build
+rustup target add x86_64-unknown-linux-musl            # the release target (aarch64-... on arm64)
+apt-get install -y musl-tools                          # root: provides musl-gcc
+```
+
+The web UI is embedded at build time: `cd web && bun install --frozen-lockfile
+&& bun run build` before a Rust build that should serve it (a build without
+`web/dist` embeds a placeholder page).
+
+### Building the release binary
+
+Releases are static musl binaries. cc-rs does not find a musl compiler by
+itself (`ToolNotFound: x86_64-linux-musl-gcc`), so the target needs
+`CC_x86_64_unknown_linux_musl=musl-gcc`. `scripts/build-release.sh` does the
+whole job, as `release.yml` does: it checks the prerequisites and names what
+is missing, sets the compiler variable, builds the web UI, runs `cargo build
+--release --locked --target ...-unknown-linux-musl` and checks the result.
+
+```sh
+scripts/build-release.sh --check    # only the prerequisites
+scripts/build-release.sh            # the binary: $CARGO_TARGET_DIR/<target>/release/isb
+scripts/check.sh --release          # the checks below, then that build
+```
+
 ## Layout
 
 isb is a cargo workspace. The `isb` package at the root is the CLI

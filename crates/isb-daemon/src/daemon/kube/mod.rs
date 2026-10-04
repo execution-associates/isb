@@ -198,6 +198,13 @@ pub(super) fn details(a: &crate::server::mcp::Audited) -> Value {
     if let (Some(extra), Some(o)) = (audit_details(a.action, a.args), out.as_object_mut()) {
         o.extend(extra.as_object().cloned().unwrap_or_default());
     }
+    // A read says so, for the web UI's activity feed: a read is evidence, not news.
+    let read = a
+        .tool
+        .is_some_and(|t| super::audit::class_for(t, a.args).read_only);
+    if let (true, Some(o)) = (read, out.as_object_mut()) {
+        o.insert("read_only".into(), json!(true));
+    }
     super::authorize::scoped(out, a.caller)
 }
 

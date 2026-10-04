@@ -16,7 +16,8 @@ creates what is missing and reconciles what exists, changing only what differs. 
 
 - With no `-f`, isb looks in the current directory for `isb.yaml`, then
   `isb.yml`, and merges `isb.override.yaml` (or `isb.override.yml`) over it if
-  one exists.
+  one exists. Only that directory is searched, never a parent; with no file
+  there, the command fails saying so.
 - `-f FILE` may be repeated, and then no override file is loaded. It is accepted
   before the subcommand and after the compose-aware ones (`up`, `down`, `plan`,
   `config`, `ps`, `inspect`, `exec`, `logs`, `stack deploy`):
@@ -1053,7 +1054,7 @@ Compose (take service names; all services when none are given):
 | `down [SVC...] [--volumes]` | Delete the sandboxes (running ones are stopped). With `--volumes` and no service list, also delete the file's non-external named volumes: every one a service mounts, in the pool `up` used (mount `pool`, else top-level `pool`, else that sandbox's `storage` pool), plus declared ones no service mounts (in their `pool`, `auto` meaning the host default). A volume still in use is kept with a message. With a service list, `--volumes` is ignored with a message. |
 | `config [--services]` | Print the resolved file. |
 | `ps [SVC...] [--json]` | Status per service; without a compose file, running instances. |
-| `exec TARGET [-u USER] [-w CWD] [-e K=V] [-l] [-t\|-T] [-n] [--timeout D] -- ARGV...` | Run argv (no shell). `TARGET` is a service if a compose file defines it, else an instance. TTY when stdin is a terminal. Exit code is the command's, or 125 if isb itself failed. |
+| `exec TARGET [-u USER] [-w CWD] [-e K=V] [-l] [-t\|-T] [-i\|-n] [--timeout D] -- ARGV...` | Run argv (no shell). `TARGET` is a service (by key or by its instance name) if a compose file defines it, else an instance. TTY when stdin is a terminal; stdin is forwarded for a terminal, `-T` or `-i`, else the command sees EOF. Exit code is the command's, or 125 if isb itself failed. |
 | `inspect NAME [--json]` | One sandbox, by service or instance name. |
 | `logs SERVICE [-n 100]` | Recent output of a long-running (`restart`) or OCI service: its unit's journal, or the console log. |
 

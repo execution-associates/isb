@@ -302,7 +302,7 @@ pub(super) fn register(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<(
     let exec_props = |name_doc: &str| {
         json!({
             "name": {"type": "string", "description": name_doc},
-            "argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "The command and its arguments; no shell unless you run one: [\"sh\", \"-c\", \"...\"]."},
+            "argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "The command and its arguments; no shell unless you run one: [\"sh\", \"-c\", \"...\"]. `command` is accepted as an alias (a string runs as `sh -c`)."},
             "cwd": {"type": "string"},
             "user": {"type": "string", "description": "A guest user name, uid or uid:gid (default: the instance's default, root)."},
             "env": {"type": "object", "additionalProperties": {"type": "string"}},
@@ -310,7 +310,7 @@ pub(super) fn register(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<(
             "timeout": {"type": "string", "description": "Kill the command after this long, e.g. 30s (default 60s, at most 15m). A command that runs out answers timed_out with the output so far."}
         })
     };
-    let mut app_exec_props = exec_props("The app.");
+    let mut app_exec_props = exec_props("The app's name (`app` is accepted as an alias).");
     app_exec_props["replica"] = json!({"type": "integer", "minimum": 1, "description": "The replica's slot (default: a running one, preferring healthy replicas in rotation)."});
     app_exec_props["instance"] =
         json!({"type": "string", "description": "Or the replica's instance name."});

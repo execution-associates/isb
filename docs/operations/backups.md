@@ -24,6 +24,14 @@ The databases in the state directory (`isb.db`, `audit.db`,
 `orgs/<org>/metrics.db`) are SQLite in WAL mode. For a consistent copy, stop
 the daemon while you copy (`systemctl --user stop isb`: apps keep running,
 only published ports and domains pause), or copy from a filesystem snapshot.
+The state directory holds sockets (`ingress/run/admin.sock` while ingress
+runs), which a copy has no use for; leave them out, or `tar` warns about each:
+
+```console
+$ systemctl --user stop isb
+$ tar --exclude='*.sock' -czf isb-state.tgz -C ~/.local/state isb
+$ systemctl --user start isb
+```
 
 What is **not** in the state directory, and how it is covered:
 

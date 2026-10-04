@@ -591,7 +591,7 @@ pub(super) fn register(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<(
         "Recent output of an app's replicas, by app name (kubectl logs deploy/NAME): all replicas, or one with `replica`. `tail` lines (default 200, at most 5000); `since` keeps lines newer than a duration like 10m (for system images; an OCI image's console log has no timestamps). A replaced replica's logs go with it, so there is no `previous`: app_events and history_query say what happened.",
         obj(
             json!({
-                "name": {"type": "string", "description": "The app."},
+                "name": {"type": "string", "description": "The app's name (`app` is accepted as an alias)."},
                 "replica": {"type": "integer", "minimum": 1, "description": "One replica's slot."},
                 "tail": {"type": "integer", "minimum": 1, "maximum": 5000},
                 "since": {"type": "string", "description": "e.g. 10m, 2h."}

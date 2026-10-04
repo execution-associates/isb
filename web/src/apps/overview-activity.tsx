@@ -121,6 +121,9 @@ export function actorLabel(a: string | null | undefined): string | undefined {
   return a;
 }
 
+/** Words in an audit action that make it a read. */
+const READS = new Set(["list", "get", "status", "query", "overview", "events", "export", "validate", "logs", "top", "show", "inspect", "search"]);
+
 /** Account events: [kind, text before the object]; null leaves it out (personal, not the org's news). */
 const AUTH: Record<string, [ActivityKind, string] | null> = {
   invitation_create: ["member", "Invited"],
@@ -147,7 +150,10 @@ function auditEntry(i: HistoryItem): ActivityEntry | null {
     }
     return { ...base, kind: failed ? "warn" : a[0], before: subject ? `${a[1]} ` : a[1], subject };
   }
+  // A read is evidence, not news: the daemon marks them, and older rows are
+  // told by their action's name (monitor_list, overview, ...).
   const parts = action.split("_");
+  if (i.details?.read_only === true || parts.some((p) => READS.has(p))) return null;
   const verbAt = parts.findIndex((p) => p in VERBS);
   let kind: ActivityKind = "update";
   let before: string;

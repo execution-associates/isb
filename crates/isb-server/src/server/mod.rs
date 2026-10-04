@@ -25,6 +25,7 @@
 //!   on those hosts.
 
 pub mod access;
+pub mod aliases;
 pub use isb_core::serve_client as client;
 #[cfg(test)]
 mod client_tests;

@@ -95,7 +95,12 @@ pub(crate) struct ExecArgs {
     /// Never allocate a pseudo-terminal.
     #[arg(short = 'T', long)]
     pub(crate) no_tty: bool,
-    /// Do not forward stdin (the command sees EOF).
+    /// Forward stdin even when it is not a terminal (a terminal's stdin, and
+    /// `-T`'s, is always forwarded). Without one of those the command sees
+    /// EOF, so `isb exec` inside a script never reads the script.
+    #[arg(short = 'i', long, conflicts_with = "no_stdin")]
+    pub(crate) interactive: bool,
+    /// Never forward stdin (the command sees EOF), even from a terminal.
     #[arg(short = 'n', long)]
     pub(crate) no_stdin: bool,
     /// Kill the command after this long (default: no limit).
@@ -339,6 +344,27 @@ pub(crate) fn ps(ctx: &Ctx, services: Vec<String>, json: bool) -> Result<u8> {
     Ok(0)
 }
 
+/// Stdin is forwarded for a terminal, for `-i`, and for `-T` (the pipe form,
+/// `isb exec -T NAME -- server`, whose stdin is the protocol); otherwise the
+/// command sees EOF and the caller's stdin stays the caller's.
+fn stdin_for(a: &ExecArgs, tty: bool) -> Stdin {
+    if !a.no_stdin && (tty || a.interactive || a.no_tty) {
+        Stdin::Inherit
+    } else {
+        Stdin::Null
+    }
+}
+
+/// The compose service whose sandbox is the instance `name`, when that is
+/// not the service's own key (`container_name:`, or a prefixed name).
+fn service_of_instance(p: &isb::compose::Project, name: &str) -> Option<String> {
+    p.file
+        .services
+        .iter()
+        .find(|(_, spec)| spec.name.as_deref() == Some(name))
+        .map(|(k, _)| k.clone())
+}
+
 pub(crate) fn exec(ctx: &Ctx, a: ExecArgs) -> Result<u8> {
     // A compose service if a file was named (or exists here) and defines it;
     // otherwise an instance name.
@@ -348,6 +374,15 @@ pub(crate) fn exec(ctx: &Ctx, a: ExecArgs) -> Result<u8> {
             let c = ctx.client(p.file.incus_project.as_deref());
             let name = spec.name.clone().unwrap_or_default();
             let sb = Sandbox::get(&c, &name)?.with_exec_defaults(spec.exec_defaults());
+            (c, sb)
+        }
+        // An instance that is some service's own, by its instance name: run
+        // it with that service's user and working_dir, as the service name would.
+        Some(p) if service_of_instance(&p, &a.target).is_some() => {
+            let svc = service_of_instance(&p, &a.target).unwrap_or_default();
+            let spec = p.service(&svc)?;
+            let c = ctx.client(p.file.incus_project.as_deref());
+            let sb = Sandbox::get(&c, &a.target)?.with_exec_defaults(spec.exec_defaults());
             (c, sb)
         }
         Some(p) if !ctx.global.files.is_empty() => {
@@ -377,6 +412,7 @@ pub(crate) fn exec(ctx: &Ctx, a: ExecArgs) -> Result<u8> {
         env.insert(k, v);
     }
     let (width, height) = isb::exec::terminal_size().unzip();
+    let stdin = stdin_for(&a, tty);
     let opts = ExecOptions {
         cwd: a.cwd,
         user: a.user,
@@ -386,11 +422,7 @@ pub(crate) fn exec(ctx: &Ctx, a: ExecArgs) -> Result<u8> {
         width,
         height,
         timeout: a.timeout,
-        stdin: if a.no_stdin {
-            Stdin::Null
-        } else {
-            Stdin::Inherit
-        },
+        stdin,
     };
     match sb.attach(a.argv, opts) {
         Ok(code) => Ok(code.clamp(0, 255) as u8),
@@ -511,4 +543,64 @@ pub(crate) fn device(ctx: &Ctx, d: DeviceCmd) -> Result<u8> {
         }
     }
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    fn exec_args(args: &[&str]) -> ExecArgs {
+        let mut v = vec!["isb", "exec"];
+        v.extend_from_slice(args);
+        match Cli::try_parse_from(v).unwrap().cmd {
+            Cmd::Exec(a) => a,
+            _ => unreachable!(),
+        }
+    }
+
+    fn forwards(a: &[&str], tty: bool) -> bool {
+        matches!(stdin_for(&exec_args(a), tty), Stdin::Inherit)
+    }
+
+    #[test]
+    fn stdin_is_forwarded_for_a_terminal_dash_i_and_dash_t_only() {
+        // A script's own stdin stays the script's.
+        assert!(!forwards(&["web", "--", "ls"], false));
+        // A terminal, `-i`, and the pipe form `-T` (a server speaking on stdin).
+        assert!(forwards(&["web", "--", "sh"], true));
+        assert!(forwards(&["-i", "web", "--", "cat"], false));
+        assert!(forwards(&["-T", "web", "--", "server"], false));
+        // `-n` wins, even over a terminal.
+        assert!(!forwards(&["-n", "web", "--", "sh"], true));
+        assert!(Cli::try_parse_from(["isb", "exec", "-i", "-n", "web", "--", "ls"]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod instance_name_tests {
+    use super::*;
+
+    #[test]
+    fn an_instance_name_finds_its_service() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("isb.yaml");
+        std::fs::write(
+            &f,
+            "name: shop\nservices:\n  web:\n    image: images:alpine/3.20\n    user: dev\n    working_dir: /app\n  db:\n    image: images:alpine/3.20\n    container_name: shop-database\n",
+        )
+        .unwrap();
+        let p = isb::compose::load(&isb::compose::LoadOptions {
+            files: vec![f],
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(service_of_instance(&p, "shop-web").as_deref(), Some("web"));
+        assert_eq!(
+            service_of_instance(&p, "shop-database").as_deref(),
+            Some("db")
+        );
+        assert_eq!(service_of_instance(&p, "web"), None);
+        assert_eq!(service_of_instance(&p, "other"), None);
+    }
 }

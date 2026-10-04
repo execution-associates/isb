@@ -23,6 +23,11 @@ export interface WorkspaceTerminals {
   sessions: TerminalSession[];
 }
 
+/** When this tab created each org's workspace: its first shell opens by itself, once it runs. */
+const created = new Map<string, number>();
+export const markJustCreated = (org: string) => void created.set(org, Date.now());
+export const justCreated = (org: string) => Date.now() - (created.get(org) ?? 0) < 120_000;
+
 export const terminalKeys = { sessions: (org: string) => ["workspace-terminals", org] as const };
 
 export function useTerminals(org: string, enabled: boolean) {

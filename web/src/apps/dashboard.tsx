@@ -271,7 +271,7 @@ function StatTiles({
           </div>
         ) : (
           <div className="space-y-2">
-            <Meter label="CPU" value={coresLabel(use.cpu)} of={cpuLimit ? `${cpuLimit} cores` : "cores"} ratio={cpuLimit ? use.cpu / 100 / cpuLimit : null} />
+            <Meter label="CPU" value={cpuLimit ? coresLabel(use.cpu) : `${coresLabel(use.cpu)} cores`} of={cpuLimit ? `${cpuLimit} cores` : undefined} ratio={cpuLimit ? use.cpu / 100 / cpuLimit : null} />
             <Meter label="Mem" value={bytes(use.mem)} of={memLimit ? bytes(memLimit) : undefined} ratio={memLimit ? use.mem / memLimit : null} />
           </div>
         )}

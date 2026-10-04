@@ -158,6 +158,8 @@ function AppHeader({ org, app, writer, viewing }: { org: string; app: App; write
   const svc = serviceOf(stack.data, app.name);
   const latest = deps.data?.deployments[0];
   const state = appState(svc, latest);
+  // Until both answer, "not deployed" would be a guess.
+  const loading = stack.isLoading || deps.isLoading;
   const db = (app.source as { database?: { engine: string; version?: string } }).database;
   const src = isGit(app.source)
     ? `${app.source.git.url.replace(/^https?:\/\//, "").replace(/\.git$/, "")} @ ${app.source.git.ref}`
@@ -192,7 +194,7 @@ function AppHeader({ org, app, writer, viewing }: { org: string; app: App; write
         title={
           <>
             <span className="truncate">{app.name}</span>
-            <AppStateBadge state={state} />
+            {loading ? <Skeleton className="h-5 w-20 rounded-full" /> : <AppStateBadge state={state} />}
           </>
         }
         description={
@@ -203,7 +205,7 @@ function AppHeader({ org, app, writer, viewing }: { org: string; app: App; write
             </span>
             <span className="flex items-center gap-1.5">
               <Server className="size-3.5 shrink-0" />
-              {svc ? `${svc.healthy}/${svc.replicas} healthy` : "not running"}
+              {loading ? <Skeleton className="h-3.5 w-20" /> : svc ? `${svc.healthy}/${svc.replicas} healthy` : "not running"}
             </span>
             {!url && ingressOff(ingress.data) && (app.domains ?? []).length > 0 && (
               <span className="flex min-w-0 items-center gap-1.5 text-warning" title={NO_INGRESS_WARNING}>
@@ -222,7 +224,7 @@ function AppHeader({ org, app, writer, viewing }: { org: string; app: App; write
         actions={
           writer && (
             <>
-              {state === "stopped" ? (
+              {loading ? null : state === "stopped" ? (
                 <Button variant="outline" onClick={start} disabled={starting}>
                   {starting ? <Loader2 className="animate-spin" /> : <Play />}
                   Start

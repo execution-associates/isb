@@ -244,6 +244,8 @@ function DeployForm({ org, detail }: { org: string; detail: TemplateDetail }) {
   const projects = useProjects(org);
   const apps = useApps(org);
   const canWrite = useCanWrite(org);
+  // With no ingress there is no public address to make a domain from.
+  const noIngress = ingressOff(useIngress(org).data);
   const vars: Variable[] = useMemo(() => detail.variables ?? [], [detail.variables]);
   // null: not chosen yet, so the default (computed from what exists) shows.
   const [projectSel, setProjectSel] = useState<string | null>(null);
@@ -384,10 +386,10 @@ function DeployForm({ org, detail }: { org: string; detail: TemplateDetail }) {
       </Section>
 
       {vars.length > 0 && (
-        <Section title="Settings" description="Leave a generated one empty to have it made for you. Secret ones are kept as org secrets and never shown here.">
+        <Section title="Settings" description={`${noIngress ? "Leave a generated secret empty to have it made for you; a domain needs your own, since this server has no ingress to make one from." : "Leave a generated one empty to have it made for you."} Secret ones are kept as org secrets and never shown here.`}>
           <div className="grid items-start gap-x-4 gap-y-5 sm:grid-cols-2">
             {vars.map((v) => (
-              <VariableField key={v.name} v={v} value={values[v.name] ?? ""} error={show(v.name)} onChange={(x) => setValues((s) => ({ ...s, [v.name]: x }))} />
+              <VariableField key={v.name} v={v} value={values[v.name] ?? ""} error={show(v.name)} noIngress={noIngress} onChange={(x) => setValues((s) => ({ ...s, [v.name]: x }))} />
             ))}
           </div>
         </Section>
@@ -465,11 +467,17 @@ function ChoiceSelect({
   );
 }
 
-function VariableField({ v, value, error, onChange }: { v: Variable; value: string; error: string | null | undefined; onChange: (s: string) => void }) {
+function VariableField({ v, value, error, noIngress, onChange }: { v: Variable; value: string; error: string | null | undefined; noIngress: boolean; onChange: (s: string) => void }) {
   const kind = v.type ?? "string";
   const secret = v.secret ?? ["password", "base64", "hex", "jwt"].includes(kind);
-  const placeholder = emptyMeans(v);
-  const hint = [v.description, v.generated ? "Generated when left empty." : null].filter(Boolean).join(" ");
+  const needsDomain = kind === "domain" && noIngress;
+  const placeholder = needsDomain ? "your domain" : emptyMeans(v);
+  const hint = [
+    v.description,
+    needsDomain ? "This server has no ingress, so no name can be generated: give a domain (nothing serves it until an ingress runs)." : v.generated ? "Generated when left empty." : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
     <Field
       label={varLabel(v)}

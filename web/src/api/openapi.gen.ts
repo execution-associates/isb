@@ -7447,7 +7447,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description The command and its arguments; no shell unless you run one: ["sh", "-c", "..."]. */
+                    /** @description The command and its arguments; no shell unless you run one: ["sh", "-c", "..."]. `command` is accepted as an alias (a string runs as `sh -c`). */
                     argv: string[];
                     cwd?: string;
                     env?: {
@@ -7455,7 +7455,7 @@ export interface operations {
                     };
                     /** @description Or the replica's instance name. */
                     instance?: string;
-                    /** @description The app. */
+                    /** @description The app's name (`app` is accepted as an alias). */
                     name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
@@ -7626,7 +7626,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description The app. */
+                    /** @description The app's name (`app` is accepted as an alias). */
                     name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
@@ -9181,7 +9181,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description The command and its arguments; no shell unless you run one: ["sh", "-c", "..."]. */
+                    /** @description The command and its arguments; no shell unless you run one: ["sh", "-c", "..."]. `command` is accepted as an alias (a string runs as `sh -c`). */
                     argv: string[];
                     cwd?: string;
                     env?: {

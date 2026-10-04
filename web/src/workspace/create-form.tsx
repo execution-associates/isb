@@ -16,6 +16,7 @@ import { errorMessage } from "@/lib/messages";
 import { useMe } from "@/lib/session";
 import { type WorkspaceCreateOptions, type WorkspaceSettings, wsCall, wsKeys } from "./api";
 import { BuildDefaultImage } from "./image-build";
+import { markJustCreated } from "./terminal-sessions";
 import { envProblems, headroom, sizeProblem, TOKEN_ROLES } from "./util";
 
 /** Works on any host: what to fall back on when the daemon offers nothing. */
@@ -78,6 +79,7 @@ export function CreateWorkspace({
       if (Object.keys(env.map).length) args.env = env.map;
       if (f.setup.trim()) args.setup = f.setup;
       await wsCall("workspace_create", args, org);
+      markJustCreated(org);
       toast.success(`${f.name} is running`);
       await qc.invalidateQueries({ queryKey: wsKeys.workspace(org) });
     } catch (err) {

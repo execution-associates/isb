@@ -80,6 +80,9 @@ $ isb ps
 need `sh -c`. It exits with the command's own status, and with 125 when isb
 itself failed (no such sandbox, incusd unreachable).
 
+Its stdin is the command's only for a terminal, `-T` or `-i`; inside a script
+the command sees EOF, so `isb exec` never swallows the script it runs in.
+
 ## Change it
 
 Edit the file (say `cpus: 4`), then look before you leap:

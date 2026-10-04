@@ -270,6 +270,23 @@ fn schedule_home_snapshots(d: &Daemon, org: &OrgId, w: &Workspace, log: &mut Vec
     }
 }
 
+/// Start the instance when it is not running; what happened goes in `log`.
+fn start_if_stopped(oc: &Client, instance: &str, log: &mut Vec<String>) {
+    let Ok(sb) = Sandbox::get(oc, instance) else {
+        return;
+    };
+    let running = sb
+        .info()
+        .is_ok_and(|i| i.status.eq_ignore_ascii_case("running"));
+    if running {
+        return;
+    }
+    match sb.start() {
+        Ok(()) => log.push(format!("{instance} was not running: started")),
+        Err(e) => log.push(format!("{instance} is not running and did not start: {e}")),
+    }
+}
+
 pub(super) fn workspace_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     let org = super::super::arg_org(&a)?;
     let mut a: CreateArgs = args(a)?;
@@ -309,6 +326,8 @@ pub(super) fn workspace_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value
         format!("workspace {name} created from {}", w.image),
         json!({"image": w.image, "token_role": role}),
     );
+    // A new workspace runs: start it if anything left it stopped.
+    start_if_stopped(&wsm.oc(&org), w.instance(), &mut log);
     drop(_g);
     wsm.kick_setup(&org, name);
     let mut v = view(d, &org, &w, false);

@@ -435,6 +435,24 @@ fn the_audit_row_has_the_argv_and_the_path_but_not_the_secrets() {
         Ok(()),
     );
     assert_eq!(e.details["path"], "/run/secrets/db");
+    // A read is marked, which the web UI's activity feed leaves out; a write is not.
+    let marked = |name: &str| {
+        let tool = Tool::new(name, "", json!({}), |_, _| Ok(json!({})))
+            .annotations(annotations(name, &ann));
+        let args = json!({"org": "acme", "name": "web-1"});
+        details(&Audited {
+            caller: &c,
+            action: name,
+            tool: Some(&tool),
+            args: &args,
+            outcome: Ok(()),
+            origin: &origin,
+        })
+        .get("read_only")
+        .is_some()
+    };
+    assert!(marked("instance_get"));
+    assert!(!marked("instance_restart"));
     // A refusal is recorded too.
     let denied = Error::Forbidden("a viewer only reads".into());
     let e = entry_for(

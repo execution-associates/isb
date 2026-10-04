@@ -689,6 +689,8 @@ fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate:
         Authenticated::None
     });
     let authorize: crate::server::mcp::Authorize = Arc::new(move |c, tool, args, scope| {
+        // `app` for `name`, `command` for `argv`, before anything reads them.
+        let args = crate::server::aliases::alias_args(tool, args);
         authorize_class(
             c,
             &tool.name,

@@ -194,9 +194,9 @@ pub fn load(opts: &LoadOptions) -> Result<Project> {
         let cwd = std::env::current_dir()?;
         files.push(find_default(&cwd).ok_or_else(|| {
             Error::invalid(format!(
-                "no compose file: pass -f FILE or create {} in {}",
-                DEFAULT_FILES[0],
-                cwd.display()
+                "no compose file in {} (isb reads only ./{}, never a parent directory's; -f FILE names another)",
+                cwd.display(),
+                DEFAULT_FILES.join(" or ./")
             ))
         })?);
         files.extend(find_override(&cwd));

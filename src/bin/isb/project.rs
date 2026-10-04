@@ -84,6 +84,7 @@ pub(crate) fn up(ctx: &Ctx, services: Vec<String>, flags: UpFlags) -> Result<u8>
         ..Default::default()
     };
     let mut rep = ctx.report();
+    rep(&format!("using {}", p.files_display()));
     let ups = compose::up_handles(&ctx.client(None), &p, &services, opts, &mut rep)?;
     if flags.json {
         let r: Vec<_> = ups.iter().map(|(_, r, _)| r).collect();

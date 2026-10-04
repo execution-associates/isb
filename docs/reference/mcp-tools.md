@@ -18,6 +18,12 @@ The list a caller actually sees can be shorter: `--allow-tools` and
 does not exist for them. `GET /api/v1/tools` and MCP's `tools/list` return
 what this listener offers, with each tool's schema and annotations.
 
+The canonical argument names are the ones in each schema: an app is `name`
+and a command is `argv`. The `app_*` tools also accept `app` for `name`, and
+the exec tools accept `command` (an array, or a string that runs as
+`sh -c`) for `argv`; the schema and the examples show only the canonical
+name.
+
 ## Who may call what
 
 Every tool takes `org` (default `default`) and works in that org; an

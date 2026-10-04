@@ -57,6 +57,17 @@ describe("humanize", () => {
     expect(out[0].count).toBe(2);
   });
 
+  it("leaves reads out of the feed", () => {
+    const out = humanize([
+      item({ source: "audit", kind: "monitor_list", object: null, level: "ok" }),
+      item({ source: "audit", kind: "overview", object: null, level: "ok" }),
+      item({ source: "audit", kind: "app_get", object: "api", level: "ok" }),
+      item({ source: "audit", kind: "something_odd", object: null, level: "ok", details: { read_only: true } }),
+      item({ source: "audit", kind: "app_create", object: "api", level: "ok" }),
+    ]);
+    expect(out.map((e) => `${e.before}${e.subject ?? ""}`)).toEqual(["Created app api"]);
+  });
+
   it("caps the list", () => {
     const many = Array.from({ length: 30 }, (_, i) => item({ source: "audit", kind: "app_create", object: `a${i}`, level: "ok" }));
     expect(humanize(many, 10)).toHaveLength(10);

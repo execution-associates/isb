@@ -4230,7 +4230,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "argv": {
-                    "description": "The command and its arguments; no shell unless you run one: [\"sh\", \"-c\", \"...\"].",
+                    "description": "The command and its arguments; no shell unless you run one: [\"sh\", \"-c\", \"...\"]. `command` is accepted as an alias (a string runs as `sh -c`).",
                     "items": {
                       "type": "string"
                     },
@@ -4251,7 +4251,7 @@
                     "type": "string"
                   },
                   "name": {
-                    "description": "The app.",
+                    "description": "The app's name (`app` is accepted as an alias).",
                     "type": "string"
                   },
                   "org": {
@@ -4527,7 +4527,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "name": {
-                    "description": "The app.",
+                    "description": "The app's name (`app` is accepted as an alias).",
                     "type": "string"
                   },
                   "org": {
@@ -7168,7 +7168,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "argv": {
-                    "description": "The command and its arguments; no shell unless you run one: [\"sh\", \"-c\", \"...\"].",
+                    "description": "The command and its arguments; no shell unless you run one: [\"sh\", \"-c\", \"...\"]. `command` is accepted as an alias (a string runs as `sh -c`).",
                     "items": {
                       "type": "string"
                     },

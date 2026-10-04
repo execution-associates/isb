@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { detached, modeLabel, nextShellName, sessionNameProblem, terminalUrl } from "./terminal-sessions";
+import { detached, justCreated, markJustCreated, modeLabel, nextShellName, sessionNameProblem, terminalUrl } from "./terminal-sessions";
 
 describe("workspace terminal sessions", () => {
+  it("opens the first shell by itself for a workspace this tab just created", () => {
+    expect(justCreated("acme")).toBe(false);
+    markJustCreated("acme");
+    expect(justCreated("acme")).toBe(true);
+    expect(justCreated("other")).toBe(false);
+  });
+
   it("asks for a named session on the terminal websocket", () => {
     const loc = { protocol: "https:", host: "isb.example.com" };
     expect(terminalUrl(loc, "acme", "workspace", 80, 24)).toBe("wss://isb.example.com/orgs/acme/api/v1/terminal?instance=workspace&cols=80&rows=24");

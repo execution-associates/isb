@@ -36,7 +36,9 @@ before the subcommand and after the compose-aware ones: `up`, `down`,
 `plan`, `config`, `ps`, `inspect`, `exec`, `logs` and `stack deploy`
 (`isb -f a.yaml up -f b.yaml` loads `a.yaml`, then `b.yaml`). Without
 `-f`, isb reads `./isb.yaml` (or `isb.yml`) with `./isb.override.yaml` (or
-`isb.override.yml`) merged over it when present. See
+`isb.override.yml`) merged over it when present, and never a parent
+directory's file; with none, the command says so and names the directory.
+`isb up` prints the file it uses (`using /path/isb.yaml`). See
 [Files and validation](compose.md#files-and-validation).
 
 ## Where commands send their work
@@ -88,7 +90,7 @@ isb restart NAME...
 isb rm NAME... [-f]                    delete (-f stops a running one first); aliases remove, delete
 isb ls [-l KEY[=VALUE]]... [--json]    list, filtered by labels; alias list
 isb inspect NAME [--json]              one sandbox, by service or instance name
-isb exec TARGET [-u USER] [-w DIR] [-e K=V]... [-l] [-t|-T] [-n] [--timeout D] -- ARGV...
+isb exec TARGET [-u USER] [-w DIR] [-e K=V]... [-l] [-t|-T] [-i|-n] [--timeout D] -- ARGV...
 isb prune --label KEY --missing-path [-y] [--json]
 ```
 
@@ -105,11 +107,18 @@ isb prune --label KEY --missing-path [-y] [--json]
 - `start` and `restart` wait for `running` only, not a file's `ready`
   checks.
 - `exec` runs argv with no shell. `TARGET` is a compose service when a
-  compose file defines one by that name, else an instance. It runs as the
-  service's `user` in its `working_dir` unless `-u`/`-w` say otherwise. A
-  terminal is allocated when stdin is one (`-t` forces it, `-T` never);
-  `-n` gives the command an empty stdin; `-l` runs it through the user's
-  login shell; `--timeout` kills it (no limit by default).
+  compose file defines one by that name, or the instance name of one of its
+  services (`myproject-web`), else any instance. A service runs as its `user`
+  in its `working_dir` unless `-u`/`-w` say otherwise; an instance that is
+  not in the compose file in the current directory runs as the instance's
+  default user (root) in its default directory. A terminal is allocated when
+  stdin is one (`-t` forces it, `-T` never). Stdin is forwarded when it is a
+  terminal, with `-T` (the pipe form, for a server that speaks on stdin and
+  stdout), or with `-i`; otherwise the command sees EOF, so a script that
+  calls `isb exec` keeps its own stdin, and `isb exec web -i -- cat < f`
+  feeds a file. `-n` gives the command an empty stdin even from a terminal;
+  `-l` runs it through the user's login shell; `--timeout` kills it (no
+  limit by default).
 - `prune` deletes sandboxes whose `KEY` label is an absolute host path that
   no longer exists. It is a dry run unless `-y`, and never touches a
   sandbox without the label or whose path still exists.
