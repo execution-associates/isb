@@ -1329,7 +1329,7 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
 name = "isb"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "age",
  "clap",
@@ -1350,7 +1350,7 @@ dependencies = [
 
 [[package]]
 name = "isb-apps"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "age",
  "base64 0.23.1",
@@ -1374,7 +1374,7 @@ dependencies = [
 
 [[package]]
 name = "isb-core"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "age",
  "base64 0.23.1",
@@ -1401,7 +1401,7 @@ dependencies = [
 
 [[package]]
 name = "isb-daemon"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "age",
  "httparse",
@@ -1421,7 +1421,7 @@ dependencies = [
 
 [[package]]
 name = "isb-egress"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "base64 0.23.1",
  "httparse",
@@ -1434,7 +1434,7 @@ dependencies = [
 
 [[package]]
 name = "isb-server"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "argon2",
  "base64 0.23.1",
@@ -1458,7 +1458,7 @@ dependencies = [
 
 [[package]]
 name = "isb-tui"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "isb-core",
  "libc",
