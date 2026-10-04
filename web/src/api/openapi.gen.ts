@@ -2079,7 +2079,7 @@ export interface paths {
         put?: never;
         /**
          * Create an uptime monitor
-         * @description Watch something users reach: an HTTP(S) URL (status range, keyword present or absent, headers from secrets, certificate expiry), a TCP port, or an app by reference (its served domain, or its own endpoint). Checked every interval from this daemon; failure_threshold failures in a row make it down (monitor.down to notification channels), recovery_threshold successes up again (monitor.up, with the downtime). URLs a member types are held to the platform's address policy.
+         * @description Watch something users reach: an HTTP(S) URL (status range, keyword present or absent, headers from secrets, certificate expiry), a TCP port, or an app by reference (its served domain, or its own endpoint). Checked every interval from this daemon; a new monitor is pending (failures before its first success are not downtime) until its first success; failure_threshold failures in a row then make it down (monitor.down to notification channels), recovery_threshold successes up again (monitor.up, with the downtime). URLs a member types are held to the platform's address policy.
          */
         post: operations["monitor_create"];
         delete?: never;
@@ -2139,7 +2139,7 @@ export interface paths {
         put?: never;
         /**
          * List uptime monitors
-         * @description The org's monitors with status (up, down, pending, paused), last check, uptime over 24h/7d/30d, latency p50/p95 (24h), 24 hourly uptime bars and the last 30 latencies; `down` (how many are down), the org's recent incidents, and its settings (auto_monitors, exclude_apps).
+         * @description The org's monitors with status (up, down, pending, paused; `never_up` when pending 30 min with only failures), last check, uptime over 24h/7d/30d, latency p50/p95 (24h), 24 hourly uptime bars and the last 30 latencies; `down` (how many are down), the org's recent incidents, and its settings (auto_monitors, exclude_apps).
          */
         post: operations["monitor_list"];
         delete?: never;
