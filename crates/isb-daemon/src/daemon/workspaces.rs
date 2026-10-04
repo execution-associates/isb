@@ -50,6 +50,7 @@ mod nesting;
 mod ports;
 mod preview;
 mod proxy;
+mod secrets;
 mod settings;
 mod setup;
 use bridge::{bridge_handler, gateway};
@@ -640,56 +641,6 @@ chown "$u": "$h"
                 String::from_utf8_lossy(&out.stderr).trim()
             )));
         }
-        Ok(())
-    }
-
-    /// Write the token, the named secrets and the login environment into a
-    /// running workspace. Files only, through incus' file API.
-    fn deliver(&self, org: &OrgId, w: &Workspace) -> Result<()> {
-        let oc = self.oc(org);
-        let Some(state) = oc.get_opt(&format!(
-            "/1.0/instances/{}/state",
-            encode_segment(w.instance())
-        ))?
-        else {
-            return Ok(());
-        };
-        let pid = state["pid"].as_i64().unwrap_or(0);
-        if pid <= 0 {
-            return Ok(());
-        }
-        let u = crate::exec::resolve_user(&oc, w.instance(), &w.user)?;
-        let inst = w.instance();
-        oc.make_dir(inst, "/run/isb", 0, 0, 0o755)?;
-        if let Some(t) = self.token_plain(org, &w.name)? {
-            oc.push_file(inst, ws::TOKEN_PATH, &t, u.uid, u.gid, 0o400)?;
-        }
-        if !w.secrets.is_empty() {
-            oc.make_dir(inst, ws::SECRETS_DIR, u.uid, u.gid, 0o700)?;
-            for name in &w.secrets {
-                match self.secrets.get(org, name) {
-                    Ok((v, _)) => oc.push_file(
-                        inst,
-                        &format!("{}/{name}", ws::SECRETS_DIR),
-                        &v,
-                        u.uid,
-                        u.gid,
-                        0o400,
-                    )?,
-                    Err(e) => eprintln!(
-                        "isb serve: workspace {org}/{}: secret {name} not delivered: {e}",
-                        w.name
-                    ),
-                }
-            }
-        }
-        oc.make_dir(inst, "/etc/profile.d", 0, 0, 0o755)?;
-        let profile = ws::profile(self.url(org).as_deref(), org, w);
-        oc.push_file(inst, ws::PROFILE_PATH, profile.as_bytes(), 0, 0, 0o644)?;
-        self.delivered
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(key(&org.incus_project(), inst), pid);
         Ok(())
     }
 

@@ -3283,7 +3283,7 @@ export interface paths {
         put?: never;
         /**
          * Refresh a secret
-         * @description Re-read an externally stored secret from its source now, and roll the stacks using it if its version moved (listed in `rolled`). `name` is a store name, or a stack's driver reference. A no-op for the local store.
+         * @description Re-read an externally stored secret from its source now; if its version moved, each stack service using it acts per its `on_change` (`services`, `rolled`, `skipped` as for secret_set). `name` is a store name, or a stack's driver reference. A no-op for the local store.
          */
         post: operations["secret_refresh"];
         delete?: never;
@@ -3323,7 +3323,7 @@ export interface paths {
         put?: never;
         /**
          * Set a secret
-         * @description Give a secret a new value (base64), bumping its version; creates it in the local store if missing. Stacks using it roll to the new version (listed in `rolled`).
+         * @description Give a secret a new value (base64), bumping its version; creates it in the local store if missing. Each stack service using it acts per its `on_change`: `roll` (default; a rolling update), `restart` (in place) or `none` (files updated, replicas stale until they next start). `services` lists what each service did, `rolled` the stacks that roll or restart, `skipped` what was not cycled and why (workspaces get the file, never a restart).
          */
         post: operations["secret_set"];
         delete?: never;
@@ -7188,6 +7188,11 @@ export interface operations {
                     /** @description Named volumes, NAME:/path[:ro]. No host paths. */
                     volumes?: string[];
                     working_dir?: string;
+                    /**
+                     * @description What a new version of a secret the app uses (env or files) does to its replicas: roll (default; a rolling update), restart (each replica's app restarted in place with the new value, one at a time, waiting until healthy) or none (files updated, replicas reported stale until they next start).
+                     * @enum {string}
+                     */
+                    secret_on_change?: "roll" | "restart" | "none";
                 };
             };
         };
@@ -7973,6 +7978,11 @@ export interface operations {
                     /** @description Named volumes, NAME:/path[:ro]. No host paths. */
                     volumes?: string[];
                     working_dir?: string;
+                    /**
+                     * @description What a new version of a secret the app uses (env or files) does to its replicas: roll (default; a rolling update), restart (each replica's app restarted in place with the new value, one at a time, waiting until healthy) or none (files updated, replicas reported stale until they next start).
+                     * @enum {string}
+                     */
+                    secret_on_change?: "roll" | "restart" | "none";
                 };
             };
         };

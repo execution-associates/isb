@@ -39,6 +39,7 @@ fn instance(name: &str, slot: u32, status: &str, health: &str, rotation: bool) -
         cpu_history: vec![],
         mem_bytes: None,
         disk_bytes: None,
+        stale_secrets: vec![],
     }
 }
 

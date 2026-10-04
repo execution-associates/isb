@@ -18,6 +18,7 @@ use serde_json::Value;
 
 use super::changes::diff;
 use super::ports::{Published, published};
+use super::secrets::{Cycle, LABEL_SECRETS, StaleSecret};
 use super::{
     LABEL_REV, LABEL_SERVICE, LABEL_SLOT, LABEL_STACK, StackDef, Store, instance_name, new_id,
     now_secs, validate_stack_name,
@@ -30,8 +31,8 @@ use crate::plan::Desired;
 use crate::sandbox::{EnsureOptions, Sandbox};
 use crate::secrets::Secrets;
 use crate::spec::{
-    DependCondition, FailureAction, HealthProbe, RestartCondition, RestartMode, SandboxSpec,
-    UpdateConfig, UpdateOrder,
+    DependCondition, FailureAction, HealthProbe, OnChange, RestartCondition, RestartMode,
+    SandboxSpec, UpdateConfig, UpdateOrder,
 };
 use crate::supervise;
 
@@ -66,6 +67,10 @@ pub struct InstanceStatus {
     pub mem_bytes: Option<u64>,
     /// Root disk usage, where the storage driver reports it.
     pub disk_bytes: Option<u64>,
+    /// Secrets (`on_change: none`, or a restart still to come) whose new
+    /// version reached the replica's files but not its running app.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub stale_secrets: Vec<StaleSecret>,
 }
 
 /// A published port: TCP served by the balancer, UDP by a NAT proxy on the
@@ -169,7 +174,9 @@ pub struct Event {
     /// `deploy.failed`, `health.unhealthy`, `health.recovered`,
     /// `backup.succeeded`, `backup.failed`, `restore.succeeded`,
     /// `restore.failed`, `job.succeeded`, `job.failed`, `cert.issued`,
-    /// `cert.failed`, `preview.created`, `preview.removed` (a preview's
+    /// `cert.failed`, `secret.rotated` (a new secret version reached a
+    /// service, saying what its `on_change` does; a workspace under stack
+    /// `<org>/@workspaces`), `preview.created`, `preview.removed` (a preview's
     /// deploys are `deploy.*` under its own stack), `server.unreachable`,
     /// `server.recovered` (on a control plane, stack `<org>/@servers` for
     /// each org on the server and `system/@servers`, service = the server).
@@ -423,147 +430,16 @@ impl Controller {
             c.apply(Arc::new(def));
         }
         // A vault may have moved on while the daemon was down.
-        for def in c.definitions() {
-            let keys: Vec<String> = def.secrets.keys().cloned().collect();
-            c.check_bindings(&def.qualified(), &keys, false);
-        }
-        Ok(c)
-    }
-
-    /// A stored secret got a new value (`isb secret set`): every stack in
-    /// the org bound to it moves to the new version and rolls. Returns the
-    /// stacks rolled.
-    pub fn secret_changed(&self, org: &OrgId, name: &str) -> Vec<String> {
-        let mut rolled = Vec::new();
-        for def in self.definitions() {
-            if def.org != *org {
-                continue;
-            }
-            let keys: Vec<String> = def
-                .secrets
-                .iter()
-                .filter(|(_, b)| b.name == name)
-                .map(|(k, _)| k.clone())
-                .collect();
-            if !keys.is_empty() && self.check_bindings(&def.qualified(), &keys, false) {
-                rolled.push(def.qualified());
-            }
-        }
-        rolled
-    }
-
-    /// Re-read every binding to `name` in the org from its driver now
-    /// (`isb secret refresh`). Returns each driver and version found, and
-    /// the stacks rolled.
-    pub fn refresh_secret(
-        &self,
-        org: &OrgId,
-        name: &str,
-    ) -> Result<crate::stack::secrets::Refreshed> {
-        let mut found = Vec::new();
-        let mut rolled = Vec::new();
-        for def in self.definitions() {
-            if def.org != *org {
-                continue;
-            }
-            let q = def.qualified();
-            let keys: Vec<String> = def
-                .secrets
-                .iter()
-                .filter(|(_, b)| b.name == name)
-                .map(|(k, _)| k.clone())
-                .collect();
-            for k in &keys {
-                let b = &def.secrets[k];
-                let v = self.inner.secrets.refresh_in(&b.driver, org, name)?;
-                found.push((b.driver.clone(), v));
-                let every = def
-                    .file
-                    .secrets
-                    .get(k)
-                    .map(crate::spec::SecretDef::refresh_interval)
-                    .unwrap_or(crate::spec::DEFAULT_SECRET_REFRESH);
-                self.inner
-                    .refresh
-                    .lock()
-                    .unwrap()
-                    .reset(&q, k, every, Instant::now());
-            }
-            if !keys.is_empty() && self.check_bindings(&q, &keys, true) {
-                rolled.push(q);
-            }
-        }
-        Ok((found, rolled))
-    }
-
-    /// The driver-backed bindings whose refresh interval is up.
-    fn check_due_secrets(&self) {
-        let defs: Vec<(String, Arc<StackDef>)> = self
-            .inner
-            .stacks
-            .lock()
-            .unwrap()
+        let all: Vec<(String, String)> = c
+            .definitions()
             .iter()
-            .map(|(q, d)| (q.clone(), d.clone()))
+            .flat_map(|def| {
+                let q = def.qualified();
+                def.secrets.keys().map(move |k| (q.clone(), k.clone()))
+            })
             .collect();
-        let due = self
-            .inner
-            .refresh
-            .lock()
-            .unwrap()
-            .due(defs.iter().map(|(q, d)| (q.as_str(), &**d)), Instant::now());
-        let mut by_stack: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        for (q, k) in due {
-            by_stack.entry(q).or_default().push(k);
-        }
-        for (q, keys) in by_stack {
-            self.check_bindings(&q, &keys, false);
-        }
-    }
-
-    /// Compare the given bindings of a stack with the store's current
-    /// versions; on any change, save the new versions and roll. `quiet`
-    /// skips logging lookups that fail (the caller reports them).
-    fn check_bindings(&self, q: &str, keys: &[String], quiet: bool) -> bool {
-        let _g = self.inner.edit.lock().unwrap();
-        let Ok(cur) = self.get_def(q) else {
-            return false;
-        };
-        let mut def = (*cur).clone();
-        let mut moved = Vec::new();
-        for k in keys {
-            let Some(b) = def.secrets.get_mut(k) else {
-                continue;
-            };
-            match self.inner.secrets.version_in(&b.driver, &def.org, &b.name) {
-                Ok(v) if v != b.version => {
-                    moved.push(format!("{} v{} -> v{v}", b.name, b.version));
-                    b.version = v;
-                }
-                Ok(_) => {}
-                // The services keep the value they have.
-                Err(e) if !quiet => self.note(
-                    "warn",
-                    q,
-                    format!("secret {}: cannot check its version: {e}", b.name),
-                ),
-                Err(_) => {}
-            }
-        }
-        if moved.is_empty() {
-            return false;
-        }
-        if let Err(e) = self.inner.store.save(&def) {
-            self.note("error", q, format!("cannot save new secret versions: {e}"));
-            return false;
-        }
-        self.apply(Arc::new(def));
-        self.note(
-            "info",
-            q,
-            format!("new secret version ({}): rolling", moved.join(", ")),
-        );
-        true
+        c.poll(all);
+        Ok(c)
     }
 
     pub fn balancer(&self) -> &Balancer {
@@ -1068,7 +944,20 @@ fn instance_spec(
     s.labels.insert(LABEL_SERVICE.into(), service.into());
     s.labels.insert(LABEL_SLOT.into(), slot.to_string());
     s.labels.insert(LABEL_REV.into(), rev.into());
+    let live = live_versions(def, service);
+    if !live.is_empty() {
+        s.labels
+            .insert(LABEL_SECRETS.into(), super::secrets::versions_label(&live));
+    }
     Ok(s)
+}
+
+/// The versions bound now of the secrets `service` takes in place.
+fn live_versions(def: &StackDef, service: &str) -> BTreeMap<String, u64> {
+    def.live_secrets(service)
+        .into_iter()
+        .map(|(k, (_, v))| (k, v))
+        .collect()
 }
 
 /// A stack's instance as listed.
@@ -1079,6 +968,9 @@ pub struct Inst {
     pub(super) slot: u32,
     pub rev: String,
     status: String,
+    /// [`LABEL_SECRETS`]: the `restart`/`none` secret versions its app last
+    /// started with; `None` on an instance from before the label.
+    secrets: Option<BTreeMap<String, u64>>,
 }
 
 impl Inst {
@@ -1129,6 +1021,9 @@ pub fn list_instances(client: &Client, stack: &str, service: Option<&str>) -> Re
                 .cloned()
                 .unwrap_or_default(),
             status: info.status.clone(),
+            secrets: super::secrets::parse_versions_label(
+                c.get(&format!("user.{LABEL_SECRETS}")).map(String::as_str),
+            ),
         });
     }
     out.sort_by(|a, b| (a.slot, &a.name).cmp(&(b.slot, &b.name)));
@@ -1191,6 +1086,8 @@ struct InstRt {
     /// Restarts counted against `restart_policy.max_attempts`.
     restarts: VecDeque<Instant>,
     in_rotation: bool,
+    /// The `none` secret versions whose files were last delivered live.
+    delivered: BTreeMap<String, u64>,
 }
 
 /// A service's worker.
@@ -1239,6 +1136,9 @@ struct Worker {
     health_alarm: bool,
     /// The definition the last pass ran on.
     seen: Option<Arc<StackDef>>,
+    /// The secret versions whose in-place restart failed, and why: not
+    /// tried again on the other replicas until they move.
+    restart_failed: Option<(BTreeMap<String, u64>, String)>,
 }
 
 fn spawn_worker(inner: Arc<Inner>, def: &StackDef, service: String, shared: Arc<WorkerShared>) {
@@ -1292,6 +1192,7 @@ impl Worker {
             health_down: None,
             health_alarm: false,
             seen: None,
+            restart_failed: None,
         }
     }
 
@@ -1595,12 +1496,20 @@ impl Worker {
         }
         if pending.is_empty() {
             self.create_backoff = None;
+            // New versions of secrets the service takes in place.
+            let uc = spec
+                .deploy
+                .as_ref()
+                .and_then(|d| d.update_config.clone())
+                .unwrap_or_default();
+            self.cycle_in_place(def, &spec, &uc)?;
+            let insts = self.insts.clone();
             let all_ok = insts
                 .iter()
                 .all(|i| i.rev == rev && self.rt.get(&i.name).is_some_and(|r| r.in_rotation));
             self.state = if all_ok { "converged" } else { "failing" }.into();
             if all_ok {
-                self.message = None;
+                self.message = self.restart_failed.as_ref().map(|(_, m)| m.clone());
             } else if self.message.is_none() {
                 self.message = Some("some replicas are not healthy".into());
             }
@@ -1887,6 +1796,7 @@ impl Worker {
         if rt.pid != pid {
             // A (re)boot: /run/secrets is a fresh tmpfs, and the unit may be
             // from an older isb. Probing starts over.
+            let restarted = rt.pid != 0;
             rt.pid = pid;
             rt.since = Some(Instant::now());
             rt.failures = 0;
@@ -1903,6 +1813,10 @@ impl Worker {
                     step: format!("set up {}", i.name),
                     message: e.to_string(),
                 });
+            }
+            // Seen restarting: its app now runs what setup delivered.
+            if restarted {
+                self.mark_started(def, &i.name)?;
             }
         }
         let alive = self.alive(&sb, spec, oci);
@@ -1975,6 +1889,11 @@ impl Worker {
             rt.healthy = None;
             rt.since = Some(Instant::now());
             supervise::restart_app(&sb, &self.service, oci)?;
+            if !oci {
+                // The unit restarts within the same instance; it reads the
+                // files and variables delivered last.
+                self.mark_started(def, &i.name)?;
+            }
         }
         Ok(())
     }
@@ -1988,16 +1907,31 @@ impl Worker {
         } else {
             super::secrets::values(&self.inner.secrets, &def.org, &def.secrets, keys)?
         };
+        // A new value for a secret the service takes with `on_change: none`
+        // is delivered without restarting the app.
+        let none = |k: &str| def.on_change(&self.service, k) == OnChange::None;
         // An OCI app started before its files arrived: restart it once so
         // it reads them (the next pass finds them in place).
-        if supervise::push_secrets(sb, spec, &values)? && oci {
+        let pushed = supervise::push_secrets_detailed(sb, spec, &values)?;
+        if oci && (pushed.missing || pushed.changed.iter().any(|k| !none(k))) {
             supervise::restart_app(sb, &self.service, oci)?;
         }
         if spec.command.is_some() && !oci {
             let mut s = spec.clone();
             s.restart = Some(RestartMode::Always);
             let env = supervise::secret_env(spec, &values)?;
-            supervise::install(sb, &self.service, &s, !spec.secrets.is_empty(), &env)?;
+            // Only a change all of whose variables are `none` secrets is
+            // left for the next start.
+            let env_restarts =
+                spec.env.secrets.is_empty() || spec.env.secrets.values().any(|k| !none(k));
+            supervise::install_with(
+                sb,
+                &self.service,
+                &s,
+                !spec.secrets.is_empty(),
+                &env,
+                env_restarts,
+            )?;
         }
         Ok(())
     }
@@ -2105,6 +2039,7 @@ impl Worker {
                 slot,
                 rev: rev.to_string(),
                 status: "Running".into(),
+                secrets: Some(live_versions(def, &self.service)),
             };
             self.insts.push(inst.clone());
             self.slot_state(def, slot, None, None, Some("probing"));
@@ -2211,6 +2146,21 @@ impl Worker {
     /// Take an instance out of rotation, let its connections drain, then
     /// delete it.
     fn retire(&mut self, name: &str) -> Result<()> {
+        self.drain(name);
+        if let Ok(sb) = Sandbox::get(self.client(), name) {
+            let _ = sb.stop(false, Duration::from_secs(10));
+        }
+        self.rt.remove(name);
+        self.insts.retain(|i| i.name != name);
+        match Sandbox::remove(self.client(), name, true) {
+            Err(e) if !e.is_not_found() => Err(e),
+            _ => Ok(()),
+        }
+    }
+
+    /// Take an instance out of rotation and let its connections drain (up
+    /// to [`DRAIN`]).
+    fn drain(&mut self, name: &str) {
         let ip = self.rt.get(name).and_then(|r| r.ip);
         self.set_rotation(name, false);
         self.sync_routes();
@@ -2225,15 +2175,6 @@ impl Worker {
                     .balancer
                     .wait_drained(k, SocketAddr::new(ip, p.target), left);
             }
-        }
-        if let Ok(sb) = Sandbox::get(self.client(), name) {
-            let _ = sb.stop(false, Duration::from_secs(10));
-        }
-        self.rt.remove(name);
-        self.insts.retain(|i| i.name != name);
-        match Sandbox::remove(self.client(), name, true) {
-            Err(e) if !e.is_not_found() => Err(e),
-            _ => Ok(()),
         }
     }
 
@@ -2368,6 +2309,7 @@ impl Worker {
         };
         let rev = def.revision(&self.service).unwrap_or_default();
         let probe = matches!(spec.health_probe(), Ok(Some(_)));
+        let live = live_versions(def, &self.service);
         let snap = self.inner.snapshot.lock().unwrap().instances.clone();
         let instances: Vec<InstanceStatus> = self
             .insts
@@ -2397,6 +2339,11 @@ impl Worker {
                     cpu_history: m.map(|m| m.cpu_history.clone()).unwrap_or_default(),
                     mem_bytes: m.and_then(|m| m.mem_bytes),
                     disk_bytes: m.and_then(|m| m.disk_bytes),
+                    stale_secrets: i
+                        .secrets
+                        .as_ref()
+                        .map(|have| super::secrets::stale(have, &live))
+                        .unwrap_or_default(),
                 }
             })
             .collect();
@@ -2485,6 +2432,9 @@ pub fn unsettled(st: &StackStatus) -> BTreeSet<String> {
         .map(|s| s.service.clone())
         .collect()
 }
+
+#[path = "rotation.rs"]
+mod rotation;
 
 #[cfg(test)]
 #[path = "controller_tests.rs"]

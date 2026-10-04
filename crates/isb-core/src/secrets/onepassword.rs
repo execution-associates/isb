@@ -9,12 +9,19 @@
 //! driver is read-only: values are managed in 1Password. A secret's version
 //! is the 1Password item's version, which moves on every edit, so polling
 //! notices rotations.
+//!
+//! 1Password limits reads per account per day, so polling is grouped: every
+//! field of an item shares the item's version, so one `op item get` answers
+//! all the references into one item in a round ([`Driver::versions`]). The
+//! item it returns (fields and values included) is kept for [`ITEM_TTL`], so
+//! the reads that follow a version bump take their values from it instead
+//! of asking again per reference and per replica.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -29,12 +36,22 @@ pub const TOKEN_SECRET: &str = "onepassword-token";
 /// How long one `op` call may take.
 const OP_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How long an item read from 1Password answers again: long enough to cover
+/// one polling round and the deliveries it sets off, short enough that a
+/// forced refresh or the next round always asks 1Password.
+pub const ITEM_TTL: Duration = Duration::from_secs(20);
+
 /// Reads an org's token: `Ok(None)` when the org has none.
 pub type TokenSource = Arc<dyn Fn(&OrgId) -> Result<Option<String>> + Send + Sync>;
+
+/// Items read lately, by (org, vault, item): when, and the item.
+type ItemCache = HashMap<(String, String, String), (Instant, Arc<Value>)>;
 
 pub struct OnePasswordDriver {
     op: PathBuf,
     token: TokenSource,
+    /// Items read lately, by (org, vault, item): when, and the item.
+    items: Mutex<ItemCache>,
 }
 
 /// A parsed `vault/item/[section/]field` reference.
@@ -72,7 +89,11 @@ impl OnePasswordDriver {
         let op = std::env::var_os("ISB_OP_BIN")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("op"));
-        OnePasswordDriver { op, token }
+        OnePasswordDriver {
+            op,
+            token,
+            items: Mutex::new(HashMap::new()),
+        }
     }
 
     pub fn with_binary(mut self, op: impl Into<PathBuf>) -> Self {
@@ -152,14 +173,36 @@ impl OnePasswordDriver {
         Ok(stdout)
     }
 
-    fn item(&self, org: &OrgId, r: &Reference) -> Result<Value> {
+    fn item_key(org: &OrgId, r: &Reference) -> (String, String, String) {
+        (org.to_string(), r.vault.clone(), r.item.clone())
+    }
+
+    /// The item, from 1Password unless it was read within [`ITEM_TTL`].
+    fn item(&self, org: &OrgId, r: &Reference) -> Result<Arc<Value>> {
+        let k = Self::item_key(org, r);
+        if let Some((at, v)) = self.items.lock().unwrap().get(&k) {
+            if at.elapsed() < ITEM_TTL {
+                return Ok(v.clone());
+            }
+        }
+        self.fetch_item(org, r)
+    }
+
+    /// The item, always from 1Password; remembered for [`ITEM_TTL`].
+    fn fetch_item(&self, org: &OrgId, r: &Reference) -> Result<Arc<Value>> {
         let out = self.op(
             org,
             &[
                 "item", "get", &r.item, "--vault", &r.vault, "--format", "json",
             ],
         )?;
-        serde_json::from_slice(&out).map_err(|e| Error::Protocol(format!("op item get: {e}")))
+        let v: Value = serde_json::from_slice(&out)
+            .map_err(|e| Error::Protocol(format!("op item get: {e}")))?;
+        let v = Arc::new(v);
+        let mut items = self.items.lock().unwrap();
+        items.retain(|_, (at, _)| at.elapsed() < ITEM_TTL);
+        items.insert(Self::item_key(org, r), (Instant::now(), v.clone()));
+        Ok(v)
     }
 
     fn meta(&self, org: &OrgId, name: &str, item: &Value) -> SecretMeta {
@@ -174,6 +217,29 @@ impl OnePasswordDriver {
             updated_at: ts("updated_at"),
             labels: BTreeMap::new(),
         }
+    }
+}
+
+/// A field's value in an item as `op item get --format json` prints it:
+/// `field` is a field's id or label, `section/field` one in a section (by
+/// its id or label). `None` when it is not there exactly once, or has no
+/// value (a file, an OTP), so the caller asks `op read`, which knows every
+/// form.
+fn field_value(item: &Value, field: &str) -> Option<Vec<u8>> {
+    let (section, field) = match field.split_once('/') {
+        Some((s, f)) => (Some(s), f),
+        None => (None, field),
+    };
+    let named = |v: &Value, n: &str| v["id"].as_str() == Some(n) || v["label"].as_str() == Some(n);
+    let hits: Vec<&Value> = item["fields"]
+        .as_array()?
+        .iter()
+        .filter(|f| named(f, field))
+        .filter(|f| section.is_none_or(|s| named(&f["section"], s)))
+        .collect();
+    match hits.as_slice() {
+        [f] => f["value"].as_str().map(|v| v.as_bytes().to_vec()),
+        _ => None,
     }
 }
 
@@ -193,14 +259,47 @@ impl Driver for OnePasswordDriver {
 
     fn get(&self, org: &OrgId, name: &str) -> Result<(Vec<u8>, u64)> {
         let r = reference(name)?;
-        let value = self.op(org, &["read", "--no-newline", &r.uri()])?;
-        let version = self.item(org, &r)?["version"].as_u64().unwrap_or(0);
+        let item = self.item(org, &r)?;
+        let version = item["version"].as_u64().unwrap_or(0);
+        let value = match field_value(&item, &r.field) {
+            Some(v) => v,
+            None => self.op(org, &["read", "--no-newline", &r.uri()])?,
+        };
         Ok((value, version))
     }
 
+    /// Polling asks 1Password every time; the answer then serves the reads
+    /// a new version sets off.
     fn version(&self, org: &OrgId, name: &str) -> Result<u64> {
         let r = reference(name)?;
-        Ok(self.item(org, &r)?["version"].as_u64().unwrap_or(0))
+        Ok(self.fetch_item(org, &r)?["version"].as_u64().unwrap_or(0))
+    }
+
+    /// One `op item get` per (vault, item), whatever the number of fields
+    /// referenced in it.
+    fn versions(&self, org: &OrgId, names: &[&str]) -> Vec<Result<u64>> {
+        let mut round: HashMap<(String, String), std::result::Result<u64, String>> = HashMap::new();
+        names
+            .iter()
+            .map(|name| {
+                let r = reference(name)?;
+                let got = round
+                    .entry((r.vault.clone(), r.item.clone()))
+                    .or_insert_with(|| {
+                        self.fetch_item(org, &r)
+                            .map(|i| i["version"].as_u64().unwrap_or(0))
+                            .map_err(|e| e.to_string())
+                    });
+                got.clone().map_err(Error::invalid)
+            })
+            .collect()
+    }
+
+    /// Forget what was read lately, so the next look asks 1Password.
+    fn refresh(&self, org: &OrgId, name: &str) -> Result<SecretMeta> {
+        let r = reference(name)?;
+        let item = self.fetch_item(org, &r)?;
+        Ok(self.meta(org, name, &item))
     }
 
     fn inspect(&self, org: &OrgId, name: &str) -> Result<SecretMeta> {
@@ -245,6 +344,70 @@ fn rfc3339_to_unix(s: &str) -> Option<u64> {
     let days = era * 146_097 + doe - 719_468;
     let secs = days * 86_400 + hh * 3600 + mm * 60 + ss - offset;
     u64::try_from(secs).ok()
+}
+
+/// A fake `op` that logs every call and serves items from a directory:
+/// `<dir>/items/<vault>.<item>` holds the item's version (a missing file is
+/// an unknown item). Each item has fields `password` and `login/user`.
+#[cfg(test)]
+pub(crate) mod fake {
+    use super::*;
+
+    pub(crate) struct FakeOp {
+        pub dir: tempfile::TempDir,
+    }
+
+    impl FakeOp {
+        pub(crate) fn new() -> FakeOp {
+            let dir = tempfile::tempdir().unwrap();
+            let d = dir.path().display();
+            std::fs::create_dir(dir.path().join("items")).unwrap();
+            let script = format!(
+                r#"#!/bin/sh
+echo "$*" >> {d}/calls
+case "$1 $2" in
+  "item get")
+    f="{d}/items/$5.$3"
+    [ -f "$f" ] || {{ echo "\"$3\" isn't an item" >&2; exit 1; }}
+    printf '{{"version": %s, "fields": [{{"id": "password", "label": "password", "value": "pw-%s-%s"}}, {{"id": "u1", "label": "user", "section": {{"id": "s1", "label": "login"}}, "value": "user-%s"}}]}}' "$(cat "$f")" "$3" "$(cat "$f")" "$3"
+    ;;
+  "read --no-newline") printf 'read:%s' "$3" ;;
+  *) exit 2 ;;
+esac
+"#
+            );
+            let op = dir.path().join("op");
+            std::fs::write(&op, script).unwrap();
+            std::fs::set_permissions(&op, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+                .unwrap();
+            FakeOp { dir }
+        }
+
+        pub(crate) fn driver(&self) -> OnePasswordDriver {
+            let token: TokenSource = Arc::new(|_| Ok(Some("tok".to_string())));
+            OnePasswordDriver::new(token).with_binary(self.dir.path().join("op"))
+        }
+
+        pub(crate) fn set_version(&self, vault: &str, item: &str, v: u64) {
+            std::fs::write(
+                self.dir
+                    .path()
+                    .join("items")
+                    .join(format!("{vault}.{item}")),
+                v.to_string(),
+            )
+            .unwrap();
+        }
+
+        /// Every call so far, one `op` argv per line.
+        pub(crate) fn calls(&self) -> Vec<String> {
+            std::fs::read_to_string(self.dir.path().join("calls"))
+                .unwrap_or_default()
+                .lines()
+                .map(String::from)
+                .collect()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -310,5 +473,87 @@ mod tests {
             .to_string();
         assert!(e.contains("no 1Password token"), "{e}");
         assert!(d.set(&alpha, "v/i/f", b"x").is_err());
+    }
+
+    /// 150 references into 10 items, polled in one round: 10 `op item get`,
+    /// not 150. The values a bump then needs come from those answers.
+    #[test]
+    fn a_polling_round_asks_once_per_item() {
+        let op = fake::FakeOp::new();
+        for i in 0..10 {
+            op.set_version("v", &format!("item{i}"), 3);
+        }
+        let d = op.driver();
+        let org = OrgId::new("alpha").unwrap();
+        let refs: Vec<String> = (0..150)
+            .map(|n| match n % 3 {
+                0 => format!("v/item{}/password", n % 10),
+                1 => format!("v/item{}/login/user", n % 10),
+                _ => format!("v/item{}/field{n}", n % 10),
+            })
+            .collect();
+        let names: Vec<&str> = refs.iter().map(String::as_str).collect();
+        let got = d.versions(&org, &names);
+        assert!(got.iter().all(|v| *v.as_ref().unwrap() == 3));
+        assert_eq!(op.calls().len(), 10, "{:?}", op.calls());
+        assert!(op.calls().iter().all(|c| c.starts_with("item get")));
+
+        // Item 4 moves: the next round still asks once per item, and sees it.
+        op.set_version("v", "item4", 4);
+        let got = d.versions(&org, &names);
+        assert_eq!(op.calls().len(), 20);
+        for (r, v) in refs.iter().zip(&got) {
+            let want = if r.starts_with("v/item4/") { 4 } else { 3 };
+            assert_eq!(*v.as_ref().unwrap(), want, "{r}");
+        }
+
+        // Reading the moved references right after (what a roll does, per
+        // replica) costs nothing more: the round's answer holds the fields.
+        for _ in 0..3 {
+            assert_eq!(
+                d.get(&org, "v/item4/password").unwrap(),
+                (b"pw-item4-4".to_vec(), 4)
+            );
+            assert_eq!(
+                d.get(&org, "v/item4/login/user").unwrap(),
+                (b"user-item4".to_vec(), 4)
+            );
+        }
+        assert_eq!(op.calls().len(), 20, "{:?}", op.calls());
+        // A field the item's JSON does not carry is read with `op read`.
+        assert_eq!(
+            d.get(&org, "v/item4/field9").unwrap(),
+            (b"read:op://v/item4/field9".to_vec(), 4)
+        );
+        assert_eq!(op.calls().len(), 21);
+        // A forced refresh always asks.
+        assert_eq!(d.refresh(&org, "v/item4/password").unwrap().version, 4);
+        assert_eq!(op.calls().len(), 22);
+        // An unknown item fails its own references only, once.
+        let got = d.versions(&org, &["v/ghost/a", "v/ghost/b", "v/item1/password"]);
+        assert!(got[0].is_err() && got[1].is_err());
+        assert_eq!(*got[2].as_ref().unwrap(), 3);
+        assert_eq!(op.calls().len(), 24);
+        // Orgs never share an answer.
+        let beta = OrgId::new("beta").unwrap();
+        d.get(&beta, "v/item4/password").unwrap();
+        assert_eq!(op.calls().len(), 25);
+    }
+
+    #[test]
+    fn field_values_from_the_item() {
+        let item: Value = serde_json::json!({"fields": [
+            {"id": "password", "label": "password", "value": "pw"},
+            {"id": "x1", "label": "user", "section": {"id": "s1", "label": "login"}, "value": "u"},
+            {"id": "x2", "label": "user", "section": {"id": "s2", "label": "admin"}, "value": "a"},
+            {"id": "doc", "label": "doc"},
+        ]});
+        assert_eq!(field_value(&item, "password"), Some(b"pw".to_vec()));
+        assert_eq!(field_value(&item, "login/user"), Some(b"u".to_vec()));
+        assert_eq!(field_value(&item, "s2/x2"), Some(b"a".to_vec()));
+        // Ambiguous, valueless or missing: left to `op read`.
+        assert_eq!(field_value(&item, "user"), None);
+        assert_eq!(field_value(&item, "doc"), None);
+        assert_eq!(field_value(&item, "nope"), None);
     }
 }

@@ -99,7 +99,7 @@ matches any run of characters) and it passes every filter given:
 
 | Field | Matches |
 |---|---|
-| `events` | `deploy.*`, `health.*`, `monitor.*`, `backup.*`, `job.*`, `cert.*`, `*.failed`, `*` (the default) |
+| `events` | `deploy.*`, `health.*`, `monitor.*`, `backup.*`, `job.*`, `cert.*`, `secret.*`, `*.failed`, `*` (the default) |
 | `projects` | the app's project (only app events have one) |
 | `apps` | the app (a service of that name) |
 | `stacks` | the stack's name in the org (`<project>-<env>` for apps) |
@@ -121,6 +121,7 @@ shortest globs (`*`, `deploy.*`, `*.failed`).
 | `backup.succeeded`, `backup.failed`, `job.succeeded`, `job.failed` | [Database and volume backups](databases.md#backups) and [scheduled jobs](jobs.md). |
 | `monitor.down`, `monitor.up` | An [uptime monitor](uptime.md) went down (its failure threshold reached), or came back (with the downtime). Once per incident; a flapping monitor is held until it settles. The body's `details` carry the URL, status, latency, error and a link. |
 | `monitor.cert_expiring` | An HTTPS certificate a monitor sees expires within its `cert_expiry_days`; once per certificate. |
+| `secret.rotated` | A new secret version reached a stack service (or an app): the message says the versions and what its `on_change` does (rolling, restarting in place, or not cycled, at `warn`). A workspace using it is reported under stack `<org>/@workspaces`. See [When a secret changes](secrets.md#when-a-secret-changes). |
 | `server.unreachable`, `server.recovered` | On a control plane: a [server](servers.md) stopped answering its heartbeat, or answers again (stack `<org>/@servers` for each org on it, and `system/@servers`). |
 
 The list is the `kind` field on the event feed (the `events` tool, the SSE

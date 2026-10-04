@@ -88,6 +88,7 @@ isb app update NAME [-f PATCH|-] [--image REF] [--ref R] [--replicas N] [--port 
 | `files` | `[{path, secret, mode?}]`: the org secret `secret`'s value as a file at the absolute `path` (config files, certificates), delivered like a stack's file secrets ([Secrets](secrets.md#stacks)). Mode default `0400`, owned by the app's numeric user or root. |
 | `user` | The user the app runs as; numeric (`uid[:gid]`) on an OCI image. |
 | `working_dir` | The working directory. |
+| `secret_on_change` | What a new version of a secret the app uses (in `env` or `files`) does: `roll` (default; a rolling update), `restart` (each replica's app restarted in place, one at a time, waiting until healthy) or `none` (files updated, replicas stale until they next start). See [When a secret changes](secrets.md#when-a-secret-changes). |
 
 Changing a setting (`app_update`, a JSON merge patch where `null` clears a
 field; `isb app update NAME -f patch.yaml`, JSON or YAML) takes effect at the
@@ -96,8 +97,9 @@ has volumes, since two live copies of a database on one volume do not mix.
 
 The rendered service is labelled `isb.app=<name>`. An env secret `NAME`
 becomes the stack secret `<app>.NAME` (`external`, store name `NAME`), so
-`isb secret set NAME` rolls the app like any stack using it
-([Secrets](secrets.md#stacks)).
+`isb secret set NAME` reaches the app like any stack using it, per its
+`secret_on_change` ([When a secret
+changes](secrets.md#when-a-secret-changes)).
 
 **Domains** are stored with the app and passed to its service as the
 stack's `domains:` list, so the ingress routes them at the next deploy;

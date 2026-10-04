@@ -8,8 +8,8 @@ Every org on `isb serve` has its own secret store: named values, encrypted at
 rest, that you manage with `isb secret` or the `secret_*` tools. Stacks and
 apps refer to stored secrets by name and version, never by value, so a value
 never sits in a compose file, an instance's config or a deployment record,
-and giving a secret a new version rolls the services that use it
-([Stacks](#stacks)).
+and giving a secret a new version cycles the services that use it, the way
+each one asks ([When a secret changes](#when-a-secret-changes)).
 
 ```sh
 printf %s "$DB_PASSWORD" | isb secret create db_password    # value from stdin
@@ -64,8 +64,8 @@ renamed into place, so a crash never leaves half a value. A `.age` file is a
 standard age file: `age -d -i KEY <name>.age` decrypts it with the daemon's
 key or a break-glass key.
 
-`isb secret refresh NAME` re-reads a secret from its source and rolls the
-stacks using it if its version moved; for `local` it does nothing.
+`isb secret refresh NAME` re-reads a secret from its source and, if its
+version moved, cycles the services using it; for `local` it does nothing.
 
 ### `onepassword`
 
@@ -83,7 +83,18 @@ manage the values in 1Password.
 - A name with a `/` in it is always such a reference; `local` names never
   contain one.
 - The version is the 1Password item's version, which moves on every edit to
-  the item, so the daemon's refresh notices a rotation.
+  the item, so the daemon's refresh notices a rotation. Every field of an
+  item shares it, so editing one field moves the version of every reference
+  into that item, and the services using any of them cycle.
+- Polling is grouped to stay inside 1Password's daily read limit (per
+  account, across all its service accounts): a round asks `op item get`
+  once per org, vault and item, however many fields, stacks and services
+  refer to it, and the values a new version then needs come from that same
+  answer (kept 20 seconds) rather than one read per reference and replica.
+  A field the item's JSON does not carry as text (a file, an OTP) is read
+  with `op read`. Budget about one read per item per `refresh` interval:
+  50 items at `refresh: 5m` is 14,400 reads a day.
+- `isb secret refresh REF` asks 1Password once, however many stacks use it.
 - The token reaches `op` through the environment of that one child process,
   never its arguments, and nothing else from the daemon's environment goes
   with it.
@@ -251,25 +262,73 @@ store (or a driver's reference), the driver, and the version deployed
 - `driver: X, name: REF` is read through driver X.
 
 The controller reads each value from the store whenever it delivers it (a new
-instance, a reboot), never from the definition. A service's revision includes
-each of its secrets' name and version, so a new version is a new revision and
-the service rolls, per its `update_config`:
+instance, a reboot, a restart in place), never from the definition. A new
+version is noticed in two ways:
 
-- `isb secret set NAME` (or `secret_set`) rolls every stack in the org bound
-  to `NAME` right away, and says which.
+- `isb secret set NAME` (or `secret_set`) moves every stack in the org bound
+  to `NAME` to the new version right away.
 - Driver-backed secrets are polled: every `refresh` interval (default 1h) the
-  controller asks the driver for the current version, and rolls on a change.
-  `isb secret refresh NAME` (a store name or a stack's driver reference)
-  checks now.
+  controller asks the driver for the current version. `isb secret refresh
+  NAME` (a store name or a stack's driver reference) checks now.
+
+What each service then does is its `on_change` ([When a secret
+changes](#when-a-secret-changes)).
 
 `isb stack rm` deletes the `<stack>_<key>` secrets the stack stored, unless
 another stack has come to use them. `isb secret rm` refuses to delete a
 secret that a deployed stack uses. The store keeps only each secret's current
 value, so `isb stack rollback` delivers today's values.
 
-Apps use the same mechanism: an app's env secret `NAME` becomes the stack
-secret `<app>.NAME` (`external`, store name `NAME`), so `isb secret set NAME`
-rolls the app ([Deploy apps](deploy-apps.md)).
+Apps use the same mechanism: an app's env secret `NAME` (and a file's
+secret) becomes the stack secret `<app>.NAME` (`external`, store name
+`NAME`), so `isb secret set NAME` reaches the app, per its
+`secret_on_change` ([Deploy apps](deploy-apps.md)).
+
+## When a secret changes
+
+Each stack service using a secret chooses what its new version does, with
+[`on_change`](../reference/compose.md#on_change) on the top-level secret or
+on the service's own reference (an app: `secret_on_change`):
+
+| `on_change` | The replicas | Gap |
+|---|---|---|
+| `roll` (default) | Replaced by a rolling update per `update_config`: `start-first` starts each new replica and waits until it is healthy before retiring the old one; `failure_action` applies. | None with `start-first` |
+| `restart` | Kept. One batch at a time (`update_config.parallelism`), each is drained, gets the new files and variables, has its app restarted, and must pass its health check before the next. | That replica, while it restarts |
+| `none` | Kept, and not restarted. Files get the new value (an app that re-reads them picks it up); variables get it for the next start. Reported stale. | None |
+
+Everything that uses a secret, and what a new version does to it:
+
+| Consumer | On a new version |
+|---|---|
+| Stack service, file (`secrets:`) | Its `on_change`. |
+| Stack service, variable (`environment: {KEY: {secret: NAME}}`) | Its `on_change`. A running process cannot take a new variable, so `none` delivers it for the next start only. |
+| App (`${{secret.NAME}}` in env, `files`) | A stack service: its `secret_on_change` (default `roll`; apps update `start-first` unless they have volumes). |
+| Database app | The same; its password secret only seeds a new data volume, so a new version of it does not change the database's password. |
+| Job, `run` mode | Reads the values when each run starts: always current. |
+| Job, `exec` mode | Runs in a replica: whatever the replica has. |
+| Workspace (`--secret NAME`) | Never restarted (a workspace restarts only with `confirm`): `secret_set` writes the new file to `/run/isb/secrets/NAME` in each running workspace using it, and reports the workspace under `skipped`. A program that read the old value keeps it. A driver reference a workspace uses is not polled; `isb secret refresh REF` delivers it. |
+| Sandbox egress secret (`{env, secret, hosts}`) | Read by the egress proxy when a request needs it, cached for a few seconds: live. |
+| `isb up` | Reads values when it runs; nothing to cycle. |
+
+`isb secret set` and `refresh` (and the tools) report it all: per service,
+its stack, the secret's key, the versions and the action taken
+(`services`), the stacks that roll or restart (`rolled`), and what was not
+cycled and why (`skipped`):
+
+```console
+$ printf %s "$NEW" | isb secret set smtp-password -
+smtp-password: version 4
+shop-production/web: web.smtp-password v3 -> v4: restarting its replicas in place
+shop-production/worker: web.smtp-password v3 -> v4: not cycled (on_change: none): files updated, the app keeps v3 until it next starts
+workspace main: delivered /run/isb/secrets/smtp-password; not restarted (a workspace restarts only with confirm): processes that read the old value keep it
+```
+
+Each service (and workspace) a new version reaches also gets a
+`secret.rotated` event, `warn` when nothing restarts: it lands in the
+history (`history_query`, kind `secret.rotated`) and goes to the
+[notification channels](notifications.md) that want it. `stack_status`
+lists, per replica, the `stale_secrets` it runs an older version of. The
+`secret_set`/`secret_refresh` calls themselves are in the audit log.
 
 A stack definition that holds base64 values in place of references is
 converted when `isb serve` starts: each value moves into the org's store as
@@ -296,12 +355,12 @@ Values travel base64.
 | Tool | Does |
 |---|---|
 | `secret_create` | Create (`name`, `value`, optional `driver`, `labels`); fails if it exists. |
-| `secret_set` | New value (`name`, `value`); returns the metadata with the new version, and the stacks rolling to it (`rolled`). |
+| `secret_set` | New value (`name`, `value`); returns the metadata with the new version, what each service using it does (`services`: `stack`, `service`, `key`, `secret`, `from`, `to`, `action`), the stacks that roll or restart (`rolled`), and what was not cycled and why (`skipped`). |
 | `secret_get` | `{meta, value}`. |
 | `secret_list` | `{secrets: [meta...], references: [...]}`, no values. Each secret carries `used_by`, the deployed stacks whose services use it; `references` are the driver references (such as `vault/item/field`) stacks use, each `{name, driver, version, used_by}`. |
 | `secret_inspect` | One secret's metadata. |
 | `secret_delete` | Delete, unless a deployed stack uses it. |
-| `secret_refresh` | Re-read from an external source (a store name, or a stack's driver reference); `rolled` lists the stacks rolling. |
+| `secret_refresh` | Re-read from an external source (a store name, or a stack's driver reference); answers like `secret_set`. |
 | `secret_reencrypt` | Re-encrypt to the current recipients (`org`, or `all: true`). |
 | `secret_recipients` | The public keys values are encrypted to. |
 | `secret_resolve` | Local callers only: the values of a compose file's `external`/`age`/`driver` secrets, for `isb up`. |

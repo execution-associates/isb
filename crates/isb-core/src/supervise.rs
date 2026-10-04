@@ -248,6 +248,20 @@ pub fn install(
     uses_secrets: bool,
     secret_env: &BTreeMap<String, String>,
 ) -> Result<bool> {
+    install_with(sb, service, spec, uses_secrets, secret_env, true)
+}
+
+/// [`install`], restarting the app for a changed environment file only when
+/// `restart_on_env`: a secret variable with `on_change: none` is written for
+/// the next start and left alone. A changed unit always restarts it.
+pub fn install_with(
+    sb: &Sandbox,
+    service: &str,
+    spec: &SandboxSpec,
+    uses_secrets: bool,
+    secret_env: &BTreeMap<String, String>,
+    restart_on_env: bool,
+) -> Result<bool> {
     let client = sb.client();
     let name = sb.name();
     if !root_exec(
@@ -274,7 +288,9 @@ pub fn install(
     let same = |path: &str, want: &str| -> Result<bool> {
         Ok(client.read_file(name, path)?.as_deref() == Some(want.as_bytes()))
     };
-    let changed = !same(&unit_path, &files.unit)? || !same(&env_file, &files.env)?;
+    let unit_changed = !same(&unit_path, &files.unit)?;
+    let env_changed = !same(&env_file, &files.env)?;
+    let changed = unit_changed || env_changed;
     let unit = unit_name(service);
     if changed {
         client.make_dir(name, "/etc/isb", 0, 0, 0o755)?;
@@ -310,7 +326,8 @@ pub fn install(
         &format!("systemctl enable {unit}"),
     )?;
     // --no-block: a unit waiting for its secrets would otherwise hold this.
-    let verb = if changed { "restart" } else { "start" };
+    let restart = unit_changed || (env_changed && restart_on_env);
+    let verb = if restart { "restart" } else { "start" };
     check(
         root_exec(
             sb,
@@ -319,7 +336,7 @@ pub fn install(
         )?,
         &format!("systemctl {verb} {unit}"),
     )?;
-    Ok(changed)
+    Ok(restart)
 }
 
 /// A just-started guest has /run/systemd/system before systemd answers on
@@ -397,10 +414,29 @@ pub fn push_secrets(
     spec: &SandboxSpec,
     values: &BTreeMap<String, Vec<u8>>,
 ) -> Result<bool> {
+    push_secrets_detailed(sb, spec, values).map(|p| p.missing || !p.changed.is_empty())
+}
+
+/// What [`push_secrets_detailed`] found in the guest before writing.
+#[derive(Debug, Default)]
+pub struct Pushed {
+    /// A file was not there at all: the app started without it.
+    pub missing: bool,
+    /// The top-level secrets whose file held another value.
+    pub changed: std::collections::BTreeSet<String>,
+}
+
+/// [`push_secrets`], saying which secrets' files were missing or different,
+/// so a caller can restart the app only for the ones that warrant it.
+pub fn push_secrets_detailed(
+    sb: &Sandbox,
+    spec: &SandboxSpec,
+    values: &BTreeMap<String, Vec<u8>>,
+) -> Result<Pushed> {
+    let mut pushed = Pushed::default();
     if spec.secrets.is_empty() {
-        return Ok(false);
+        return Ok(pushed);
     }
-    let mut changed = false;
     let client = sb.client();
     let name = sb.name();
     let (def_uid, def_gid) = numeric_user(spec.user.as_deref()).unwrap_or((0, 0));
@@ -417,8 +453,13 @@ pub fn push_secrets(
         make_dirs(client, name, parent)?;
         let mode = s.file_mode().map_err(Error::invalid)?;
         let (uid, gid) = (s.uid.unwrap_or(def_uid), s.gid.or(s.uid).unwrap_or(def_gid));
-        changed |=
-            client.read_file(name, &path).ok().flatten().as_deref() != Some(value.as_slice());
+        match client.read_file(name, &path).ok().flatten() {
+            None => pushed.missing = true,
+            Some(v) if v != *value => {
+                pushed.changed.insert(s.source.clone());
+            }
+            Some(_) => {}
+        }
         client.push_file(name, &path, value, uid, gid, mode)?;
         let stored = format!("{SECRETS_STORE}/{n}");
         client.push_file(name, &stored, value, 0, 0, 0o400)?;
@@ -429,7 +470,35 @@ pub fn push_secrets(
         ));
     }
     client.push_file(name, SECRETS_RESTORE, script.as_bytes(), 0, 0, 0o700)?;
-    Ok(changed)
+    Ok(pushed)
+}
+
+/// Set an OCI instance's secret variables in its config (`environment.KEY`),
+/// where its next start reads them; the running app keeps what it has.
+pub fn set_oci_env(sb: &Sandbox, env: &BTreeMap<String, String>) -> Result<()> {
+    if env.is_empty() {
+        return Ok(());
+    }
+    let config: serde_json::Map<String, serde_json::Value> = env
+        .iter()
+        .map(|(k, v)| {
+            (
+                format!("environment.{k}"),
+                serde_json::Value::from(v.as_str()),
+            )
+        })
+        .collect();
+    sb.client().mutate(
+        "PATCH",
+        &format!(
+            "/1.0/instances/{}",
+            crate::client::encode_segment(sb.name())
+        ),
+        Some(&serde_json::json!({ "config": config })),
+        "set secret variables",
+        Duration::from_secs(60),
+    )?;
+    Ok(())
 }
 
 fn sh_quote(s: &str) -> String {

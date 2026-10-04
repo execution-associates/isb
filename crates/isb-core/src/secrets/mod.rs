@@ -59,6 +59,13 @@ pub trait Driver: Send + Sync {
     /// The current version only: cheap, for polling.
     fn version(&self, org: &OrgId, name: &str) -> Result<u64>;
 
+    /// The current version of each name, in order: one polling round.
+    /// Drivers whose secrets share a version (every field of a 1Password
+    /// item) answer each group with one lookup.
+    fn versions(&self, org: &OrgId, names: &[&str]) -> Vec<Result<u64>> {
+        names.iter().map(|n| self.version(org, n)).collect()
+    }
+
     fn inspect(&self, org: &OrgId, name: &str) -> Result<SecretMeta>;
 
     /// Every secret in the org this driver holds: metadata, never values.
@@ -343,11 +350,24 @@ impl Secrets {
         self.driver(driver)?.version(org, name)
     }
 
+    /// The current versions of several names in a named driver: one
+    /// polling round, deduplicated where the driver can.
+    pub fn versions_in(&self, driver: &str, org: &OrgId, names: &[&str]) -> Vec<Result<u64>> {
+        match self.driver(driver) {
+            Ok(d) => d.versions(org, names),
+            Err(e) => {
+                let msg = e.to_string();
+                names
+                    .iter()
+                    .map(|_| Err(Error::invalid(msg.clone())))
+                    .collect()
+            }
+        }
+    }
+
     /// Re-read from the source through a named driver.
     pub fn refresh_in(&self, driver: &str, org: &OrgId, name: &str) -> Result<u64> {
-        let d = self.driver(driver)?;
-        d.refresh(org, name)?;
-        d.version(org, name)
+        Ok(self.driver(driver)?.refresh(org, name)?.version)
     }
 
     pub fn inspect(&self, org: &OrgId, name: &str) -> Result<SecretMeta> {

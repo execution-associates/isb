@@ -253,7 +253,10 @@ sandboxes and audit log). The token:
   org, and labels the sandboxes it makes `isb.owner=workspace`.
 
 Named org secrets (`--secret NAME`) are delivered as `/run/isb/secrets/NAME`
-(0400, the workspace user's). `-e KEY=VALUE` are plain variables for login
+(0400, the workspace user's). A new value (`isb secret set`) is written into
+a running workspace at once, and never restarts it: a program that read the
+old value keeps it ([When a secret
+changes](../guides/secrets.md#when-a-secret-changes)). `-e KEY=VALUE` are plain variables for login
 shells (`ISB_*` are isb's and refused).
 
 ### Reaching isb from inside: the bridge listener

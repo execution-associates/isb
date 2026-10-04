@@ -41,6 +41,7 @@ mod notify;
 mod orgs;
 pub mod policy;
 pub mod previews;
+mod secret_hooks;
 pub mod secrets;
 mod servers;
 mod ssh;
@@ -807,46 +808,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
     tools::stack_scale_tool(&mut r, &d, &ann)?;
     tools::stack_edit_tools(&mut r, &d, &ann)?;
     tools::sandbox_create_tool(&mut r, &d, &ann)?;
-    let ctl = d.ctl.clone();
-    let bindings: secrets::Bindings = Arc::new(move |org: &crate::org::OrgId| {
-        let mut out = Vec::new();
-        for def in ctl.definitions().iter().filter(|def| def.org == *org) {
-            let used = crate::stack::secrets::used_keys(&def.file);
-            for (_, b) in def.secrets.iter().filter(|(k, _)| used.contains(*k)) {
-                out.push(secrets::Binding {
-                    name: b.name.clone(),
-                    driver: b.driver.clone(),
-                    version: b.version,
-                    stack: def.name.clone(),
-                });
-            }
-        }
-        out
-    });
-    let ctl = d.ctl.clone();
-    let in_use: secrets::InUse = Arc::new(move |org: &crate::org::OrgId, name: &str| {
-        ctl.definitions()
-            .iter()
-            .filter(|def| def.org == *org && def.store_secrets().contains(name))
-            .map(|def| def.name.clone())
-            .collect()
-    });
-    let ctl = d.ctl.clone();
-    let changed: secrets::Changed =
-        Arc::new(move |org: &crate::org::OrgId, name: &str| ctl.secret_changed(org, name));
-    let ctl = d.ctl.clone();
-    let refresh: secrets::Refresh =
-        Arc::new(move |org: &crate::org::OrgId, name: &str| ctl.refresh_secret(org, name));
-    secrets::register(
-        &mut r,
-        d.secrets.clone(),
-        secrets::Hooks {
-            in_use,
-            changed,
-            refresh,
-            bindings,
-        },
-    )?;
+    secret_hooks::register(&mut r, &d)?;
     builds::register(
         &mut r,
         builds::Ctx {

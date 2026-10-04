@@ -202,6 +202,11 @@ pub struct AppSpec {
     pub user: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
+    /// What a new version of a secret the app uses (in `env` or `files`)
+    /// does to its replicas: `roll` (default), `restart` in place, or
+    /// `none` (files updated, replicas stale until they next start).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_on_change: Option<crate::spec::OnChange>,
 }
 
 /// A file an app gets: the value of org secret `secret` at `path`.
@@ -434,6 +439,7 @@ pub fn render(spec: &AppSpec, image: &str, notes: &mut Vec<String>) -> Result<Re
                     SecretDef {
                         external: true,
                         name: Some(secret.clone()),
+                        on_change: spec.secret_on_change,
                         ..Default::default()
                     },
                 );
@@ -494,6 +500,7 @@ pub fn render(spec: &AppSpec, image: &str, notes: &mut Vec<String>) -> Result<Re
                 SecretDef {
                     external: true,
                     name: Some(f.secret.clone()),
+                    on_change: spec.secret_on_change,
                     ..Default::default()
                 },
             );
@@ -718,6 +725,25 @@ mod tests {
         assert!(s.healthcheck.is_some());
         assert_eq!(s.ports.len(), 1);
         assert!(notes.is_empty());
+    }
+
+    #[test]
+    fn secret_on_change_reaches_every_secret_the_app_uses() {
+        let base = concat!(
+            "name: web\nproject: shop\nsource: {image: 'docker:traefik/whoami'}\n",
+            "env: \"T=${{secret.tok}}\\n\"\nfiles: [{path: /etc/app.conf, secret: conf}]\n",
+        );
+        let r = render(&spec(base), "x", &mut vec![]).unwrap();
+        assert!(r.secrets.values().all(|d| d.on_change.is_none()));
+        let a = spec(&format!("{base}secret_on_change: restart\n"));
+        let r = render(&a, "x", &mut vec![]).unwrap();
+        assert_eq!(r.secrets.len(), 2);
+        assert!(
+            r.secrets
+                .values()
+                .all(|d| d.on_change == Some(crate::spec::OnChange::Restart))
+        );
+        assert!(try_spec(&format!("{base}secret_on_change: sometimes\n")).is_err());
     }
 
     #[test]

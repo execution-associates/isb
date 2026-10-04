@@ -110,6 +110,7 @@ const ORDER: &[&str] = &[
     "files",
     "user",
     "working_dir",
+    "secret_on_change",
 ];
 
 /// The YAML document of an app's settings. It goes through JSON so that

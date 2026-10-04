@@ -12,20 +12,46 @@ use crate::error::{Error, Result};
 use crate::org::OrgId;
 use crate::secrets::Secrets;
 use crate::server::{Caller, Registry, Tool};
+use crate::stack::secrets::Cycle;
 
 type Handler = Box<dyn Fn(&Secrets, Value, &Caller) -> Result<Value> + Send + Sync>;
 
 /// The stacks in an org whose services use a stored secret.
 pub type InUse = Arc<dyn Fn(&OrgId, &str) -> Vec<String> + Send + Sync>;
 
-/// A stored secret got a new value: roll what uses it; returns the stacks
-/// rolled.
-pub type Changed = Arc<dyn Fn(&OrgId, &str) -> Vec<String> + Send + Sync>;
+/// What a new secret version did: per stack service, its `on_change`
+/// action, and what was not cycled (workspaces) and why.
+#[derive(Debug, Clone, Default)]
+pub struct Outcome {
+    pub cycles: Vec<Cycle>,
+    pub skipped: Vec<Skipped>,
+}
+
+/// Something using a secret that a new version does not restart.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Skipped {
+    /// `workspace`.
+    pub kind: String,
+    pub name: String,
+    pub reason: String,
+}
+
+impl Outcome {
+    /// `rolled`, `services` and `skipped`, as the tools answer them.
+    fn fill(&self, v: &mut Value) {
+        v["rolled"] = json!(crate::stack::secrets::cycled_stacks(&self.cycles));
+        v["services"] = json!(self.cycles);
+        v["skipped"] = json!(self.skipped);
+    }
+}
+
+/// A stored secret got a new value: cycle what uses it, per its
+/// `on_change`.
+pub type Changed = Arc<dyn Fn(&OrgId, &str) -> Outcome + Send + Sync>;
 
 /// Re-read every stack reference to a name through its driver now; returns
-/// (driver, version) per reference and the stacks rolled.
-pub type Refresh =
-    Arc<dyn Fn(&OrgId, &str) -> Result<crate::stack::secrets::Refreshed> + Send + Sync>;
+/// (driver, version) per driver and what the new version did.
+pub type Refresh = Arc<dyn Fn(&OrgId, &str) -> Result<(Vec<(String, u64)>, Outcome)> + Send + Sync>;
 
 /// One stack's use of a secret, as deployed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,8 +80,8 @@ impl Hooks {
     pub fn none() -> Hooks {
         Hooks {
             in_use: Arc::new(|_, _| Vec::new()),
-            changed: Arc::new(|_, _| Vec::new()),
-            refresh: Arc::new(|_, _| Ok((Vec::new(), Vec::new()))),
+            changed: Arc::new(|_, _| Outcome::default()),
+            refresh: Arc::new(|_, _| Ok((Vec::new(), Outcome::default()))),
             bindings: Arc::new(|_| Vec::new()),
         }
     }
@@ -220,7 +246,7 @@ pub fn register(r: &mut Registry, secrets: Arc<Secrets>, hooks: Hooks) -> Result
     add(
         "secret_set",
         "Set a secret",
-        "Give a secret a new value (base64), bumping its version; creates it in the local store if missing. Stacks using it roll to the new version (listed in `rolled`).",
+        "Give a secret a new value (base64), bumping its version; creates it in the local store if missing. Each stack service using it acts per its `on_change`: `roll` (default; a rolling update), `restart` (in place) or `none` (files updated, replicas stale until they next start). `services` lists what each service did, `rolled` the stacks that roll or restart, `skipped` what was not cycled and why (workspaces get the file, never a restart).",
         obj(
             props(json!({"name": name_prop()["name"], "value": value_prop["value"]})),
             &["name", "value"],
@@ -238,9 +264,9 @@ pub fn register(r: &mut Registry, secrets: Arc<Secrets>, hooks: Hooks) -> Result
             let a: A = args(a)?;
             let org = org_for(c, a.org.as_deref())?;
             let m = s.set(&org, &a.name, &value_of(&a.value)?)?;
-            let rolled = on_set(&org, &a.name);
+            let outcome = on_set(&org, &a.name);
             let mut v = serde_json::to_value(m)?;
-            v["rolled"] = json!(rolled);
+            outcome.fill(&mut v);
             Ok(v)
         }),
     )?;
@@ -307,7 +333,7 @@ pub fn register(r: &mut Registry, secrets: Arc<Secrets>, hooks: Hooks) -> Result
     add(
         "secret_refresh",
         "Refresh a secret",
-        "Re-read an externally stored secret from its source now, and roll the stacks using it if its version moved (listed in `rolled`). `name` is a store name, or a stack's driver reference. A no-op for the local store.",
+        "Re-read an externally stored secret from its source now; if its version moved, each stack service using it acts per its `on_change` (`services`, `rolled`, `skipped` as for secret_set). `name` is a store name, or a stack's driver reference. A no-op for the local store.",
         obj(
             props(
                 json!({"name": {"type": "string", "description": "A store name, or a driver reference a stack uses."}}),
@@ -329,7 +355,7 @@ pub fn register(r: &mut Registry, secrets: Arc<Secrets>, hooks: Hooks) -> Result
             } else {
                 None
             };
-            let (refs, rolled) = refresh(&org, &a.name)?;
+            let (refs, outcome) = refresh(&org, &a.name)?;
             let mut v = match (meta, refs.first()) {
                 (Some(m), _) => serde_json::to_value(m)?,
                 (None, Some((driver, version))) => {
@@ -337,7 +363,7 @@ pub fn register(r: &mut Registry, secrets: Arc<Secrets>, hooks: Hooks) -> Result
                 }
                 (None, None) => return Err(crate::secrets::not_found(&org, &a.name)),
             };
-            v["rolled"] = json!(rolled);
+            outcome.fill(&mut v);
             Ok(v)
         }),
     )?;
@@ -442,18 +468,44 @@ mod tests {
                 vec![]
             }
         });
-        let changed: Changed = Arc::new(|org: &OrgId, name: &str| {
+        let cycle = |stack: &str, service: &str, action| Cycle {
+            stack: stack.into(),
+            service: service.into(),
+            key: "k".into(),
+            secret: "used".into(),
+            from: 1,
+            to: 2,
+            action,
+        };
+        let changed: Changed = Arc::new(move |org: &OrgId, name: &str| {
             if org.is_default() && name == "used" {
-                vec!["app".to_string()]
+                Outcome {
+                    cycles: vec![
+                        cycle("app", "web", crate::spec::OnChange::Restart),
+                        cycle("app", "api", crate::spec::OnChange::Roll),
+                        cycle("other", "cron", crate::spec::OnChange::None),
+                    ],
+                    skipped: vec![Skipped {
+                        kind: "workspace".into(),
+                        name: "main".into(),
+                        reason: "delivered".into(),
+                    }],
+                }
             } else {
-                vec![]
+                Outcome::default()
             }
         });
-        let refresh: Refresh = Arc::new(|_org: &OrgId, name: &str| {
+        let refresh: Refresh = Arc::new(move |_org: &OrgId, name: &str| {
             if name == "op://v/item" {
-                Ok((vec![("vault".to_string(), 4)], vec!["app".to_string()]))
+                Ok((
+                    vec![("vault".to_string(), 4)],
+                    Outcome {
+                        cycles: vec![cycle("app", "web", crate::spec::OnChange::Roll)],
+                        skipped: vec![],
+                    },
+                ))
             } else {
-                Ok((vec![], vec![]))
+                Ok((vec![], Outcome::default()))
             }
         });
         let bindings: Bindings = Arc::new(|org: &OrgId| {
@@ -496,8 +548,36 @@ mod tests {
         let v = crate::rpc::b64_encode(b"one");
         call(&r, "secret_create", json!({"name": "used", "value": v})).unwrap();
         let m = call(&r, "secret_set", json!({"name": "used", "value": v})).unwrap();
+        // Only stacks that roll or restart count as rolled; a `none`
+        // service is listed, with its action, but not cycled.
         assert_eq!(m["rolled"], json!(["app"]));
         assert_eq!(m["version"], 2);
+        let actions: Vec<(String, String)> = m["services"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| {
+                (
+                    format!(
+                        "{}/{}",
+                        c["stack"].as_str().unwrap(),
+                        c["service"].as_str().unwrap()
+                    ),
+                    c["action"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            actions,
+            [
+                ("app/web".to_string(), "restart".to_string()),
+                ("app/api".to_string(), "roll".to_string()),
+                ("other/cron".to_string(), "none".to_string()),
+            ]
+        );
+        assert_eq!(m["services"][0]["from"], 1);
+        assert_eq!(m["services"][0]["to"], 2);
+        assert_eq!(m["skipped"][0]["kind"], "workspace");
         // A driver reference is no store name; the stacks answer for it.
         let m = call(&r, "secret_refresh", json!({"name": "op://v/item"})).unwrap();
         assert_eq!(

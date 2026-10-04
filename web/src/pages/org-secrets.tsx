@@ -267,17 +267,40 @@ function SecretsTable({ org, secrets, reveal }: { org: string; secrets: SecretMe
   );
 }
 
+/** What secret_set and secret_refresh say a new version did. */
+type Rotation = {
+  version: number;
+  rolled: string[];
+  services?: { stack: string; service: string; action: "roll" | "restart" | "none" }[];
+  skipped?: { kind: string; name: string; reason: string }[];
+};
+
+/** One line on what a new version did: per `on_change`, and what was skipped. */
+function rotationSummary(r: Rotation): string {
+  const by = (a: string) =>
+    (r.services ?? []).filter((c) => c.action === a).map((c) => `${c.stack}/${c.service}`);
+  const parts: string[] = [];
+  const roll = r.services ? by("roll") : r.rolled;
+  if (roll.length) parts.push(`rolling ${[...new Set(roll)].join(", ")}`);
+  const restart = by("restart");
+  if (restart.length) parts.push(`restarting in place ${[...new Set(restart)].join(", ")}`);
+  const none = by("none");
+  if (none.length) parts.push(`stale until restarted ${[...new Set(none)].join(", ")}`);
+  const ws = (r.skipped ?? []).filter((s) => s.kind === "workspace").map((s) => s.name);
+  if (ws.length) parts.push(`file updated in workspace ${ws.join(", ")} (not restarted)`);
+  return parts.join("; ");
+}
+
 /** Re-read a secret (or a stack's driver reference) from its source now. */
 function useRefresh(org: string) {
   const qc = useQueryClient();
   return async (name: string) => {
     const t = toast.loading(`Checking ${name}…`);
     try {
-      const r = await callTool<{ version: number; rolled: string[] }>("secret_refresh", { name }, org);
+      const r = await callTool<Rotation>("secret_refresh", { name }, org);
+      const what = rotationSummary(r);
       toast.success(
-        r.rolled.length
-          ? `${name} is at v${r.version}; rolling ${r.rolled.join(", ")}`
-          : `${name} is at v${r.version}; nothing to roll`,
+        what ? `${name} is at v${r.version}; ${what}` : `${name} is at v${r.version}; nothing to roll`,
         { id: t },
       );
       await qc.invalidateQueries({ queryKey: ["tool", "secret_list", org] });
@@ -500,12 +523,9 @@ function ValueDialog({
       const value =
         source === "text" ? textToB64(text) : bytesToB64(new Uint8Array(await file!.arrayBuffer()));
       if (update) {
-        const r = await callTool<{ version: number; rolled: string[] }>("secret_set", { name: theName, value }, org);
-        toast.success(
-          r.rolled.length
-            ? `${theName} is now v${r.version}; rolling ${r.rolled.join(", ")}`
-            : `${theName} is now v${r.version}`,
-        );
+        const r = await callTool<Rotation>("secret_set", { name: theName, value }, org);
+        const what = rotationSummary(r);
+        toast.success(what ? `${theName} is now v${r.version}; ${what}` : `${theName} is now v${r.version}`);
       } else if (fixedName) {
         // set creates it in the local store when missing.
         await callTool("secret_set", { name: theName, value }, org);

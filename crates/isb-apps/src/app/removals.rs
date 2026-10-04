@@ -90,6 +90,12 @@ pub fn removals(old: &AppSpec, new: &AppSpec) -> Vec<String> {
         old.working_dir.is_some(),
         new.working_dir.is_some(),
     );
+    reset(
+        &mut out,
+        "secret_on_change",
+        old.secret_on_change.is_some(),
+        new.secret_on_change.is_some(),
+    );
     out
 }
 

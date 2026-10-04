@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::flex;
 
+mod secret;
+pub use secret::{DEFAULT_SECRET_REFRESH, OnChange, SecretDef};
+
 /// A compose file: named volumes plus any number of services, each one
 /// sandbox. Mirrors docker compose wherever incus allows.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -40,133 +43,6 @@ pub struct ComposeFile {
     pub secrets: BTreeMap<String, SecretDef>,
 }
 
-/// Where a secret's value comes from. Exactly one source.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct SecretDef {
-    /// A host file holding the value (relative to the compose file).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub file: Option<String>,
-
-    /// An environment variable of whoever deploys the file (`isb up`, or the
-    /// client calling `isb stack deploy`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environment: Option<String>,
-
-    /// The secret already exists in the org's secret store (`isb secret
-    /// create`), under `name` (default: the key).
-    #[serde(
-        default,
-        deserialize_with = "flex::bool",
-        skip_serializing_if = "std::ops::Not::not"
-    )]
-    #[schemars(with = "flex::BoolOrString")]
-    pub external: bool,
-
-    /// With `external`: the store's name for it. With `driver`: the
-    /// driver's reference (a 1Password `op://` path, say).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-
-    /// The value, age-encrypted to the daemon's recipients (`isb secret
-    /// encrypt`): ASCII-armored, or base64 of the binary format.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub age: Option<String>,
-
-    /// Read through this secrets driver, from `name`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub driver: Option<String>,
-
-    /// With `driver`: how often `isb serve` checks the driver for a new
-    /// version (`30m`, `1h`; default 1h). A new version rolls the services
-    /// using it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub refresh: Option<String>,
-}
-
-impl SecretDef {
-    /// Check that exactly one source is given: `file`, `environment`,
-    /// `external`, `age`, or `driver` with `name`.
-    pub fn validate(&self) -> std::result::Result<(), String> {
-        let sources = [
-            self.file.is_some(),
-            self.environment.is_some(),
-            self.external,
-            self.age.is_some(),
-            self.driver.is_some(),
-        ];
-        if sources.iter().filter(|s| **s).count() != 1 {
-            return Err(
-                "needs exactly one of file, environment, external, age, or driver (with name)"
-                    .into(),
-            );
-        }
-        if self.name.is_some() && !self.external && self.driver.is_none() {
-            return Err("name goes with external or driver".into());
-        }
-        if self.driver.is_some() && self.name.as_deref().is_none_or(str::is_empty) {
-            return Err("driver needs name: the driver's reference to the secret".into());
-        }
-        if self.external {
-            if let Some(n) = &self.name {
-                crate::secrets::validate_name(n).map_err(|e| e.to_string())?;
-            }
-        }
-        if self.age.as_deref().is_some_and(|a| a.trim().is_empty()) {
-            return Err("age is empty".into());
-        }
-        if let Some(r) = &self.refresh {
-            if self.driver.is_none() {
-                return Err("refresh goes with driver".into());
-            }
-            let d = flex::parse_duration(r).map_err(|e| format!("refresh: {e}"))?;
-            if d < std::time::Duration::from_secs(10) {
-                return Err(format!("refresh {r:?}: at least 10s"));
-            }
-        }
-        Ok(())
-    }
-
-    /// The store name of an `external` secret declared under `key`.
-    pub fn store_name<'a>(&'a self, key: &'a str) -> Option<&'a str> {
-        self.external.then(|| self.name.as_deref().unwrap_or(key))
-    }
-
-    /// How often a driver-backed secret is checked for a new version.
-    pub fn refresh_interval(&self) -> std::time::Duration {
-        self.refresh
-            .as_deref()
-            .and_then(|r| flex::parse_duration(r).ok())
-            .unwrap_or(DEFAULT_SECRET_REFRESH)
-    }
-
-    /// Resolved where the deployer stands (`file`, `environment`), rather
-    /// than from the org's store and the daemon's key.
-    pub fn is_client_side(&self) -> bool {
-        self.file.is_some() || self.environment.is_some()
-    }
-
-    /// The source kind, for messages.
-    pub fn source_kind(&self) -> &'static str {
-        if self.file.is_some() {
-            "file"
-        } else if self.environment.is_some() {
-            "environment"
-        } else if self.external {
-            "external"
-        } else if self.age.is_some() {
-            "age"
-        } else if self.driver.is_some() {
-            "driver"
-        } else {
-            "none"
-        }
-    }
-}
-
-/// How often `isb serve` checks a driver-backed secret by default.
-pub const DEFAULT_SECRET_REFRESH: std::time::Duration = std::time::Duration::from_secs(3600);
-
 /// A service's environment: plain values, and variables whose value is a
 /// top-level secret (`KEY: {secret: NAME}`).
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -175,6 +51,8 @@ pub struct Environment {
     pub vars: BTreeMap<String, String>,
     /// `KEY: {secret: NAME}`: variable to top-level secret key.
     pub secrets: BTreeMap<String, String>,
+    /// `KEY: {secret: NAME, on_change: ...}`: the variable's own setting.
+    pub on_change: BTreeMap<String, OnChange>,
 }
 
 impl Environment {
@@ -210,6 +88,7 @@ impl From<BTreeMap<String, String>> for Environment {
         Environment {
             vars,
             secrets: BTreeMap::new(),
+            on_change: BTreeMap::new(),
         }
     }
 }
@@ -225,7 +104,11 @@ impl Serialize for Environment {
             match (self.vars.get(k), self.secrets.get(k)) {
                 (Some(v), _) => m.serialize_entry(k, v)?,
                 (None, Some(sec)) => {
-                    m.serialize_entry(k, &BTreeMap::from([("secret", sec.as_str())]))?
+                    let mut v = BTreeMap::from([("secret", sec.as_str())]);
+                    if let Some(o) = self.on_change.get(k) {
+                        v.insert("on_change", o.as_str());
+                    }
+                    m.serialize_entry(k, &v)?
                 }
                 (None, None) => {}
             }
@@ -245,12 +128,15 @@ impl<'de> Deserialize<'de> for Environment {
                         flex::EnvValue::Scalar(v) => {
                             env.vars.insert(k, v.into_string());
                         }
-                        flex::EnvValue::Secret { secret } if secret.is_empty() => {
+                        flex::EnvValue::Secret { secret, .. } if secret.is_empty() => {
                             return Err(D::Error::custom(format!(
                                 "environment {k}: secret needs a top-level secret's name"
                             )));
                         }
-                        flex::EnvValue::Secret { secret } => {
+                        flex::EnvValue::Secret { secret, on_change } => {
+                            if let Some(o) = on_change {
+                                env.on_change.insert(k.clone(), o);
+                            }
                             env.secrets.insert(k, secret);
                         }
                     }
@@ -1727,6 +1613,10 @@ pub struct SecretRef {
     )]
     #[schemars(with = "Option<flex::IntOrString>")]
     pub mode: Option<String>,
+    /// What a new version of the secret does to this service (overrides the
+    /// top-level secret's `on_change`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_change: Option<OnChange>,
 }
 
 #[derive(Deserialize)]
@@ -1743,6 +1633,8 @@ enum SecretRefRepr {
         gid: Option<flex::Scalar>,
         #[serde(default)]
         mode: Option<flex::Scalar>,
+        #[serde(default)]
+        on_change: Option<OnChange>,
     },
 }
 
@@ -1759,7 +1651,9 @@ impl<'de> Deserialize<'de> for SecretRef {
             .transpose()
         };
         match SecretRefRepr::deserialize(d).map_err(|_| {
-            D::Error::custom("expected a secret name or {source, target, uid, gid, mode}")
+            D::Error::custom(
+                "expected a secret name or {source, target, uid, gid, mode, on_change}",
+            )
         })? {
             SecretRefRepr::Name(source) => Ok(SecretRef {
                 source,
@@ -1771,9 +1665,11 @@ impl<'de> Deserialize<'de> for SecretRef {
                 uid,
                 gid,
                 mode,
+                on_change,
             } => Ok(SecretRef {
                 source,
                 target,
+                on_change,
                 uid: id(uid, "uid")?,
                 gid: id(gid, "gid")?,
                 // YAML reads an unquoted 0400 as the number 400; both mean octal.
@@ -1814,6 +1710,23 @@ impl SandboxSpec {
             .map(|r| r.source.as_str())
             .chain(self.env.secrets.values().map(String::as_str))
             .collect()
+    }
+
+    /// The service's own `on_change` for a top-level secret it uses: the
+    /// strongest of its references that set one, `None` when none does.
+    pub fn secret_on_change(&self, key: &str) -> Option<OnChange> {
+        self.secrets
+            .iter()
+            .filter(|r| r.source == key)
+            .filter_map(|r| r.on_change)
+            .chain(
+                self.env
+                    .secrets
+                    .iter()
+                    .filter(|(_, k)| *k == key)
+                    .filter_map(|(var, _)| self.env.on_change.get(var).copied()),
+            )
+            .max()
     }
 
     /// `restart` is set to something that keeps the service running.

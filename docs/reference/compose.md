@@ -192,6 +192,7 @@ A secret a service uses as a file (its `secrets`) or a variable
 | `age` | The value, age-encrypted to the daemon's recipients (`isb secret encrypt`), decrypted with the daemon's key. |
 | `driver` | A secrets driver; `name` is the driver's reference. |
 | `refresh` | With `driver`: how often `isb serve` checks it for a new version (`30m`; default `1h`, at least `10s`). |
+| `on_change` | What a new version does to the stack services using it: `roll` (default), `restart` or `none`. Any source. A service's own reference overrides it. |
 
 `name` goes with `external` or `driver` only. A secret no service uses is never
 read. A deployed stack keeps references to the org's store (name and version),
@@ -202,6 +203,40 @@ secrets:
   db_password: {environment: DB_PASSWORD}
   tls_key: {file: ./certs/key.pem}
   api_token: {external: true}
+```
+
+### `on_change`
+
+Under `isb serve`, a secret's new version (`isb secret set`, or a driver's
+version moving) reaches each service using it in one of three ways:
+
+| Value | What happens to the service's replicas |
+|---|---|
+| `roll` (default) | A new revision: a rolling update replaces them, per `deploy.update_config` (`order`, `parallelism`, `delay`, `monitor`, `failure_action`), each new replica health-checked before the next. |
+| `restart` | Each keeps its instance: it is drained from the load balancer, gets the new files and variables, its app is restarted, and it must serve again (health check, then `update_config.monitor`) before the next batch of `update_config.parallelism`. A replica that fails stops the rest, which keep the old value until the next version or deploy; the service's message says so. |
+| `none` | Nothing restarts. The new value goes where a running replica can take it: its files under `/run/secrets` (and their boot copies), and the variables its next start reads (the unit's environment file, or an OCI instance's config). The app keeps the old value until it next starts, and each replica's `stale_secrets` in `stack_status` says which secrets it runs an older version of. |
+
+A service's own reference sets it for that service: `secrets: [{source:
+KEY, on_change: ...}]`, or `environment: {VAR: {secret: KEY, on_change:
+...}}`. When a service uses a secret more than once, the strongest setting
+wins (`roll`, then `restart`, then `none`). `isb up` has no daemon and
+ignores it.
+
+A `roll` secret's version is part of the service's revision; a `restart` or
+`none` secret's is not. So changing a secret between `roll` and the other
+two rolls its services once, on that deploy; moving between `restart` and
+`none` does not. The versions a replica's app started with are kept on its
+instance (`user.isb.secrets`), so a daemon restart forgets nothing.
+
+```yaml
+secrets:
+  db_password: {external: true, on_change: restart}
+  feature_flags: {external: true, on_change: none}   # the app re-reads the file
+services:
+  api:
+    secrets: [db_password, feature_flags]
+    environment:
+      SMTP_PASSWORD: {secret: smtp, on_change: none}
 ```
 
 ## `services.<service>`
@@ -443,8 +478,10 @@ environment:
   config show`). isb never shows it in plans or reports (`(secret)`). Mount
   the secret as a file instead when that matters.
 
-The value must be text (UTF-8, no NUL). A new version of the secret replaces a
-stack's instances, as for a file secret.
+The value must be text (UTF-8, no NUL). A new version of the secret reaches a
+stack's replicas per its [`on_change`](#on_change) (default: replaced by a
+rolling update); `{secret: NAME, on_change: restart}` sets it for this
+variable.
 
 ### `volumes`
 
@@ -869,7 +906,7 @@ domains:
 ### `secrets`
 
 Secrets (top-level `secrets`) to write into the guest: names, or the long form
-`{source, target, uid, gid, mode}`. Each becomes a file at
+`{source, target, uid, gid, mode, on_change}`. Each becomes a file at
 `/run/secrets/<target>` (default target: the source; an absolute target is used
 as is), owned by `uid`/`gid` (default: a numeric `user`, else root) with `mode`
 (default `0400`; YAML's unquoted `0400` and `"0400"` both mean octal).
@@ -882,8 +919,9 @@ instance's init) is running, so when one was missing or different isb restarts
 the app once, and an app that reads its config at startup sees it; files already
 in place (a daemon restart) restart nothing. The values never appear in instance
 config or in `isb config`.
-A new version of a secret replaces a stack's instances (it is part of the
-revision).
+A new version of a secret reaches a stack's replicas per its
+[`on_change`](#on_change): by default it is part of the revision, and a
+rolling update replaces them.
 
 ```yaml
 secrets:
