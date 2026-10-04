@@ -163,9 +163,10 @@ protects the credentials themselves:
   (tailnet, Access) and an org's agent identities pass CSRF, `Origin`,
   `Content-Type` and `Host` checks ([Superadmins](access.md#superadmins),
   [Agent identities](access.md#agent-identities)).
-- The first admin is created on the host or with a one-time setup token from
-  `<state>/setup-token`, so whoever reaches the port first cannot claim the
-  platform.
+- The first admin is created on the host, by a person a tailnet or Access
+  front door verified (only someone on its superadmin list, when that list
+  is set), or with a one-time setup token from `<state>/setup-token`. Either
+  way, whoever merely reaches the port first cannot claim the platform.
 - A workspace token is confined to its org, never shown, and served only on
   that org's own bridge to that org's subnet
   ([Workspaces](workspaces.md#reaching-isb-from-inside-the-bridge-listener)).

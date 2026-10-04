@@ -225,7 +225,7 @@ always under `orgs/<org>/`, the default org included.
 |---|---|
 | `isb.db` | Users, identities, passkeys, SSH keys, orgs and memberships, sessions, invitations, API and superadmin tokens (SQLite, WAL; [Identity API](../reference/identity-api.md#schema)). |
 | `audit.db` | The audit log and the history, each with its own hash chain ([audit](audit.md), [history](history.md)). |
-| `setup-token` | The one-time first-run setup token; removed once setup is done. |
+| `setup-token` | The one-time first-run setup token, for a first run nobody's front door verifies; removed once setup is done. |
 | `notify.json` | Server-wide notification settings (private targets). |
 | `files/<stack>/` | Where relative paths of a remote caller's stack resolve. |
 | `builds/` | Images staged between a build sandbox and the registry; removed after the push. |

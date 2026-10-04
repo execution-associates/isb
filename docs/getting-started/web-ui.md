@@ -22,10 +22,13 @@ to phone width.
 
 ## Signing in
 
-- **First run**: `/setup` creates the platform admin with the one-time setup
-  token from `<state>/setup-token` ([the first admin](../guides/sign-in.md#the-first-admin)).
-  The token may also come in the address, `/setup#TOKEN`.
-- **Sign in** (`/login`): email and password, a passkey, and a button for each
+- **First run**: `/setup` creates the platform admin. Behind Tailscale or
+  Cloudflare Access it offers to continue as the person the front door
+  verified; otherwise open the setup link the daemon logged, `/setup#TOKEN`
+  ([the first admin](../guides/sign-in.md#the-first-admin)).
+- **Sign in** (`/login`): behind Tailscale or Access, isb signs in the
+  verified person by itself (after signing out, a "Continue as" button
+  waits for a click). Otherwise email and password, a passkey, and a button for each
   provider the daemon has configured (GitHub, Google, OIDC SSO). A failed
   provider sign-in comes back as `/login?error=CODE` and is explained in plain
   words; `?next=/path` is where you land afterwards (a path on this site

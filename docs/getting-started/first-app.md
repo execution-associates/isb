@@ -62,9 +62,11 @@ host, as the daemon's user; it is a platform admin and the owner of the
 $ isb user create you@example.com          # asks for the password (at least 12 characters)
 ```
 
-Or do it in the browser: open `http://127.0.0.1:8092/setup` and paste the
-one-time setup token the daemon wrote to `~/.local/state/isb/setup-token`
-(`$XDG_STATE_HOME/isb/setup-token`). See [the first admin](../guides/sign-in.md#the-first-admin).
+Or do it in the browser. Behind Tailscale or Cloudflare Access, open `/setup`
+and confirm who the front door says you are. On a plain local port, open the
+setup link the daemon logged (`journalctl --user -u isb | grep setup`); its
+token is also in `~/.local/state/isb/setup-token`. See [the first
+admin](../guides/sign-in.md#the-first-admin).
 
 ## 4. An org
 

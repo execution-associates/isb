@@ -19,7 +19,7 @@ endpoint has neither a tool nor a documented reason in the
 | Account tools, the web UI through the identity endpoints | 20 |
 | Tools for MCP and the CLI only | 27 |
 | Identity endpoints with a tool | 21 |
-| Identity endpoints for the browser only | 21 |
+| Identity endpoints for the browser only | 23 |
 | Other routes with no tool | 4 |
 
 "In the web UI" includes a handful of tools whose data a page shows
@@ -199,8 +199,8 @@ no tool, on purpose:
 
 | Endpoints | Web UI | Why no tool |
 |---|---|---|
-| `POST login`, `POST logout`, `GET providers`, `GET`/`POST oauth/{provider}/start`, `GET oauth/{provider}/callback`, `POST passkeys/login/options`, `POST passkeys/login/verify` | Sign in | A browser sign-in flow: it sets the session cookie a person's browser carries. An agent signs in with a token instead. |
-| `GET`/`POST setup` | First-run setup | Happens once, in a browser, with the setup token from the host. |
+| `POST login`, `POST logout`, `GET`/`POST edge`, `GET providers`, `GET`/`POST oauth/{provider}/start`, `GET oauth/{provider}/callback`, `POST passkeys/login/options`, `POST passkeys/login/verify` | Sign in | A browser sign-in flow: it sets the session cookie a person's browser carries. An agent signs in with a token instead. |
+| `GET`/`POST setup` | First-run setup | Happens once, in a browser, as the tailnet or Access identity, or with the setup link from the host. |
 | `POST invitations/inspect`, `POST invitations/accept`, `POST password-reset/request`, `POST password-reset/confirm` | Invitation and password reset pages | For someone who holds no credential yet: the token or address they bring is the credential. |
 | `POST password`, `GET identities`, `DELETE identities/{id}`, `GET passkeys`, `DELETE passkeys/{id}`, `POST passkeys/register/options`, `POST passkeys/register/verify` | Account, Sign-in methods | A way into the account: changed from a signed-in browser session only, so a leaked token cannot lock its owner out or let an attacker in. |
 

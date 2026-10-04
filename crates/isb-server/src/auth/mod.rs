@@ -20,6 +20,7 @@ mod actors;
 pub mod agent_identities;
 pub mod cbor;
 pub mod db;
+pub mod edge;
 pub mod external;
 pub mod http;
 pub mod limit;
@@ -27,6 +28,7 @@ pub mod oauth;
 pub mod oidc;
 pub mod ops;
 pub mod secret;
+mod setup;
 pub mod ssh_keys;
 pub mod superadmin;
 pub mod webauthn;
@@ -681,44 +683,6 @@ impl AuthStore {
     }
 
     // ---- users ----
-
-    /// True until the first user exists.
-    pub fn setup_needed(&self) -> AuthResult<bool> {
-        let n: i64 = self
-            .db()
-            .query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))?;
-        Ok(n == 0)
-    }
-
-    /// Create the first user: a platform admin and owner of the `default`
-    /// org. Refused once any user exists.
-    pub fn create_first_admin(&self, email: &str, name: &str, password: &str) -> AuthResult<User> {
-        let email = normalize_email(email)?;
-        let name = clean_name(name)?;
-        let hash = self.hash_pw(password)?;
-        let now = self.now();
-        let mut db = self.db();
-        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let n: i64 = tx.query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))?;
-        if n > 0 {
-            return Err(AuthError::Conflict("setup is already done".into()));
-        }
-        tx.execute(
-            "INSERT INTO users (email, name, password_hash, platform_admin, created_at)
-             VALUES (?1, ?2, ?3, 1, ?4)",
-            params![email, name, hash, now],
-        )?;
-        let id = tx.last_insert_rowid();
-        let org = OrgId::default_org();
-        ensure_org_tx(&tx, &org, now)?;
-        tx.execute(
-            "INSERT INTO memberships (user_id, org, role, created_at) VALUES (?1, ?2, 'owner', ?3)",
-            params![id, org.as_str(), now],
-        )?;
-        tx.commit()?;
-        drop(db);
-        self.user(id)
-    }
 
     /// Create a user. `password` may be `None` for an account that will sign
     /// in through an external identity or reset its password.

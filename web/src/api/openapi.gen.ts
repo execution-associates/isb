@@ -64,6 +64,30 @@ export interface paths {
         patch: operations["auth_patch_admin_users_id"];
         trace?: never;
     };
+    "/api/v1/auth/edge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Who the tailnet or Cloudflare Access says is calling
+         * @description Who: anyone.
+         */
+        get: operations["auth_get_edge"];
+        put?: never;
+        /**
+         * Sign in as the tailnet or Cloudflare Access identity
+         * @description Who: an edge identity.
+         */
+        post: operations["auth_post_edge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/identities": {
         parameters: {
             query?: never;
@@ -671,7 +695,7 @@ export interface paths {
         put?: never;
         /**
          * Create the first platform admin
-         * @description Who: anyone, with the setup token.
+         * @description Who: an edge identity, or anyone with the setup token.
          */
         post: operations["auth_post_setup"];
         delete?: never;
@@ -5124,6 +5148,20 @@ export interface components {
             error: string;
             message: string;
         };
+        EdgeIdentity: {
+            /** @description May claim first-run setup. */
+            can_claim: boolean;
+            /** @description An email the front door vouches for. */
+            email: string | null;
+            /** @enum {string} */
+            kind: "tailnet" | "access";
+            /** @description The tailnet login, or the Access email. */
+            name: string;
+            /** @description The tailnet node. */
+            node?: string;
+            /** @description The tailnet login, or the Access subject. */
+            subject: string;
+        };
         Identity: {
             created_at: number;
             email: string | null;
@@ -5365,6 +5403,66 @@ export interface operations {
                     "application/json": {
                         user: components["schemas"]["User"];
                     };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_get_edge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        edge: null | components["schemas"]["EdgeIdentity"];
+                    };
+                };
+            };
+            /** @description An error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthError"];
+                };
+            };
+        };
+    };
+    auth_post_edge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionAnswer"];
                 };
             };
             /** @description An error */
@@ -6508,6 +6606,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        edge: null | components["schemas"]["EdgeIdentity"];
                         needed: boolean;
                     };
                 };
@@ -6533,10 +6632,13 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    email: string;
+                    /** @description Required with a setup token; with an edge identity, defaults to the email it vouches for. */
+                    email?: string;
                     name?: string;
-                    password: string;
-                    setup_token: string;
+                    /** @description Required with a setup token; optional for an edge identity. */
+                    password?: string;
+                    /** @description From the setup link the daemon logs. Omit it to claim setup as the edge identity (GET setup's `edge`). */
+                    setup_token?: string;
                 };
             };
         };

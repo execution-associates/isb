@@ -17,6 +17,8 @@ export type Session = S["Session"];
 /** read, deploy, admin, tool:GLOB in `scopes`; empty: the holder's whole role. */
 export type ApiToken = S["ApiToken"];
 export type Identity = S["Identity"];
+/** The person a tailnet or Cloudflare Access listener verified. */
+export type EdgeIdentity = S["EdgeIdentity"];
 export type Passkey = S["Passkey"];
 /** An SSH public key on the account: what `isb ssh-proxy` lets in (docs/guides/ssh.md). */
 export type SshKey = S["SshKey"];
@@ -93,6 +95,10 @@ export const auth = {
   setupNeeded: () => call("get", "/api/v1/auth/setup", none),
   setup: (b: BodyOf<Op<"/api/v1/auth/setup", "post">>) => call("post", "/api/v1/auth/setup", none, b),
   login: (email: string, password: string) => call("post", "/api/v1/auth/login", none, { email, password }),
+  /** Who the tailnet or Cloudflare Access says this browser is. */
+  edge: () => call("get", "/api/v1/auth/edge", none),
+  /** Start a session as that person. */
+  edgeSignIn: () => call("post", "/api/v1/auth/edge", none),
   logout: () => call("post", "/api/v1/auth/logout", none),
   me: () => call("get", "/api/v1/auth/me", none) as Promise<Me>,
   providers: () => call("get", "/api/v1/auth/providers", none),
