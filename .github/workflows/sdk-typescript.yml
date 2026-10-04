@@ -127,6 +127,9 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [binaries, sdk-package]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     defaults:
       run:
         working-directory: .
@@ -136,15 +139,13 @@ jobs:
           pattern: npm-*
           path: npm
           merge-multiple: true
+      # Trusted publishing needs npm 11.5.1 or later and no registry token.
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
       - name: publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          [ -n "$NODE_AUTH_TOKEN" ] || { echo "secret NPM_TOKEN is not set"; exit 1; }
+          npm --version
           ls -l npm
           # The platform packages first: the SDK depends on them.
           for t in npm/*isb-linux-*.tgz npm/*isb-[0-9]*.tgz; do
