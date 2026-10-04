@@ -15,10 +15,15 @@
 //!   isb never grants, so a forged form or fetch from another site is
 //!   refused before it does anything. Login and setup are covered too (login
 //!   CSRF signs a victim into the attacker's account).
-//! - **First-run setup** needs a one-time setup token the daemon writes to
-//!   `<state>/setup-token` (0600) at startup while no user exists, so whoever
-//!   reaches the port first cannot claim the platform. `isb user create
-//!   --admin` on the host is the other way in.
+//! - **First-run setup** is claimed by an edge identity ([`super::edge`]:
+//!   the tailnet peer, or the verified Access user), whom the front door
+//!   already let in. With no edge identity, it needs the one-time setup
+//!   token the daemon writes to `<state>/setup-token` (0600) and logs as a
+//!   `/setup#TOKEN` link, so whoever reaches the port first cannot claim the
+//!   platform. `isb user create` on the host is the other way in.
+//! - **Edge sign-in** (`POST edge`) starts a session for the user an edge
+//!   identity belongs to, so behind a tailnet or Access nobody types a
+//!   password.
 //! - **External sign-in and passkeys** are in the `external` submodule.
 
 use std::net::IpAddr;
@@ -83,6 +88,9 @@ pub struct ApiConfig {
     pub notifier: Option<Notifier>,
     /// Where the first-run setup token is written while setup is needed.
     pub setup_token_file: Option<PathBuf>,
+    /// The person the front door verified, if any: who may claim setup
+    /// without the token, and sign in with no password.
+    pub edge: Option<super::edge::EdgeFn>,
     /// External sign-in providers (they need `public_url` for their
     /// callback URL).
     pub providers: Vec<ProviderConfig>,
@@ -108,6 +116,7 @@ impl std::fmt::Debug for ApiConfig {
             .field("audit", &self.audit.is_some())
             .field("superadmin", &self.superadmin.is_some())
             .field("agent", &self.agent.is_some())
+            .field("edge", &self.edge.is_some())
             .finish()
     }
 }
@@ -192,9 +201,14 @@ impl AuthApi {
             match &api.cfg.setup_token_file {
                 Some(p) => {
                     write_secret_file(p, &token)?;
+                    let link = match &public {
+                        Some(u) => format!("{u}/setup#{token}"),
+                        None => format!("/setup#{token}"),
+                    };
                     eprintln!(
-                        "isb serve: first-run setup is open: the setup token is in {} \
-                         (or create the first admin with `isb user create EMAIL --admin`)",
+                        "isb serve: first-run setup is open. Someone a tailnet or Cloudflare Access \
+                         listener verified can claim it at /setup; otherwise open {link} \
+                         (the token is also in {}), or run `isb user create EMAIL` on this host",
                         p.display()
                     );
                 }
@@ -297,7 +311,9 @@ impl AuthApi {
 
     fn dispatch(&self, req: &Request, m: &str, seg: &[&str]) -> Response {
         let r = match (m, seg) {
-            ("GET", ["setup"]) => self.get_setup(),
+            ("GET", ["setup"]) => self.get_setup(req),
+            ("GET", ["edge"]) => Ok(self.get_edge(req)),
+            ("POST", ["edge"]) => self.post_edge(req),
             ("POST", ["setup"]) => self.post_setup(req),
             ("POST", ["login"]) => self.login(req),
             ("POST", ["logout"]) => self.logout(req),
@@ -384,7 +400,26 @@ impl AuthApi {
         };
         let mut details = serde_json::Map::new();
         let (action, org, target): (&str, Option<String>, Option<String>) = match (m, seg) {
-            ("POST", ["setup"]) => ("auth.setup", None, field(&body, "email")),
+            ("POST", ["setup"]) => {
+                let by = if body.get("setup_token").is_some_and(|t| !t.is_null()) {
+                    "setup_token"
+                } else {
+                    "edge"
+                };
+                details.insert("method".into(), json!(by));
+                (
+                    "auth.setup",
+                    None,
+                    field(&answer["user"], "email").or_else(|| field(&body, "email")),
+                )
+            }
+            ("POST", ["edge"]) => {
+                if let Some(e) = self.edge(req) {
+                    details.insert("method".into(), json!(e.provider()));
+                    details.insert("subject".into(), json!(e.name));
+                }
+                ("auth.login", None, None)
+            }
             ("POST", ["login"]) => {
                 details.insert("method".into(), json!("password"));
                 ("auth.login", None, None)
@@ -597,62 +632,6 @@ impl AuthApi {
         match self.principal(req) {
             Some(p) => f(&p),
             None => Ok(error_response(401, "unauthenticated", "sign in first")),
-        }
-    }
-
-    // ---- setup ----
-
-    fn get_setup(&self) -> Result<Response, AuthError> {
-        let needed = self.store.setup_needed()?;
-        if !needed {
-            self.forget_setup_file();
-        }
-        Ok(Response::json(200, &json!({"needed": needed})))
-    }
-
-    fn post_setup(&self, req: &Request) -> Result<Response, AuthError> {
-        #[derive(Deserialize)]
-        struct B {
-            setup_token: String,
-            email: String,
-            #[serde(default)]
-            name: String,
-            password: String,
-        }
-        self.store.limit_ip(client_ip(req).as_deref())?;
-        let b: B = body(req)?;
-        if !self.store.setup_needed()? {
-            self.forget_setup_file();
-            return Err(AuthError::Conflict("setup is already done".into()));
-        }
-        let ok = self
-            .setup
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .as_ref()
-            .is_some_and(|h| {
-                secret::well_formed(&b.setup_token, TokenKind::Setup)
-                    && secret::ct_eq(h, &secret::hash_token(&b.setup_token))
-            });
-        if !ok {
-            return Err(AuthError::InvalidToken("setup token"));
-        }
-        let user = self
-            .store
-            .create_first_admin(&b.email, &b.name, &b.password)?;
-        *self.setup.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        self.forget_setup_file();
-        eprintln!(
-            "isb serve: first-run setup done: {} is platform admin",
-            user.email
-        );
-        let s = self.store.start_session(user.id, meta(req))?;
-        self.session_response(req, 201, &s)
-    }
-
-    fn forget_setup_file(&self) {
-        if let Some(p) = &self.cfg.setup_token_file {
-            let _ = std::fs::remove_file(p);
         }
     }
 
@@ -1087,7 +1066,7 @@ fn auth_error(e: AuthError) -> Response {
 
 fn not_found_or_405(seg: &[&str]) -> Response {
     let allow = match seg {
-        ["setup"] => "GET, POST",
+        ["setup" | "edge"] => "GET, POST",
         ["login" | "logout" | "invitations" | "password"] => "POST",
         ["invitations" | "password-reset", _] => "POST",
         ["me" | "sessions" | "providers" | "identities" | "passkeys"] => "GET",
@@ -1118,6 +1097,7 @@ fn org_405(seg: &[&str]) -> Response {
 
 mod external;
 mod org;
+mod setup;
 pub mod spec;
 pub use external::{LOGIN_PAGE, OAUTH_COOKIE, safe_next};
 

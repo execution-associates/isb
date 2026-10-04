@@ -181,18 +181,16 @@ fn auth_routes(
         eprintln!("isb serve: {n}");
     }
     let path = crate::auth::db_path(&cfg.state_dir);
-    let agent_gate = gate.clone();
     let agent_ways = gate.agent_ways().with_public_url(cfg.public_url.clone());
     let api = AuthApi::new(
         store.clone(),
         ApiConfig {
-            agent: Some(Arc::new(move |r: &crate::server::http::Request| {
-                agent_gate.agent(r, None)
-            })),
+            agent: Some(gate.agent_fn()),
             agent_ways,
             public_url: cfg.public_url.clone(),
             notifier: None,
             setup_token_file: Some(cfg.state_dir.join("setup-token")),
+            edge: Some(gate.edge_fn()),
             providers,
             open_signup: cfg.open_signup,
             audit: Some(log.clone()),

@@ -57,14 +57,28 @@ fn session_answer() -> Value {
 fn me() -> Value {
     r("Me")
 }
+fn edge_or_null() -> Value {
+    json!({"oneOf": [{"type": "null"}, r("EdgeIdentity")]})
+}
 fn setup_get() -> Value {
-    obj(json!({"needed": {"type": "boolean"}}), &["needed"])
+    obj(
+        json!({"needed": {"type": "boolean"}, "edge": edge_or_null()}),
+        &["needed", "edge"],
+    )
 }
 fn setup_body() -> Value {
     obj(
-        json!({"setup_token": {"type": "string"}, "email": {"type": "string"}, "name": {"type": "string"}, "password": {"type": "string"}}),
-        &["setup_token", "email", "password"],
+        json!({
+            "setup_token": {"type": "string", "description": "From the setup link the daemon logs. Omit it to claim setup as the edge identity (GET setup's `edge`)."},
+            "email": {"type": "string", "description": "Required with a setup token; with an edge identity, defaults to the email it vouches for."},
+            "name": {"type": "string"},
+            "password": {"type": "string", "description": "Required with a setup token; optional for an edge identity."},
+        }),
+        &[],
     )
+}
+fn edge_get() -> Value {
+    obj(json!({"edge": edge_or_null()}), &["edge"])
 }
 fn login_body() -> Value {
     obj(
@@ -290,8 +304,10 @@ use Agents::{BrowserOnly as B, Tool as T};
 
 /// Every identity endpoint.
 pub const ROUTES: &[Route] = &[
-    route!("GET" "setup", "Is first-run setup needed", "anyone", None, 200, Some(setup_get), B("first-run setup happens once, in a browser, with the setup token from the host")),
-    route!("POST" "setup", "Create the first platform admin", "anyone, with the setup token", Some(setup_body), 201, Some(session_answer), B("first-run setup happens once, in a browser, with the setup token from the host")),
+    route!("GET" "setup", "Is first-run setup needed", "anyone", None, 200, Some(setup_get), B("first-run setup happens once, in a browser, as the tailnet or Access identity, or with the setup link from the host")),
+    route!("POST" "setup", "Create the first platform admin", "an edge identity, or anyone with the setup token", Some(setup_body), 201, Some(session_answer), B("first-run setup happens once, in a browser, as the tailnet or Access identity, or with the setup link from the host")),
+    route!("GET" "edge", "Who the tailnet or Cloudflare Access says is calling", "anyone", None, 200, Some(edge_get), B(SIGN_IN)),
+    route!("POST" "edge", "Sign in as the tailnet or Cloudflare Access identity", "an edge identity", None, 200, Some(session_answer), B(SIGN_IN)),
     route!("POST" "login", "Sign in with a password", "anyone", Some(login_body), 200, Some(session_answer), B(SIGN_IN)),
     route!("POST" "logout", "Sign out", "anyone", None, 204, None, B(SIGN_IN)),
     route!("GET" "me", "Who is calling", "signed in", None, 200, Some(me), T("whoami")),
@@ -441,6 +457,14 @@ fn sign_in_schemas() -> Value {
             "email": {"type": ["string", "null"]}, "email_verified": {"type": "boolean"},
             "created_at": {"type": "integer"}, "last_used": {"type": ["integer", "null"]},
         }), &["id", "user_id", "provider", "provider_id", "label", "subject", "email", "email_verified", "created_at", "last_used"]),
+        "EdgeIdentity": obj(json!({
+            "kind": {"type": "string", "enum": ["tailnet", "access"]},
+            "subject": {"type": "string", "description": "The tailnet login, or the Access subject."},
+            "name": {"type": "string", "description": "The tailnet login, or the Access email."},
+            "email": {"type": ["string", "null"], "description": "An email the front door vouches for."},
+            "node": {"type": "string", "description": "The tailnet node."},
+            "can_claim": {"type": "boolean", "description": "May claim first-run setup."},
+        }), &["kind", "subject", "name", "email", "can_claim"]),
         "Passkey": obj(json!({
             "id": {"type": "integer"}, "user_id": {"type": "integer"}, "credential_id": {"type": "string"},
             "name": {"type": "string"}, "alg": {"type": "integer"}, "sign_count": {"type": "integer"},

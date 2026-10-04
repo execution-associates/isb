@@ -19,8 +19,19 @@ Everything lives in one SQLite file, `<state>/isb.db` (`--state-dir`, default
 
 ## The first admin
 
-While no user exists, make one of two ways:
+While no user exists, make one of three ways:
 
+- **Behind Tailscale or Cloudflare Access**, just open `/setup`. The person
+  the tailnet or Access verified is shown, and one click makes them the
+  first admin, with no token to paste and the password optional; from then
+  on, opening isb through the same front door signs them in
+  ([edge identities](../reference/identity-api.md#edge-identities)). Only
+  people count (not tagged nodes or service tokens), and when
+  `--superadmin-tailnet` or `--superadmin-access` is set, only someone on
+  that list can claim setup. Reaching the port took getting past the front
+  door, so the first person through is someone it already let in. Without a
+  password the front door is the only way in; `isb user passwd EMAIL` on the
+  host sets one if that ever changes.
 - **On the host**, as the daemon's user:
 
   ```sh
@@ -29,11 +40,13 @@ While no user exists, make one of two ways:
 
   It reads stdin's first line instead when stdin is not a terminal. The first
   user is always a platform admin and owner of the `default` org.
-- **Through the web**: at startup the daemon writes a one-time **setup token**
-  to `<state>/setup-token` (0600) and logs where it is. Open `/setup` (the
-  link `/setup#TOKEN` carries it in the fragment), or `POST
-  /api/v1/auth/setup` with it, so whoever reaches the port first cannot claim
-  the platform. The file is removed once setup is done.
+- **With the setup link**, when nothing in front of isb verifies anyone (a
+  plain loopback port, a tunnel without Access): at startup the daemon
+  writes a one-time **setup token** to `<state>/setup-token` (0600) and logs
+  a link to open, `/setup#TOKEN` (under `ISB_PUBLIC_URL` when it is set; the
+  fragment never reaches a server). `journalctl --user -u isb | grep setup`
+  finds it. The token is what stops whoever reaches the port first from
+  claiming the platform. The file is removed once setup is done.
 
 ## Passwords
 

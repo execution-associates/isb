@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { useNavigate } from "react-router";
-import { auth, type Me } from "@/api/auth";
+import { auth, type EdgeIdentity, type Me } from "@/api/auth";
 import { ApiError } from "@/api/client";
 
 /** The signed-in caller, or null when nobody is (a 401). */
@@ -22,6 +22,35 @@ export function useMe() {
 
 export function useProviders() {
   return useQuery({ queryKey: ["providers"], queryFn: auth.providers, staleTime: 60_000 });
+}
+
+export function useEdge() {
+  return useQuery({ queryKey: ["edge"], queryFn: async () => (await auth.edge()).edge, staleTime: 60_000 });
+}
+
+/** The front door an edge identity came through, as a person would name it. */
+export function edgeLabel(e: EdgeIdentity): string {
+  return e.kind === "tailnet" ? "Tailscale" : "Cloudflare Access";
+}
+
+// Set by signing out, so the login page waits for a click instead of
+// signing the same tailnet or Access identity straight back in.
+const SIGNED_OUT = "isb-signed-out";
+
+export function signedOutHere(): boolean {
+  try {
+    return sessionStorage.getItem(SIGNED_OUT) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function clearSignedOut() {
+  try {
+    sessionStorage.removeItem(SIGNED_OUT);
+  } catch {
+    // nothing to clear
+  }
 }
 
 export function useSetupNeeded() {
@@ -46,6 +75,11 @@ export function useSignOut() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useCallback(async () => {
+    try {
+      sessionStorage.setItem(SIGNED_OUT, "1");
+    } catch {
+      // auto sign-in may follow
+    }
     try {
       await auth.logout();
     } finally {

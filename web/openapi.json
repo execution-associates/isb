@@ -159,6 +159,48 @@
         ],
         "type": "object"
       },
+      "EdgeIdentity": {
+        "properties": {
+          "can_claim": {
+            "description": "May claim first-run setup.",
+            "type": "boolean"
+          },
+          "email": {
+            "description": "An email the front door vouches for.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "enum": [
+              "tailnet",
+              "access"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "The tailnet login, or the Access email.",
+            "type": "string"
+          },
+          "node": {
+            "description": "The tailnet node.",
+            "type": "string"
+          },
+          "subject": {
+            "description": "The tailnet login, or the Access subject.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "subject",
+          "name",
+          "email",
+          "can_claim"
+        ],
+        "type": "object"
+      },
       "Identity": {
         "properties": {
           "created_at": {
@@ -964,6 +1006,85 @@
           "identity"
         ],
         "x-isb-tool": "user_update"
+      }
+    },
+    "/api/v1/auth/edge": {
+      "get": {
+        "description": "Who: anyone.",
+        "operationId": "auth_get_edge",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "edge": {
+                      "oneOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "$ref": "#/components/schemas/EdgeIdentity"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "edge"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthError"
+                }
+              }
+            },
+            "description": "An error"
+          }
+        },
+        "summary": "Who the tailnet or Cloudflare Access says is calling",
+        "tags": [
+          "identity"
+        ],
+        "x-isb-browser-only": "a browser sign-in flow: it sets the session cookie a person's browser carries"
+      },
+      "post": {
+        "description": "Who: an edge identity.",
+        "operationId": "auth_post_edge",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionAnswer"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthError"
+                }
+              }
+            },
+            "description": "An error"
+          }
+        },
+        "summary": "Sign in as the tailnet or Cloudflare Access identity",
+        "tags": [
+          "identity"
+        ],
+        "x-isb-browser-only": "a browser sign-in flow: it sets the session cookie a person's browser carries"
       }
     },
     "/api/v1/auth/identities": {
@@ -2710,12 +2831,23 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "edge": {
+                      "oneOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "$ref": "#/components/schemas/EdgeIdentity"
+                        }
+                      ]
+                    },
                     "needed": {
                       "type": "boolean"
                     }
                   },
                   "required": [
-                    "needed"
+                    "needed",
+                    "edge"
                   ],
                   "type": "object"
                 }
@@ -2738,10 +2870,10 @@
         "tags": [
           "identity"
         ],
-        "x-isb-browser-only": "first-run setup happens once, in a browser, with the setup token from the host"
+        "x-isb-browser-only": "first-run setup happens once, in a browser, as the tailnet or Access identity, or with the setup link from the host"
       },
       "post": {
-        "description": "Who: anyone, with the setup token.",
+        "description": "Who: an edge identity, or anyone with the setup token.",
         "operationId": "auth_post_setup",
         "requestBody": {
           "content": {
@@ -2749,23 +2881,22 @@
               "schema": {
                 "properties": {
                   "email": {
+                    "description": "Required with a setup token; with an edge identity, defaults to the email it vouches for.",
                     "type": "string"
                   },
                   "name": {
                     "type": "string"
                   },
                   "password": {
+                    "description": "Required with a setup token; optional for an edge identity.",
                     "type": "string"
                   },
                   "setup_token": {
+                    "description": "From the setup link the daemon logs. Omit it to claim setup as the edge identity (GET setup's `edge`).",
                     "type": "string"
                   }
                 },
-                "required": [
-                  "setup_token",
-                  "email",
-                  "password"
-                ],
+                "required": [],
                 "type": "object"
               }
             }
@@ -2798,7 +2929,7 @@
         "tags": [
           "identity"
         ],
-        "x-isb-browser-only": "first-run setup happens once, in a browser, with the setup token from the host"
+        "x-isb-browser-only": "first-run setup happens once, in a browser, as the tailnet or Access identity, or with the setup link from the host"
       }
     },
     "/api/v1/auth/ssh-keys": {

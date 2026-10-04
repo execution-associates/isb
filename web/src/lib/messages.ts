@@ -10,6 +10,7 @@ const SIGN_IN_ERRORS: Record<string, string> = {
   invitation_mismatch: "That invitation is for a different email address than the account you signed in with.",
   invalid_invitation: "That invitation link is invalid, already used, or expired. Ask for a new one.",
   account_disabled: "This account is disabled. Contact your isb administrator.",
+  no_edge_identity: "Nothing in front of isb vouched for you here. Sign in another way.",
   setup_required: "isb hasn't been set up yet. The administrator needs to finish first-run setup.",
   identity_taken: "That provider account is already linked to a different isb user.",
   state_invalid: "That sign-in attempt expired or was already used. Please start again.",

@@ -188,9 +188,34 @@ Over the limit is `429` with `Retry-After`. The client IP is
 With Access configured (`CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD`), it stays
 the front door of the loopback listeners: `/api/v1/auth/*` also needs a
 valid `Cf-Access-Jwt-Assertion`, as `/mcp` does, and isb's own sign-in
-applies behind it. `--superadmin-access` makes listed Access identities
+applies behind it, with the verified user as an [edge
+identity](#edge-identities). `--superadmin-access` makes listed Access identities
 superadmins; it needs Access and `--public-url`. Without Access the identity
 endpoints are still served: they authenticate their own callers.
+
+## Edge identities
+
+An edge identity is the person a front door already verified: an untagged
+tailnet peer (tailscaled's whois of the real socket peer, on a tailnet
+`--listen` address), or a verified Access user on a loopback listener Access
+guards. Tagged nodes and service tokens are not people and never edge
+identities; a request carrying `Authorization` is judged by the token alone.
+`EDGE` is `{kind: "tailnet" | "access", subject, name, email, node?,
+can_claim}`: `subject` is the tailnet login or the Access subject, `email`
+is the Access email or a tailnet login shaped like an address (a GitHub
+login such as `someone@github` is not one).
+
+- **Setup**: while no user exists, an edge identity with `can_claim` creates
+  the first admin without the setup token, and a password is optional. The
+  identity is linked to the account (provider `tailnet` or `access` in
+  [`user_identities`](#schema)). `can_claim` is false when the front door's
+  superadmin list (`--superadmin-tailnet`, `--superadmin-access`) is set and
+  leaves the identity out.
+- **Sign-in**: `POST edge` starts an ordinary session by the [provider
+  rules](#the-flow): a linked identity signs its user in, a verified email
+  links to the user who has it, and a new account needs an invitation or
+  open sign-up. The web UI calls it on `/login` without a click, except
+  right after signing out in that tab.
 
 ## Endpoints
 
@@ -211,8 +236,10 @@ router's own route table.
 
 | Method and path (`/api/v1/auth/...`) | Who | Body | Answer |
 |---|---|---|---|
-| `GET setup` | anyone | | `{"needed": bool}` |
-| `POST setup` | anyone, with the setup token | `{setup_token, email, name, password}` | `201` session (below), cookie set |
+| `GET setup` | anyone | | `{"needed": bool, "edge": EDGE \| null}`; `edge` only while setup is needed |
+| `POST setup` | an edge identity that may claim it, or anyone with the setup token | `{name?, email?, password?}` as the edge identity (email defaults to the one it vouches for); `{setup_token, email, name?, password}` with the token | `201` session (below), cookie set |
+| `GET edge` | anyone | | `{"edge": EDGE \| null}` |
+| `POST edge` | an edge identity | | session, cookie set; refused with the sign-in codes above, or `no_edge_identity` |
 | `POST login` | anyone | `{email, password}` | session, cookie set |
 | `POST logout` | anyone | | `204`, cookie cleared |
 | `GET me` | signed in | | `{user, platform_admin, memberships: [{org, role}], orgs: [ORG], auth: {kind: "session", id} \| {kind: "api_token", id, org, name, scopes?} \| {kind: "superadmin", source}, superadmin}`; `orgs` is every org the caller can open (all of them for a platform admin); `superadmin` is `null`, or `{source: "tailnet:...", via: {kind: "token" \| "tailnet" \| "access", ...}, account: bool}` |

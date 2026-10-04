@@ -962,3 +962,4 @@ fn superadmins_sign_in_by_their_source_and_never_mint_superadmin_tokens() {
 }
 
 mod agent_ui;
+mod edge;

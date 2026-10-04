@@ -447,7 +447,12 @@ impl AuthApi {
                     .find(|x| x.cfg.identity_provider() == i.provider);
                 let mut v = serde_json::to_value(&i).unwrap_or_default();
                 v["provider_id"] = json!(cfg.map(|c| c.cfg.id.clone()));
-                v["label"] = json!(cfg.map_or(i.provider.clone(), |c| c.cfg.label.clone()));
+                let edge = crate::auth::edge::provider_label(&i.provider).map(String::from);
+                v["label"] = json!(
+                    cfg.map(|c| c.cfg.label.clone())
+                        .or(edge)
+                        .unwrap_or_else(|| i.provider.clone())
+                );
                 v
             })
             .collect();

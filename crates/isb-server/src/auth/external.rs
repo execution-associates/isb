@@ -502,7 +502,7 @@ fn user_in(conn: &rusqlite::Connection, id: i64) -> AuthResult<User> {
     .ok_or_else(|| AuthError::NotFound(format!("user {id}")))
 }
 
-fn insert_identity(
+pub(super) fn insert_identity(
     conn: &rusqlite::Connection,
     user_id: i64,
     ext: &ExternalIdentity,

@@ -27,6 +27,12 @@ mapped; Access and the tailnet decide who
 reaches the port, isb decides what they may do ([Users, roles and
 superadmins](../concepts/access.md)).
 
+Behind either one, the person it verified is an **edge identity**: on a
+first run they claim setup at `/setup` with no token, and afterwards the
+web UI signs them in as their isb user without a password
+([The first admin](sign-in.md#the-first-admin), [edge
+identities](../reference/identity-api.md#edge-identities)).
+
 ## Cloudflare Tunnel and Access
 
 The pattern is the one [herdr-mcp](https://github.com/Orange-County-AI/herdr-mcp)
@@ -46,8 +52,8 @@ ISB_PUBLIC_URL=https://isb.example.com
 
 `isb serve install` writes `ISB_SERVE_LISTEN=127.0.0.1:8092` into a new
 `serve.env` by default; add the rest and `systemctl --user restart isb`.
-Access is the front door; it does not replace
-isb's own sign-in. Without the `CF_ACCESS_*` values the listener still serves
+Access is the front door, and the user it verified signs in to isb as the
+account with that email, or the one linked to them. Without the `CF_ACCESS_*` values the listener still serves
 the web UI, the identity endpoints and the tools to callers with an isb
 session or API token, and refuses anonymous calls (unless
 `--allow-unauthenticated`, which is for local testing only). With them, a
@@ -143,7 +149,9 @@ ISB_SUPERADMIN_TAILNET=someone@example.com,tag:agents
 The tailnet address is this host's own (`tailscale ip -4`). A request from a
 tailnet peer is a superadmin when tailscaled says its user's login, or one of
 its node's tags, is on the list (a tagged node only by its tags). Everyone
-else on that listener signs in as on any other (tokens, sessions). The
+else on that listener signs in as on any other (tokens, sessions), and an
+untagged peer whose login is an isb user's (or is linked to one) is signed
+in as that user without a password. The
 `Host` a browser sends must be the listen address, the node's MagicDNS name
 (`host` or `host.tailnet.ts.net`) or the public URL's host. An empty list is
 refused.
