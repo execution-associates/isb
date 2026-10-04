@@ -6,6 +6,7 @@ import { memo, type ReactNode, useDeferredValue, useEffect, useLayoutEffect, use
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { parseAnsi, type Span, stripAnsi } from "./logstream";
+import { copyText } from "@/lib/clipboard";
 
 const FG: Record<string, string> = {
   black: "text-zinc-500",
@@ -144,7 +145,7 @@ export function LogView({
   const text = () => lines.map(stripAnsi).join("\n");
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(text());
+      await copyText(text());
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {

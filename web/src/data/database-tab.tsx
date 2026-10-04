@@ -15,6 +15,7 @@ import { errorMessage } from "@/lib/messages";
 import { useCanWrite } from "@/lib/use-role";
 import { cn } from "@/lib/utils";
 import { type Database, dbEnvSnippet, engineLabel, useDatabase } from "./api";
+import { copyText } from "@/lib/clipboard";
 
 const REVEAL_FOR = 30_000;
 
@@ -232,7 +233,7 @@ export function CopyIcon({ value, label, dark }: { value: string; label: string;
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(value);
+      await copyText(value);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {

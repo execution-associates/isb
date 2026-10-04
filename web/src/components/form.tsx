@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MIN_PASSWORD, passwordProblem } from "@/lib/messages";
 import { cn } from "@/lib/utils";
+import { copyText } from "@/lib/clipboard";
 
 /** A new password and its confirmation, checked as the server checks it. */
 export function NewPasswordFields({
@@ -142,7 +143,7 @@ export function CopyButton({ value, label = "Copy" }: { value: string; label?: s
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(value);
+      await copyText(value);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -162,7 +163,7 @@ export function CopyIconButton({ value, label = "Copy", className }: { value: st
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(value);
+      await copyText(value);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
