@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# The same build-free checks, so a commit made with --no-verify still cannot
+# reach CI broken. Run scripts/check.sh in the sandbox for clippy and tests.
+exec "$(git rev-parse --show-toplevel)/.githooks/pre-commit"

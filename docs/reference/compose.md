@@ -355,8 +355,49 @@ If the instance has a `raw.idmap` that the spec does not produce, `plan` notes i
 ("not needed on this host" for `auto`, "the spec says idmap: none" for `none`)
 and leaves it to be unset by hand.
 
-Container-only. On a VM, `auto` and `none` are accepted and do nothing; any
-other form (`always`, the map form including `{}`, or `{raw: ...}`) is an error.
+**On a VM** the same key makes the host bind mounts safe rather than writable;
+see [Host directories in a VM](#host-directories-in-a-vm). Unset, `auto`,
+`always` and the map form map the service user (see below) to the user running
+isb, and `idmap: none` shares untranslated (unsafe, with a warning). The
+`/etc/subuid` rule above does not apply to a VM.
+
+### Host directories in a VM
+
+A host bind mount reaches a VM over virtiofs, which by itself passes ids through
+untouched: guest root would create root-owned files, with setuid bits and
+device nodes, in the host directory. isb therefore sets `raw.idmap` on every VM
+that has a host bind mount, whether or not the spec says `idmap`. incus (7.5 or
+later) then starts that mount's virtiofsd on the host with
+`--translate-uid`/`--translate-gid`, a map the guest cannot remount or change.
+
+**Guarantee** (checked against incus 7.5.1 by `tests/integration.rs`
+`virtual_machine`): through a bind mount, exactly one guest uid and one guest gid
+can read or write host files, and they appear on the host as the user (and
+group) running isb. Every other guest id, root included, gets an error when it
+creates a file, chowns one, or makes a device node, so no file on the host is
+ever owned by an id the sandbox's owner does not control.
+
+**What it does not stop:** a setuid or setgid bit can still be set on a file the
+mapped id owns. That file belongs to the invoking user on the host, so running
+it there gains nothing the user did not have, except for other host users who
+execute it as that user. To close even that, keep the shared directory on a
+`nosuid` host mount, or mount it read-only (`:ro`): a guest-side `nosuid` does
+not count, because guest root can remount it.
+
+Which guest id is mapped: `idmap: {mode: always, guest_uid: N, guest_gid: M}` if
+you say so; otherwise the service user: a numeric `user:` (`1000` or `1000:50`),
+root when `user:` is unset or `root`, and 1000 for a named user (dev-base's
+`dev`). The host side defaults to the uid and gid of the process running isb,
+not 1000. `{raw: ...}` is passed to incus verbatim. A map is one guest id per
+host id: mapping the same host id to two guest ids (root and a service user)
+makes virtiofsd fail to start the VM, so only one of them can write.
+
+isb refuses to create or reconcile such a VM on an incus older than 7.5 or whose
+version it cannot read: an older incus may ignore `raw.idmap` for VMs and share
+the directory untranslated. Upgrade incus, or set `idmap: none` to accept that
+(isb prints a warning on every plan). VMs with no host bind mount, only named
+volumes, get no `raw.idmap`. Changing the map restarts the VM
+(`raw.idmap` cannot change while it runs).
 
 ### `incus_profiles`
 
@@ -991,7 +1032,8 @@ For a VM:
 
 - `image` must be a VM image.
 - `privileged` is an error.
-- `idmap` other than `auto` or `none` is an error; `auto` is a no-op.
+- Host bind mounts are translated to the user running isb, whatever `idmap`
+  you write: see [Host directories in a VM](#host-directories-in-a-vm).
 - `ports` must be host-bound; `bind: guest` is an error. Each proxy gets
   `nat: "true"` automatically, since incus proxies into a VM only in NAT mode.
   With incus 7.0.1 or later, the default guest address `0.0.0.0` lets incus

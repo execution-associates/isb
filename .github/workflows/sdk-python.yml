@@ -3,7 +3,8 @@ name: Python SDK
 # Lint, type check and test sdk/python on every PR and push to main. On a v*
 # tag, build the sdist, the pure wheel and platform wheels that bundle the
 # isb binary (static musl on Linux; built the same way as release.yml), and upload them
-# as workflow artifacts. Nothing is published to PyPI.
+# as workflow artifacts, then publish them to PyPI (secret PYPI_TOKEN; files
+# already on PyPI are skipped, so a failed run can be re-run).
 
 on:
   push:
@@ -145,3 +146,26 @@ jobs:
           name: python-wheel-${{ matrix.target }}
           path: sdk/python/dist/*.whl
           if-no-files-found: error
+
+  publish:
+    name: publish to PyPI
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [sdist, wheels]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: python-*
+          path: dist
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v6
+      - name: upload
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          [ -n "$UV_PUBLISH_TOKEN" ] || { echo "secret PYPI_TOKEN is not set"; exit 1; }
+          ls -l dist
+          uv publish --check-url https://pypi.org/simple/ dist/*

@@ -206,6 +206,21 @@ user, as the installed service does. On macOS, where the daemon runs in the
 `isb machine` VM, create sandboxes with secrets through the daemon's
 `sandbox_create`.
 
+## Host directories in a VM
+
+A closed network is half of running untrusted code in a VM; the other half is
+what it can write to the host. A host directory bind-mounted into a VM is shared
+over virtiofs, and isb makes incus translate its ids on the host side: only one
+guest uid and gid (the service user, root when `user:` is unset) can touch it,
+and they land on the host as the user running isb. Any other guest id, root
+included, is refused when it creates or chowns a file or makes a device node, so
+the sandbox cannot plant a root-owned file on the host. A setuid bit can still
+be set on a file the mapped id owns, but that file is the invoking user's, so
+for real separation put the directory on a `nosuid` mount or mount it `:ro`.
+This needs incus 7.5 or later; isb refuses a VM with host mounts on an older
+one. Details and the `idmap` forms:
+[Host directories in a VM](../reference/compose.md#host-directories-in-a-vm).
+
 ## Limits
 
 A proxy holds at most 256 connections at once, a connection idle for ten

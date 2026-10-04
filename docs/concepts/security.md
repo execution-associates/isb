@@ -319,6 +319,11 @@ every project, including changes made outside isb, with who requested them.
   org, and a workspace allowed to nest ([The Docker
   exception](#the-docker-exception)) reaches more of the kernel to try. Use a VM (`type: vm`, `--untrusted` builds) for code you do not trust,
   and a dedicated VM or another server for an org that must share no kernel.
+  A VM's host bind mounts are translated to the invoking user, so guest root
+  cannot own files on the host ([Host directories in a
+  VM](../reference/compose.md#host-directories-in-a-vm)); setuid bits set by the
+  mapped id remain, as the invoking user's, unless the directory is on a
+  `nosuid` mount.
 - **Anyone with the incus socket**, or in `incus-admin`, owns the host.
 - **The local registry has no authentication**: anything on the host that
   can open `127.0.0.1:5480` can read and write every org's images. Org

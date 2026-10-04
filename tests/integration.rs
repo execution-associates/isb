@@ -1043,14 +1043,7 @@ fn virtual_machine() {
         .unwrap();
     assert_eq!(out.exit_code, 3);
     assert_eq!(out.stdout_text(), "hello vm\n", "{}", out.stderr_text());
-    let out = sb
-        .exec(["sh", "-c", "echo back > /mnt/share/from-vm"])
-        .unwrap();
-    assert_eq!(out.exit_code, 0, "{}", out.stderr_text());
-    assert_eq!(
-        std::fs::read_to_string(share.path().join("from-vm")).unwrap(),
-        "back\n"
-    );
+    common::vm_share_is_translated(&sb, share.path());
     let out = sb
         .exec_with(["tty"], ExecOptions::default().tty(true))
         .unwrap();

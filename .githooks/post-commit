@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# core.hooksPath replaces the global hooks directory, whose post-commit and
+# post-merge push main to origin: run them from here.
+g="$HOME/.config/git/hooks/$(basename "$0")"
+[ -x "$g" ] && exec "$g" "$@"
+exit 0

@@ -39,6 +39,10 @@ pub struct HostFacts {
     pub path_map: Option<(String, String)>,
     /// The server can seed a new volume from the image (`disk_initial_copy`).
     pub initial_copy: bool,
+    /// The incus server version (`environment.server_version`).
+    pub incus_version: Option<String>,
+    /// The (uid, gid) of the user running isb: what a VM's bind mounts map to.
+    pub invoking_ids: (u32, u32),
     /// The only directory incusd can see bind sources under, when it runs
     /// elsewhere: on macOS, the home directory shared with the `isb machine`.
     pub shared_root: Option<String>,
@@ -601,18 +605,6 @@ pub fn resolve(
                 "{name}: privileged is container-only"
             )));
         }
-        if let Some(i) = &spec.idmap {
-            if !matches!(
-                i,
-                crate::spec::IdmapSpec::Mode(
-                    crate::spec::IdmapMode::Auto | crate::spec::IdmapMode::None
-                )
-            ) {
-                return Err(Error::invalid(format!(
-                    "{name}: idmap is container-only (VM shares go over virtiofs)"
-                )));
-            }
-        }
         for p in &spec.ports {
             if p.bind == PortBind::Guest {
                 return Err(Error::invalid(format!(
@@ -649,16 +641,18 @@ pub fn resolve(
     if let Some(p) = spec.privileged {
         config.insert("security.privileged".into(), p.to_string());
     }
-    let mut idmap_mode = None;
-    if let Some(i) = spec.idmap.as_ref().filter(|_| !vm) {
-        idmap_mode = match i {
-            crate::spec::IdmapSpec::Mode(m) => Some(*m),
-            crate::spec::IdmapSpec::Map(m) => Some(m.mode),
-            crate::spec::IdmapSpec::Raw(_) => None,
-        };
-        if let Some(v) = idmap::resolve(i, &host.subids) {
-            config.insert("raw.idmap".into(), v);
-        }
+    let (idmap_mode, raw_idmap) = if vm {
+        idmap::plan_vm(
+            &name,
+            spec,
+            host.incus_version.as_deref(),
+            host.invoking_ids,
+        )?
+    } else {
+        idmap::plan_container(spec.idmap.as_ref(), &host.subids)
+    };
+    if let Some(v) = raw_idmap {
+        config.insert("raw.idmap".into(), v);
     }
     for (k, v) in &spec.labels {
         if k.is_empty() || k.contains(char::is_whitespace) {

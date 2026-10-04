@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# The checks that need no build: the legibility ratchet, rustfmt and the docs
+# links. They are the ones CI failed on most often, and take about a second.
+# Clippy and the tests run project code, so they belong in the sandbox
+# (scripts/check.sh); CI runs them too.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+scripts/ratchet.sh >/dev/null || { scripts/ratchet.sh | grep FAIL; exit 1; }
+if command -v cargo >/dev/null; then
+  cargo fmt --all --check >/dev/null || { echo "rustfmt: run 'cargo fmt --all'"; exit 1; }
+fi
+scripts/check-docs.py >/dev/null || { scripts/check-docs.py; exit 1; }
