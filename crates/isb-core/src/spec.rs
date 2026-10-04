@@ -575,6 +575,16 @@ pub struct SandboxSpec {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub secrets: Vec<SecretRef>,
 
+    /// Which hostnames the sandbox may reach, and secrets that never enter
+    /// it (docs/guides/egress.md). `none` denies all network; a list of
+    /// `host[:port]` (port 443 by default; `*.example.com` for subdomains)
+    /// denies everything else, public and private; `{allow, secrets}` adds
+    /// secrets the guest sees only as placeholders, put on the wire towards
+    /// their approved hosts. Omitted: open egress, as before. Needs
+    /// `isb serve` running for its proxy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub egress: Option<crate::egress::EgressSpec>,
+
     /// Extra instance config keys, set verbatim (escape hatch).
     #[serde(
         default,
@@ -1954,6 +1964,11 @@ impl SandboxSpec {
     }
     pub fn env(mut self, k: impl Into<String>, v: impl Into<String>) -> Self {
         self.env.insert(k.into(), v.into());
+        self
+    }
+    /// Restrict the sandbox's network: see [`crate::egress::EgressSpec`].
+    pub fn egress(mut self, e: crate::egress::EgressSpec) -> Self {
+        self.egress = Some(e);
         self
     }
     /// Mount `vol` at `guest_path`.

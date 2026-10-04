@@ -144,6 +144,7 @@ mod tests {
             shared_root: None,
             org: Some(OrgId::new("acme").unwrap()),
             registry: None,
+            project: "isb-acme".into(),
         };
         let resolve = |s: &crate::spec::SandboxSpec| {
             crate::plan::resolve(s, &Default::default(), &host, Path::new("/"))

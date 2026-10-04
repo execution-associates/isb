@@ -169,6 +169,7 @@ pub fn host_facts(client: &Client) -> Result<HostFacts> {
         shared_root: shared_root(),
         org: crate::org::OrgId::from_incus_project(client.project_name()),
         registry: crate::registry::info(client)?.map(|i| i.addr),
+        project: client.project_name().to_string(),
     })
 }
 
@@ -304,6 +305,9 @@ pub fn apply(
         ..Default::default()
     };
     let mut pending: Vec<&Action> = Vec::new();
+    if let Some(p) = &desired.egress {
+        crate::egress::before_apply(client, p, report)?;
+    }
     for action in &plan.actions {
         match action {
             Action::SetConfig { .. }
@@ -952,6 +956,9 @@ pub fn ensure(
             desired.ready_timeout,
             &desired.exec,
         )?;
+        if let Some(p) = &desired.egress {
+            crate::egress::after_ready(client, p)?;
+        }
     }
     Ok(out)
 }
@@ -1022,6 +1029,9 @@ impl Sandbox {
         apply(client, &d, &plan, report)?;
         if opts.wait_ready {
             wait_ready(client, &d.name, &d.ready, d.ready_timeout, &d.exec)?;
+            if let Some(p) = &d.egress {
+                crate::egress::after_ready(client, p)?;
+            }
         }
         Ok(Self::from_desired(client, &d))
     }
@@ -1107,7 +1117,10 @@ impl Sandbox {
                 "{name} is running; stop it first or force removal"
             )));
         }
-        force_delete(client, name)
+        force_delete(client, name)?;
+        // The egress bridge and ACL go with the sandbox; a daemon sweeps any left behind.
+        let _ = crate::egress::plumb::teardown(client, name);
+        Ok(())
     }
 
     pub fn name(&self) -> &str {
@@ -1359,31 +1372,4 @@ pub fn prune_missing_path(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_route_parsing() {
-        let v4 = "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\neth0\t00000000\t0100B40A\t0003\t0\t0\t0\t00000000\t0\t0\t0\neth0\t0000B40A\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0\n";
-        assert!(has_default_route(v4, ""));
-        let no = "Iface\tDestination\tGateway \tFlags\neth0\t0000B40A\t00000000\t0001\n";
-        assert!(!has_default_route(no, ""));
-        let v6 = "00000000000000000000000000000000 00 00000000000000000000000000000000 00 fe80000000000000000000000000001 00000400 00000001 00000000 00000003 eth0\n00000000000000000000000000000000 00 00000000000000000000000000000000 00 00000000000000000000000000000000 ffffffff 00000001 00000000 00200200 lo\n";
-        assert!(has_default_route(no, v6));
-        let v6_lo_only = "00000000000000000000000000000000 00 00000000000000000000000000000000 00 00000000000000000000000000000000 ffffffff 00000001 00000000 00200200 lo\n";
-        assert!(!has_default_route(no, v6_lo_only));
-    }
-
-    #[test]
-    fn label_filters() {
-        let mut i =
-            SandboxInfo::from_api(&json!({"name": "a", "config": {"user.k": "v", "user.p": "/x"}}));
-        assert!(i.matches(&[LabelFilter::parse("k")]));
-        assert!(i.matches(&[LabelFilter::parse("k=v")]));
-        assert!(!i.matches(&[LabelFilter::parse("k=w")]));
-        assert!(!i.matches(&[LabelFilter::parse("missing")]));
-        assert!(i.matches(&[LabelFilter::parse("k=v"), LabelFilter::parse("p")]));
-        i.labels.clear();
-        assert!(i.matches(&[]));
-    }
-}
+mod tests;

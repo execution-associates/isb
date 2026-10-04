@@ -9,6 +9,7 @@ pub mod client;
 pub mod compose;
 pub mod cron;
 pub mod discovery;
+pub mod egress;
 pub mod error;
 pub mod exec;
 #[doc(hidden)]
