@@ -163,9 +163,8 @@ fn volumes(
             ));
             continue;
         }
-        let is_path = source.starts_with(['/', '.', '~'])
-            || kind == "bind"
-            || source.contains(['$', '/']);
+        let is_path =
+            source.starts_with(['/', '.', '~']) || kind == "bind" || source.contains(['$', '/']);
         if kind == "anon" {
             anon += 1;
             let n = format!("anon-{anon}");

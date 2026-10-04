@@ -467,7 +467,10 @@ fn uptime_kuma_loses_only_its_relative_health_check() {
     let (t, r) = tr_meta(&meta("uptime-kuma", UPTIME_KUMA, None), UPTIME_KUMA);
     assert_eq!(r.status, Status::Notes, "{r:?}");
     assert_eq!(r.notes.len(), 1, "{r:?}");
-    assert!(r.notes[0].contains("(extra/healthcheck) is dropped"), "{r:?}");
+    assert!(
+        r.notes[0].contains("(extra/healthcheck) is dropped"),
+        "{r:?}"
+    );
     assert_eq!(t.apps.len(), 1);
     assert_eq!(t.apps[0].healthcheck, None);
     assert_eq!(t.apps[0].volumes, ["uptime-kuma-data:/app/data"]);
@@ -508,8 +511,16 @@ fn a_health_check_by_relative_path_is_dropped() {
     ));
     assert_eq!(t.apps[0].healthcheck, None);
     assert_eq!(r.status, Status::Notes);
-    assert!(r.notes[0].contains("(extra/healthcheck) is dropped"), "{r:?}");
-    for ok_test in ["[CMD, /bin/check, -x]", "[CMD, curl, -f, http://x/a/b]", "[CMD-SHELL, 'curl -f http://x/a']", "[CMD-SHELL, $$HOME/check]"] {
+    assert!(
+        r.notes[0].contains("(extra/healthcheck) is dropped"),
+        "{r:?}"
+    );
+    for ok_test in [
+        "[CMD, /bin/check, -x]",
+        "[CMD, curl, -f, http://x/a/b]",
+        "[CMD-SHELL, 'curl -f http://x/a']",
+        "[CMD-SHELL, $$HOME/check]",
+    ] {
         let (t, r) = ok(&svc(&format!("    healthcheck:\n      test: {ok_test}\n")));
         assert!(t.apps[0].healthcheck.is_some(), "{ok_test}");
         assert_eq!(r.status, Status::Clean, "{ok_test}: {r:?}");
