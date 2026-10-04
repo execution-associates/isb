@@ -517,6 +517,36 @@ impl Apps {
         Ok(())
     }
 
+    /// The secret `name` got a new value: when it is a database app's
+    /// password (`db.<app>.password`), store the URL secret again with it.
+    /// Returns the URL secret's name when its value moved.
+    pub fn database_password_changed(&self, org: &OrgId, name: &str) -> Result<Option<String>> {
+        use super::database as d;
+        let Some(app) = name
+            .strip_prefix("db.")
+            .and_then(|r| r.strip_suffix(".password"))
+        else {
+            return Ok(None);
+        };
+        let a = match self.get(org, app) {
+            Ok(a) => a,
+            Err(e) if e.is_not_found() => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        let Source::Database(db) = &a.spec.source else {
+            return Ok(None);
+        };
+        let (pw, _) = self.inner.secrets.get(org, name)?;
+        let pw = String::from_utf8(pw).map_err(|_| Error::invalid("the password is not text"))?;
+        let url = d::internal_url(&a.spec, db, pw.trim());
+        let before = self.inner.secrets.version(org, &d::url_secret(app)).ok();
+        let m = self
+            .inner
+            .secrets
+            .put(org, &d::url_secret(app), url.as_bytes())?;
+        Ok((Some(m.version) != before).then_some(m.name))
+    }
+
     /// The org's secret store (backups read destination credentials and
     /// database passwords from it).
     pub fn secrets(&self) -> &Arc<Secrets> {

@@ -446,6 +446,19 @@ pub fn render(spec: &AppSpec, image: &str, notes: &mut Vec<String>) -> Result<Re
             }
         }
     }
+    // A database's passwords take effect inside it before its replicas
+    // get them; its engine reads them only when the data is first made.
+    if let Source::Database(db) = &spec.source {
+        let mut rotate = |name: String, root: bool| {
+            if let Some(d) = secrets.get_mut(&secret_key(&spec.name, &name)) {
+                d.rotate = Some(db.engine.rotate_command(root));
+            }
+        };
+        rotate(database::password_secret(&spec.name), false);
+        if db.engine.has_root_password() {
+            rotate(database::root_password_secret(&spec.name), true);
+        }
+    }
     let mut volumes = BTreeMap::new();
     let mut mounts = Vec::new();
     for v in &spec.volumes {

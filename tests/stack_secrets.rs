@@ -408,3 +408,128 @@ fn stack_secret_on_change_none() {
     assert_eq!(revisions(&s), revs);
     assert_eq!(s.instance("lazy").name(), lazy.name());
 }
+
+/// A secret's `rotate` as a YAML value, `$` escaped from interpolation.
+fn rotate_yaml(engine: isb::app::database::Engine, root: bool) -> String {
+    serde_json::to_string(&engine.rotate_command(root))
+        .unwrap()
+        .replace('$', "$$")
+}
+
+/// Run `sh -c line` in a guest with `env`, and whether it succeeded.
+fn sh_ok(sb: &Sandbox, line: &str, env: &[(&str, &str)]) -> bool {
+    let mut o = isb::ExecOptions::default();
+    for (k, v) in env {
+        o.env.insert(k.to_string(), v.to_string());
+    }
+    sb.exec_with(["sh", "-c", line], o)
+        .is_ok_and(|o| o.success())
+}
+
+/// The `rotate` commands database apps get change the password inside a
+/// running Postgres, MariaDB (user and root) and Redis before anything is
+/// stored, with values that need quoting; a failing one refuses the change.
+#[test]
+fn stack_secret_rotate_changes_database_passwords() {
+    use isb::app::database::Engine;
+    if !enabled() {
+        return;
+    }
+    let s = SecretStack::new("rotate");
+    let org = isb::org::OrgId::default_org();
+    let n = |k: &str| format!("{}.{k}", s.name);
+    for k in ["pg", "my", "myroot", "rd", "bad"] {
+        s.secrets
+            .create(&org, &n(k), None, b"old-pw", &Default::default())
+            .unwrap();
+    }
+    let sec = |k: &str, rotate: String| {
+        format!(
+            "  {k}: {{external: true, name: {}, on_change: none, rotate: {rotate}}}\n",
+            n(k)
+        )
+    };
+    let yaml = format!(
+        "secrets:\n{}{}{}{}{}services:\n\
+         \x20 pg:\n    image: docker:postgres:17-alpine\n    labels: {{isb-test: '1'}}\n\
+         \x20   environment: {{POSTGRES_USER: app, POSTGRES_DB: app, POSTGRES_PASSWORD: {{secret: pg}}}}\n\
+         \x20   healthcheck: {{test: [CMD-SHELL, 'pg_isready -q -h 127.0.0.1 -U app'], interval: 2s, retries: 60, start_period: 120s}}\n\
+         \x20 maria:\n    image: docker:mariadb:11\n    labels: {{isb-test: '1'}}\n\
+         \x20   environment: {{MARIADB_USER: app, MARIADB_DATABASE: app, MARIADB_PASSWORD: {{secret: my}}, MARIADB_ROOT_PASSWORD: {{secret: myroot}}}}\n\
+         \x20   healthcheck: {{test: [CMD-SHELL, 'MYSQL_PWD=\"$$MARIADB_ROOT_PASSWORD\" mariadb-admin ping -h 127.0.0.1 -uroot --silent'], interval: 2s, retries: 60, start_period: 120s}}\n\
+         \x20 redis:\n    image: docker:redis:7-alpine\n    labels: {{isb-test: '1'}}\n\
+         \x20   command: [sh, -c, 'exec docker-entrypoint.sh redis-server --requirepass \"$$REDIS_PASSWORD\"']\n\
+         \x20   environment: {{REDIS_PASSWORD: {{secret: rd}}, REDISCLI_AUTH: {{secret: rd}}}}\n\
+         \x20   secrets: [bad]\n",
+        sec("pg", rotate_yaml(Engine::Postgres, false)),
+        sec("my", rotate_yaml(Engine::Mariadb, false)),
+        sec("myroot", rotate_yaml(Engine::Mariadb, true)),
+        sec("rd", rotate_yaml(Engine::Redis, false)),
+        sec(
+            "bad",
+            "[sh, -c, 'cat >/dev/null; echo nope >&2; exit 3']".into()
+        ),
+    );
+    s.deploy(&yaml, &[]);
+    let (pg, maria, redis) = (s.instance("pg"), s.instance("maria"), s.instance("redis"));
+    // Values a careless quote would break.
+    let new = r#"n3w'pa"ss\w$x"#;
+    let set = |k: &str, v: &str| {
+        let applied = s.ctl.rotate_before_set(&org, &n(k), v.as_bytes()).unwrap();
+        assert_eq!(applied.len(), 1, "{k}: {applied:?}");
+        s.secrets.set(&org, &n(k), v.as_bytes()).unwrap();
+        s.ctl.secret_changed(&org, &n(k));
+    };
+    // Over the bridge address: the image trusts loopback, so only there is
+    // the password checked.
+    let st = s.ctl.status(&s.name).unwrap();
+    let ip = st
+        .services
+        .iter()
+        .find(|x| x.service == "pg")
+        .unwrap()
+        .instances[0]
+        .ip
+        .clone()
+        .unwrap();
+    let psql = format!("psql -h {ip} -U app -d app -tAc 'select 1' | grep -qx 1");
+    let psql = psql.as_str();
+    assert!(sh_ok(&pg, psql, &[("PGPASSWORD", "old-pw")]));
+    set("pg", new);
+    assert!(
+        sh_ok(&pg, psql, &[("PGPASSWORD", new)]),
+        "postgres: new password"
+    );
+    assert!(
+        !sh_ok(&pg, psql, &[("PGPASSWORD", "old-pw")]),
+        "postgres: old one gone"
+    );
+
+    let my = |user: &str| format!("mariadb -h 127.0.0.1 -u{user} -e 'select 1' >/dev/null");
+    set("my", new);
+    assert!(
+        sh_ok(&maria, &my("app"), &[("MYSQL_PWD", new)]),
+        "mariadb user"
+    );
+    assert!(!sh_ok(&maria, &my("app"), &[("MYSQL_PWD", "old-pw")]));
+    // Root's own rotate authenticates with the root password the instance
+    // still has.
+    set("myroot", "r00t'new");
+    assert!(
+        sh_ok(&maria, &my("root"), &[("MYSQL_PWD", "r00t'new")]),
+        "mariadb root"
+    );
+
+    let ping = "redis-cli -h 127.0.0.1 --no-auth-warning ping | grep -q PONG";
+    set("rd", new);
+    assert!(sh_ok(&redis, ping, &[("REDISCLI_AUTH", new)]), "redis");
+    assert!(!sh_ok(&redis, ping, &[("REDISCLI_AUTH", "old-pw")]));
+
+    // A failing rotate refuses the change, naming why.
+    let e = s
+        .ctl
+        .rotate_before_set(&org, &n("bad"), b"x")
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("exited") && e.contains("nope"), "{e}");
+}

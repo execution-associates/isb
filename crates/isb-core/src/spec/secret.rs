@@ -54,6 +54,16 @@ pub struct SecretDef {
     /// (`secrets: [{source, on_change}]`, `{secret, on_change}`) overrides it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_change: Option<OnChange>,
+
+    /// Under `isb serve`: argv run in one running replica of each service
+    /// using the secret when it gets a new version, before any replica is
+    /// given it, to make the new value take effect where the old one is
+    /// stored (a database user's password). It reads the new value on stdin
+    /// and runs with the replica's own environment, which still holds the
+    /// old one. A failure stops the change: `isb secret set` stores nothing,
+    /// and a driver's new version is not taken up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotate: Option<Vec<String>>,
 }
 
 /// What a new version of a secret does to the stack services using it.
@@ -135,6 +145,13 @@ impl SecretDef {
         }
         if self.age.as_deref().is_some_and(|a| a.trim().is_empty()) {
             return Err("age is empty".into());
+        }
+        if self
+            .rotate
+            .as_ref()
+            .is_some_and(|a| a.is_empty() || a[0].is_empty())
+        {
+            return Err("rotate needs a command: [argv...]".into());
         }
         if let Some(r) = &self.refresh {
             if self.driver.is_none() {

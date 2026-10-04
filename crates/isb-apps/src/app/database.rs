@@ -166,6 +166,36 @@ impl Engine {
         vec!["/bin/sh".into(), "-c".into(), line.into()]
     }
 
+    /// The command that makes a new password take effect inside a running
+    /// database (`rotate`): the user's (`root: false`), or MySQL's and
+    /// MariaDB's root password. The new value arrives on stdin; the
+    /// instance's environment still holds the old one, which authenticates.
+    /// The engines read their password variables only when the data
+    /// directory is first made, so without this a new password would lock
+    /// the apps out.
+    pub fn rotate_command(self, root: bool) -> Vec<String> {
+        // MySQL string literal: backslashes and quotes doubled.
+        const MY_ESC: &str = r#"pw=$(cat | sed -e 's/\\/\\\\/g' -e "s/'/''/g")"#;
+        let line = match (self, root) {
+            (Engine::Postgres, _) => r#"pw=$(cat) && q="'" && printf 'ALTER ROLE :"u" PASSWORD :%spw%s;\n' "$q" "$q" | PGPASSWORD="$POSTGRES_PASSWORD" psql -v ON_ERROR_STOP=1 -q -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v u="$POSTGRES_USER" -v pw="$pw""#.to_string(),
+            (Engine::Mysql, false) => format!(
+                r#"{MY_ESC} && printf "ALTER USER '%s'@'%%' IDENTIFIED BY '%s';\n" "$MYSQL_USER" "$pw" | MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -h 127.0.0.1 -uroot"#
+            ),
+            (Engine::Mysql, true) => format!(
+                r#"{MY_ESC} && printf "ALTER USER IF EXISTS 'root'@'%%' IDENTIFIED BY '%s'; ALTER USER IF EXISTS 'root'@'localhost' IDENTIFIED BY '%s';\n" "$pw" "$pw" | MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -h 127.0.0.1 -uroot"#
+            ),
+            (Engine::Mariadb, false) => format!(
+                r#"{MY_ESC} && printf "ALTER USER '%s'@'%%' IDENTIFIED BY '%s';\n" "$MARIADB_USER" "$pw" | MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb -h 127.0.0.1 -uroot"#
+            ),
+            (Engine::Mariadb, true) => format!(
+                r#"{MY_ESC} && printf "ALTER USER IF EXISTS 'root'@'%%' IDENTIFIED BY '%s'; ALTER USER IF EXISTS 'root'@'localhost' IDENTIFIED BY '%s';\n" "$pw" "$pw" | MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb -h 127.0.0.1 -uroot"#
+            ),
+            (Engine::Mongodb, _) => r#"NEW=$(cat) mongosh --quiet --host 127.0.0.1 admin -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval 'db.changeUserPassword(process.env.MONGO_INITDB_ROOT_USERNAME, process.env.NEW)'"#.to_string(),
+            (Engine::Redis, _) => r#"NEW=$(cat) && redis-cli -h 127.0.0.1 --no-auth-warning CONFIG SET requirepass "$NEW" | grep -q OK"#.to_string(),
+        };
+        vec!["/bin/sh".into(), "-c".into(), line]
+    }
+
     /// A shell line that restores a dump read from stdin, replacing what
     /// the dump holds. `ISB_SOURCE_DB` names the dumped database (MongoDB
     /// renames it to this one's).
@@ -641,6 +671,40 @@ mod tests {
         assert!(Engine::parse("oracle").is_err());
         let e: Engine = serde_json::from_value(json!("mongo")).unwrap();
         assert_eq!(e, Engine::Mongodb);
+    }
+
+    /// A database's passwords change inside it before its replica gets
+    /// them: `rotate` on exactly those secrets, and only on the database.
+    #[test]
+    fn passwords_rotate_inside_the_database() {
+        for engine in ENGINES {
+            let s = db_spec(engine.name());
+            let r = render_db(&s);
+            let rotating: Vec<&str> = r
+                .secrets
+                .iter()
+                .filter(|(_, d)| d.rotate.is_some())
+                .map(|(k, _)| k.as_str())
+                .collect();
+            let mut want = vec![format!("main-db.{}", password_secret("main-db"))];
+            if engine.has_root_password() {
+                want.push(format!("main-db.{}", root_password_secret("main-db")));
+            }
+            want.sort();
+            assert_eq!(rotating, want, "{engine}");
+            for root in [false, true] {
+                let argv = engine.rotate_command(root);
+                // The line parses as shell.
+                let ok = std::process::Command::new("sh")
+                    .args(["-n", "-c", &argv[2]])
+                    .status()
+                    .unwrap()
+                    .success();
+                assert!(ok, "{engine} root={root}: {}", argv[2]);
+                // The new value only ever arrives on stdin.
+                assert!(argv[2].contains("$(cat"), "{engine}");
+            }
+        }
     }
 
     #[test]

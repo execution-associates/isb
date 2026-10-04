@@ -144,7 +144,7 @@ There is no `port-forward` tool: run `curl` with `app_exec`, or reach an instanc
 | `workspace_rebuild` | admin | A fresh machine from its image (or `image`), same home and token; `confirm`. |
 | `workspace_delete` | admin | The machine and its token, and the home unless `keep_home`; `confirm`. |
 | `workspace_token_rotate` | admin | A new token, delivered inside; the old one stops at once. |
-| `workspace_settings` | member reads, admin changes | `sandbox_expiry`, `sandbox_idle`; `max_workspaces`, `home_kind`, `home_pool` are for platform admins. |
+| `workspace_settings` | member reads, admin changes | `sandbox_expiry`, `sandbox_idle`, `secret_refresh` (how often workspaces' driver references are checked); `max_workspaces`, `home_kind`, `home_pool` are for platform admins. |
 | `workspace_setup_run` | admin | Run the first-boot script again, as root: now when running, else on the next start; outcome and output in the history (`workspace.setup`). |
 | `workspace_terminals` | member | The web terminal's mode (`herdr` or `shell`) and its herdr sessions. |
 | `workspace_terminal_update` | member | A herdr session: `rename`, or `end: true`. |
@@ -164,7 +164,7 @@ There is no `port-forward` tool: run `curl` with `app_exec`, or reach an instanc
 | Tool | Who | Does |
 |---|---|---|
 | `secret_create` | member | Create (`name`, `value`, optional `driver`, `labels`); fails if it exists. |
-| `secret_set` | member | A new value and version (creates it in the local store if missing). Each stack service using it acts per its `on_change`: `services` lists what each did (`roll`, `restart`, `none`), `rolled` the stacks that roll or restart, `skipped` what was not cycled and why (workspaces get the file, never a restart). |
+| `secret_set` | member | A new value and version (creates it in the local store if missing). A stack secret's `rotate` command (a database app's password) runs first, in a running replica (`applied`); if it fails nothing is stored. Each stack service using it acts per its `on_change`: `services` lists what each did (`roll`, `restart`, `none`), `rolled` the stacks that roll or restart, `skipped` what was not cycled and why (workspaces get the file, never a restart). |
 | `secret_get` | member | `{meta, value}`. A secret read: always audited. |
 | `secret_list` | viewer | Metadata, never values; `used_by` per secret, and `references`: the driver references stacks use. |
 | `secret_inspect` | viewer | One secret's metadata. |

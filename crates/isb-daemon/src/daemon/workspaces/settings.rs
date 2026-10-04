@@ -14,6 +14,8 @@ struct SettingsArgs {
     sandbox_expiry: Option<String>,
     #[serde(default)]
     sandbox_idle: Option<String>,
+    #[serde(default)]
+    secret_refresh: Option<String>,
     /// `""` clears it.
     #[serde(default)]
     home_pool: Option<String>,
@@ -30,6 +32,7 @@ pub(super) fn workspace_settings(d: &Daemon, a: Value, c: &Caller) -> Result<Val
     let changes = a.max_workspaces.is_some()
         || a.sandbox_expiry.is_some()
         || a.sandbox_idle.is_some()
+        || a.secret_refresh.is_some()
         || a.home_pool.is_some()
         || a.home_kind.is_some();
     if changes {
@@ -62,6 +65,9 @@ pub(super) fn workspace_settings(d: &Daemon, a: Value, c: &Caller) -> Result<Val
         }
         if let Some(i) = a.sandbox_idle {
             s.sandbox_idle = i.trim().to_string();
+        }
+        if let Some(r) = a.secret_refresh {
+            s.secret_refresh = r.trim().to_string();
         }
         if let Some(k) = a.home_kind {
             s.home_kind = match k.trim() {

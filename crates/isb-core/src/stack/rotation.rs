@@ -171,9 +171,28 @@ impl Controller {
         if moved.is_empty() {
             return Vec::new();
         }
-        if let Err(e) = self.inner.store.save(&def) {
-            self.note("error", q, format!("cannot save new secret versions: {e}"));
-            return Vec::new();
+        // A new version from a driver takes effect where the old one is
+        // stored first (`rotate`); `isb secret set` did that before storing.
+        let mut failed: BTreeMap<String, String> = BTreeMap::new();
+        for (key, _, from, _) in &moved {
+            let b = &def.secrets[key];
+            let has_rotate = def
+                .file
+                .secrets
+                .get(key)
+                .is_some_and(|d| d.rotate.is_some());
+            if !b.is_driver_backed() || !has_rotate {
+                continue;
+            }
+            let r = b
+                .read(&self.inner.secrets, &def.org)
+                .and_then(|v| self.run_rotate(&def, key, &v));
+            if let Err(e) = r {
+                failed.insert(key.clone(), e.to_string());
+                if let Some(b) = def.secrets.get_mut(key) {
+                    b.version = *from;
+                }
+            }
         }
         let mut cycles = Vec::new();
         for (key, secret, from, to) in &moved {
@@ -186,12 +205,118 @@ impl Controller {
                     secret: secret.clone(),
                     from: *from,
                     to: *to,
+                    error: failed.get(key).cloned(),
                 });
             }
         }
-        self.apply(Arc::new(def));
+        if failed.len() < moved.len() {
+            if let Err(e) = self.inner.store.save(&def) {
+                self.note("error", q, format!("cannot save new secret versions: {e}"));
+                return Vec::new();
+            }
+            self.apply(Arc::new(def));
+        }
         self.report_cycles(q, &cycles);
         cycles
+    }
+
+    /// `isb secret set NAME`, before the value is stored: run the `rotate`
+    /// command of every stack secret bound to `name` in the org, with the
+    /// new value, so it takes effect where the old one is kept (a database
+    /// user's password) before any replica is given it. The first failure
+    /// is the answer, and the caller stores nothing.
+    pub fn rotate_before_set(
+        &self,
+        org: &OrgId,
+        name: &str,
+        value: &[u8],
+    ) -> Result<Vec<crate::stack::secrets::Applied>> {
+        let mut out = Vec::new();
+        for def in self.definitions() {
+            if def.org != *org {
+                continue;
+            }
+            for (key, b) in &def.secrets {
+                let rotates = def
+                    .file
+                    .secrets
+                    .get(key)
+                    .is_some_and(|d| d.rotate.is_some());
+                if b.name == name && rotates {
+                    out.extend(self.run_rotate(&def, key, value).map_err(|e| {
+                        Error::invalid(format!(
+                            "secret {name} not changed: stack {}: {e}",
+                            def.name
+                        ))
+                    })?);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Run the top-level secret `key`'s `rotate` command, with `value` on
+    /// stdin, in one running replica of each service using it.
+    fn run_rotate(
+        &self,
+        def: &StackDef,
+        key: &str,
+        value: &[u8],
+    ) -> Result<Vec<crate::stack::secrets::Applied>> {
+        let Some(argv) = def.file.secrets.get(key).and_then(|d| d.rotate.clone()) else {
+            return Ok(Vec::new());
+        };
+        let client = crate::org::client(&self.inner.client, &def.org);
+        let mut out = Vec::new();
+        for service in def.services_using(key) {
+            let rev = def.revision(&service)?;
+            let mut insts: Vec<Inst> = list_instances(&client, &def.name, Some(&service))?
+                .into_iter()
+                .filter(Inst::running)
+                .collect();
+            // The current revision's first, then the lowest slot.
+            insts.sort_by_key(|i| (i.rev != rev, i.slot));
+            let Some(i) = insts.first() else {
+                return Err(Error::invalid(format!(
+                    "rotate: no running replica of {service} to run it in"
+                )));
+            };
+            let o = Sandbox::get(&client, &i.name)?.exec_with(
+                argv.clone(),
+                crate::exec::ExecOptions::default()
+                    .stdin(crate::exec::Stdin::Bytes(value.to_vec()))
+                    .timeout(Duration::from_secs(120)),
+            )?;
+            if !o.success() {
+                let err = o.stderr_text();
+                let out_text = o.stdout_text();
+                let why = [err.trim(), out_text.trim()]
+                    .into_iter()
+                    .find(|s| !s.is_empty())
+                    .unwrap_or("no output");
+                let tail: String = why.lines().rev().take(5).collect::<Vec<_>>().join(" | ");
+                return Err(Error::invalid(format!(
+                    "rotate in {} exited with {:?}: {tail}",
+                    i.name, o.exit_code
+                )));
+            }
+            self.event(
+                "secret.rotated",
+                "info",
+                &def.qualified(),
+                &service,
+                format!(
+                    "secret {key}: the new value took effect in {} (rotate)",
+                    i.name
+                ),
+            );
+            out.push(crate::stack::secrets::Applied {
+                stack: def.name.clone(),
+                service,
+                instance: i.name.clone(),
+            });
+        }
+        Ok(out)
     }
 
     /// One `secret.rotated` event per service a new secret version reached,
@@ -208,6 +333,19 @@ impl Controller {
                 .map(|c| format!("{} v{} -> v{}", c.secret, c.from, c.to))
                 .collect();
             let action = cs.iter().map(|c| c.action).max().unwrap_or_default();
+            if let Some(e) = cs.iter().find_map(|c| c.error.as_deref()) {
+                self.event(
+                    "secret.rotated",
+                    "error",
+                    q,
+                    service,
+                    format!(
+                        "new secret version ({}) not taken up: {e}; the service keeps the version it has",
+                        what.join(", ")
+                    ),
+                );
+                continue;
+            }
             let (level, how) = match action {
                 OnChange::Roll => ("info", "rolling its replicas".to_string()),
                 OnChange::Restart => ("info", "restarting its replicas in place".to_string()),

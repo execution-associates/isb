@@ -230,13 +230,25 @@ pub struct Cycle {
     /// the value is delivered where it can be, nothing restarts, and the
     /// replicas are stale until they next start.
     pub action: OnChange,
+    /// The secret's `rotate` command failed: the stack keeps the version it
+    /// had, and nothing cycles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 impl Cycle {
     /// The replicas run the new value once this is done.
     pub fn cycles(&self) -> bool {
-        self.action != OnChange::None
+        self.error.is_none() && self.action != OnChange::None
     }
+}
+
+/// Where a secret's `rotate` command made a new value take effect.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Applied {
+    pub stack: String,
+    pub service: String,
+    pub instance: String,
 }
 
 /// The stacks with a service that cycles (rolls or restarts), by name.

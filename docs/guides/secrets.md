@@ -93,7 +93,8 @@ manage the values in 1Password.
   answer (kept 20 seconds) rather than one read per reference and replica.
   A field the item's JSON does not carry as text (a file, an OTP) is read
   with `op read`. Budget about one read per item per `refresh` interval:
-  50 items at `refresh: 5m` is 14,400 reads a day.
+  50 items at `refresh: 5m` is 14,400 reads a day. Workspaces' references
+  are polled in a round of their own, per org, every `secret_refresh`.
 - `isb secret refresh REF` asks 1Password once, however many stacks use it.
 - The token reaches `op` through the environment of that one child process,
   never its arguments, and nothing else from the daemon's environment goes
@@ -303,10 +304,10 @@ Everything that uses a secret, and what a new version does to it:
 | Stack service, file (`secrets:`) | Its `on_change`. |
 | Stack service, variable (`environment: {KEY: {secret: NAME}}`) | Its `on_change`. A running process cannot take a new variable, so `none` delivers it for the next start only. |
 | App (`${{secret.NAME}}` in env, `files`) | A stack service: its `secret_on_change` (default `roll`; apps update `start-first` unless they have volumes). |
-| Database app | The same; its password secret only seeds a new data volume, so a new version of it does not change the database's password. |
+| Database app | Its passwords (`db.<app>.password`, MySQL's and MariaDB's `db.<app>.root-password`) carry a `rotate` command: before anything is stored, isb changes the password inside the running database, authenticating with the old one, then stores the new value and rewrites `db.<app>.url`, so apps using the URL follow. If that fails (the database is not running, say), `secret_set` stores nothing and says why. The engines read their password variables only when the data is first made, which is why it has to happen in the database. |
 | Job, `run` mode | Reads the values when each run starts: always current. |
 | Job, `exec` mode | Runs in a replica: whatever the replica has. |
-| Workspace (`--secret NAME`) | Never restarted (a workspace restarts only with `confirm`): `secret_set` writes the new file to `/run/isb/secrets/NAME` in each running workspace using it, and reports the workspace under `skipped`. A program that read the old value keeps it. A driver reference a workspace uses is not polled; `isb secret refresh REF` delivers it. |
+| Workspace (`--secret NAME`) | Never restarted (a workspace restarts only with `confirm`): `secret_set` writes the new file to `/run/isb/secrets/NAME` in each running workspace using it, and reports the workspace under `skipped`. A driver reference (`vault/item/field`) is polled every org's `secret_refresh` (`isb workspace settings --secret-refresh`, default `1h`), one lookup per item, and a new version is written the same way, with a `secret.rotated` event; `isb secret refresh REF` checks now. A program that read the old value keeps it. |
 | Sandbox egress secret (`{env, secret, hosts}`) | Read by the egress proxy when a request needs it, cached for a few seconds: live. |
 | `isb up` | Reads values when it runs; nothing to cycle. |
 
@@ -321,6 +322,34 @@ smtp-password: version 4
 shop-production/web: web.smtp-password v3 -> v4: restarting its replicas in place
 shop-production/worker: web.smtp-password v3 -> v4: not cycled (on_change: none): files updated, the app keeps v3 until it next starts
 workspace main: delivered /run/isb/secrets/smtp-password; not restarted (a workspace restarts only with confirm): processes that read the old value keep it
+```
+
+### Changing the value where it is kept
+
+Some services keep a secret's value somewhere a restart does not reset: a
+database stores its users' passwords in its data, and reads the password
+variable only when the data is first made. Changing the secret alone would
+give the apps a password the database does not know. A top-level secret's
+[`rotate`](../reference/compose.md#secretskey) command handles this: isb
+runs it in a running replica of each service using the secret, with the new
+value on stdin and the replica's own environment (still holding the old
+value, to authenticate), before anything changes:
+
+- `isb secret set` runs it before storing the value. If it fails, or no
+  replica runs, nothing is stored and the command says why.
+- A driver's new version (polled or refreshed) is taken up only after it
+  succeeded; a failure leaves the stack on the version it has, with an
+  `error` on each service in the answer and an `error`-level
+  `secret.rotated` event, and is tried again on the next check.
+
+[Database apps](databases.md) get it for their passwords. A compose stack
+with its own database writes it, for instance for Postgres:
+
+```yaml
+secrets:
+  pg_password:
+    external: true
+    rotate: [sh, -c, 'pw=$$(cat) && q="''" && printf ''ALTER ROLE :"u" PASSWORD :%spw%s;\n'' "$$q" "$$q" | psql -v ON_ERROR_STOP=1 -q -h 127.0.0.1 -U "$$POSTGRES_USER" -v u="$$POSTGRES_USER" -v pw="$$pw"']
 ```
 
 Each service (and workspace) a new version reaches also gets a
@@ -355,7 +384,7 @@ Values travel base64.
 | Tool | Does |
 |---|---|
 | `secret_create` | Create (`name`, `value`, optional `driver`, `labels`); fails if it exists. |
-| `secret_set` | New value (`name`, `value`); returns the metadata with the new version, what each service using it does (`services`: `stack`, `service`, `key`, `secret`, `from`, `to`, `action`), the stacks that roll or restart (`rolled`), and what was not cycled and why (`skipped`). |
+| `secret_set` | New value (`name`, `value`); a stack secret's `rotate` command runs first (`applied`), and if it fails nothing is stored. Returns the metadata with the new version, what each service using it does (`services`: `stack`, `service`, `key`, `secret`, `from`, `to`, `action`), the stacks that roll or restart (`rolled`), and what was not cycled and why (`skipped`). |
 | `secret_get` | `{meta, value}`. |
 | `secret_list` | `{secrets: [meta...], references: [...]}`, no values. Each secret carries `used_by`, the deployed stacks whose services use it; `references` are the driver references (such as `vault/item/field`) stacks use, each `{name, driver, version, used_by}`. |
 | `secret_inspect` | One secret's metadata. |

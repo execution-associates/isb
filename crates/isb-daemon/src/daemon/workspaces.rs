@@ -171,6 +171,7 @@ pub struct Workspaces {
     activity: Mutex<HashMap<String, u64>>,
     /// The init pid each workspace's credentials were delivered for.
     delivered: Mutex<HashMap<String, i64>>,
+    secret_poll: Mutex<secrets::Poll>,
     bridges: Mutex<HashMap<OrgId, Bridge>>,
     /// The SSH count per workspace and when it was asked, so pages that
     /// poll do not exec in the machine every few seconds.
@@ -207,6 +208,7 @@ impl Workspaces {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             activity: Mutex::new(HashMap::new()),
             delivered: Mutex::new(HashMap::new()),
+            secret_poll: Mutex::default(),
             bridges: Mutex::new(HashMap::new()),
             ssh: Mutex::new(HashMap::new()),
             serve: OnceLock::new(),
@@ -702,6 +704,7 @@ chown "$u": "$h"
                 let mut last_reap = std::time::Instant::now();
                 loop {
                     me.upkeep(&local);
+                    me.poll_secrets(&ctl, &local);
                     if last_reap.elapsed() >= REAP_EVERY {
                         me.reap(&ctl, &local);
                         last_reap = std::time::Instant::now();
@@ -1689,12 +1692,13 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
     tool!(
         "workspace_settings",
         "Workspace settings",
-        "The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none). Without changes it reads them; org admins change the sandbox defaults.",
+        "The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none); and secret_refresh (1h, at least 10s), how often the workspaces' secrets that are driver references (vault/item/field) are checked for a new version, which is written into running workspaces without a restart. Without changes it reads them; org admins change the sandbox defaults and secret_refresh.",
         obj(
             json!({
                 "max_workspaces": {"type": "integer", "minimum": 1, "maximum": 100},
                 "sandbox_expiry": {"type": "string", "description": "e.g. 24h, 7d."},
                 "sandbox_idle": {"type": "string", "description": "e.g. 2h, or none."},
+                "secret_refresh": {"type": "string", "description": "e.g. 1h, 5m; at least 10s."},
                 "home_kind": {"type": "string", "enum": ["", "volume", "host"], "description": "Platform admins: where new workspace homes go: a managed volume, or a host folder under isb serve's --workspace-home-root (\"\": the daemon's default)."},
                 "home_pool": {"type": "string", "description": "Platform admins: the storage pool new workspace homes go in (\"\" clears it: the daemon's --workspace-pool, else the org's default pool)."}
             }),
@@ -1799,6 +1803,7 @@ mod tests {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             activity: Mutex::new(HashMap::new()),
             delivered: Mutex::new(HashMap::new()),
+            secret_poll: Mutex::default(),
             bridges: Mutex::new(HashMap::new()),
             ssh: Mutex::new(HashMap::new()),
             serve: OnceLock::new(),

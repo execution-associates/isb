@@ -205,6 +205,7 @@ Each app is an [app](deploy-apps.md#an-apps-settings) with an image source:
 | `args` | Arguments after the image's own entrypoint (docker's `command`): the entrypoint is read from the image (`skopeo inspect --config`) at deploy. |
 | `files` | `[{path, content, mode?}]`: files in the app's instances. The content is rendered and stored as a secret; mode default `0444`. |
 | `depends_on` | Apps deployed (and converged) first. |
+| `secret_on_change` | What a new version of one of the app's secrets does: `roll` (default), `restart` or `none`, as the app's [`secret_on_change`](deploy-apps.md). |
 
 A template cannot ask for anything an app cannot have: no host paths,
 privileged mode, devices or extra capabilities. The org's own limits apply

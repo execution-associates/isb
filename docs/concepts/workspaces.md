@@ -42,6 +42,7 @@ isb workspace image build|ls|logs|rm         workspace images from recipes (plat
 isb workspace rm [NAME] [--keep-home] --yes
 isb workspace rotate-token [NAME]
 isb workspace settings [--max-workspaces N] [--sandbox-expiry 24h] [--sandbox-idle 2h|none]
+                       [--secret-refresh 1h]
                        [--home-kind volume|host] [--home-pool POOL]
 isb workspace sandboxes [--json]             creator, age, expiry, resources
 isb workspace extend SANDBOX [--by 24h] [--idle-timeout 4h|none]
@@ -256,7 +257,10 @@ Named org secrets (`--secret NAME`) are delivered as `/run/isb/secrets/NAME`
 (0400, the workspace user's). A new value (`isb secret set`) is written into
 a running workspace at once, and never restarts it: a program that read the
 old value keeps it ([When a secret
-changes](../guides/secrets.md#when-a-secret-changes)). `-e KEY=VALUE` are plain variables for login
+changes](../guides/secrets.md#when-a-secret-changes)). A secret that is a
+driver reference (`vault/item/field`) is checked for a new version every
+org's `secret_refresh` (default `1h`; `isb workspace settings
+--secret-refresh 15m`) and written in the same way. `-e KEY=VALUE` are plain variables for login
 shells (`ISB_*` are isb's and refused).
 
 ### Reaching isb from inside: the bridge listener
@@ -429,7 +433,7 @@ and `sandbox_remove` of it are refused.
 | `workspace_setup_run` | admins | run the first-boot script again: now when running, else on the next start |
 | `workspace_terminals`, `workspace_terminal_update` | members | the web terminal's herdr sessions ([above](#the-web-terminal)) |
 | `workspace_image_build`, `_logs`, `_list`, `_remove` | platform admins | images from recipes ([Workspace images](../guides/workspace-images.md)) |
-| `workspace_settings` | members read, admins change | `sandbox_expiry`, `sandbox_idle`; `max_workspaces`, `home_kind`, `home_pool` (platform admins) |
+| `workspace_settings` | members read, admins change | `sandbox_expiry`, `sandbox_idle`, `secret_refresh`; `max_workspaces`, `home_kind`, `home_pool` (platform admins) |
 | `sandbox_create` | members | takes `expires`, `idle_timeout` |
 | `sandbox_extend` | the creator, admins | `name`, `by`, `idle_timeout` |
 | `workspace_port_list` | members | the published ports: preview host, ingress hostname, URL and state |

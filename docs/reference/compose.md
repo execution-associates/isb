@@ -193,6 +193,7 @@ A secret a service uses as a file (its `secrets`) or a variable
 | `driver` | A secrets driver; `name` is the driver's reference. |
 | `refresh` | With `driver`: how often `isb serve` checks it for a new version (`30m`; default `1h`, at least `10s`). |
 | `on_change` | What a new version does to the stack services using it: `roll` (default), `restart` or `none`. Any source. A service's own reference overrides it. |
+| `rotate` | Under `isb serve`: argv run in a running replica of each service using it when it gets a new version, before any replica is given it, with the new value on stdin and the replica's environment (holding the old value). For values a service keeps itself, such as a database user's password. A failure stops the change: `isb secret set` stores nothing, a driver's new version is not taken up. See [Changing the value where it is kept](../guides/secrets.md#changing-the-value-where-it-is-kept). |
 
 `name` goes with `external` or `driver` only. A secret no service uses is never
 read. A deployed stack keeps references to the org's store (name and version),

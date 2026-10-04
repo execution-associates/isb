@@ -3323,7 +3323,7 @@ export interface paths {
         put?: never;
         /**
          * Set a secret
-         * @description Give a secret a new value (base64), bumping its version; creates it in the local store if missing. Each stack service using it acts per its `on_change`: `roll` (default; a rolling update), `restart` (in place) or `none` (files updated, replicas stale until they next start). `services` lists what each service did, `rolled` the stacks that roll or restart, `skipped` what was not cycled and why (workspaces get the file, never a restart).
+         * @description Give a secret a new value (base64), bumping its version; creates it in the local store if missing. Each stack service using it acts per its `on_change`: `roll` (default; a rolling update), `restart` (in place) or `none` (files updated, replicas stale until they next start). `services` lists what each service did, `rolled` the stacks that roll or restart, `skipped` what was not cycled and why (workspaces get the file, never a restart). A stack secret with a `rotate` command (a database app's password) is first changed where the old value is kept, in a running replica (`applied`); if that fails, nothing is stored. A database app's URL secret follows its password.
          */
         post: operations["secret_set"];
         delete?: never;
@@ -4663,7 +4663,7 @@ export interface paths {
         put?: never;
         /**
          * Workspace settings
-         * @description The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none). Without changes it reads them; org admins change the sandbox defaults.
+         * @description The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none); and secret_refresh (1h, at least 10s), how often the workspaces' secrets that are driver references (vault/item/field) are checked for a new version, which is written into running workspaces without a restart. Without changes it reads them; org admins change the sandbox defaults and secret_refresh.
          */
         post: operations["workspace_settings"];
         delete?: never;
@@ -5013,7 +5013,7 @@ export interface paths {
         };
         /**
          * Workspace settings
-         * @description The `workspace_settings` tool as a resource. The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none). Without changes it reads them; org admins change the sandbox defaults.
+         * @description The `workspace_settings` tool as a resource. The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none); and secret_refresh (1h, at least 10s), how often the workspaces' secrets that are driver references (vault/item/field) are checked for a new version, which is written into running workspaces without a restart. Without changes it reads them; org admins change the sandbox defaults and secret_refresh.
          */
         get: operations["workspace_resource_get_settings"];
         put?: never;
@@ -5023,7 +5023,7 @@ export interface paths {
         head?: never;
         /**
          * Workspace settings
-         * @description The `workspace_settings` tool as a resource. The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none). Without changes it reads them; org admins change the sandbox defaults.
+         * @description The `workspace_settings` tool as a resource. The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none); and secret_refresh (1h, at least 10s), how often the workspaces' secrets that are driver references (vault/item/field) are checked for a new version, which is written into running workspaces without a restart. Without changes it reads them; org admins change the sandbox defaults and secret_refresh.
          */
         patch: operations["workspace_resource_patch_settings"];
         trace?: never;
@@ -15138,6 +15138,8 @@ export interface operations {
                     sandbox_expiry?: string;
                     /** @description e.g. 2h, or none. */
                     sandbox_idle?: string;
+                    /** @description e.g. 1h, 5m; at least 10s. */
+                    secret_refresh?: string;
                 };
             };
         };
@@ -15995,6 +15997,8 @@ export interface operations {
                     sandbox_expiry?: string;
                     /** @description e.g. 2h, or none. */
                     sandbox_idle?: string;
+                    /** @description e.g. 1h, 5m; at least 10s. */
+                    secret_refresh?: string;
                 };
             };
         };

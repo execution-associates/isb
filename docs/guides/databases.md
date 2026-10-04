@@ -72,8 +72,12 @@ What a database gets that an image app does not:
 
   The database's own engine reads them only on first start, when the data
   directory is empty. So a database deleted and created again with the same
-  name **reuses** its passwords (they are kept with the volume), and
-  changing a password means changing it in the database too.
+  name **reuses** its passwords (they are kept with the volume). Setting a
+  password secret (`isb secret set db.<name>.password`) changes it inside
+  the running database first, authenticated with the old one, then stores
+  it and rewrites `db.<name>.url`, so apps using the URL follow; if the
+  database is not running, or the change fails, nothing is stored. See
+  [Changing the value where it is kept](secrets.md#changing-the-value-where-it-is-kept).
 - **No published port by default.** `--publish [IP:]PORT` (`publish` in
   `database_create`) publishes it on the host (default address
   `127.0.0.1`), load-balanced like any app port; `isb db show` then lists

@@ -12,6 +12,8 @@ export interface WorkspaceSettings {
   sandbox_expiry: string;
   /** Idle timeout for sandboxes, e.g. `2h`, or `none`. */
   sandbox_idle: string;
+  /** How often workspace secrets that are driver references are checked, e.g. `1h`. */
+  secret_refresh?: string;
 }
 
 export interface WorkspaceSessions {

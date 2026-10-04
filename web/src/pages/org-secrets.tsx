@@ -271,15 +271,25 @@ function SecretsTable({ org, secrets, reveal }: { org: string; secrets: SecretMe
 type Rotation = {
   version: number;
   rolled: string[];
+  applied?: { stack: string; service: string; instance: string }[];
   services?: { stack: string; service: string; action: "roll" | "restart" | "none" }[];
   skipped?: { kind: string; name: string; reason: string }[];
 };
+
+/** A database app's password (`db.<app>.password` or `.root-password`): what setting it does. */
+function dbPasswordNote(name: string): string {
+  const m = /^db\.(.+)\.(password|root-password)$/.exec(name);
+  if (!m) return "";
+  return ` This is database ${m[1]}'s password: isb changes it inside the running database first (and its URL secret with it); if that fails, for instance because the database is not running, nothing is stored.`;
+}
 
 /** One line on what a new version did: per `on_change`, and what was skipped. */
 function rotationSummary(r: Rotation): string {
   const by = (a: string) =>
     (r.services ?? []).filter((c) => c.action === a).map((c) => `${c.stack}/${c.service}`);
   const parts: string[] = [];
+  const applied = (r.applied ?? []).map((a) => `${a.stack}/${a.service}`);
+  if (applied.length) parts.push(`changed inside ${applied.join(", ")} first`);
   const roll = r.services ? by("roll") : r.rolled;
   if (roll.length) parts.push(`rolling ${[...new Set(roll)].join(", ")}`);
   const restart = by("restart");
@@ -551,7 +561,7 @@ function ValueDialog({
           <DialogDescription>
             {description ??
               (update
-                ? `Version ${existing!.version + 1}. Stacks using it roll to the new value.`
+                ? `Version ${existing!.version + 1}. Each service using it rolls, restarts or is left stale, as its on_change says.${dbPasswordNote(theName)}`
                 : `Stored encrypted in ${org}'s local store.`)}
           </DialogDescription>
         </DialogHeader>

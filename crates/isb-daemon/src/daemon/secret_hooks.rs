@@ -35,15 +35,40 @@ pub(super) fn register(r: &mut Registry, d: &Arc<Daemon>) -> Result<()> {
             .map(|def| def.name.clone())
             .collect()
     });
-    let (ctl, wsm) = (d.ctl.clone(), d.workspaces.clone());
+    let ctl = d.ctl.clone();
+    let prepare: secrets::Prepare =
+        Arc::new(move |org: &crate::org::OrgId, name: &str, value: &[u8]| {
+            ctl.rotate_before_set(org, name, value)
+        });
+    let (ctl, wsm, apps) = (d.ctl.clone(), d.workspaces.clone(), d.apps.clone());
     let changed: secrets::Changed = Arc::new(move |org: &crate::org::OrgId, name: &str| {
-        let cycles = ctl.secret_changed(org, name);
-        let skipped = workspace_secret_changed(&ctl, &wsm, org, name, true);
+        let mut cycles = ctl.secret_changed(org, name);
+        let mut skipped = workspace_secret_changed(&ctl, &wsm, org, name, true);
+        // A database app's password moved: its URL secret, which carries
+        // it, follows, and so do the apps that use the URL.
+        match apps.database_password_changed(org, name) {
+            Ok(Some(url)) => {
+                cycles.extend(ctl.secret_changed(org, &url));
+                skipped.extend(workspace_secret_changed(&ctl, &wsm, org, &url, true));
+            }
+            Ok(None) => {}
+            Err(e) => ctl.note(
+                "error",
+                &crate::stack::qualified(org, "@secrets"),
+                format!("secret {name}: the database URL secret was not updated: {e}"),
+            ),
+        }
         secrets::Outcome { cycles, skipped }
     });
-    let (ctl, wsm) = (d.ctl.clone(), d.workspaces.clone());
+    let (ctl, wsm, store) = (d.ctl.clone(), d.workspaces.clone(), d.secrets.clone());
     let refresh: secrets::Refresh = Arc::new(move |org: &crate::org::OrgId, name: &str| {
-        let (found, cycles) = ctl.refresh_secret(org, name)?;
+        let (mut found, cycles) = ctl.refresh_secret(org, name)?;
+        // A reference only workspaces take: re-read it here, before it is
+        // delivered.
+        if found.is_empty() && name.contains('/') && wsm.uses(org, name) {
+            let m = store.refresh(org, name)?;
+            found.push((m.driver, m.version));
+        }
         let skipped = workspace_secret_changed(&ctl, &wsm, org, name, false);
         Ok((found, secrets::Outcome { cycles, skipped }))
     });
@@ -51,6 +76,7 @@ pub(super) fn register(r: &mut Registry, d: &Arc<Daemon>) -> Result<()> {
         r,
         d.secrets.clone(),
         secrets::Hooks {
+            prepare,
             in_use,
             changed,
             refresh,

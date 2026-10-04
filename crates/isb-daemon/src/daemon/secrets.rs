@@ -45,6 +45,12 @@ impl Outcome {
     }
 }
 
+/// Before a new value is stored: make it take effect where the old one is
+/// kept (a stack secret's `rotate`, such as a database's password). An
+/// error stops the set.
+pub type Prepare =
+    Arc<dyn Fn(&OrgId, &str, &[u8]) -> Result<Vec<crate::stack::secrets::Applied>> + Send + Sync>;
+
 /// A stored secret got a new value: cycle what uses it, per its
 /// `on_change`.
 pub type Changed = Arc<dyn Fn(&OrgId, &str) -> Outcome + Send + Sync>;
@@ -69,6 +75,7 @@ pub type Bindings = Arc<dyn Fn(&OrgId) -> Vec<Binding> + Send + Sync>;
 /// How the secret tools reach the stacks.
 #[derive(Clone)]
 pub struct Hooks {
+    pub prepare: Prepare,
     pub in_use: InUse,
     pub changed: Changed,
     pub refresh: Refresh,
@@ -79,6 +86,7 @@ impl Hooks {
     /// No stacks at all.
     pub fn none() -> Hooks {
         Hooks {
+            prepare: Arc::new(|_, _, _| Ok(Vec::new())),
             in_use: Arc::new(|_, _| Vec::new()),
             changed: Arc::new(|_, _| Outcome::default()),
             refresh: Arc::new(|_, _| Ok((Vec::new(), Outcome::default()))),
@@ -178,6 +186,7 @@ fn listing(stored: Vec<crate::secrets::SecretMeta>, used: Vec<Binding>) -> Resul
 )]
 pub fn register(r: &mut Registry, secrets: Arc<Secrets>, hooks: Hooks) -> Result<()> {
     let Hooks {
+        prepare,
         in_use,
         changed,
         refresh,
@@ -246,7 +255,7 @@ pub fn register(r: &mut Registry, secrets: Arc<Secrets>, hooks: Hooks) -> Result
     add(
         "secret_set",
         "Set a secret",
-        "Give a secret a new value (base64), bumping its version; creates it in the local store if missing. Each stack service using it acts per its `on_change`: `roll` (default; a rolling update), `restart` (in place) or `none` (files updated, replicas stale until they next start). `services` lists what each service did, `rolled` the stacks that roll or restart, `skipped` what was not cycled and why (workspaces get the file, never a restart).",
+        "Give a secret a new value (base64), bumping its version; creates it in the local store if missing. Each stack service using it acts per its `on_change`: `roll` (default; a rolling update), `restart` (in place) or `none` (files updated, replicas stale until they next start). `services` lists what each service did, `rolled` the stacks that roll or restart, `skipped` what was not cycled and why (workspaces get the file, never a restart). A stack secret with a `rotate` command (a database app's password) is first changed where the old value is kept, in a running replica (`applied`); if that fails, nothing is stored. A database app's URL secret follows its password.",
         obj(
             props(json!({"name": name_prop()["name"], "value": value_prop["value"]})),
             &["name", "value"],
@@ -263,10 +272,13 @@ pub fn register(r: &mut Registry, secrets: Arc<Secrets>, hooks: Hooks) -> Result
             }
             let a: A = args(a)?;
             let org = org_for(c, a.org.as_deref())?;
-            let m = s.set(&org, &a.name, &value_of(&a.value)?)?;
+            let value = value_of(&a.value)?;
+            let applied = prepare(&org, &a.name, &value)?;
+            let m = s.set(&org, &a.name, &value)?;
             let outcome = on_set(&org, &a.name);
             let mut v = serde_json::to_value(m)?;
             outcome.fill(&mut v);
+            v["applied"] = json!(applied);
             Ok(v)
         }),
     )?;
@@ -476,6 +488,7 @@ mod tests {
             from: 1,
             to: 2,
             action,
+            error: None,
         };
         let changed: Changed = Arc::new(move |org: &OrgId, name: &str| {
             if org.is_default() && name == "used" {
@@ -531,6 +544,12 @@ mod tests {
             &mut r,
             s,
             Hooks {
+                prepare: Arc::new(|_, name: &str, v: &[u8]| {
+                    if name == "locked" && v == b"bad" {
+                        return Err(Error::invalid("rotate failed"));
+                    }
+                    Ok(vec![])
+                }),
                 in_use,
                 changed,
                 refresh,
@@ -715,6 +734,14 @@ mod tests {
             call(&r, "secret_delete", json!({"name": "db"})),
             Err(Error::NotFound(_))
         ));
+        // A failed rotate stores nothing.
+        call(&r, "secret_create", json!({"name": "locked", "value": v})).unwrap();
+        let bad = crate::rpc::b64_encode(b"bad");
+        assert!(call(&r, "secret_set", json!({"name": "locked", "value": bad})).is_err());
+        assert_eq!(
+            call(&r, "secret_inspect", json!({"name": "locked"})).unwrap()["version"],
+            1
+        );
         // Bad input.
         assert!(call(&r, "secret_set", json!({"name": "x", "value": "!!"})).is_err());
         assert!(call(&r, "secret_get", json!({"name": "x", "extra": 1})).is_err());

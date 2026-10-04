@@ -540,6 +540,38 @@ mod tests {
         assert_eq!(op.calls().len(), 25);
     }
 
+    /// The facade finds each name's driver: store names in `local`,
+    /// references in 1Password, all of them in one `op` call per item.
+    #[test]
+    fn the_facade_polls_mixed_names_in_one_round() {
+        let op = fake::FakeOp::new();
+        op.set_version("v", "a", 5);
+        op.set_version("v", "b", 6);
+        let dir = tempfile::tempdir().unwrap();
+        let k = crate::secrets::Keyring::new(age::x25519::Identity::generate(), vec![]);
+        let s =
+            crate::secrets::Secrets::new(crate::secrets::LocalDriver::new(dir.path(), Arc::new(k)))
+                .with_driver(Arc::new(op.driver()))
+                .unwrap();
+        let org = OrgId::default_org();
+        s.create(&org, "plain", None, b"x", &BTreeMap::new())
+            .unwrap();
+        let got = s.versions(
+            &org,
+            &[
+                "v/a/password",
+                "plain",
+                "v/a/login/user",
+                "v/b/password",
+                "v/ghost/x",
+                "missing",
+            ],
+        );
+        let ok: Vec<Option<u64>> = got.iter().map(|r| r.as_ref().ok().copied()).collect();
+        assert_eq!(ok, [Some(5), Some(1), Some(5), Some(6), None, None]);
+        assert_eq!(op.calls().len(), 3, "{:?}", op.calls());
+    }
+
     #[test]
     fn field_values_from_the_item() {
         let item: Value = serde_json::json!({"fields": [
