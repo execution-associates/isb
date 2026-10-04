@@ -101,6 +101,14 @@ the whole tail is shown and the answer says so. A replica that was replaced
 takes its logs with it: there is no `--previous`. `app_events` and
 `history_query` say what happened to it.
 
+A replica that fails to come up (a crash loop: the app exits within its
+monitor period, or never answers its healthcheck) is deleted and made again,
+so there is nothing to read from it later. isb reads its output before it
+deletes it, puts the last lines in the failure message (the deployment log,
+the app's status message) and keeps them: while the app is not converged,
+`app_logs` answers `last_failed_attempt` with the instance, the reason and
+the output, and `isb app logs` prints it after the live replicas' logs.
+
 The CLI's old `isb app logs` (a deployment's build and rollout log) is now
 `isb app deploy-log NAME [ID] [-f]`.
 

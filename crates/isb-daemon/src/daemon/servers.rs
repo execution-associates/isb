@@ -1223,7 +1223,7 @@ mod tests {
                 Duration::from_secs(10),
             )
             .unwrap();
-        assert_eq!(r.status, 403);
+        assert_eq!(r.status, 401);
         // A garbled one: refused too.
         let r = c
             .request(

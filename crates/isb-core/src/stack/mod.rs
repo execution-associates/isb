@@ -17,7 +17,9 @@
 //!   ([`crate::balance`]), which only sends traffic to healthy replicas, so a
 //!   `start-first` rollout has no gap.
 
+mod changes;
 pub mod controller;
+pub mod failure;
 pub mod migrate;
 pub mod secrets;
 

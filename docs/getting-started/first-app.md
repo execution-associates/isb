@@ -12,7 +12,24 @@ back. This page takes a Linux host with isb installed from nothing to an app
 answering on a URL, then opens the web UI. (On a Mac the daemon runs in the
 [isb machine](macos.md#the-daemon-lives-in-the-vm); start at step 3.)
 
-## 1. Run the daemon
+## 1. Prepare the host, once
+
+Each org gets its own bridge network. A host with a default-deny firewall
+(ufw) drops DHCP, DNS and forwarding on new bridges (and on incus' own
+`incusbr0`, where image builds run), and service names need a directory the
+daemon writes. One command, as root, does all of it:
+
+```console
+$ sudo "$(command -v isb)" host setup             # --dry-run prints what it would do
+```
+
+See [host setup](../operations/host-setup.md#host-firewall) for exactly what
+it changes. Run it before the daemon: the daemon then makes the `default` org
+with service names. (The other order works too: a running daemon turns service
+names on for the orgs that lack them within a minute of the setup, and at
+every start.)
+
+## 2. Run the daemon
 
 ```console
 $ isb serve install
@@ -34,19 +51,6 @@ Two things it may tell you:
 
 The daemon's user needs the incus socket (the `incus-admin` group). Logs:
 `journalctl --user -u isb -f`.
-
-## 2. Prepare the host, once
-
-Each org gets its own bridge network. A host with a default-deny firewall
-(ufw) drops DHCP, DNS and forwarding on new bridges, and service names need a
-directory the daemon writes. One command, as root, does both:
-
-```console
-$ sudo "$(command -v isb)" host setup             # --dry-run prints what it would do
-```
-
-See [host setup](../operations/host-setup.md#host-firewall) for exactly what
-it changes.
 
 ## 3. The first admin
 

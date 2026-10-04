@@ -14,12 +14,17 @@ keeps on disk.
 The short version, on a Linux host with incus:
 
 ```sh
+sudo isb host setup               # firewall, DHCP/DNS for org bridges, service names
 isb serve install                 # the daemon, as a systemd user service
 loginctl enable-linger "$USER"    # keep it running after you log out
-sudo isb host setup               # firewall, DHCP/DNS for org bridges, service names
 isb registry setup                # optional: the local registry, for builds
 sudo isb host setup               # again after the registry exists: incus trusts its CA
 ```
+
+The order of the first two does not matter for service names: the daemon
+turns them on for every org that lacks them at each start and then once a
+minute, so a `host setup` after `serve install` takes effect without a
+restart (the daemon logs `turning on service names`).
 
 ## The daemon as a service
 
@@ -110,6 +115,14 @@ new bridges, so org networks would come up without addresses or internet.
   them, all but ICMP. The rule matches `--physdev-is-bridged`, traffic that
   stays on one bridge, so traffic between two orgs (routed between bridges)
   is still denied.
+- **The same for `incusbr0`**, incus' own default bridge, where isb builds
+  workspace images and builder images and runs dedicated VMs: DHCP and
+  same-bridge traffic in the `before.rules` block, `ufw allow in on incusbr0
+  to any port 53` and `ufw route allow in on incusbr0 out on <uplink>`
+  (commented `isb image builds: DNS` and `...: egress`). Without them a build
+  container on `incusbr0` gets no IPv4 address; the build says so after 90
+  seconds and points here, instead of waiting for a download that never
+  starts.
 - **DNS** to the host: `ufw allow in on isbbr+ to any port 53`.
 - **Egress** through the uplink: `ufw route allow in on isbbr+ out on <uplink>`
   (`--uplink IFACE`; default the interface of the default route).
@@ -166,9 +179,10 @@ watches.
   writes, dnsmasq reads, nobody else can. A host without an `incus` group gets
   a world-readable 0755 directory.
 - `isb org create` makes `<org>/` in it. On a host without the directory the
-  org is created without service names and says so; run `sudo isb host setup`
-  and then `isb org create` again (that sets `raw.dnsmasq`, restarting the
-  org's dnsmasq once).
+  org is created without service names and says so. Once `sudo isb host
+  setup` has made the directory, a running `isb serve` sets `raw.dnsmasq` on
+  every org that lacks it (restarting that org's dnsmasq once), the `default`
+  org included; with no daemon, run `isb org create ORG` again.
 - `isb org rm` deletes the org's directory.
 - `ISB_DNS_DIR` moves the directory, for `isb org` and `isb serve` alike.
 - When the directory is inside the daemon's state directory (a daemon running

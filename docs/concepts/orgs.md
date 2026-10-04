@@ -237,9 +237,11 @@ changing it later restarts the org's dnsmasq.
   reads, nobody else can. A host without an `incus` group gets a
   world-readable 0755 directory.
 - `isb org create` makes `<org>/` in it. On a host without the directory the
-  org is created without service names and says so; run `sudo isb host
-  setup` and then `isb org create` again (that sets `raw.dnsmasq`,
-  restarting the org's dnsmasq once).
+  org is created without service names and says so. Once `sudo isb host
+  setup` has made the directory, a running `isb serve` sets `raw.dnsmasq` on
+  every org that lacks it (restarting that org's dnsmasq once), the `default`
+  org included, at its next start or within a minute; with no daemon, run
+  `isb org create ORG` again.
 - `isb org rm` deletes the org's directory.
 - `ISB_DNS_DIR` moves the directory, for `isb org` and `isb serve` alike.
 - When the directory is inside the daemon's state directory (a daemon

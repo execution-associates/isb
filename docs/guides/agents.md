@@ -89,8 +89,10 @@ and [MCP tools](../reference/mcp-tools.md) lists them all.
    ```
 
    A JSON answer with `tools` means the URL and the credentials work. 401: the
-   token is wrong, revoked or expired; 403 from Cloudflare: Access stopped it
-   before isb.
+   token is missing, wrong, revoked or expired (the same call without the
+   `Authorization` header answers `401` with `sign in: send an API token as
+   Authorization: Bearer ...`); 403 from Cloudflare: Access stopped it before
+   isb.
 
 The MCP page writes all of these for you: the org endpoint's URL on the origin
 the page is open at, a form that makes the token (name, access, expiry) and

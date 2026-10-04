@@ -20,6 +20,23 @@ use crate::error::{Error, Result};
 pub(crate) mod fake;
 mod stream;
 
+/// The sentence for an incus (`GET /1.0` metadata) without the
+/// `instance_oci` API extension, which every OCI image needs.
+pub fn oci_unsupported(info: &Value) -> Option<String> {
+    let ext = info["api_extensions"].as_array()?;
+    if ext.iter().any(|e| e == "instance_oci") {
+        return None;
+    }
+    let version = info["environment"]["server_version"]
+        .as_str()
+        .unwrap_or("this version");
+    Some(format!(
+        "incus {version} is too old for OCI images (`docker:`, `ghcr:`, `registry:`), which need incus 6.3 or later; \
+on Ubuntu 24.04 the distro package is 6.0, so install incus from the Zabbly stable repository instead \
+(the install guide, step 1: incus)"
+    ))
+}
+
 /// Deadlines used by the client. Every request has one; there is no unbounded wait
 /// anywhere except the output of `exec`, which by design has no default timeout.
 #[derive(Debug, Clone)]
@@ -142,6 +159,13 @@ impl Client {
     /// `GET /1.0`: server info. Also a cheap reachability check.
     pub fn server_info(&self) -> Result<Value> {
         self.get("/1.0")
+    }
+
+    /// A sentence saying so when this incus cannot run OCI images
+    /// (`docker:`, `ghcr:`, `registry:`), else `None`. Also `None` when
+    /// incusd cannot be asked.
+    pub fn oci_unsupported(&self) -> Option<String> {
+        oci_unsupported(&self.server_info().ok()?)
     }
 
     fn with_project(&self, path: &str) -> String {
@@ -757,6 +781,25 @@ fn eof_body(buf: &[u8]) -> Option<RawResponse> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_incus_without_oci_images_is_named_with_the_way_out() {
+        let old = serde_json::json!({
+            "api_extensions": ["disk_initial_copy"],
+            "environment": {"server_version": "6.0.4"},
+        });
+        let m = oci_unsupported(&old).unwrap();
+        assert!(m.contains("incus 6.0.4"), "{m}");
+        assert!(m.contains("Zabbly"), "{m}");
+        assert!(m.contains("6.3"), "{m}");
+        let new = serde_json::json!({
+            "api_extensions": ["disk_initial_copy", "instance_oci"],
+            "environment": {"server_version": "7.5.1"},
+        });
+        assert_eq!(oci_unsupported(&new), None);
+        // An answer without the list (an odd proxy) is not a verdict.
+        assert_eq!(oci_unsupported(&serde_json::json!({})), None);
+    }
 
     #[test]
     fn parses_content_length_response() {

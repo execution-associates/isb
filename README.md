@@ -65,6 +65,7 @@ $ isb down                # delete it, host untouched
 To run the platform, install the daemon and deploy an app:
 
 ```console
+$ sudo "$(command -v isb)" host setup   # once: firewall rules and service names for org networks
 $ isb serve install                     # the daemon, as a systemd user service
 $ isb project create shop               # in the default org, which the daemon creates
 $ isb app create web --project shop --image docker:traefik/whoami -p 127.0.0.1:8080:80 --deploy

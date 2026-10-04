@@ -263,6 +263,9 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     client
         .server_info()
         .map_err(|e| Error::invalid(format!("isb serve needs incusd: {e}")))?;
+    if let Some(m) = client.oci_unsupported() {
+        eprintln!("isb serve: WARNING: {m}");
+    }
     let store = Store::open(&cfg.state_dir)?;
     dns::open_dns_path(&cfg.state_dir);
     // The default org is the incus project `isb-default`, made here when
@@ -743,6 +746,7 @@ fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate:
         audit: None,
         route: None,
         listed: Some(Arc::new(tool_listed)),
+        refuse_anonymous: !allow_anonymous,
     }
 }
 

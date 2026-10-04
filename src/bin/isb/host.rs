@@ -33,8 +33,13 @@ pub(crate) enum HostCmd {
     },
 }
 
-/// The ufw rules org bridges need on a default-deny host, as argv lists.
-/// DHCP is not among them: see [`BEFORE_RULES`].
+/// incus' own default bridge, which isb's image builds, builder images,
+/// dedicated VMs and `isb machine` run on (never an org's bridge).
+pub(crate) const INCUS_BRIDGE: &str = "incusbr0";
+
+/// The ufw rules org bridges and incus' default bridge need on a
+/// default-deny host, as argv lists. DHCP is not among them: see
+/// [`BEFORE_RULES`].
 pub(crate) fn host_rules(
     uplink: &str,
     public_ingress: bool,
@@ -66,6 +71,15 @@ pub(crate) fn host_rules(
         "isb org bridges: tunnel ingress",
         "isb org bridges: workspace MCP",
     ];
+    // incus' default bridge: DNS from its instances, and their way out.
+    // Without these the instances isb builds images in get no address.
+    out.push(v(&format!(
+        "ufw allow in on {INCUS_BRIDGE} to any port 53 comment"
+    )));
+    out.push(v(&format!(
+        "ufw route allow in on {INCUS_BRIDGE} out on {uplink} comment"
+    )));
+    comments.extend(["isb image builds: DNS", "isb image builds: egress"]);
     if public_ingress {
         out.push(v("ufw allow 80/tcp comment"));
         out.push(v("ufw allow 443/tcp comment"));
@@ -96,6 +110,8 @@ pub(crate) const EGRESS_SYSCTL_TEXT: &str = "# isb serve's sandbox egress proxy 
 ///   bridged copy of a DHCP broadcast is dropped in FORWARD, and once the
 ///   bridge carries an incus ACL the copy meant for dnsmasq then counts as
 ///   INVALID; a `ufw allow` rule comes too late to see it.
+/// - The same two for `incusbr0`, incus' default bridge (image builds,
+///   dedicated VMs).
 /// - Traffic between instances of one org. With br_netfilter on, frames
 ///   bridged within an org's bridge traverse FORWARD, where ufw's routed
 ///   default-deny drops them (only ICMP got through). `--physdev-is-bridged`
@@ -104,6 +120,8 @@ pub(crate) const EGRESS_SYSCTL_TEXT: &str = "# isb serve's sandbox egress proxy 
 pub(crate) const BEFORE_RULES: &str = "# isb org bridges: begin\n\
 -A ufw-before-input -i isbbr+ -p udp --dport 67 -j ACCEPT\n\
 -A ufw-before-forward -i isbbr+ -o isbbr+ -m physdev --physdev-is-bridged -j ACCEPT\n\
+-A ufw-before-input -i incusbr0 -p udp --dport 67 -j ACCEPT\n\
+-A ufw-before-forward -i incusbr0 -o incusbr0 -m physdev --physdev-is-bridged -j ACCEPT\n\
 # isb org bridges: end\n";
 
 pub(crate) const BEFORE_RULES_PATH: &str = "/etc/ufw/before.rules";
@@ -171,6 +189,9 @@ pub(crate) fn host_setup(
     public_ingress: bool,
     sandbox_egress: bool,
 ) -> Result<u8> {
+    if let Some(m) = Client::new().oci_unsupported() {
+        eprintln!("isb host setup: WARNING: {m}");
+    }
     let uplink = match uplink {
         Some(u) => u,
         None => default_route_iface()
@@ -333,7 +354,7 @@ pub(crate) fn host_setup(
         return Err(Error::Invalid("ufw reload failed".into()));
     }
     println!(
-        "org bridges (isbbr*) may now reach DHCP and DNS on this host and egress through {uplink}"
+        "org bridges (isbbr*) and {INCUS_BRIDGE} (image builds, dedicated VMs) may now reach DHCP and DNS on this host and egress through {uplink}"
     );
     Ok(0)
 }
@@ -345,4 +366,40 @@ pub(crate) fn default_route_iface() -> Option<String> {
         .map(|l| l.split_whitespace().collect::<Vec<_>>())
         .find(|f| f.get(1) == Some(&"00000000"))
         .map(|f| f[0].to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_rules_cover_incus_default_bridge_for_image_builds() {
+        let rules = host_rules("eth0", false, false);
+        let line = |r: &Vec<String>| r.join(" ");
+        let all: Vec<String> = rules.iter().map(line).collect();
+        assert!(
+            all.iter()
+                .any(|r| r.starts_with("ufw allow in on incusbr0 to any port 53 comment")),
+            "{all:?}"
+        );
+        assert!(
+            all.iter()
+                .any(|r| r.starts_with("ufw route allow in on incusbr0 out on eth0 comment")),
+            "{all:?}"
+        );
+        // Every rule carries its comment as the last argument.
+        assert!(
+            rules
+                .iter()
+                .all(|r| r.iter().any(|a| a == "comment") && r.len() > 2)
+        );
+        // DHCP and same-bridge forwarding come with the before.rules block.
+        assert!(BEFORE_RULES.contains("-i incusbr0 -p udp --dport 67 -j ACCEPT"));
+        assert!(BEFORE_RULES.contains("-i incusbr0 -o incusbr0 -m physdev --physdev-is-bridged"));
+        // A host set up before incusbr0 was covered gets the new block in place.
+        let old = "*filter\n# isb org bridges: begin\n-A ufw-before-input -i isbbr+ -p udp --dport 67 -j ACCEPT\n-A ufw-before-forward -i isbbr+ -o isbbr+ -m physdev --physdev-is-bridged -j ACCEPT\n# isb org bridges: end\n-A ufw-before-input -i lo -j ACCEPT\nCOMMIT\n";
+        let up = with_before_rules(old).unwrap();
+        assert!(up.contains("-i incusbr0 -p udp --dport 67"));
+        assert_eq!(up.matches("# isb org bridges: begin").count(), 1);
+    }
 }

@@ -37,6 +37,7 @@ use crate::error::{Error, Result};
 use crate::exec::{ExecEvent, ExecOptions, Stdin};
 use crate::org::OrgId;
 use crate::sandbox::Sandbox;
+mod ready;
 pub mod workspace_image;
 /// How a source tree becomes an image.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -220,7 +221,7 @@ pub fn run_with(
         &oc, &name, &image, vm, &pool, &cache, opts, &req.app, deadline,
     )?;
     let sb = Sandbox::get(&oc, &name)?;
-    wait_exec(&sb, deadline)?;
+    ready::exec(&sb, deadline)?;
 
     let sent = send_context(&sb, &ctx_dir, opts.max_context, deadline)?;
     log(&format!("copied the source in ({})", human(sent)));
@@ -530,30 +531,6 @@ fn create_sandbox(
     Ok(())
 }
 
-/// Wait until commands run (a VM: once its agent is up).
-fn wait_exec(sb: &Sandbox, deadline: Instant) -> Result<()> {
-    let until = Instant::now() + Duration::from_secs(300);
-    let mut last = String::new();
-    while Instant::now() < until.min(deadline) {
-        match sb
-            .exec_stream(
-                ["/bin/true"],
-                ExecOptions::default().timeout(Duration::from_secs(20)),
-            )
-            .and_then(|s| s.collect_output())
-        {
-            Ok(o) if o.success() => return Ok(()),
-            Ok(o) => last = format!("exit {}", o.exit_code),
-            Err(e) => last = e.to_string(),
-        }
-        std::thread::sleep(Duration::from_millis(500));
-    }
-    Err(Error::invalid(format!(
-        "build sandbox {} did not accept commands: {last}",
-        sb.name()
-    )))
-}
-
 /// Run argv, handing each output line to `log`. Returns the exit code.
 fn stream_lines(
     sb: &Sandbox,
@@ -807,7 +784,8 @@ pub fn ensure_builder_image(
         Duration::from_secs(300),
     )?;
     let sb = Sandbox::get(&s, &name)?;
-    wait_exec(&sb, deadline)?;
+    ready::exec(&sb, deadline)?;
+    ready::network(&s, &name, &net, deadline, log)?;
     s.push_file(
         &name,
         "/root/builder-image.sh",

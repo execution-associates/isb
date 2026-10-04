@@ -278,13 +278,14 @@ pub(super) fn stack_logs_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> R
                 lines: Option<usize>,
             }
             let a: A = args(a)?;
-            let logs = d.ctl.logs(
-                &qname(&a.org, &a.name)?,
-                &a.service,
-                a.slot,
-                a.lines.unwrap_or(200).min(5000),
-            )?;
-            Ok(json!({"logs": logs}))
+            let stack = qname(&a.org, &a.name)?;
+            let lines = a.lines.unwrap_or(200).min(5000);
+            let logs = d.ctl.logs(&stack, &a.service, a.slot, lines)?;
+            let mut out = json!({"logs": logs});
+            if let Some(f) = d.ctl.last_failure(&stack, &a.service) {
+                out["last_failed_attempt"] = json!(f);
+            }
+            Ok(out)
         }
     );
     Ok(())

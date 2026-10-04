@@ -375,10 +375,12 @@ export interface ToolInfo {
   title?: string;
   description?: string;
   annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean };
+  /** Whether an org's /orgs/ORG/mcp lists the tool; false for host, superadmin and platform tools. */
+  org_endpoint?: boolean;
 }
 
-/** Tools only a superadmin gets (docs/concepts/access.md). */
-export const isHostTool = (name: string) => name.startsWith("host_") || name.startsWith("superadmin_");
+/** Tools only /mcp lists, not an org's endpoint: host, superadmin and platform tools (docs/concepts/access.md). */
+export const isHostTool = (t: ToolInfo) => (t.org_endpoint === undefined ? t.name.startsWith("host_") || t.name.startsWith("superadmin_") : !t.org_endpoint);
 
 /** A description's first sentence, for a one-line list. */
 export function firstSentence(s: string | undefined): string {

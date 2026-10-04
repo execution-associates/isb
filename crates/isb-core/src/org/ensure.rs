@@ -70,16 +70,21 @@ fn kept(opts: &OrgOptions, existing: Option<&Value>) -> Result<Kept> {
     })
 }
 
+/// What an org's service names are waiting for.
+fn no_directory(org: &OrgId) -> String {
+    format!(
+        "{org}: no writable {}: service names are off (run `sudo isb host setup`; a running `isb serve` then turns them on, or run this again)",
+        crate::discovery::root().display()
+    )
+}
+
 /// Service discovery: the org's dnsmasq reads its hosts directory. Set at
 /// creation, since changing raw.dnsmasq later restarts dnsmasq. Empty when
 /// the host has no directory for it.
 fn raw_dnsmasq(org: &OrgId, report: &mut dyn FnMut(&str)) -> Result<String> {
     let dns_dir = crate::discovery::prepare_org(org)?;
     if dns_dir.is_none() {
-        report(&format!(
-            "{org}: no writable {}: service names are off (run `sudo isb host setup`, then this again)",
-            crate::discovery::root().display()
-        ));
+        report(&no_directory(org));
     }
     Ok(dns_dir
         .as_deref()
@@ -204,6 +209,102 @@ fn attach(
         )?;
     }
     Ok(())
+}
+
+/// Where an org stands on service names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Names {
+    /// The org's bridge already reads its hosts directory (or the org has
+    /// no bridge to change).
+    Present,
+    /// Just turned on: the bridge's `raw.dnsmasq` now names the directory.
+    TurnedOn,
+    /// Off, because this host has no writable directory for it yet.
+    Unavailable,
+}
+
+/// `raw.dnsmasq` with the `hostsdir=` line for `line` in it, or `None` when
+/// it already names a hosts directory. Other lines the operator set stay.
+fn with_hostsdir(current: &str, line: &str) -> Option<String> {
+    if current.lines().any(|l| l.trim().starts_with("hostsdir=")) {
+        return None;
+    }
+    let keep = current.trim_end();
+    Some(if keep.is_empty() {
+        line.to_string()
+    } else {
+        format!("{keep}\n{line}")
+    })
+}
+
+/// Turn service names on for an existing org whose bridge does not read a
+/// hosts directory yet, as `isb org create` does: the bridge's
+/// `raw.dnsmasq` gets `hostsdir=<dir>`. `dns_dir` is the org's hosts
+/// directory, or `None` when the host has none.
+fn converge_names(
+    h: &Client,
+    org: &OrgId,
+    dns_dir: Option<&Path>,
+    report: &mut dyn FnMut(&str),
+) -> Result<Names> {
+    let bridge = bridge_name(org);
+    let net_path = format!("/1.0/networks/{}", encode_segment(&bridge));
+    let Some(net) = h.get_opt(&net_path)? else {
+        return Ok(Names::Present);
+    };
+    let current = net["config"]["raw.dnsmasq"].as_str().unwrap_or_default();
+    if current.lines().any(|l| l.trim().starts_with("hostsdir=")) {
+        return Ok(Names::Present);
+    }
+    let Some(dir) = dns_dir else {
+        return Ok(Names::Unavailable);
+    };
+    let Some(raw) = with_hostsdir(current, &crate::discovery::raw_dnsmasq(dir)) else {
+        return Ok(Names::Present);
+    };
+    report(&format!(
+        "{org}: turning on service names (restarts {bridge}'s DNS)"
+    ));
+    let mut cfg = net["config"].clone();
+    cfg["raw.dnsmasq"] = json!(raw);
+    h.mutate(
+        "PATCH",
+        &net_path,
+        Some(&json!({"config": cfg})),
+        &format!("set raw.dnsmasq on {bridge}"),
+        h.get_timeouts().other,
+    )?;
+    Ok(Names::TurnedOn)
+}
+
+/// Bring one existing org's service names in line: when the host has the
+/// hosts directory now (`isb host setup` ran after the org was made), make
+/// the org's directory and point its bridge at it.
+pub fn ensure_service_names(
+    base: &Client,
+    org: &OrgId,
+    report: &mut dyn FnMut(&str),
+) -> Result<Names> {
+    ensure_service_names_in(base, org, &crate::discovery::prepare_org, report)
+}
+
+/// The directory of an org's hosts files, made if the host allows it.
+pub(super) type PrepareDir<'a> = &'a dyn Fn(&OrgId) -> Result<Option<PathBuf>>;
+
+/// [`ensure_service_names`] with the directory step given.
+pub(super) fn ensure_service_names_in(
+    base: &Client,
+    org: &OrgId,
+    prepare: PrepareDir,
+    report: &mut dyn FnMut(&str),
+) -> Result<Names> {
+    let h = host(base);
+    let dir = prepare(org)?;
+    let names = converge_names(&h, org, dir.as_deref(), report)?;
+    if names == Names::Unavailable {
+        report(&no_directory(org));
+    }
+    Ok(names)
 }
 
 /// The networks the project's instances may use: the org's bridge, and the
@@ -381,6 +482,67 @@ pub fn ensure(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::fake::{Route, serve};
+
+    fn bridge_route(prefix: &'static str, config: Value) -> Route {
+        Route {
+            prefix,
+            status: 200,
+            body: json!({"config": config}),
+        }
+    }
+
+    #[test]
+    fn hostsdir_is_added_beside_the_operators_own_lines() {
+        let line = "hostsdir=/var/lib/isb/dns/default";
+        assert_eq!(with_hostsdir("", line).as_deref(), Some(line));
+        assert_eq!(
+            with_hostsdir("log-queries\n", line).as_deref(),
+            Some("log-queries\nhostsdir=/var/lib/isb/dns/default")
+        );
+        assert_eq!(with_hostsdir("hostsdir=/elsewhere", line), None);
+    }
+
+    #[test]
+    fn an_org_made_before_host_setup_gets_service_names_afterwards() {
+        let org = OrgId::default_org();
+        let net = "GET /1.0/networks/";
+        let dir = std::path::Path::new("/var/lib/isb/dns/default");
+        let mut lines = Vec::new();
+
+        // No directory on this host yet: off, and nothing changed.
+        let (_d, c) = serve(vec![bridge_route(net, json!({"ipv4.address": "auto"}))]);
+        let n = converge_names(&c, &org, None, &mut |l| lines.push(l.to_string())).unwrap();
+        assert_eq!(n, Names::Unavailable);
+
+        // The directory is there now: the bridge is patched.
+        let (_d, c) = serve(vec![
+            bridge_route(net, json!({"ipv4.address": "auto"})),
+            Route {
+                prefix: "PATCH /1.0/networks/",
+                status: 200,
+                body: json!({}),
+            },
+        ]);
+        let n = converge_names(&c, &org, Some(dir), &mut |l| lines.push(l.to_string())).unwrap();
+        assert_eq!(n, Names::TurnedOn);
+        assert!(lines.iter().any(|l| l.contains("turning on service names")));
+
+        // Without the PATCH route the same call fails: it did try to patch.
+        let (_d, c) = serve(vec![bridge_route(net, json!({}))]);
+        assert!(converge_names(&c, &org, Some(dir), &mut |_| {}).is_err());
+
+        // Already on, or no bridge at all: left alone (no PATCH route to answer).
+        let (_d, c) = serve(vec![bridge_route(
+            net,
+            json!({"raw.dnsmasq": "hostsdir=/srv/dns"}),
+        )]);
+        let n = converge_names(&c, &org, Some(dir), &mut |_| {}).unwrap();
+        assert_eq!(n, Names::Present);
+        let (_d, c) = serve(vec![]);
+        let n = converge_names(&c, &org, Some(dir), &mut |_| {}).unwrap();
+        assert_eq!(n, Names::Present);
+    }
 
     fn kept_default() -> Kept {
         Kept {

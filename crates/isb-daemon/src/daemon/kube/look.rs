@@ -450,6 +450,10 @@ fn app_logs(d: &Daemon, a: Value, _c: &Caller) -> Result<Value> {
         .map(|i| (i.name.as_str(), i.slot))
         .collect();
     let mut out = json!({"app": a.name, "logs": logs, "replicas": slots});
+    // A replica that failed to come up is already deleted: its last output.
+    if let Some(f) = d.ctl.last_failure(&stack, &a.name) {
+        out["last_failed_attempt"] = json!(f);
+    }
     if cutoff.is_some() && !since_applied {
         out["note"] = json!(
             "since could not be applied to every replica: an OCI image's console log has no timestamps, so all of its tail is shown"
@@ -588,7 +592,7 @@ pub(super) fn register(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<(
         d,
         "app_logs",
         "An app's logs",
-        "Recent output of an app's replicas, by app name (kubectl logs deploy/NAME): all replicas, or one with `replica`. `tail` lines (default 200, at most 5000); `since` keeps lines newer than a duration like 10m (for system images; an OCI image's console log has no timestamps). A replaced replica's logs go with it, so there is no `previous`: app_events and history_query say what happened.",
+        "Recent output of an app's replicas, by app name (kubectl logs deploy/NAME): all replicas, or one with `replica`. `tail` lines (default 200, at most 5000); `since` keeps lines newer than a duration like 10m (for system images; an OCI image's console log has no timestamps). A replaced replica's logs go with it, so there is no `previous`, except that a replica that failed to come up (a crash loop) leaves its last output as `last_failed_attempt` while the app is not converged; app_events and history_query say what happened.",
         obj(
             json!({
                 "name": {"type": "string", "description": "The app's name (`app` is accepted as an alias)."},

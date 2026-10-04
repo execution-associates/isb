@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-use super::{Remove, remaining, stream_lines, uplink_network, wait_exec};
+use super::{Remove, ready, remaining, stream_lines, uplink_network};
 use crate::client::{Client, encode_segment};
 use crate::error::{Error, Result};
 use crate::exec::ExecOptions;
@@ -522,7 +522,8 @@ fn run_recipe(
         Duration::from_secs(300),
     )?;
     let sb = Sandbox::get(s, &name)?;
-    wait_exec(&sb, deadline)?;
+    ready::exec(&sb, deadline)?;
+    ready::network(s, &name, &net, deadline, log)?;
     s.push_file(&name, RECIPE_PATH, b.recipe.as_bytes(), 0, 0, 0o700)?;
     log(&format!(
         "running the recipe ({} bytes, sha256 {})",

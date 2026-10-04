@@ -16,7 +16,22 @@ The list a caller actually sees can be shorter: `--allow-tools` and
 `--deny-tools` hide tools from remote callers
 ([Configuration](configuration.md#daemon-flags)), and a tool hidden that way
 does not exist for them. `GET /api/v1/tools` and MCP's `tools/list` return
-what this listener offers, with each tool's schema and annotations.
+what this listener offers, with each tool's schema and annotations. Both
+answer 401 to a caller with no credential, unless the daemon runs with
+`--allow-unauthenticated`.
+
+Three counts differ for that reason, and none is a fault:
+
+- The daemon's startup line (`... (196 tools)`) counts every tool the
+  listener could offer: the unix socket's full list.
+- `/mcp` lists the same tools to a signed-in caller (a call is still judged
+  by role and scopes).
+- An org's `/orgs/<org>/mcp` lists fewer: the host, superadmin and platform
+  tools (`host_*`, `superadmin_*`, `org_nesting`, `org_list`, `org_create`,
+  `server_*`, `user_list` and the like) are on `/mcp` only, for anyone but
+  the unix socket. `GET /api/v1/tools` marks each tool with `org_endpoint`
+  (false for those), and the web UI's MCP page counts the tools an org
+  endpoint lists from it.
 
 The canonical argument names are the ones in each schema: an app is `name`
 and a command is `argv`. The `app_*` tools also accept `app` for `name`, and
@@ -81,7 +96,7 @@ means every member of the org, *member* means members, admins and owners.
 | `stack_config` | viewer | The deployed compose file, and its secrets as references (store name, driver, version), never values. |
 | `stack_export` | viewer | The compose file a stack runs from as YAML text for `stack_deploy` (what the web UI's stack editor shows): resolved, with file/environment secrets named as `external` store secrets so no value is needed. Also `managed_by` (`apps` for a project environment's stack) and the services. |
 | `stack_validate` | viewer | A dry run of `stack_deploy` for an editor: `{valid, errors: [{line, column, message}], changes, exists, managed_by, diff}`, where `diff` is a unified diff from the deployed file. A bad file is an answer, not an error. Writes nothing. |
-| `stack_logs` | viewer | Recent output of a service's replicas (`slot`, `lines`): the supervised command's journal, or an OCI image's console. |
+| `stack_logs` | viewer | Recent output of a service's replicas (`slot`, `lines`): the supervised command's journal, or an OCI image's console; `last_failed_attempt` as for `app_logs`. |
 | `stack_scale` | member | Set a service's replicas (0 stops it without removing it). |
 | `stack_redeploy` | member | Replace a service's replicas though nothing changed: a moved tag, changed bind-mounted files. |
 | `stack_rollback` | member | Back to the previous deployment; a second rollback undoes the first. |
@@ -97,7 +112,7 @@ means every member of the org, *member* means members, admins and owners.
 | `instance_get` | viewer | One instance in full: the row plus image, limits, environment variable **names** (never values), volumes, devices, ports, the domains its service serves and whether traffic reaches it, the last health probe, the files isb delivers into it, labels, and its recent `history` (`history` sets how many rows). |
 | `app_exec` | member | Run argv in one of an app's replicas (default: a running one, healthy and in rotation first; `replica` is the slot, or `instance` its name): exit code, stdout, stderr. `stdin` (at most 1 MiB), `cwd`, `user`, `env`, `timeout` (default 60s, at most 15m; `timed_out` and the output so far when it runs out). Each stream keeps its last 1 MiB (`truncated`). The audit row keeps the argv, the names of `env` and the size of `stdin`. |
 | `instance_exec` | member | The same in any running instance of the org by `name` (a workspace runs as its user, in its home). |
-| `app_logs` | viewer | An app's replicas' recent output by app name (`replica`, `tail` default 200, `since` such as `10m`); `stack_logs` underneath. |
+| `app_logs` | viewer | An app's replicas' recent output by app name (`replica`, `tail` default 200, `since` such as `10m`); `stack_logs` underneath. While the app is not converged, `last_failed_attempt` carries the output of the last replica that failed to come up (instance, reason, output) after it was deleted. |
 | `app_top` | viewer | Per replica CPU, memory, disk and network counters now, and the totals next to the app's limits (`history: true` adds CPU samples). |
 | `app_events` | viewer | Events about one app, newest last (`since`, `limit`, `stack_wide: true` adds the stack's own). |
 | `app_restart` | member | A rolling replace of the app's replicas with fresh instances of the same settings, in `update_config`'s order (`wait`, `timeout`). |

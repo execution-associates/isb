@@ -21,20 +21,6 @@ pub const DEFAULT_ORG: &str = "default";
 /// The incus project of the default org.
 pub const DEFAULT_ORG_PROJECT: &str = "isb-default";
 
-/// Make sure the default org exists: create `isb-default` with default
-/// settings when it is missing, and leave an existing one as it is.
-/// Returns whether it created it. Idempotent.
-pub fn ensure_default(base: &Client, report: &mut dyn FnMut(&str)) -> Result<bool> {
-    let org = OrgId::default_org();
-    match host(base).get_opt(&format!("/1.0/projects/{DEFAULT_ORG_PROJECT}"))? {
-        Some(p) if p["config"][KEY_ORG].as_str() == Some(DEFAULT_ORG) => Ok(false),
-        Some(_) => Err(Error::AlreadyExists(format!(
-            "incus project {DEFAULT_ORG_PROJECT} exists but is not isb's default org"
-        ))),
-        None => ensure(base, &org, &OrgOptions::default(), report).map(|_| true),
-    }
-}
-
 /// Not an org: `isb-system` is [`crate::registry::PROJECT`].
 const RESERVED_SYSTEM: &str = "system";
 
@@ -120,6 +106,9 @@ use std::collections::BTreeMap;
 
 mod ensure;
 mod homes;
+mod names;
+pub use ensure::{Names, ensure_service_names};
+pub use names::{ensure_all_service_names, ensure_default};
 pub(crate) mod limits;
 pub mod nesting;
 
@@ -783,26 +772,6 @@ mod tests {
         assert_eq!(OrgId::from_incus_project("default"), None);
     }
 
-    #[test]
-    fn ensure_default_leaves_an_existing_default_org_alone() {
-        use crate::client::fake::{Route, serve};
-        let (_d, c) = serve(vec![Route {
-            prefix: "GET /1.0/projects/isb-default",
-            status: 200,
-            body: json!({"config": {KEY_ORG: "default"}}),
-        }]);
-        let mut lines = Vec::new();
-        assert!(!ensure_default(&c, &mut |l| lines.push(l.to_string())).unwrap());
-        assert!(lines.is_empty());
-        // Another tool's project of that name is refused, not taken over.
-        let (_d, c) = serve(vec![Route {
-            prefix: "GET /1.0/projects/isb-default",
-            status: 200,
-            body: json!({"config": {}}),
-        }]);
-        let e = ensure_default(&c, &mut |_| {}).unwrap_err();
-        assert!(e.to_string().contains("not isb's default org"), "{e}");
-    }
     use super::*;
 
     #[test]

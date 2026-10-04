@@ -14,16 +14,46 @@ so installing it is two steps: have incus running, then put `isb` on your
 ### 1. incus
 
 isb needs a Linux host with incus installed and initialised, and access to
-its unix socket. Follow incus' own
+its unix socket.
+
+**On Ubuntu and Debian, use the Zabbly stable repository, not the
+distribution's `incus` package.** Ubuntu 24.04's package is incus 6.0, which
+is too old for OCI images (`docker:`, `ghcr:`, `registry:`): those need incus
+6.3 or later (the `instance_oci` API extension), and the first app in these
+docs is one.
+The [Zabbly packages](https://github.com/zabbly/incus) install a current
+incus over the distribution's:
+
+```sh
+sudo mkdir -p /etc/apt/keyrings
+sudo curl -fsSL https://pkgs.zabbly.com/key.asc -o /etc/apt/keyrings/zabbly.asc
+sudo tee /etc/apt/sources.list.d/zabbly-incus-stable.sources >/dev/null <<EOF
+Enabled: yes
+Types: deb
+URIs: https://pkgs.zabbly.com/incus/stable
+Suites: $(. /etc/os-release && echo "$VERSION_CODENAME")
+Components: main
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/zabbly.asc
+EOF
+sudo apt-get update
+sudo apt-get install -y incus skopeo
+```
+
+On other distributions follow incus' own
 [installation guide](https://linuxcontainers.org/incus/docs/main/installing/)
-(on Ubuntu and Debian, [Zabbly's packages](https://github.com/zabbly/incus)
-are the usual source), then:
+and make sure you get 6.3 or later (`incus --version`). Then:
 
 ```sh
 sudo incus admin init --auto          # a storage pool and a bridge, if incus has none
 sudo usermod -aG incus-admin "$USER"  # then log out and in again
 incus info >/dev/null && echo ok      # isb needs this to work
 ```
+
+`isb serve` and `isb host setup` ask incus which API extensions it has and
+print a warning at the start when `instance_oci` is missing, naming the
+incus version and pointing back here. Sandboxes and system-image apps still
+work on an older incus; only OCI images do not.
 
 Membership in `incus-admin` is **root-equivalent on that host**: anything
 that can open the incus socket can do anything incus can. Treat every isb
@@ -33,7 +63,7 @@ Some features need more on the host:
 
 | For | Needs |
 |---|---|
-| OCI images (`docker:`, `ghcr:`, `registry:` ...) | `skopeo` on the host, and incus 6.3 or later (the `instance_oci` API extension) |
+| OCI images (`docker:`, `ghcr:`, `registry:` ...) | `skopeo` on the host, and incus 6.3 or later (the `instance_oci` API extension; not Ubuntu 24.04's own 6.0 package) |
 | VMs (`type: vm`, untrusted builds, dedicated VMs) | KVM (`/dev/kvm`) |
 | Org networks on a host with a default-deny firewall (ufw) | `sudo isb host setup` once ([host setup](../operations/host-setup.md#host-firewall)) |
 

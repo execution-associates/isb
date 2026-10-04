@@ -145,9 +145,12 @@ describe("snippets", () => {
 
 describe("tool list", () => {
   it("keeps host tools for superadmins and one line per tool", () => {
-    expect(isHostTool("host_policy")).toBe(true);
-    expect(isHostTool("superadmin_token_list")).toBe(true);
-    expect(isHostTool("stack_list")).toBe(false);
+    expect(isHostTool({ name: "host_policy" })).toBe(true);
+    expect(isHostTool({ name: "superadmin_token_list" })).toBe(true);
+    expect(isHostTool({ name: "stack_list" })).toBe(false);
+    // The server says which tools an org endpoint lists (platform tools such as org_list are not among them).
+    expect(isHostTool({ name: "org_list", org_endpoint: false })).toBe(true);
+    expect(isHostTool({ name: "stack_list", org_endpoint: true })).toBe(false);
     expect(firstSentence("Deploy a stack. Returns changes.")).toBe("Deploy a stack.");
     expect(firstSentence("No full stop")).toBe("No full stop");
     expect(firstSentence(undefined)).toBe("");

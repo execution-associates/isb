@@ -18,7 +18,9 @@ use crate::error::{Error, Result};
 
 mod ambient;
 mod downscope;
+mod origin;
 pub use ambient::ambient_ok;
+pub use origin::origin;
 
 pub use isb_core::serve_client::PROTOCOL_VERSIONS;
 
@@ -464,48 +466,11 @@ pub struct Hooks {
     pub route: Option<Route>,
     /// Which tools `tools/list` shows a caller (all, when unset).
     pub listed: Option<Listed>,
-}
-
-/// Where a request came from, for the audit log: the surface (`cli` over
-/// the unix socket, `mcp`, `web` for a browser session, else `rest`), the
-/// client's address and agent, and a request id (`X-Request-Id` when it is
-/// sane, else `Cf-Ray`, else a fresh one).
-pub fn origin(req: &Request, caller: &Caller, mcp: bool) -> crate::audit::Origin {
-    let surface = match (&req.peer, mcp, caller) {
-        (Peer::Unix { .. }, _, _) => "cli",
-        (_, true, _) => "mcp",
-        (_, false, Caller::User { principal })
-            if matches!(principal.kind, crate::auth::PrincipalKind::Session { .. }) =>
-        {
-            "web"
-        }
-        _ => "rest",
-    };
-    let sane = |s: &&str| {
-        !s.is_empty()
-            && s.len() <= 64
-            && s.bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':'))
-    };
-    let request_id = req
-        .header("x-request-id")
-        .filter(sane)
-        .or_else(|| req.header("cf-ray").filter(sane))
-        .map(String::from)
-        .unwrap_or_else(new_request_id);
-    crate::audit::Origin {
-        surface: surface.into(),
-        ip: crate::auth::http::client_ip(req),
-        user_agent: req.header("user-agent").map(String::from),
-        request_id: Some(request_id),
-    }
-}
-
-fn new_request_id() -> String {
-    use ring::rand::SecureRandom;
-    let mut b = [0u8; 8];
-    let _ = ring::rand::SystemRandom::new().fill(&mut b);
-    b.iter().map(|x| format!("{x:02x}")).collect()
+    /// Answer 401 to a network caller who sent no credential, on every
+    /// authenticated surface (`/mcp`, the tool list and calls, events),
+    /// instead of treating them as anonymous. Off only when the embedder
+    /// runs with anonymous access on.
+    pub refuse_anonymous: bool,
 }
 
 /// One listener's view of the server: its tools, its gate, its health.
@@ -616,15 +581,28 @@ impl Endpoint {
         if req.method != "GET" {
             return Response::text(405, "method not allowed").header("Allow", "GET");
         }
-        if let Err(r) = self.authenticate(req) {
-            return r;
-        }
+        let caller = match self.authenticate(req) {
+            Ok(c) => c,
+            Err(r) => return r,
+        };
+        // `org_endpoint`: whether an org's `/orgs/<org>/mcp` lists the tool
+        // (host, superadmin and platform tools are on `/mcp` only), so a
+        // page can count what an org connector sees.
+        let org = crate::org::OrgId::default_org();
+        let in_org = |t: &Tool| {
+            let l = &self.hooks.listed;
+            l.as_ref().is_none_or(|l| l(&caller, &t.name, Some(&org)))
+        };
         let tools: Vec<Value> = self
             .registry
             .tools()
             .iter()
             .filter(|t| self.policy.allows(&t.name))
-            .map(Tool::describe)
+            .map(|t| {
+                let mut v = t.describe();
+                v["org_endpoint"] = json!(in_org(t));
+                v
+            })
             .collect();
         Response::json(200, &json!({"tools": tools}))
     }
@@ -1049,10 +1027,11 @@ impl Endpoint {
             eprintln!("isb serve: refused origin {o:?}");
             return Err(rest_error(403, "forbidden", "origin not allowed"));
         }
-        Ok(match &req.peer {
-            Peer::Unix { uid } => Caller::Local { uid: *uid },
-            Peer::Tcp(addr) => Caller::Unauthenticated { addr: *addr },
-        })
+        match &req.peer {
+            Peer::Unix { uid } => Ok(Caller::Local { uid: *uid }),
+            Peer::Tcp(_) if self.hooks.refuse_anonymous => Err(origin::sign_in_required()),
+            Peer::Tcp(addr) => Ok(Caller::Unauthenticated { addr: *addr }),
+        }
     }
 
     fn post(
@@ -1378,6 +1357,10 @@ fn tool_result(r: crate::Result<Value>) -> Value {
 #[cfg(test)]
 #[path = "mcp_agent_tests.rs"]
 mod agent_tests;
+
+#[cfg(test)]
+#[path = "mcp_anonymous_tests.rs"]
+mod anonymous_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1825,6 +1808,7 @@ mod tests {
             audit: None,
             route: None,
             listed: None,
+            refuse_anonymous: false,
         };
         ep
     }

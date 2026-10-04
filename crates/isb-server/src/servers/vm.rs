@@ -353,7 +353,9 @@ pub fn boot(client: &Client, org: &OrgId, size: &VmSize, p: &Provision) -> Resul
                         host_address,
                     });
                 }
-                last = "no IPv4 address yet".into();
+                last = format!(
+                    "no IPv4 address yet on {network} (behind a default-deny firewall such as ufw, run `sudo isb host setup`: it lets {network} through)"
+                );
             }
             Ok(false) => last = "the guest agent answered with an error".into(),
             Err(e) => last = e.to_string(),

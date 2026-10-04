@@ -82,6 +82,7 @@ pub(super) fn agent_hooks(
         audit: base.audit.clone(),
         route: None,
         listed: base.listed.clone(),
+        refuse_anonymous: true,
     }
 }
 

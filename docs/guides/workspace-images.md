@@ -89,7 +89,12 @@ What a build does, in order:
    through isb.
 2. Launches a container from the base in the **`isb-system` project**,
    isb's own, never an org's, on the host's default bridge (`incusbr0`),
-   with 4 CPUs and 4 GiB.
+   with 4 CPUs and 4 GiB, and waits for it to get an IPv4 address. On a
+   host with a default-deny firewall (ufw) that needs `sudo isb host setup`,
+   which lets `incusbr0` through ([Host firewall](../operations/host-setup.md#host-firewall)).
+   A container that has no address after 90 seconds fails the build with a
+   message saying so and naming that command, in the build log and the UI,
+   rather than leaving the recipe waiting on downloads that never start.
 3. Pushes the recipe in and runs it, streaming every line to the build's
    log (the CLI follows it; `workspace_image_logs` serves it), for at most
    `--timeout` (30 minutes, at most 2 hours).

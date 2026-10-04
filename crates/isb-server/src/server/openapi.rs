@@ -110,7 +110,7 @@ pub const SURFACE: &[Surface] = &[
         method: "get",
         path: "/api/v1/tools",
         summary: "The tools this listener offers",
-        description: "Each tool's name, title, description, input schema and annotations: MCP's tools/list over REST.",
+        description: "Each tool's name, title, description, input schema and annotations: MCP's tools/list over REST, plus `org_endpoint`: whether `/orgs/{org}/mcp` lists the tool (host, superadmin and platform tools are listed on `/mcp` only).",
         answers: "json",
         query: &[],
         signed_in: true,

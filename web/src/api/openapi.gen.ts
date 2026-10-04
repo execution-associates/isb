@@ -857,7 +857,7 @@ export interface paths {
         };
         /**
          * The tools this listener offers
-         * @description Each tool's name, title, description, input schema and annotations: MCP's tools/list over REST.
+         * @description Each tool's name, title, description, input schema and annotations: MCP's tools/list over REST, plus `org_endpoint`: whether `/orgs/{org}/mcp` lists the tool (host, superadmin and platform tools are listed on `/mcp` only).
          */
         get: operations["get_api_v1_tools"];
         put?: never;
@@ -1219,7 +1219,7 @@ export interface paths {
         put?: never;
         /**
          * An app's logs
-         * @description Recent output of an app's replicas, by app name (kubectl logs deploy/NAME): all replicas, or one with `replica`. `tail` lines (default 200, at most 5000); `since` keeps lines newer than a duration like 10m (for system images; an OCI image's console log has no timestamps). A replaced replica's logs go with it, so there is no `previous`: app_events and history_query say what happened.
+         * @description Recent output of an app's replicas, by app name (kubectl logs deploy/NAME): all replicas, or one with `replica`. `tail` lines (default 200, at most 5000); `since` keeps lines newer than a duration like 10m (for system images; an OCI image's console log has no timestamps). A replaced replica's logs go with it, so there is no `previous`, except that a replica that failed to come up (a crash loop) leaves its last output as `last_failed_attempt` while the app is not converged; app_events and history_query say what happened.
          */
         post: operations["app_logs"];
         delete?: never;

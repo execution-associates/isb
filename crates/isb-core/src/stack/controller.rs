@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use serde_json::Value;
 
+use super::changes::diff;
 use super::{
     LABEL_REV, LABEL_SERVICE, LABEL_SLOT, LABEL_STACK, StackDef, Store, instance_name, new_id,
     now_secs, validate_stack_name,
@@ -251,6 +252,8 @@ struct Inner {
     /// Deployed stacks, by name.
     stacks: Mutex<BTreeMap<String, Arc<StackDef>>>,
     status: Mutex<BTreeMap<(String, String), ServiceStatus>>,
+    /// The output of each service's last replica that failed to come up.
+    failures: super::failure::Failures,
     events: Mutex<(u64, VecDeque<Event>)>,
     snapshot: Mutex<Snapshot>,
     /// The org stores secret values are read from at delivery.
@@ -352,6 +355,7 @@ impl Controller {
                 workers: Mutex::new(BTreeMap::new()),
                 stacks: Mutex::new(BTreeMap::new()),
                 status: Mutex::new(BTreeMap::new()),
+                failures: Default::default(),
                 events: Mutex::new((0, VecDeque::new())),
                 snapshot: Mutex::new(Snapshot::default()),
                 secrets,
@@ -1001,20 +1005,24 @@ impl Controller {
         lines: usize,
     ) -> Result<BTreeMap<String, String>> {
         let def = self.get_def(name)?;
-        let spec = def.service(service)?;
-        let oci = crate::plan::ImageSource::parse(&spec.image)?.is_oci();
-        let mut out = BTreeMap::new();
+        let oci = crate::plan::ImageSource::parse(&def.service(service)?.image)?.is_oci();
         let oc = crate::org::client(&self.inner.client, &def.org);
-        for i in list_instances(&oc, &def.name, Some(service))? {
-            if slot.is_some_and(|s| s != i.slot) {
-                continue;
-            }
-            let sb = Sandbox::get(&oc, &i.name)?;
-            let text = supervise::logs(&sb, service, oci, lines)
-                .unwrap_or_else(|e| format!("(no logs: {e})"));
-            out.insert(i.name, text);
+        super::failure::replica_logs(&oc, &def.name, service, oci, slot, lines)
+    }
+
+    /// The last replica of a service that failed to come up, with its
+    /// output, while the service is not converged: after the instance is
+    /// deleted, this is all that is left to read.
+    pub fn last_failure(&self, name: &str, service: &str) -> Option<super::failure::FailedAttempt> {
+        let state = self.inner.status.lock().unwrap();
+        let converged = state
+            .get(&(name.to_string(), service.to_string()))
+            .is_some_and(|s| s.state == "converged");
+        drop(state);
+        if converged {
+            return None;
         }
-        Ok(out)
+        self.inner.failures.last(name, service)
     }
 
     /// Stop every worker and the balancer. Apps keep running in their
@@ -1028,50 +1036,10 @@ impl Controller {
     }
 }
 
-/// What deploying `new` over `old` changes, per service.
 /// Whether a failure message is an incus project-limit refusal (see
 /// `org::limits`): one that raising the org's limits can fix.
 fn limit_error(msg: &str) -> bool {
     msg.contains(" quota (") || msg.contains(" limit (")
-}
-
-fn diff(old: Option<&StackDef>, new: &StackDef) -> Result<Vec<DeployChange>> {
-    let mut out = Vec::new();
-    for (svc, spec) in &new.file.services {
-        let rev = new.revision(svc)?;
-        let replicas = spec.replicas();
-        let change = match old.and_then(|o| o.file.services.get(svc).map(|s| (o, s))) {
-            None => "create",
-            Some((o, os)) => {
-                if o.revision(svc)? != rev {
-                    "update"
-                } else if os.replicas() != replicas {
-                    "scale"
-                } else {
-                    "unchanged"
-                }
-            }
-        };
-        out.push(DeployChange {
-            service: svc.clone(),
-            change: change.into(),
-            rev,
-            replicas,
-        });
-    }
-    if let Some(o) = old {
-        for svc in o.file.services.keys() {
-            if !new.file.services.contains_key(svc) {
-                out.push(DeployChange {
-                    service: svc.clone(),
-                    change: "remove".into(),
-                    rev: String::new(),
-                    replicas: 0,
-                });
-            }
-        }
-    }
-    Ok(out)
 }
 
 /// The spec an instance of `service` is created from: labelled, with its
@@ -1156,7 +1124,7 @@ fn published(spec: &SandboxSpec) -> Result<Vec<Published>> {
 #[doc(hidden)]
 pub struct Inst {
     pub name: String,
-    slot: u32,
+    pub(super) slot: u32,
     pub rev: String,
     status: String,
 }
@@ -2191,6 +2159,10 @@ impl Worker {
             self.wait_serving(def, &inst, spec, oci, probe, monitor)
         });
         if let Err(e) = result {
+            // Read its output before it is deleted: it explains the failure.
+            let (e, attempt) =
+                super::failure::explain(self.client(), &name, &self.service, oci, e, now_ms());
+            self.inner.failures.record(&self.q, &self.service, attempt);
             self.event(
                 "error",
                 Some(&name),

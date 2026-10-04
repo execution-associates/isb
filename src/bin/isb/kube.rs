@@ -194,7 +194,23 @@ pub fn logs(org: &Option<String>, a: AppLogs) -> Result<u8> {
     if let Some(n) = r["note"].as_str() {
         eprintln!("isb: {n}");
     }
+    print_failed_attempt(&r["last_failed_attempt"]);
     Ok(0)
+}
+
+/// The last replica that failed to come up: it is deleted, so this is what it printed.
+fn print_failed_attempt(f: &Value) {
+    let Some(out) = f["output"].as_str() else {
+        return;
+    };
+    eprintln!(
+        "isb: the last replica that failed to start, {}, was deleted ({}); its last output:",
+        f["instance"].as_str().unwrap_or("?"),
+        f["reason"].as_str().unwrap_or("it failed")
+    );
+    for line in out.lines() {
+        eprintln!("  {line}");
+    }
 }
 
 pub fn restart(org: &Option<String>, name: &str, wait: bool) -> Result<u8> {

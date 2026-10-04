@@ -246,8 +246,11 @@ connector in an MCP client behaves as an org connector whoever adds it:
 | Tailnet or Access agent identity | agents an org maps | [Agent identities](#agent-identities) |
 | Superadmin sources | operators | above |
 
-Anonymous calls are refused, unless the daemon runs with
-`--allow-unauthenticated` (local testing only).
+Anonymous callers are refused, unless the daemon runs with
+`--allow-unauthenticated` (local testing only): a request with no credential
+to `/mcp`, `/orgs/<org>/mcp`, `/api/v1/tools` or the events stream gets `401`
+with `WWW-Authenticate: Bearer`, so not even the tool list is shown. The unix
+socket needs no token; the machine's users are its callers.
 
 ## API tokens
 
