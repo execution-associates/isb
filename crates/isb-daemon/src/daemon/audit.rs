@@ -233,7 +233,7 @@ pub fn entry(a: &Audited, record_all: bool) -> Option<NewEntry> {
     if !(terminal || !cls.read_only || record_all || refused || superadmin) {
         return None;
     }
-    let details = super::authorize::scoped(safe_details(a.args), a.caller);
+    let details = super::authorize::scoped(super::apps::manifest::kept(a.action, a.args), a.caller);
     // The org tools act on the org they name.
     let target = if a.action.starts_with("org_") {
         details.get("org").and_then(Value::as_str).map(String::from)

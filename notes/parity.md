@@ -15,9 +15,9 @@ endpoint has neither a tool nor a documented reason in the
 
 | Category | Count |
 |---|---|
-| Tools in the web UI and MCP | 142 |
+| Tools in the web UI and MCP | 148 |
 | Account tools, the web UI through the identity endpoints | 20 |
-| Tools for MCP and the CLI only | 18 |
+| Tools for MCP and the CLI only | 16 |
 | Identity endpoints with a tool | 21 |
 | Identity endpoints for the browser only | 21 |
 | Other routes with no tool | 4 |
@@ -41,7 +41,8 @@ a person on the web does not need it.
 | One stack in detail | App page (domains, replicas) | `stack_status` |
 | Scale a service | App page, General: Replicas; Stop/Start | `stack_scale` |
 | Logs | App page, Logs | `stack_logs` |
-| Deploy, redeploy, roll back or remove a compose stack, show its file | *MCP/CLI only*: a compose stack is a file kept in a repository and deployed from it (`isb stack deploy`); the web UI manages apps, which are stacks underneath, with `app_deploy`, `app_rollback` and `app_delete` | `stack_deploy`, `stack_redeploy`, `stack_rollback`, `stack_remove`, `stack_config` |
+| Compose stacks: list, show the file, check it, deploy it, remove it | Projects, Compose stacks; New compose stack (paste YAML); a stack's page: Compose (editor, Changes, review, Deploy), Services, Logs, Remove | `stack_export`, `stack_validate`, `stack_deploy`, `stack_remove` |
+| Redeploy one service, roll a stack back, the raw stored definition | *MCP/CLI only*: a service is rolled by changing its file (the stack's Compose tab), and the stored definition is what `stack_export` shows as YAML; the web UI manages apps, which are stacks underneath, with `app_deploy`, `app_rollback` and `app_delete` | `stack_redeploy`, `stack_rollback`, `stack_config` |
 | List sandboxes | Workspace, Sandboxes | `sandbox_list` |
 | Extend or remove a sandbox | Workspace, Sandboxes: Extend by, Delete | `sandbox_extend`, `sandbox_remove` |
 | Create a sandbox, run a command in it | *MCP/CLI only*: sandboxes are agents' scratch machines; a person opens a shell in one from Workspace, Sandboxes, Shell (the terminal websocket) | `sandbox_create`, `sandbox_exec` |
@@ -83,6 +84,7 @@ a person on the web does not need it.
 | Projects and environments | Projects; project page: New environment, Delete | `project_list`, `project_create`, `project_delete`, `environment_create`, `environment_delete` |
 | List a project's environments | Shown on the project page (from `project_list`) | `environment_list` |
 | Apps: list, show, create, change, delete | Projects, app pages, New app, General, Advanced | `app_list`, `app_get`, `app_create`, `app_update`, `app_delete` |
+| An app as a YAML document: show it, check it, diff it, create or replace it (kubectl apply) | App, YAML (editor, Changes, review, Save, Save and deploy) | `app_export`, `app_apply` |
 | Environment variables | App, Environment | `app_env_get`, `app_env_set` |
 | Deploy, roll back, deployments and their logs | App: Deploy, Deployments, a deployment's page | `app_deploy`, `app_rollback`, `app_deployments`, `app_deployment_log` |
 | Webhook URL and secret, deploy key | App, General: Git | `app_webhook`, `app_deploy_key` |

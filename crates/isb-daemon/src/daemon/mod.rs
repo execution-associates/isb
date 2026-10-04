@@ -802,9 +802,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
     tools::stack_config_tool(&mut r, &d, &ann)?;
     tools::stack_logs_tool(&mut r, &d, &ann)?;
     tools::stack_scale_tool(&mut r, &d, &ann)?;
-    tools::stack_redeploy_tool(&mut r, &d, &ann)?;
-    tools::stack_rollback_tool(&mut r, &d, &ann)?;
-    tools::stack_remove_tool(&mut r, &d, &ann)?;
+    tools::stack_edit_tools(&mut r, &d, &ann)?;
     tools::sandbox_create_tool(&mut r, &d, &ann)?;
     let ctl = d.ctl.clone();
     let bindings: secrets::Bindings = Arc::new(move |org: &crate::org::OrgId| {
@@ -897,7 +895,7 @@ or the org's own builds in the local registry (registry:APP:TAG; build_run makes
 Deploys return immediately; poll stack_status, or pass wait=true. \
 Each org also has a secret store (secret_create, secret_set, secret_list; values are base64). \
 Apps (Dokploy-style): project_create, then app_create (an image, or a repository with a builder), \
-app_env_set, app_deploy; each project environment runs as one stack <project>-<env>. \
+app_env_set, app_deploy (or app_apply: a YAML definition that creates or updates, dry_run to diff first); each project environment runs as one stack <project>-<env>. \
 One-click apps: template_list, template_get, then template_deploy (dry_run first shows the plan). \
 Databases are apps too (database_create; connection details via database_get), backed up to S3-compatible \
 destinations on a cron schedule (backup_destination_create, backup_create, backup_run, backup_restore). \

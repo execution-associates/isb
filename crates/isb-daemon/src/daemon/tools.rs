@@ -4,11 +4,22 @@
 
 use super::*;
 
+mod stack_manifest;
+
 /// The MCP annotations the tools below share.
 pub(super) struct Ann {
     pub(super) ro: Value,
     pub(super) destructive: Value,
     pub(super) write: Value,
+}
+
+/// The tools that change a stack or hand its file out: redeploy, roll back,
+/// remove, export and validate.
+pub(super) fn stack_edit_tools(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> {
+    stack_redeploy_tool(r, d, ann)?;
+    stack_rollback_tool(r, d, ann)?;
+    stack_remove_tool(r, d, ann)?;
+    stack_manifest::register(r, d, ann)
 }
 
 pub(super) fn stack_deploy_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> {

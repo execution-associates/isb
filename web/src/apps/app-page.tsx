@@ -1,7 +1,7 @@
 // /orgs/:org/apps/:app/:tab: one app, with its header (state, Deploy, Stop)
 // and tabs. Deployment logs live under the Deployments tab.
 import { useQueryClient } from "@tanstack/react-query";
-import { Activity, ArrowRight, ArrowUpRight, Boxes, CalendarClock, Database, DatabaseBackup, GitBranch, GitPullRequest, Globe, History, Loader2, Package, Play, Rocket, ScrollText, Server, Settings2, SlidersHorizontal, Square, TerminalSquare, Variable } from "lucide-react";
+import { Activity, ArrowRight, ArrowUpRight, Boxes, CalendarClock, Database, DatabaseBackup, FileCode2, GitBranch, GitPullRequest, Globe, History, Loader2, Package, Play, Rocket, ScrollText, Server, Settings2, SlidersHorizontal, Square, TerminalSquare, Variable } from "lucide-react";
 import { lazy, Suspense, useEffect, useReducer, useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
@@ -21,6 +21,7 @@ import { EnvironmentTab } from "./app-environment";
 import { GeneralTab } from "./app-general";
 import { LogsTab } from "./app-logs";
 import { MonitoringTab } from "./app-monitoring";
+import { YamlTab } from "./app-yaml";
 import { AppStateBadge, ConfirmDialog, Crumbs, EmptyState, QueryError, TabLinks } from "./components";
 import { DeploymentPage } from "./deployment-page";
 import { DeploymentsTab, elapsed } from "./deployments-tab";
@@ -43,6 +44,7 @@ const TABS = [
   { id: "monitoring", label: "Monitoring", icon: Activity },
   { id: "jobs", label: "Jobs", icon: CalendarClock },
   { id: "terminal", label: "Terminal", icon: TerminalSquare },
+  { id: "yaml", label: "YAML", icon: FileCode2 },
   { id: "advanced", label: "Advanced", icon: SlidersHorizontal },
 ] as const;
 
@@ -140,6 +142,7 @@ export function AppPage() {
           <TerminalTab org={org} app={a} />
         </Suspense>
       )}
+      {active === "yaml" && <YamlTab org={org} app={a} />}
       {active === "advanced" && <AdvancedTab org={org} app={a} />}
     </>
   );

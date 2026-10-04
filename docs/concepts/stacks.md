@@ -220,6 +220,38 @@ and per replica its status, health, address, whether it is in rotation, its
 restarts and its last probe output. `isb stack logs STACK SERVICE` shows each
 replica's recent output.
 
+## Editing in the web UI
+
+The web UI lists an org's compose stacks under its projects (**Compose
+stacks**, on the Projects page), and edits them as files. A project's
+environment also runs as a stack (`<project>-<env>`, one service per app), but
+those belong to their apps and are changed from the app pages; the list leaves
+them out, and their own page says so and refuses a file edit. Everything else,
+a stack written as a compose file, has no project: it lives in the org.
+
+- **New compose stack** takes a name and pasted compose YAML (isb's
+  [compose format](../reference/compose.md)). It checks as you type and
+  deploys with **Deploy stack**.
+- A stack's page has **Compose** (the file in a code editor), **Services**
+  (each service's state, replicas, instances and published ports, refreshing
+  while it rolls) and **Logs** (each replica's recent output).
+- The Compose tab shows what `stack_export` returns: the deployed file,
+  resolved, so no `${VAR}`. Secrets that were read from a file or an
+  environment variable when it was deployed are named as `external` store
+  secrets (`<stack>_<key>`), so the file deploys again without their values;
+  deploying it that way keeps the stored value but no longer counts the stack
+  as its owner, so removing the stack leaves that secret behind.
+- As you type, the daemon checks the file (`stack_validate`: a dry run of
+  `stack_deploy`) and marks problems on their lines. **Changes** is a line
+  diff against what is deployed, and **Deploy** shows the diff for review,
+  then calls `stack_deploy` and moves to Services, where the rollout shows.
+  There is no save without deploying: a stack's file exists only as its
+  deployment.
+- **Remove** is `stack_remove` (typed confirm); named volumes are kept.
+- Viewers read the file. `${VAR}` and `file:`/`environment:` secrets need a
+  value from the deployer, which the editor cannot give: use `external`
+  secrets (create them under Secrets) or deploy those files with the CLI.
+
 ## Commands
 
 ```text

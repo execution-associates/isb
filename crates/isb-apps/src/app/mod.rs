@@ -28,6 +28,7 @@ pub mod deploy;
 pub mod env;
 pub mod forge;
 pub mod git;
+pub mod manifest;
 pub mod preview;
 pub mod webhook;
 

@@ -14,6 +14,7 @@ import { Dot, EmptyState, QueryError, ToneBadge } from "./components";
 import { HEALTH_LABEL, HEALTH_TONE, projectHealth, stackHealth, useStackList } from "./health";
 import { useOrgLive } from "./live";
 import { NewProjectDialog } from "./project-dialogs";
+import { ComposeStacksSection } from "@/stacks/stack-list";
 
 function lastDeploy(p: Project, latest: Map<string, Deployment[]>): Deployment | undefined {
   let best: Deployment | undefined;
@@ -176,6 +177,7 @@ export function ProjectsPage() {
           )}
         </div>
       )}
+      <ComposeStacksSection org={org} writer={writer} projects={list} />
       <NewProjectDialog org={org} open={open} onOpenChange={setOpen} />
     </>
   );

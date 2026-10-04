@@ -928,6 +928,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/app_apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply an app definition
+         * @description Declarative create-or-update, like kubectl apply: `definition` (YAML or JSON text, or a JSON object; the document app_export returns) is the app's whole desired settings. The app is created if its name is new (its project and environment must exist) and otherwise replaced by the document: fields the document leaves out go back to their defaults (app_update merges instead). An app's name, project, environment, and a database's engine/database/user cannot change. `dry_run` checks everything and writes nothing, answering {valid, errors: [{line, column, message}], action, changes, diff}; a bad document is an answer there, an error otherwise. `deploy` queues a deploy after (also when nothing changed). Takes effect at the next deploy. The response carries the app as stored and its definition as app_export shows it; a created app's carries its webhook secret.
+         */
+        post: operations["app_apply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/app_create": {
         parameters: {
             query?: never;
@@ -1082,6 +1102,26 @@ export interface paths {
          * @description Replace an app's environment with .env text: KEY=value lines (quotes and # comments as in docker compose; comments are kept), KEY=${{secret.NAME}} for an org secret. Takes effect at the next deploy (deploy=true queues one).
          */
         post: operations["app_env_set"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/app_export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Export an app as YAML
+         * @description An app's definition as a YAML document: the fields app_create takes (name, project, environment, source, build, env, domains, volumes, ports, replicas, port, healthcheck, resources, command, previews, files, user, working_dir), with secrets by name only (`${{secret.NAME}}` in env), never values. The web UI's YAML tab shows this text. Edit it and hand it to app_apply.
+         */
+        post: operations["app_export"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3348,6 +3388,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/stack_export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Export a stack as YAML
+         * @description The compose file a stack runs from, as YAML text ready for stack_deploy (the web UI's stack editor shows it): resolved (no ${VAR}), with secrets that came from a file or environment variable named as `external` store secrets, so it deploys again without their values. Also says whether the stack belongs to a project's apps (`managed_by: apps`), in which case change it through the apps, not this file.
+         */
+        post: operations["stack_export"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/stack_list": {
         parameters: {
             query?: never;
@@ -3482,6 +3542,26 @@ export interface paths {
          * @description One stack in detail: per service its revision, state (converged, updating, paused, waiting, failing), message, every replica (status, health, IP, in rotation, restarts, last probe output) and published ports with their live backends.
          */
         post: operations["stack_status"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/stack_validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check a compose file
+         * @description A dry run of stack_deploy for an editor: parses the compose YAML, checks it the way a deploy would (services, secrets, ports, ingress) and says what would change, without deploying or storing anything. Answers {valid, errors: [{line, column, message}], changes (per service), exists, managed_by, diff (a unified diff from the deployed file, stack_export's text, to this one)}; a bad file is an answer, not a failed call.
+         */
+        post: operations["stack_validate"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6673,6 +6753,50 @@ export interface operations {
             };
         };
     };
+    app_apply: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The app as YAML or JSON text, or as an object. */
+                    definition: unknown;
+                    /** @description Queue a deploy after applying. */
+                    deploy?: boolean;
+                    /** @description Validate and diff only; change nothing. */
+                    dry_run?: boolean;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
     app_create: {
         parameters: {
             query?: never;
@@ -7000,6 +7124,50 @@ export interface operations {
                     deploy?: boolean;
                     /** @description The .env text. */
                     env: string;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    app_export: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Default yaml.
+                     * @enum {string}
+                     */
+                    format?: "yaml" | "json";
                     name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
@@ -11969,6 +12137,45 @@ export interface operations {
             };
         };
     };
+    stack_export: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
     stack_list: {
         parameters: {
             query?: never;
@@ -12224,6 +12431,52 @@ export interface operations {
                     name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    stack_validate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The compose file, as YAML text. */
+                    compose: string;
+                    /** @description The stack's name; an unused one is a new stack. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description Variables for ${VAR}. */
+                    vars?: {
+                        [key: string]: string;
+                    };
                 };
             };
         };

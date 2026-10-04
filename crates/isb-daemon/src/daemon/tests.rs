@@ -58,6 +58,9 @@ fn class_of(tool: &str) -> audit::Class {
         "server_status",
         "app_get",
         "app_list",
+        "app_export",
+        "stack_export",
+        "stack_validate",
         "audit_list",
         "audit_verify",
     ]
@@ -285,6 +288,9 @@ fn viewers_only_read() {
         "stack_list",
         "secret_list",
         "app_get",
+        "app_export",
+        "stack_export",
+        "stack_validate",
         "stack_logs",
     ] {
         assert!(ok(&viewer, t, acme(json!({}))), "{t}");
@@ -294,6 +300,7 @@ fn viewers_only_read() {
     for t in [
         "stack_deploy",
         "app_deploy",
+        "app_apply",
         "sandbox_exec",
         "secret_set",
         "secret_get",
