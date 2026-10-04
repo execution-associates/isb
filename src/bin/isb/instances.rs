@@ -58,6 +58,17 @@ pub(crate) struct CreateArgs {
     /// Skip readiness checks.
     #[arg(long)]
     pub(crate) no_ready: bool,
+    /// Let the sandbox reach only these hosts: `HOST[:PORT]` (port 443 by
+    /// default; `*.example.com` for subdomains), repeatable; `none` denies
+    /// all network. Everything else, public or private, is refused, through
+    /// the proxy `isb serve` runs (docs/guides/egress.md).
+    #[arg(long = "egress", value_name = "HOST[:PORT]|none")]
+    pub(crate) egress: Vec<String>,
+    /// A secret the sandbox sees only as a placeholder in $NAME, swapped for
+    /// the real value (the org secret NAME, or `NAME=SECRET`) on the wire to
+    /// these hosts and nowhere else: `NAME[=SECRET]@host1,host2`.
+    #[arg(long = "secret", value_name = "NAME@HOSTS")]
+    pub(crate) secrets: Vec<String>,
 }
 
 #[derive(Args)]
@@ -230,6 +241,7 @@ pub(crate) fn create(ctx: &Ctx, a: CreateArgs) -> Result<u8> {
     if !a.profiles.is_empty() {
         spec.profiles = Some(a.profiles);
     }
+    spec.egress = egress_spec(&a.egress, &a.secrets)?;
     let c = ctx.client(None);
     let mut rep = ctx.report();
     let opts = EnsureOptions {
@@ -242,6 +254,28 @@ pub(crate) fn create(ctx: &Ctx, a: CreateArgs) -> Result<u8> {
         Sandbox::create_with(&c, &spec, &Default::default(), opts, &mut rep)?;
     }
     Ok(0)
+}
+
+/// `--egress` and `--secret` as the spec's `egress:` field.
+fn egress_spec(allow: &[String], secrets: &[String]) -> Result<Option<isb::egress::EgressSpec>> {
+    use isb::egress::{EgressSecretSpec, EgressSpec};
+    if allow.is_empty() && secrets.is_empty() {
+        return Ok(None);
+    }
+    let none = allow.iter().any(|a| a == "none");
+    if none && (allow.len() > 1 || !secrets.is_empty()) {
+        return Err(Error::Invalid(
+            "--egress none cannot be combined with hosts or --secret".into(),
+        ));
+    }
+    Ok(Some(EgressSpec {
+        none,
+        allow: if none { Vec::new() } else { allow.to_vec() },
+        secrets: secrets
+            .iter()
+            .map(|s| EgressSecretSpec::parse(s))
+            .collect::<Result<_>>()?,
+    }))
 }
 
 pub(crate) fn ps(ctx: &Ctx, services: Vec<String>, json: bool) -> Result<u8> {

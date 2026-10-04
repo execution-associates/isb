@@ -142,6 +142,15 @@ pub(crate) struct ServeArgs {
     /// (zfs, btrfs): on `dir` every home snapshot is a full copy.
     #[arg(long, env = "ISB_WORKSPACE_POOL")]
     pub(crate) workspace_pool: Option<String>,
+    /// Sandbox egress: connect to NAME at this address instead of resolving
+    /// it, and allow it to be a private one: `NAME=IP[:PORT]`, comma-separated
+    /// (docs/guides/egress.md).
+    #[arg(long, env = "ISB_EGRESS_PINS", value_delimiter = ',', value_name = "NAME=IP")]
+    pub(crate) egress_pin: Vec<String>,
+    /// Sandbox egress: PEM certificates to trust for the hosts a sandbox
+    /// reaches, besides the system's (a private CA).
+    #[arg(long, env = "ISB_EGRESS_CA", value_delimiter = ',', value_name = "FILE")]
+    pub(crate) egress_ca: Vec<PathBuf>,
     /// Make workspace homes host folders, `<DIR>/<org>/home`, bound into
     /// the workspace (the host backs them up, e.g. restic) instead of
     /// managed volumes. An org's home_kind setting can opt out.
@@ -355,6 +364,8 @@ pub(crate) fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
             ),
             None => None,
         },
+        egress_pins: a.egress_pin,
+        egress_ca: a.egress_ca,
     };
     isb::daemon::serve(ctx.client(None), cfg)?;
     Ok(0)

@@ -14,14 +14,16 @@ use std::time::{Duration, Instant};
 
 use isb_core::Client;
 use isb_core::egress::Policy;
-use isb_core::egress::ca::Ca;
+use isb_core::egress::ca::{self, Ca};
 use isb_core::egress::plumb::{self, KEY_CREATED, KEY_FOR, KEY_POLICY};
 use serde_json::Value;
 
 use crate::proxy::{Config, Env, Proxy};
 
 /// How often incus is looked at.
-const INTERVAL: Duration = Duration::from_secs(2);
+const INTERVAL: Duration = Duration::from_secs(5);
+/// How often the wake-up file is looked at.
+const POLL: Duration = Duration::from_millis(200);
 /// How often networks of vanished sandboxes are swept.
 const SWEEP: Duration = Duration::from_secs(60);
 /// A network younger than this is never swept: its instance may be
@@ -88,20 +90,27 @@ impl Manager {
             .name("egress-manager".into())
             .spawn(move || {
                 let mut last_sweep = Instant::now() - SWEEP;
+                let mut last = Instant::now() - INTERVAL;
+                let mut stamp = ca::kicked_at();
                 while !stop.load(Ordering::SeqCst) {
-                    if let Err(e) = m.reconcile() {
-                        (m.env.log)(&format!("egress: cannot read incus: {e}"));
-                    }
-                    if last_sweep.elapsed() >= SWEEP {
-                        last_sweep = Instant::now();
-                        m.sweep();
+                    let file = ca::kicked_at();
+                    let kicked = std::mem::take(&mut *m.kick.0.lock().expect("kick lock"));
+                    if kicked || file != stamp || last.elapsed() >= INTERVAL {
+                        stamp = file;
+                        last = Instant::now();
+                        if let Err(e) = m.reconcile() {
+                            (m.env.log)(&format!("egress: cannot read incus: {e}"));
+                        }
+                        if last_sweep.elapsed() >= SWEEP {
+                            last_sweep = Instant::now();
+                            m.sweep();
+                        }
                     }
                     let (lock, cv) = &m.kick;
-                    let mut kicked = lock.lock().expect("kick lock");
-                    if !*kicked {
-                        kicked = cv.wait_timeout(kicked, INTERVAL).expect("kick wait").0;
+                    let g = lock.lock().expect("kick lock");
+                    if !*g {
+                        let _ = cv.wait_timeout(g, POLL);
                     }
-                    *kicked = false;
                 }
                 m.stop_all();
             })

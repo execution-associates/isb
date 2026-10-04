@@ -206,6 +206,22 @@ fn attach(
     Ok(())
 }
 
+/// The networks the project's instances may use: the org's bridge, and the
+/// egress bridges of its sandboxes (`isbbrx...`), which isb adds one by one.
+fn network_access(bridge: &str, existing: Option<&Value>) -> String {
+    let mut names = vec![bridge.to_string()];
+    let old = existing
+        .and_then(|p| p["config"]["restricted.networks.access"].as_str())
+        .unwrap_or_default();
+    names.extend(
+        old.split(',')
+            .map(str::trim)
+            .filter(|n| n.starts_with(crate::egress::plumb::NET_PREFIX))
+            .map(String::from),
+    );
+    names.join(",")
+}
+
 /// The project's config: restricted to the org's bridge and uid, its
 /// limits, isb's own keys, and the disk paths it may bind (the bind roots
 /// and its workspaces' host-folder homes).
@@ -224,7 +240,7 @@ fn project_config(org: &OrgId, k: &Kept, opts: &OrgOptions, existing: Option<&Va
         // Volume snapshots and exports (crate::volume_backup).
         "restricted.snapshots": "allow",
         "restricted.backups": "allow",
-        "restricted.networks.access": bridge,
+        "restricted.networks.access": network_access(&bridge, existing),
         // The daemon's own uid may be mapped 1:1, so `idmap: auto` keeps
         // bind-mounted files writable; root never.
         "restricted.idmap.uid": uid.to_string(),

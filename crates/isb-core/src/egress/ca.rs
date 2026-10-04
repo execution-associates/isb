@@ -172,6 +172,25 @@ impl Ca {
     }
 }
 
+/// Tell a running daemon (one sharing this state directory) that an egress
+/// network changed, so its proxy comes up at once instead of at its next look.
+pub fn kick() {
+    let _ = std::fs::create_dir_all(root());
+    let _ = std::fs::write(root().join("kick"), now_nanos());
+}
+
+fn now_nanos() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos().to_string())
+        .unwrap_or_default()
+}
+
+/// When [`kick`] last ran, as the daemon sees it.
+pub fn kicked_at() -> Option<std::time::SystemTime> {
+    std::fs::metadata(root().join("kick")).and_then(|m| m.modified()).ok()
+}
+
 /// Delete a sandbox's CA.
 pub fn forget(network: &str) {
     let _ = std::fs::remove_dir_all(dir(network));

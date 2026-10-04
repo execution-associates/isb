@@ -34,6 +34,7 @@ pub mod builds;
 pub mod data;
 mod default_org;
 mod dns;
+mod egress;
 mod monitors;
 mod notify;
 mod orgs;
@@ -136,6 +137,11 @@ pub struct ServeConfig {
     pub superadmin_access: Option<superadmin::AccessAllowList>,
     /// `--heartbeat-url`: a dead man's switch pinged every interval.
     pub heartbeat: Option<crate::monitor::heartbeat::Heartbeat>,
+    /// `--egress-pin NAME=IP[:PORT]`: names the egress proxy connects to
+    /// at a fixed address instead of resolving.
+    pub egress_pins: Vec<String>,
+    /// `--egress-ca FILE`: roots the egress proxy trusts besides the system's.
+    pub egress_ca: Vec<PathBuf>,
 }
 
 /// `isb serve --agent`.
@@ -243,6 +249,8 @@ struct Daemon {
     workspaces: Arc<workspaces::Workspaces>,
     /// Where users reach isb, for invitation links.
     public_url: Option<String>,
+    /// One proxy per egress network (docs/guides/egress.md).
+    egress: Arc<isb_egress::Manager>,
 }
 
 /// Run the daemon until SIGINT/SIGTERM. Apps keep running when it stops.
@@ -413,6 +421,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         cfg.workspace_home_root.clone(),
     );
     workspaces.previews.set_base(cfg.preview_domain.clone());
+    let (egress, stop_egress) = egress::start(&cfg, &client, &secrets)?;
     let d = Arc::new(Daemon {
         client,
         ctl: ctl.clone(),
@@ -438,6 +447,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         catalogs: Arc::new(crate::template::catalog::Catalogs::new(&cfg.state_dir)),
         workspaces: workspaces.clone(),
         public_url: cfg.public_url.clone(),
+        egress,
     });
     if let Some(s) = &servers {
         s.start(ctl.clone());
@@ -534,6 +544,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     workspaces::start_ports(d.clone());
     let r = crate::server::serve_shared(listeners, registry, healthz);
     workspaces.shutdown();
+    stop_egress.store(true, std::sync::atomic::Ordering::Relaxed);
     stop_history.store(true, std::sync::atomic::Ordering::Relaxed);
     recorder.record(crate::history::marker(
         "serve.stopped",
@@ -1153,6 +1164,7 @@ fn sandbox_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         .name
         .clone()
         .ok_or_else(|| Error::invalid("spec needs container_name"))?;
+    egress::check_secrets(&d.secrets, &org, &spec)?;
     let base = if c.is_local() {
         std::env::current_dir()?
     } else {
@@ -1226,6 +1238,7 @@ fn sandbox_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         &mut |m| log.push(m.to_string()),
     )?;
     d.workspaces.mark_active(&org.incus_project(), &name);
+    d.egress.kick();
     Ok(json!({
         "info": sb.info()?,
         "report": report,

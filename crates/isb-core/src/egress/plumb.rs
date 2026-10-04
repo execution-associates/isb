@@ -249,6 +249,7 @@ pub fn prepare(client: &Client, p: &Plumbing, report: &mut dyn FnMut(&str)) -> R
     }
     put_acl(&h, p, &ip)?;
     allow_in_project(client, &p.network, true)?;
+    super::ca::kick();
     Ok(ip)
 }
 
