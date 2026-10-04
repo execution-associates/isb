@@ -257,7 +257,7 @@ function DeployForm({ org, detail }: { org: string; detail: TemplateDetail }) {
   const [error, setError] = useState<string | null>(null);
 
   const loaded = !projects.isLoading;
-  const pd = defaultProject(projects.data ?? [], detail.template.id, params.get("project"));
+  const pd = defaultProject(projects.data ?? [], detail.template.name || detail.template.id, params.get("project"));
   const projectChoice = projectSel ?? pd.choice;
   const creatingProject = projectChoice === NEW;
   const project = creatingProject ? (newProject ?? pd.newName) : projectChoice;
