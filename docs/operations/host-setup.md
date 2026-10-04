@@ -209,7 +209,7 @@ always under `orgs/<org>/`, the default org included.
 | `files/<stack>/` | Where relative paths of a remote caller's stack resolve. |
 | `builds/` | Images staged between a build sandbox and the registry; removed after the push. |
 | `registry/` | The local registry's CA and certificate keys, and its push log. |
-| `ingress/` | Caddy: `bin/caddy-<version>`, `caddy/` (certificates, the ACME account, the generated config, the internal CA under `pki/`), `run/admin.sock`, and `claims.json` (which org holds which hostname). |
+| `ingress/` | Caddy: `bin/caddy-<version>`, `caddy/` (certificates, the ACME account, the generated config, the internal CA under `pki/`), `caddy-home/` (the `HOME`, `XDG_DATA_HOME` and `XDG_CONFIG_HOME` Caddy is started with, whatever the daemon's own environment; certificates and the ACME account stay in `caddy/`, set by the config's `storage`), `run/admin.sock`, and `claims.json` (which org holds which hostname). |
 | `templates/catalogs.json` | Template catalogs added to the built-in one. |
 | `templates/logos/` | Cached template logos (a week). |
 | `servers/` | A control plane's servers: `pki/` (its CA and client certificate), `servers.json`, `placement.json`, `known_hosts` ([Servers](../guides/servers.md#what-each-side-keeps)). |

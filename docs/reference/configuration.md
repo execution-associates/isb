@@ -22,7 +22,10 @@ CF_ACCESS_AUD=your-access-application-audience-tag
 ## Daemon flags
 
 Flags of `isb serve`. A flag given on the command line wins over its
-environment variable. Durations take `ms`, `s`, `m`, `h` and `d`.
+environment variable. Durations take `ms`, `s`, `m`, `h` and `d`. On/off
+flags (and their variables) take `1`/`0`, `true`/`false`, `yes`/`no`, `on`/`off`,
+in any case; the bare flag means true, and a value on the command line is
+written `--flag=false`.
 
 ### Listeners and the remote policy
 

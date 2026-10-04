@@ -1,5 +1,8 @@
 //! `isb serve`: run, install or check the daemon, and its ingress.
 
+use clap::ArgAction;
+use clap::builder::BoolishValueParser;
+
 use super::*;
 
 #[derive(Args)]
@@ -27,7 +30,7 @@ pub(crate) struct ServeArgs {
     #[arg(long, env = "CF_ACCESS_AUD")]
     pub(crate) access_aud: Option<String>,
     /// Serve remote MCP with no Access validation (local testing only).
-    #[arg(long, env = "ISB_SERVE_ALLOW_UNAUTHENTICATED")]
+    #[arg(long, env = "ISB_SERVE_ALLOW_UNAUTHENTICATED", value_parser = BoolishValueParser::new(), action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_value = "false", default_missing_value = "true")]
     pub(crate) allow_unauthenticated: bool,
     /// Tools remote callers may use: names or globs, comma-separated.
     #[arg(long, env = "ISB_SERVE_ALLOW_TOOLS", default_value = "")]
@@ -42,14 +45,14 @@ pub(crate) struct ServeArgs {
     #[arg(long, env = "ISB_SERVE_PUBLISH_ADDRESSES", value_delimiter = ',')]
     pub(crate) publish_address: Vec<String>,
     /// Let remote callers create privileged containers.
-    #[arg(long, env = "ISB_SERVE_ALLOW_PRIVILEGED")]
+    #[arg(long, env = "ISB_SERVE_ALLOW_PRIVILEGED", value_parser = BoolishValueParser::new(), action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_value = "false", default_missing_value = "true")]
     pub(crate) allow_privileged: bool,
     /// Let remote callers use raw_config, raw_devices, incus_profiles,
     /// idmap maps and guest-bound ports.
-    #[arg(long, env = "ISB_SERVE_ALLOW_RAW")]
+    #[arg(long, env = "ISB_SERVE_ALLOW_RAW", value_parser = BoolishValueParser::new(), action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_value = "false", default_missing_value = "true")]
     pub(crate) allow_raw: bool,
     /// Let remote callers reach every instance, not only managed ones.
-    #[arg(long, env = "ISB_SERVE_ANY_INSTANCE")]
+    #[arg(long, env = "ISB_SERVE_ANY_INSTANCE", value_parser = BoolishValueParser::new(), action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_value = "false", default_missing_value = "true")]
     pub(crate) any_instance: bool,
     /// Superadmins by tailnet identity: login names (someone@example.com)
     /// and node tags (tag:agents), comma-separated. They get the unix
@@ -102,13 +105,13 @@ pub(crate) struct ServeArgs {
     #[arg(long, env = "ISB_OIDC_NAME")]
     pub(crate) oidc_name: Option<String>,
     /// Let a verified provider email make an account without an invitation.
-    #[arg(long, env = "ISB_OPEN_SIGNUP")]
+    #[arg(long, env = "ISB_OPEN_SIGNUP", value_parser = BoolishValueParser::new(), action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_value = "false", default_missing_value = "true")]
     pub(crate) open_signup: bool,
     /// How long the audit log keeps entries.
     #[arg(long, value_parser = dur, default_value = "90d", env = "ISB_AUDIT_RETENTION")]
     pub(crate) audit_retention: Duration,
     /// Record read-only tool calls too (secret reads always are).
-    #[arg(long, env = "ISB_AUDIT_ALL")]
+    #[arg(long, env = "ISB_AUDIT_ALL", value_parser = BoolishValueParser::new(), action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_value = "false", default_missing_value = "true")]
     pub(crate) audit_all: bool,
     /// How long the history keeps rows (controller and incus events).
     #[arg(long, value_parser = dur, default_value = "365d", env = "ISB_HISTORY_RETENTION")]
@@ -125,7 +128,7 @@ pub(crate) struct ServeArgs {
     #[arg(long, env = "ISB_INGRESS_HTTPS", value_name = "ADDR")]
     pub(crate) ingress_https: Option<String>,
     /// Ingress: serve Cloudflare-tunnel orgs even without public listeners.
-    #[arg(long, env = "ISB_INGRESS_TUNNELS")]
+    #[arg(long, env = "ISB_INGRESS_TUNNELS", value_parser = BoolishValueParser::new(), action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_value = "false", default_missing_value = "true")]
     pub(crate) ingress_tunnels: bool,
     /// The port each tunnel org's listener takes on its bridge address.
     #[arg(long, env = "ISB_INGRESS_TUNNEL_PORT", default_value_t = isb::ingress::DEFAULT_TUNNEL_PORT)]
@@ -167,7 +170,7 @@ pub(crate) struct ServeArgs {
     pub(crate) caddy_bin: Option<PathBuf>,
     /// Run as a server's agent for a control plane (`isb server add` sets
     /// this up): no identity store or web UI, an mTLS listener instead.
-    #[arg(long, env = "ISB_AGENT", requires_all = ["agent_listen", "agent_tls"])]
+    #[arg(long, env = "ISB_AGENT", value_parser = BoolishValueParser::new(), action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_value = "false", default_missing_value = "true", requires_all = ["agent_listen", "agent_tls"])]
     pub(crate) agent: bool,
     /// The agent's mTLS listener, e.g. 0.0.0.0:7443.
     #[arg(long, env = "ISB_AGENT_LISTEN", requires = "agent")]
@@ -503,4 +506,61 @@ pub(crate) fn ingress_status(json: bool) -> Result<u8> {
         );
     }
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Parser)]
+    struct Wrap {
+        #[command(flatten)]
+        serve: ServeArgs,
+    }
+
+    fn parse(args: &[&str], env: &[(&str, &str)]) -> Result<bool, clap::Error> {
+        // clap reads the real environment; set it for this call only.
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        for (k, v) in env {
+            // SAFETY: serialised by LOCK; no other test touches these.
+            unsafe { std::env::set_var(k, v) };
+        }
+        let r = Wrap::try_parse_from(std::iter::once("isb").chain(args.iter().copied()))
+            .map(|w| w.serve.ingress_tunnels);
+        for (k, _) in env {
+            // SAFETY: as above.
+            unsafe { std::env::remove_var(k) };
+        }
+        r
+    }
+
+    #[test]
+    fn booleans_take_the_usual_spellings_from_the_environment() {
+        for v in ["1", "true", "TRUE", "yes", "On", "y"] {
+            assert!(parse(&[], &[("ISB_INGRESS_TUNNELS", v)]).unwrap(), "{v}");
+        }
+        for v in ["0", "false", "No", "OFF", "n"] {
+            assert!(!parse(&[], &[("ISB_INGRESS_TUNNELS", v)]).unwrap(), "{v}");
+        }
+        assert!(!parse(&[], &[]).unwrap());
+    }
+
+    #[test]
+    fn booleans_take_the_usual_spellings_on_the_command_line() {
+        assert!(parse(&["--ingress-tunnels"], &[]).unwrap());
+        assert!(parse(&["--ingress-tunnels=yes"], &[]).unwrap());
+        assert!(!parse(&["--ingress-tunnels=0"], &[]).unwrap());
+        assert!(!parse(&["--ingress-tunnels=off"], &[]).unwrap());
+    }
+
+    #[test]
+    fn nonsense_is_rejected_clearly() {
+        let e = parse(&[], &[("ISB_INGRESS_TUNNELS", "maybe")]).unwrap_err();
+        let m = e.to_string();
+        assert!(
+            m.contains("maybe") && m.contains("--ingress-tunnels"),
+            "{m}"
+        );
+    }
 }

@@ -28,6 +28,8 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use serde_json::{Value, json};
 
+mod env;
+
 use super::domain::{Route, redirect_keeps_path};
 use crate::error::{Error, Result};
 
@@ -595,6 +597,9 @@ impl Edge {
         on_log: OnLog,
     ) -> Result<Arc<Edge>> {
         std::fs::create_dir_all(dir)?;
+        for (_, p) in env::child_env(dir) {
+            std::fs::create_dir_all(p)?;
+        }
         if let Some(parent) = admin_socket.parent() {
             std::fs::create_dir_all(parent)?;
             use std::os::unix::fs::PermissionsExt;
@@ -753,16 +758,10 @@ impl Edge {
             .arg(&self.config_file)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            // Its home for anything it caches outside our storage.
-            .env(
-                "XDG_DATA_HOME",
-                self.config_file.parent().unwrap_or(Path::new(".")),
-            )
-            .env(
-                "XDG_CONFIG_HOME",
-                self.config_file.parent().unwrap_or(Path::new(".")),
-            );
+            .stderr(Stdio::piped());
+        for (k, v) in env::child_env(self.config_file.parent().unwrap_or(Path::new("."))) {
+            cmd.env(k, v);
+        }
         #[cfg(target_os = "linux")]
         {
             use std::os::unix::process::CommandExt;
