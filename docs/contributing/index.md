@@ -108,7 +108,12 @@ which describe plans rather than what isb does.
 ```sh
 scripts/check.sh           # ratchet, fmt, clippy -D warnings, docs links, unit tests
 scripts/check.sh --quick   # the same without the tests
+scripts/install-hooks.sh   # once per clone: run the build-free checks on commit and push
 ```
+
+The hooks (`.githooks`) run the ratchet, `cargo fmt --check` and the docs links
+before every commit and push, about a second. Clippy and the tests run project
+code, so they stay in the sandbox (`scripts/check.sh`) and in CI.
 
 Plain `cargo test`, `cargo clippy`, `cargo doc` and `cargo build` cover the
 whole workspace (`default-members`). CI runs the same steps

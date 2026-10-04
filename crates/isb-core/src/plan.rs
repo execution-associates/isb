@@ -641,27 +641,18 @@ pub fn resolve(
     if let Some(p) = spec.privileged {
         config.insert("security.privileged".into(), p.to_string());
     }
-    let mut idmap_mode = None;
-    if vm {
-        let (mode, raw) = idmap::plan_vm(
+    let (idmap_mode, raw_idmap) = if vm {
+        idmap::plan_vm(
             &name,
             spec,
             host.incus_version.as_deref(),
             host.invoking_ids,
-        )?;
-        idmap_mode = mode;
-        if let Some(v) = raw {
-            config.insert("raw.idmap".into(), v);
-        }
-    } else if let Some(i) = spec.idmap.as_ref() {
-        idmap_mode = match i {
-            crate::spec::IdmapSpec::Mode(m) => Some(*m),
-            crate::spec::IdmapSpec::Map(m) => Some(m.mode),
-            crate::spec::IdmapSpec::Raw(_) => None,
-        };
-        if let Some(v) = idmap::resolve(i, &host.subids) {
-            config.insert("raw.idmap".into(), v);
-        }
+        )?
+    } else {
+        idmap::plan_container(spec.idmap.as_ref(), &host.subids)
+    };
+    if let Some(v) = raw_idmap {
+        config.insert("raw.idmap".into(), v);
     }
     for (k, v) in &spec.labels {
         if k.is_empty() || k.contains(char::is_whitespace) {

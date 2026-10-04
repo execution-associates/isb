@@ -118,6 +118,23 @@ pub fn invoking_ids() -> (u32, u32) {
     )
 }
 
+/// What a container spec decides about `raw.idmap`: the mode (for the plan's
+/// "unset by hand" note, none for `{raw: ...}`) and the value to set.
+pub fn plan_container(
+    spec: Option<&IdmapSpec>,
+    host: &SubIds,
+) -> (Option<IdmapMode>, Option<String>) {
+    let Some(i) = spec else {
+        return (None, None);
+    };
+    let mode = match i {
+        IdmapSpec::Mode(m) => Some(*m),
+        IdmapSpec::Map(m) => Some(m.mode),
+        IdmapSpec::Raw(_) => None,
+    };
+    (mode, resolve(i, host))
+}
+
 /// What a VM spec decides about `raw.idmap`: the mode that applies (for the
 /// plan's "unset by hand" note) and the value to set. A VM with no host bind
 /// mount needs neither. An incus that may not translate VM shares is an error
