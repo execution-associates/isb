@@ -537,9 +537,12 @@ isb update [VERSION] [--check] [--force]
 ```
 
 Replaces the running binary with the latest release (or `VERSION`, which may
-be older). The tarball for this platform is checked against the release's
-`SHA256SUMS`, unpacked next to the binary, run once with `--version`, then
-renamed over it, so a failed update leaves the old binary in place.
+be older, down to 1.0.3, the first signed release). The release's
+`SHA256SUMS` must carry a valid signature by the isb release key
+([Releases are signed](../getting-started/install.md#releases-are-signed)),
+and the tarball for this platform must match it; it is then unpacked next
+to the binary, run once with `--version`, and renamed over it, so a failed
+update leaves the old binary in place.
 `--check` only compares versions. A binary installed by mise, cargo, npm or
 pip is refused with that manager's upgrade command, since replacing it would
 leave the manager's record wrong; `--force` replaces it anyway, and also

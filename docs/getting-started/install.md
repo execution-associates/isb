@@ -78,8 +78,29 @@ cargo install isb
 Prebuilt static (musl) binaries for x86_64 and aarch64 Linux, and macOS
 binaries for Apple silicon and Intel, are on the
 [releases page](https://github.com/execution-associates/isb/releases), with
-a `SHA256SUMS` file. A binary installed from there keeps itself current with
-`isb update`.
+a `SHA256SUMS` file and its signature. A binary installed from there keeps
+itself current with `isb update`.
+
+#### Releases are signed
+
+Each release's `SHA256SUMS` is signed with the isb release key (Ed25519;
+the signature is `SHA256SUMS.sig`, 64 raw bytes), and isb has the public key
+built in: `isb update`, `isb machine init` and `isb server` upgrades install
+nothing whose signature does not verify, so a release changed after it was
+built is refused even when its checksums were changed to match. Releases
+before 1.0.3 are unsigned and cannot be installed that way. The public key
+is
+
+```text
+4f08d05a2ffaf58f40d4d0e658a9934e5246de1b472ccd2143af6c928adfd51a
+```
+
+To check a download by hand, use the GitHub build attestation each tarball
+also carries, which ties it to the workflow run that built it:
+
+```sh
+gh attestation verify isb-v1.0.3-x86_64-unknown-linux-musl.tar.gz -R execution-associates/isb
+```
 
 ```console
 $ isb --version

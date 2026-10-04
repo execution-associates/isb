@@ -4,6 +4,11 @@ name: Release
 # both (linked only against the system libraries), published as release
 # assets with SHA256SUMS when a v* tag is pushed, so hosts can install with
 # `mise use -g github:execution-associates/isb` and never build on the host.
+# SHA256SUMS is signed (SHA256SUMS.sig, raw Ed25519) with the secret
+# ISB_RELEASE_SIGNING_KEY, whose public key isb compiles in (RELEASE_KEYS in
+# crates/isb-core/src/self_update.rs): `isb update`, `isb machine init` and
+# server upgrades install nothing whose signature does not verify. Each
+# tarball also gets a GitHub build attestation (`gh attestation verify`).
 # After the release, the seven crates go to crates.io (secret
 # CARGO_REGISTRY_TOKEN); a crate version that is already there is skipped, so a
 # failed run can be re-run. Run it by hand (workflow_dispatch) to build the
@@ -95,17 +100,45 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: crates/isb-core/src/self_update.rs
+          sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
       - run: cd dist && sha256sum *.tar.gz > SHA256SUMS && cat SHA256SUMS
+      # Refuse to publish a release this version's isb could not verify: the
+      # secret's public key must be one of the keys compiled in.
+      - name: sign SHA256SUMS
+        env:
+          KEY: ${{ secrets.ISB_RELEASE_SIGNING_KEY }}
+        run: |
+          [ -n "$KEY" ] || { echo "secret ISB_RELEASE_SIGNING_KEY is not set"; exit 1; }
+          umask 077
+          key="$RUNNER_TEMP/release-key.pem"
+          printf '%s\n' "$KEY" > "$key"
+          pub=$(openssl pkey -in "$key" -pubout -outform DER | tail -c 32 | od -An -tx1 | tr -d ' \n')
+          echo "release key $pub"
+          grep -q "\"$pub\"" crates/isb-core/src/self_update.rs \
+            || { echo "release key $pub is not in RELEASE_KEYS"; rm -f "$key"; exit 1; }
+          openssl pkeyutl -sign -rawin -inkey "$key" -in dist/SHA256SUMS -out dist/SHA256SUMS.sig
+          openssl pkey -in "$key" -pubout -out "$RUNNER_TEMP/release-key.pub"
+          rm -f "$key"
+          openssl pkeyutl -verify -rawin -pubin -inkey "$RUNNER_TEMP/release-key.pub" \
+            -in dist/SHA256SUMS -sigfile dist/SHA256SUMS.sig
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*.tar.gz
       - name: create release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS \
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS dist/SHA256SUMS.sig \
             --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
 
   crates:
