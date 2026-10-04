@@ -17,7 +17,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { relativeTime } from "@/lib/format";
 import { errorMessage } from "@/lib/messages";
 import { useCanWrite } from "@/lib/use-role";
-import { type Monitor, msText, type Range, RANGES, targetText, ukeys, uptimeText, uptimeTone, useHistory, useMonitor } from "./api";
+import { type Bar, type Monitor, msText, NEVER_UP_HINT, PENDING_HINT, type Range, RANGES, statusTone, targetText, ukeys, uptimeText, uptimeTone, useHistory, useMonitor } from "./api";
 import { MonitorBadge, Stat, UptimeBars } from "./components";
 import { MonitorDialog } from "./monitor-dialog";
 import { Incidents } from "./uptime-page";
@@ -130,6 +130,18 @@ export function MonitorPage() {
 function LastCheck({ m }: { m: Monitor }) {
   const l = m.last;
   if (!l) return <p className="text-sm text-muted-foreground">{m.paused ? "Paused before its first check." : "The first check is on its way."}</p>;
+  if (m.status === "pending" && !l.ok) {
+    return (
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border px-4 py-3 text-sm">
+        <StatusDot tone={statusTone(m)} />
+        <span className="font-medium">{m.never_up ? NEVER_UP_HINT : PENDING_HINT}</span>
+        {l.error && <span className="min-w-0 basis-full font-mono text-xs break-words text-muted-foreground sm:basis-auto">{l.error}</span>}
+        <span className="ml-auto text-xs text-muted-foreground" title={new Date(l.at).toLocaleString()}>
+          {relativeTime(l.at / 1000)}
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border px-4 py-3 text-sm">
       <StatusDot tone={l.ok ? "success" : "danger"} />
@@ -162,7 +174,7 @@ function HistoryCard({ org, name }: { org: string; name: string }) {
         <Skeleton className="h-28" />
       ) : (
         <div className="grid gap-4">
-          <UptimeBars bars={h.data.buckets.map((b) => [b.at, b.uptime])} stepMs={h.data.step_ms} className="h-9" />
+          <UptimeBars bars={h.data.buckets.map((b): Bar => [b.at, b.uptime, b.pending])} stepMs={h.data.step_ms} className="h-9" />
           <div>
             <div className="mb-1 text-xs text-muted-foreground">Latency, p95 per bar (up to {msText(Math.max(0, ...lat))})</div>
             <AreaChart values={lat} label="Latency p95" tone="sky" />
@@ -197,8 +209,8 @@ function Checks({ m }: { m: Monitor }) {
                 </TableCell>
                 <TableCell>
                   <span className="inline-flex items-center gap-2">
-                    <StatusDot tone={c.ok ? "success" : "danger"} />
-                    {c.ok ? "Up" : "Down"}
+                    <StatusDot tone={c.ok ? "success" : c.pending ? "neutral" : "danger"} />
+                    {c.ok ? "Up" : c.pending ? "Pending" : "Down"}
                   </span>
                 </TableCell>
                 <TableCell className="font-mono text-xs">{c.status ?? "–"}</TableCell>

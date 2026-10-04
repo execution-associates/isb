@@ -88,6 +88,23 @@ fn with_path(url: &str, path: &str) -> String {
     format!("{}{path}", &url[..end])
 }
 
+/// Does the app have a deployment that is live: its service has a healthy
+/// replica in rotation? Until it does, an app's monitor has nothing to check.
+pub(crate) fn app_is_live(apps: &Apps, org: &OrgId, m: &Monitor) -> bool {
+    let name = m.app.as_deref().unwrap_or_default();
+    let Ok(app) = apps.get(org, name) else {
+        return false;
+    };
+    let Ok(stack) = app.spec.stack() else {
+        return false;
+    };
+    apps.controller()
+        .status(&crate::stack::qualified(org, &stack))
+        .ok()
+        .and_then(|st| st.services.into_iter().find(|s| s.service == name))
+        .is_some_and(|s| s.healthy > 0 && s.instances.iter().any(|i| i.in_rotation))
+}
+
 fn app_view(ctx: &Ctx, org: &OrgId, m: &Monitor) -> Result<AppView, String> {
     let name = m.app.as_deref().unwrap_or_default();
     let app = ctx

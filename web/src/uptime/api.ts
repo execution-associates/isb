@@ -69,18 +69,22 @@ export interface Check {
   latency_ms?: number;
   status?: number;
   error?: string;
+  /** A failure before the monitor's first success: not downtime. */
+  pending?: boolean;
 }
 
 export interface Monitor extends MonitorDef {
   status: MonitorStatus;
   since: number;
   flapping: boolean;
+  /** Pending for 30 minutes with only failures. */
+  never_up?: boolean;
   target: string;
   last?: Outcome | null;
   uptime: { "24h": number | null; "7d": number | null; "30d": number | null };
   latency: { p50: number | null; p95: number | null };
-  /** 24 hourly buckets: [unix ms, uptime % or null]. */
-  bars: [number, number | null][];
+  /** 24 hourly buckets: [unix ms, uptime % or null, pending checks]. */
+  bars: Bar[];
   /** The last 30 checks: [unix ms, latency ms, or null when it failed]. */
   spark: [number, number | null][];
   incident?: Incident | null;
@@ -90,6 +94,9 @@ export interface Monitor extends MonitorDef {
   incidents?: Incident[];
   checks?: Check[];
 }
+
+/** One uptime bar: [unix ms, uptime % or null, checks that were only pending]. */
+export type Bar = [number, number | null, number?];
 
 export interface Settings {
   auto_monitors: boolean;
@@ -107,6 +114,8 @@ export interface Bucket {
   at: number;
   checks: number;
   ok: number;
+  /** Failures before the first success: neither up nor down. */
+  pending?: number;
   uptime: number | null;
   p50: number | null;
   p95: number | null;
@@ -170,6 +179,19 @@ export const STATUS_LABEL: Record<MonitorStatus, string> = {
   pending: "Pending",
   paused: "Paused",
 };
+
+export const PENDING_HINT = "Waiting for the first successful check";
+export const NEVER_UP_HINT = "Never came up: no successful check in the first 30 minutes";
+
+/** The badge text of a monitor: its status, or why it is still pending. */
+export function statusText(m: { status: MonitorStatus; never_up?: boolean }): string {
+  return m.status === "pending" && m.never_up ? "Never came up" : STATUS_LABEL[m.status];
+}
+
+/** A pending monitor that never came up is a problem; one still waiting is not. */
+export function statusTone(m: { status: MonitorStatus; never_up?: boolean }): Tone {
+  return m.status === "pending" && m.never_up ? "danger" : STATUS_TONE[m.status];
+}
 
 /** "99.95%", "100%", "–". */
 export function uptimeText(u: number | null | undefined): string {

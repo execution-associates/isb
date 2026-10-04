@@ -5,6 +5,11 @@
 //! - `failure_threshold` failed checks in a row take a monitor down;
 //!   `recovery_threshold` successful ones bring it back up. A new monitor's
 //!   first success makes it up at once.
+//! - A new monitor is `pending` until its first success. Failures before
+//!   that are *pending* checks, not downtime: no threshold, no incident, no
+//!   `down`. If it has only failed for [`NEVER_UP_MS`], channels hear once
+//!   that it *never came up* (a `down`), and the monitor stays pending
+//!   (flagged `never_up`) until a check succeeds, which then sends an `up`.
 //! - Channels hear `down` once per incident and `up` once after it, always
 //!   alternating: an up is only sent after a down was.
 //! - A monitor that went down [`FLAP_DOWNS`] times within [`FLAP_WINDOW_MS`]
@@ -19,6 +24,8 @@ use serde::{Deserialize, Serialize};
 pub const FLAP_WINDOW_MS: u64 = 30 * 60 * 1000;
 /// Downs within the window that make a monitor flapping.
 pub const FLAP_DOWNS: usize = 3;
+/// How long a new monitor may only fail before it is called "never came up".
+pub const NEVER_UP_MS: u64 = 30 * 60 * 1000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -74,6 +81,12 @@ pub struct State {
     /// The certificate (by its expiry, unix seconds) already warned about.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cert_warned: Option<u64>,
+    /// When the first check of a pending monitor ran.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_check: Option<u64>,
+    /// Pending for [`NEVER_UP_MS`] with only failures.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub never_up: bool,
 }
 
 /// What a check changed, and what to tell channels.
@@ -82,6 +95,9 @@ pub struct Step {
     /// The new status, when it changed.
     pub changed: Option<Status>,
     pub notify: Notify,
+    /// The check failed while the monitor was waiting for its first
+    /// success: kept as pending, not as a failure.
+    pub pending: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -91,6 +107,10 @@ pub enum Notify {
     Down {
         since: u64,
         flapping: bool,
+    },
+    /// Still no success `NEVER_UP_MS` after the first check (`since`).
+    NeverUp {
+        since: u64,
     },
     /// Up again; it was down from `down_since`.
     Up {
@@ -102,6 +122,9 @@ pub enum Notify {
 impl State {
     /// Take one check's result at `now` (unix milliseconds).
     pub fn observe(&mut self, ok: bool, now: u64, t: Thresholds) -> Step {
+        if self.status == Status::Pending && !ok {
+            return self.observe_pending(now);
+        }
         let changed = self.count(ok, now, t);
         if let Some(s) = changed {
             self.status = s;
@@ -119,7 +142,31 @@ impl State {
             self.flapping = false;
         }
         let notify = self.decide(now, was);
-        Step { changed, notify }
+        Step {
+            changed,
+            notify,
+            pending: false,
+        }
+    }
+
+    /// A failed check before the first success: counted, never a down.
+    fn observe_pending(&mut self, now: u64) -> Step {
+        let first = *self.first_check.get_or_insert(now);
+        self.fails = self.fails.saturating_add(1);
+        self.oks = 0;
+        self.failing_since.get_or_insert(now);
+        let mut notify = Notify::None;
+        if !self.never_up && now.saturating_sub(first) >= NEVER_UP_MS {
+            self.never_up = true;
+            self.notified = Status::Down;
+            self.down_since = Some(first);
+            notify = Notify::NeverUp { since: first };
+        }
+        Step {
+            changed: None,
+            notify,
+            pending: true,
+        }
     }
 
     /// Count the check; the status it now calls for, when that is a change.
@@ -129,6 +176,10 @@ impl State {
             self.fails = 0;
             self.failing_since = None;
             let enough = self.status == Status::Pending || self.oks >= t.recoveries.max(1);
+            if enough {
+                self.never_up = false;
+                self.first_check = None;
+            }
             (self.status != Status::Up && enough).then_some(Status::Up)
         } else {
             self.fails = self.fails.saturating_add(1);
@@ -176,6 +227,9 @@ impl State {
         self.fails = 0;
         self.oks = 0;
         self.failing_since = None;
+        if self.status == Status::Pending {
+            self.first_check = None;
+        }
     }
 }
 
@@ -237,16 +291,75 @@ mod tests {
     }
 
     #[test]
-    fn a_new_monitor_that_is_down_is_told() {
+    fn a_new_monitor_waits_for_its_first_success() {
         let mut s = State::default();
-        let n = run(&mut s, &[(false, 10), (false, 20)]);
+        // Failures before the first success are pending, never down.
+        for at in [10, 20, 30, 40] {
+            let st = s.observe(false, at, T);
+            assert!(st.pending);
+            assert_eq!((st.changed, st.notify), (None, Notify::None));
+        }
+        assert_eq!(s.status, Status::Pending);
+        assert!(s.downs.is_empty());
+        // The first success is up, quietly, and clears the waiting.
+        let st = s.observe(true, 50, T);
+        assert!(!st.pending);
+        assert_eq!((st.changed, st.notify), (Some(Status::Up), Notify::None));
+        assert_eq!((s.first_check, s.never_up, s.fails), (None, false, 0));
+        assert_eq!(s.notified, Status::Up);
+    }
+
+    #[test]
+    fn pending_failures_do_not_count_toward_the_threshold() {
+        let mut s = State::default();
+        run(&mut s, &[(false, 10), (false, 20), (false, 30)]);
+        // Up on the first success; one failure then is still below 2.
+        assert_eq!(run(&mut s, &[(true, 40), (false, 50)]), vec![]);
+        assert_eq!(s.status, Status::Up);
+        assert_eq!(s.fails, 1);
+    }
+
+    #[test]
+    fn real_downtime_after_up_still_pages() {
+        let mut s = State::default();
+        run(&mut s, &[(false, 10), (true, 20)]);
+        let n = run(&mut s, &[(false, 30), (false, 40)]);
         assert_eq!(
             n,
             vec![Notify::Down {
-                since: 10,
+                since: 30,
                 flapping: false
             }]
         );
+        assert_eq!(s.status, Status::Down);
+        assert!(!s.observe(false, 50, T).pending);
+    }
+
+    #[test]
+    fn a_monitor_that_never_comes_up_says_so_once() {
+        let mut s = State::default();
+        assert_eq!(run(&mut s, &[(false, 1000)]), vec![]);
+        // Just short of the window: nothing.
+        assert_eq!(run(&mut s, &[(false, 1000 + NEVER_UP_MS - 1)]), vec![]);
+        let n = run(
+            &mut s,
+            &[(false, 1000 + NEVER_UP_MS), (false, 2000 + NEVER_UP_MS)],
+        );
+        assert_eq!(n, vec![Notify::NeverUp { since: 1000 }]);
+        // Still pending, flagged; no second message.
+        assert_eq!((s.status, s.never_up), (Status::Pending, true));
+        assert_eq!(run(&mut s, &[(false, 3000 + NEVER_UP_MS)]), vec![]);
+        // When it finally answers, channels hear it is up.
+        let at = 4000 + NEVER_UP_MS;
+        let n = run(&mut s, &[(true, at)]);
+        assert_eq!(
+            n,
+            vec![Notify::Up {
+                down_since: 1000,
+                downtime_ms: at - 1000
+            }]
+        );
+        assert_eq!((s.status, s.never_up), (Status::Up, false));
     }
 
     #[test]
@@ -347,6 +460,7 @@ mod tests {
     fn state_survives_a_restart() {
         let mut s = State::default();
         run(&mut s, &[(true, 1), (false, 2), (false, 3)]);
+        assert_eq!(s.status, Status::Down);
         let saved = serde_json::to_string(&s).unwrap();
         let mut back: State = serde_json::from_str(&saved).unwrap();
         assert_eq!(back, s);

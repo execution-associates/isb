@@ -306,3 +306,122 @@ fn messages() {
         "Monitor web is UP again after 4m 12s: db:5432 answered in 12 ms"
     );
 }
+
+fn failed(at: u64) -> Outcome {
+    Outcome {
+        at,
+        ok: false,
+        error: Some("connection refused".into()),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn failures_before_the_first_success_are_pending_not_downtime() {
+    let dir = tempfile::tempdir().unwrap();
+    let (svc, ctl) = service(dir.path());
+    let org = OrgId::new("acme").unwrap();
+    let (port, status) = flappy();
+    status.store(503, Ordering::SeqCst);
+    let mut m = Monitor::new("shop", Kind::Http);
+    m.url = Some(format!("http://127.0.0.1:{port}/"));
+    svc.create(&org, m.clone()).unwrap();
+    let run = |n: usize| {
+        for _ in 0..n {
+            let o = svc.check(&org, &m);
+            svc.record(&org, &m, o).unwrap();
+        }
+    };
+    run(5);
+    let s = svc.summary(&org, &m).unwrap();
+    assert_eq!(s["status"], "pending");
+    assert_eq!(s["never_up"], false);
+    assert!(s["incident"].is_null());
+    assert_eq!(s["uptime"]["24h"], Value::Null);
+    assert!(kinds(&ctl).is_empty(), "{:?}", kinds(&ctl));
+    {
+        let db = svc.db(&org).unwrap();
+        let db = db.lock().unwrap();
+        assert!(db.incidents(None, 10, now_ms()).unwrap().is_empty());
+        assert!(db.recent("shop", 10).unwrap().iter().all(|c| c.pending));
+    }
+    // The first success: up, quietly, and 100% (the pending ones count for nothing).
+    status.store(200, Ordering::SeqCst);
+    run(1);
+    let s = svc.summary(&org, &m).unwrap();
+    assert_eq!(s["status"], "up");
+    assert_eq!(s["uptime"]["24h"], 100.0);
+    assert!(kinds(&ctl).is_empty());
+    // Real downtime after that pages as usual.
+    status.store(503, Ordering::SeqCst);
+    run(2);
+    let k = kinds(&ctl);
+    assert_eq!(k.len(), 1, "{k:?}");
+    assert_eq!(k[0].0, "monitor.down");
+}
+
+#[test]
+fn a_monitor_that_never_comes_up_says_so_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let (svc, ctl) = service(dir.path());
+    let org = OrgId::new("acme").unwrap();
+    let mut m = Monitor::new("db", Kind::Tcp);
+    (m.host, m.port) = (Some("db.example.com".into()), Some(5432));
+    svc.create(&org, m.clone()).unwrap();
+    let t0 = now_ms();
+    svc.record(&org, &m, failed(t0)).unwrap();
+    svc.record(&org, &m, failed(t0 + 10 * 60_000)).unwrap();
+    assert!(kinds(&ctl).is_empty());
+    let late = t0 + super::super::state::NEVER_UP_MS + 1000;
+    svc.record(&org, &m, failed(late)).unwrap();
+    svc.record(&org, &m, failed(late + 60_000)).unwrap();
+    let k = kinds(&ctl);
+    assert_eq!(k.len(), 1, "{k:?}");
+    assert_eq!(k[0].0, "monitor.down");
+    assert!(k[0].1.contains("never came up"), "{}", k[0].1);
+    let d = svc.details(&org, "monitor.down", &k[0].1).unwrap();
+    assert_eq!(d["never_up"], true);
+    let s = svc.summary(&org, &m).unwrap();
+    assert_eq!(
+        (s["status"].as_str(), s["never_up"].as_bool()),
+        (Some("pending"), Some(true))
+    );
+    // Its first success clears the flag, closes the incident and says up.
+    let ok = Outcome {
+        at: late + 120_000,
+        ok: true,
+        latency_ms: Some(5),
+        ..Default::default()
+    };
+    svc.record(&org, &m, ok).unwrap();
+    let k = kinds(&ctl);
+    assert_eq!(
+        k.iter().map(|x| x.0.as_str()).collect::<Vec<_>>(),
+        ["monitor.down", "monitor.up"]
+    );
+    let db = svc.db(&org).unwrap();
+    let inc = db.lock().unwrap().incidents(None, 10, now_ms()).unwrap();
+    assert_eq!(inc.len(), 1);
+    assert!(inc[0].ended.is_some());
+}
+
+#[test]
+fn an_app_monitor_waits_for_a_live_deployment() {
+    let dir = tempfile::tempdir().unwrap();
+    let (svc, ctl) = service(dir.path());
+    let org = OrgId::new("acme").unwrap();
+    let mut m = Monitor::new("app-web", Kind::App);
+    m.app = Some("web".into());
+    m.auto = true;
+    svc.save(&org, &[m.clone()]).unwrap();
+    // No app, so nothing live: the check is a wait, kept as pending.
+    let o = svc.check(&org, &m);
+    assert_eq!(o.error.as_deref(), Some(WAITING_FOR_APP));
+    svc.record(&org, &m, o).unwrap();
+    let st = svc.stored(&org, "app-web").unwrap();
+    assert_eq!(st.state.status, Status::Pending);
+    assert!(kinds(&ctl).is_empty());
+    let db = svc.db(&org).unwrap();
+    let c = db.lock().unwrap().recent("app-web", 5).unwrap();
+    assert!(c[0].pending);
+}

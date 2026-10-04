@@ -18,7 +18,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use super::state::{Notify, State, Status, Thresholds};
+use super::state::{NEVER_UP_MS, Notify, State, Status, Thresholds};
 use super::store::{Check, Db};
 use super::target::{self, Ctx, Outcome};
 use super::{AUTO_PREFIX, Kind, MAX_PER_ORG, Monitor, Settings, dir, human, read_json, write_json};
@@ -38,6 +38,9 @@ const AUTO_SYNC_MS: u64 = 60_000;
 const ROLLUP_MS: u64 = 300_000;
 /// Event details kept for the notifier to pick up.
 const DETAILS_KEPT: usize = 256;
+
+/// Why an app's monitor has not checked yet.
+pub const WAITING_FOR_APP: &str = "waiting for the app's first live deployment";
 
 /// Is the address policy relaxed (the platform's private-targets setting)?
 pub type AllowPrivate = Arc<dyn Fn() -> bool + Send + Sync>;
@@ -520,8 +523,24 @@ impl Monitors {
         }
     }
 
-    /// Run one check now.
+    /// Run one check now. An app's monitor that has not been up yet does
+    /// not look at the app until it has a live deployment: the check fails
+    /// as "waiting", which the state machine keeps as pending.
     pub fn check(&self, org: &OrgId, m: &Monitor) -> Outcome {
+        if m.kind == Kind::App
+            && self
+                .stored(org, &m.name)
+                .map(|s| s.state.status == Status::Pending)
+                .unwrap_or(true)
+            && !target::app_is_live(&self.inner.apps, org, m)
+        {
+            return Outcome {
+                at: now_ms(),
+                ok: false,
+                error: Some(WAITING_FOR_APP.into()),
+                ..Default::default()
+            };
+        }
         let ctx = Ctx {
             apps: &self.inner.apps,
             ctl: self.inner.apps.controller(),
@@ -541,6 +560,12 @@ impl Monitors {
         }
         let db = self.db(org)?;
         let db = db.lock().unwrap();
+        let mut s: Stored = db.load_state(&m.name)?.unwrap_or_default();
+        let t = Thresholds {
+            failures: m.failure_threshold,
+            recoveries: m.recovery_threshold,
+        };
+        let step = s.state.observe(o.ok, o.at, t);
         db.insert(
             &m.name,
             &Check {
@@ -549,14 +574,13 @@ impl Monitors {
                 latency_ms: o.latency_ms,
                 status: o.status,
                 error: o.error.clone(),
+                pending: step.pending,
             },
         )?;
-        let mut s: Stored = db.load_state(&m.name)?.unwrap_or_default();
-        let t = Thresholds {
-            failures: m.failure_threshold,
-            recoveries: m.recovery_threshold,
-        };
-        let step = s.state.observe(o.ok, o.at, t);
+        if let Notify::NeverUp { since } = step.notify {
+            let why = format!("never came up: {}", o.error.as_deref().unwrap_or("failed"));
+            db.open_incident(&m.name, since, Some(&why))?;
+        }
         match step.changed {
             Some(Status::Down) => {
                 let since = s.state.failing_since.unwrap_or(o.at);
@@ -573,6 +597,7 @@ impl Monitors {
             Notify::Down { since, flapping } => {
                 self.emit_down(org, m, &o, since, flapping, s.state.fails)
             }
+            Notify::NeverUp { since } => self.emit_never_up(org, m, &o, since, s.state.fails),
             Notify::Up {
                 down_since,
                 downtime_ms,
@@ -685,6 +710,24 @@ impl Monitors {
         );
     }
 
+    /// A new monitor that has not had one successful check in
+    /// [`NEVER_UP_MS`]: a `monitor.down` saying so, once.
+    fn emit_never_up(&self, org: &OrgId, m: &Monitor, o: &Outcome, since: u64, fails: u32) {
+        let mut d = self.base_details(org, m, o);
+        d["down_since"] = json!(since);
+        d["failures"] = json!(fails);
+        d["flapping"] = json!(false);
+        d["never_up"] = json!(true);
+        self.emit(
+            org,
+            m,
+            "monitor.down",
+            "error",
+            never_up_message(m, o, fails),
+            d,
+        );
+    }
+
     fn emit_up(&self, org: &OrgId, m: &Monitor, o: &Outcome, down_since: u64, downtime_ms: u64) {
         let mut d = self.base_details(org, m, o);
         d["down_since"] = json!(down_since);
@@ -740,6 +783,17 @@ pub fn down_message(m: &Monitor, o: &Outcome, fails: u32, flapping: bool) -> Str
         s.push_str("; it is flapping, so further changes are held until it is stable for 30 min");
     }
     s
+}
+
+pub fn never_up_message(m: &Monitor, o: &Outcome, fails: u32) -> String {
+    let why = o.error.as_deref().unwrap_or("failed");
+    format!(
+        "Monitor {} never came up: {}: {why} (no successful check in {} min, {fails} failed check{})",
+        m.name,
+        what(m, o),
+        NEVER_UP_MS / 60_000,
+        if fails == 1 { "" } else { "s" }
+    )
 }
 
 pub fn up_message(m: &Monitor, o: &Outcome, downtime_ms: u64) -> String {

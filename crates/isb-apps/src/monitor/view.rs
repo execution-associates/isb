@@ -31,8 +31,10 @@ fn uptimes(db: &Db, name: &str, now: u64) -> Result<Value> {
 
 impl Monitors {
     /// One monitor as listings show it: its definition, `status` (up, down,
-    /// pending, paused), the last check, uptime over 24 h, 7 d and 30 d,
-    /// latency p50/p95 over 24 h, 24 hourly bars and the last 30 latencies.
+    /// pending, paused), `never_up` (pending for 30 minutes with only
+    /// failures), the last check, uptime over 24 h, 7 d and 30 d, latency
+    /// p50/p95 over 24 h, 24 hourly bars (`[start, uptime, pending checks]`)
+    /// and the last 30 latencies.
     pub fn summary(&self, org: &OrgId, m: &Monitor) -> Result<Value> {
         let now = now_ms();
         let st = self.stored(org, &m.name)?;
@@ -47,7 +49,7 @@ impl Monitors {
                 HOUR_MS,
             )?
             .into_iter()
-            .map(|b| json!([b.at, b.uptime]))
+            .map(|b| json!([b.at, b.uptime, b.pending]))
             .collect();
         let mut spark: Vec<Value> = db
             .recent(&m.name, 30)?
@@ -68,6 +70,7 @@ impl Monitors {
         v["status"] = json!(status);
         v["since"] = json!(st.state.since);
         v["flapping"] = json!(st.state.flapping);
+        v["never_up"] = json!(st.state.never_up && !m.paused);
         v["target"] = json!(m.target());
         v["last"] = serde_json::to_value(&st.last)?;
         v["uptime"] = uptimes(&db, &m.name, now)?;

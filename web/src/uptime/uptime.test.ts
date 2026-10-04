@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { compactEvents, selectedKinds } from "@/notifications/api";
-import { downtimeText, monitorNameProblem, monitorsOfApp, type Monitor, statusProblem, targetText, uptimeText, uptimeTone } from "./api";
+import { downtimeText, monitorNameProblem, monitorsOfApp, type Monitor, statusProblem, statusText, statusTone, targetText, uptimeText, uptimeTone } from "./api";
 import { argsOf } from "./monitor-dialog";
 
 const form = (p: Record<string, unknown> = {}) =>
@@ -39,6 +39,18 @@ describe("uptime", () => {
     expect(uptimeTone(50)).toBe("danger");
     expect(downtimeText(252_000)).toBe("4m 12s");
     expect(downtimeText(7_500_000)).toBe("2h 5m");
+  });
+
+  it("shows a monitor that has not been up yet as pending, not down", () => {
+    expect(statusText({ status: "pending" })).toBe("Pending");
+    expect(statusTone({ status: "pending" })).toBe("neutral");
+    // Never up after the first half hour: a problem, still not "down".
+    expect(statusText({ status: "pending", never_up: true })).toBe("Never came up");
+    expect(statusTone({ status: "pending", never_up: true })).toBe("danger");
+    expect(statusText({ status: "down" })).toBe("Down");
+    // No checks counted yet: no percentage, never a red one.
+    expect(uptimeText(null)).toBe("–");
+    expect(uptimeTone(null)).toBe("muted");
   });
 
   it("checks names and status ranges as the daemon does", () => {

@@ -3,10 +3,14 @@
 //!
 //! | Table | Rows | Kept |
 //! |---|---|---|
-//! | `checks` | every check: ok, latency, HTTP status, error | 7 days |
-//! | `hourly` | per monitor and hour: checks, successes, latency p50 and p95 | 90 days |
+//! | `checks` | every check: ok, pending, latency, HTTP status, error | 7 days |
+//! | `hourly` | per monitor and hour: checks, successes, pending checks, latency p50 and p95 | 90 days |
 //! | `incidents` | each time a monitor went down, and when it came back | 90 days after it ended |
 //! | `state` | each monitor's [`super::state::State`] and last check | while the monitor exists |
+//!
+//! A *pending* check is a failure before the monitor's first success: kept
+//! (grey in the history) but never counted as a check, so it is not in an
+//! uptime percentage.
 //!
 //! A row is about 60 bytes: a monitor checked every 30 s keeps about
 //! 20,000 raw rows and 2,160 hourly ones.
@@ -34,6 +38,9 @@ pub struct Check {
     pub status: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// A failure while the monitor waited for its first success.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pending: bool,
 }
 
 /// A time bucket of checks.
@@ -41,8 +48,11 @@ pub struct Check {
 pub struct Bucket {
     /// Unix milliseconds the bucket starts.
     pub at: u64,
+    /// Counted checks (pending ones are not).
     pub checks: u64,
     pub ok: u64,
+    /// Checks that failed while the monitor waited for its first success.
+    pub pending: u64,
     /// Percent of checks that succeeded; none without checks.
     pub uptime: Option<f64>,
     pub p50: Option<u64>,
@@ -111,20 +121,119 @@ impl Db {
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
             .map_err(db_err)?;
         conn.execute_batch(SCHEMA).map_err(db_err)?;
-        Ok(Db { conn })
+        let db = Db { conn };
+        db.migrate()?;
+        Ok(db)
+    }
+
+    /// Add the pending columns to older files, and once drop the downtime
+    /// recorded before a monitor's first success (see [`Db::heal_pending`]).
+    fn migrate(&self) -> Result<()> {
+        let mut added = false;
+        for t in ["checks", "hourly"] {
+            let has = self
+                .conn
+                .query_row(
+                    &format!(
+                        "SELECT COUNT(*) FROM pragma_table_info('{t}') WHERE name = 'pending'"
+                    ),
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )
+                .map_err(db_err)?
+                > 0;
+            if !has {
+                self.conn
+                    .execute_batch(&format!(
+                        "ALTER TABLE {t} ADD COLUMN pending INTEGER NOT NULL DEFAULT 0"
+                    ))
+                    .map_err(db_err)?;
+                added = true;
+            }
+        }
+        if added {
+            self.heal_pending()?;
+        }
+        Ok(())
+    }
+
+    /// Failures before a monitor's first success were never downtime:
+    /// mark those checks pending, drop the incidents that began before it,
+    /// and put a monitor that never succeeded back to pending.
+    fn heal_pending(&self) -> Result<()> {
+        let monitors: Vec<String> = {
+            let mut st = self
+                .conn
+                .prepare("SELECT monitor FROM state UNION SELECT monitor FROM checks")
+                .map_err(db_err)?;
+            let rows = st.query_map([], |r| r.get(0)).map_err(db_err)?;
+            rows.collect::<std::result::Result<_, _>>()
+                .map_err(db_err)?
+        };
+        for m in monitors {
+            let first_ok: Option<i64> = self
+                .conn
+                .query_row(
+                    "SELECT MIN(t) FROM (SELECT MIN(ts) AS t FROM checks WHERE monitor = ?1 AND ok = 1 UNION ALL SELECT MIN(hour) FROM hourly WHERE monitor = ?1 AND ok > 0)",
+                    [&m],
+                    |r| r.get(0),
+                )
+                .map_err(db_err)?;
+            let until = first_ok.unwrap_or(i64::MAX);
+            self.conn
+                .execute(
+                    "UPDATE checks SET pending = 1 WHERE monitor = ?1 AND ok = 0 AND ts < ?2",
+                    params![m, until],
+                )
+                .map_err(db_err)?;
+            self.conn
+                .execute(
+                    "UPDATE hourly SET pending = total, total = 0 WHERE monitor = ?1 AND ok = 0 AND hour < ?2",
+                    params![m, until],
+                )
+                .map_err(db_err)?;
+            self.conn
+                .execute(
+                    "DELETE FROM incidents WHERE monitor = ?1 AND started < ?2",
+                    params![m, until],
+                )
+                .map_err(db_err)?;
+            if first_ok.is_none() {
+                self.reset_down_state(&m)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// A monitor that never succeeded is not down: back to pending.
+    fn reset_down_state(&self, monitor: &str) -> Result<()> {
+        let Some(mut v) = self.load_state::<serde_json::Value>(monitor)? else {
+            return Ok(());
+        };
+        let Some(st) = v["state"].as_object_mut().filter(|o| o["status"] == "down") else {
+            return Ok(());
+        };
+        st.insert("status".into(), "pending".into());
+        st.insert("fails".into(), 0.into());
+        st.insert("downs".into(), serde_json::json!([]));
+        st.insert("flapping".into(), false.into());
+        st.remove("failing_since");
+        self.save_state(monitor, &v)
     }
 
     pub fn memory() -> Result<Db> {
         let conn = Connection::open_in_memory().map_err(db_err)?;
         conn.execute_batch(SCHEMA).map_err(db_err)?;
-        Ok(Db { conn })
+        let db = Db { conn };
+        db.migrate()?;
+        Ok(db)
     }
 
     pub fn insert(&self, monitor: &str, c: &Check) -> Result<()> {
         self.conn
             .execute(
-                "INSERT INTO checks (monitor, ts, ok, latency, status, error) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![monitor, i(c.at), c.ok, c.latency_ms.map(i), c.status, c.error],
+                "INSERT INTO checks (monitor, ts, ok, latency, status, error, pending) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![monitor, i(c.at), c.ok, c.latency_ms.map(i), c.status, c.error, c.pending],
             )
             .map_err(db_err)?;
         Ok(())
@@ -135,7 +244,7 @@ impl Db {
         let mut st = self
             .conn
             .prepare(
-                "SELECT ts, ok, latency, status, error FROM checks WHERE monitor = ?1 ORDER BY ts DESC LIMIT ?2",
+                "SELECT ts, ok, latency, status, error, pending FROM checks WHERE monitor = ?1 ORDER BY ts DESC LIMIT ?2",
             )
             .map_err(db_err)?;
         let rows = st
@@ -146,6 +255,7 @@ impl Db {
                     latency_ms: r.get::<_, Option<i64>>(2)?.map(|v| v as u64),
                     status: r.get(3)?,
                     error: r.get(4)?,
+                    pending: r.get(5)?,
                 })
             })
             .map_err(db_err)?;
@@ -217,7 +327,7 @@ impl Db {
         let (t2, o2): (i64, i64) = self
             .conn
             .query_row(
-                "SELECT COUNT(*), COALESCE(SUM(ok), 0) FROM checks WHERE monitor = ?1 AND ts >= ?2 AND ts < ?3",
+                "SELECT COUNT(*), COALESCE(SUM(ok), 0) FROM checks WHERE monitor = ?1 AND ts >= ?2 AND ts < ?3 AND pending = 0",
                 params![monitor, i(split), i(to)],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
@@ -266,6 +376,7 @@ impl Db {
                 at: from + k * step,
                 checks: 0,
                 ok: 0,
+                pending: 0,
                 uptime: None,
                 p50: None,
                 p95: None,
@@ -294,7 +405,7 @@ impl Db {
         let mut st = self
             .conn
             .prepare(
-                "SELECT ts, ok, latency FROM checks WHERE monitor = ?1 AND ts >= ?2 AND ts < ?3",
+                "SELECT ts, ok, latency, pending FROM checks WHERE monitor = ?1 AND ts >= ?2 AND ts < ?3",
             )
             .map_err(db_err)?;
         let rows = st
@@ -303,14 +414,19 @@ impl Db {
                     r.get::<_, i64>(0)? as u64,
                     r.get::<_, bool>(1)?,
                     r.get::<_, Option<i64>>(2)?,
+                    r.get::<_, bool>(3)?,
                 ))
             })
             .map_err(db_err)?;
         let mut lat: Vec<Vec<u64>> = vec![Vec::new(); out.len()];
         for row in rows {
-            let (ts, ok, l) = row.map_err(db_err)?;
+            let (ts, ok, l, pending) = row.map_err(db_err)?;
             let k = (ts.saturating_sub(base) / step) as usize;
             let Some(b) = out.get_mut(k) else { continue };
+            if pending {
+                b.pending += 1;
+                continue;
+            }
             b.checks += 1;
             if ok {
                 b.ok += 1;
@@ -337,22 +453,30 @@ impl Db {
     ) -> Result<()> {
         let mut st = self
             .conn
-            .prepare("SELECT hour, total, ok, p50, p95 FROM hourly WHERE monitor = ?1 AND hour >= ?2 AND hour < ?3")
+            .prepare("SELECT hour, total, ok, p50, p95, pending FROM hourly WHERE monitor = ?1 AND hour >= ?2 AND hour < ?3")
             .map_err(db_err)?;
-        type Row = (i64, i64, i64, Option<i64>, Option<i64>);
+        type Row = (i64, i64, i64, Option<i64>, Option<i64>, i64);
         let rows = st
             .query_map(
                 params![monitor, i(from), i(to)],
                 |r| -> rusqlite::Result<Row> {
-                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                    ))
                 },
             )
             .map_err(db_err)?;
         let mut p: Vec<(Vec<u64>, Vec<u64>)> = vec![(Vec::new(), Vec::new()); out.len()];
         for row in rows {
-            let (h, total, ok, p50, p95) = row.map_err(db_err)?;
+            let (h, total, ok, p50, p95, pending) = row.map_err(db_err)?;
             let k = ((h as u64 - from) / step) as usize;
             let Some(b) = out.get_mut(k) else { continue };
+            b.pending += pending as u64;
             b.checks += total as u64;
             b.ok += ok as u64;
             p[k].0.extend(p50.map(|x| x as u64));
@@ -364,6 +488,7 @@ impl Db {
         for b in &mut tail {
             b.checks = 0;
             b.ok = 0;
+            b.pending = 0;
         }
         if split < to {
             self.fill_raw(monitor, (split, to), from, step, &mut tail)?;
@@ -371,6 +496,7 @@ impl Db {
         for ((b, t), (mut a, mut c)) in out.iter_mut().zip(tail).zip(p) {
             b.checks += t.checks;
             b.ok += t.ok;
+            b.pending += t.pending;
             a.sort_unstable();
             c.sort_unstable();
             b.p50 = percentile(&a, 50.0).or(t.p50);
@@ -469,7 +595,7 @@ impl Db {
 fn roll_hour(tx: &rusqlite::Transaction, h: u64) -> Result<()> {
     let mut st = tx
         .prepare_cached(
-            "SELECT monitor, ok, latency FROM checks WHERE ts >= ?1 AND ts < ?2 ORDER BY monitor",
+            "SELECT monitor, ok, latency, pending FROM checks WHERE ts >= ?1 AND ts < ?2 ORDER BY monitor",
         )
         .map_err(db_err)?;
     let rows = st
@@ -478,24 +604,29 @@ fn roll_hour(tx: &rusqlite::Transaction, h: u64) -> Result<()> {
                 r.get::<_, String>(0)?,
                 r.get::<_, bool>(1)?,
                 r.get::<_, Option<i64>>(2)?,
+                r.get::<_, bool>(3)?,
             ))
         })
         .map_err(db_err)?;
-    let mut per: std::collections::BTreeMap<String, (u64, u64, Vec<u64>)> = Default::default();
+    let mut per: std::collections::BTreeMap<String, (u64, u64, Vec<u64>, u64)> = Default::default();
     for row in rows {
-        let (m, ok, l) = row.map_err(db_err)?;
+        let (m, ok, l, pending) = row.map_err(db_err)?;
         let e = per.entry(m).or_default();
+        if pending {
+            e.3 += 1;
+            continue;
+        }
         e.0 += 1;
         if ok {
             e.1 += 1;
             e.2.extend(l.map(|l| l as u64));
         }
     }
-    for (m, (total, ok, mut l)) in per {
+    for (m, (total, ok, mut l, pending)) in per {
         l.sort_unstable();
         tx.execute(
-            "INSERT OR REPLACE INTO hourly (monitor, hour, total, ok, p50, p95) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![m, i(h), i(total), i(ok), percentile(&l, 50.0).map(i), percentile(&l, 95.0).map(i)],
+            "INSERT OR REPLACE INTO hourly (monitor, hour, total, ok, p50, p95, pending) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![m, i(h), i(total), i(ok), percentile(&l, 50.0).map(i), percentile(&l, 95.0).map(i), i(pending)],
         )
         .map_err(db_err)?;
     }
@@ -513,6 +644,7 @@ mod tests {
             latency_ms: Some(l),
             status: Some(if ok { 200 } else { 503 }),
             error: (!ok).then(|| "HTTP 503".into()),
+            pending: false,
         }
     }
 
@@ -563,6 +695,70 @@ mod tests {
         // Past the keeps, everything goes.
         db.rollup(end + 91 * 86_400_000).unwrap();
         assert_eq!(db.counts("web", day0, end).unwrap().0, 0);
+    }
+
+    #[test]
+    fn pending_checks_are_not_counted() {
+        let mut db = Db::memory().unwrap();
+        let t0 = 100 * 86_400_000;
+        for m in 0..30 {
+            let mut c = check(t0 + m * 60_000, false, 0);
+            c.pending = true;
+            db.insert("web", &c).unwrap();
+        }
+        for m in 30..40 {
+            db.insert("web", &check(t0 + m * 60_000, true, 5)).unwrap();
+        }
+        let end = t0 + HOUR_MS;
+        assert_eq!(db.counts("web", t0, end).unwrap(), (10, 10));
+        assert_eq!(db.uptime("web", t0, end).unwrap(), Some(100.0));
+        let b = db.buckets("web", t0, end, 20 * 60_000).unwrap();
+        assert_eq!((b[0].checks, b[0].pending, b[0].uptime), (0, 20, None));
+        assert_eq!((b[1].checks, b[1].pending), (10, 10));
+        let recent = db.recent("web", 50).unwrap();
+        assert_eq!(recent.iter().filter(|c| c.pending).count(), 30);
+        // The rollup keeps them out of the totals too.
+        db.rollup(end + 1000).unwrap();
+        assert_eq!(db.counts("web", t0, end).unwrap(), (10, 10));
+        let h = db.buckets("web", t0, end, HOUR_MS).unwrap();
+        assert_eq!((h[0].checks, h[0].ok, h[0].pending), (10, 10, 30));
+    }
+
+    #[test]
+    fn old_downtime_before_the_first_success_heals() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("m.db");
+        {
+            // An old file: no pending columns.
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE checks (monitor TEXT NOT NULL, ts INTEGER NOT NULL, ok INTEGER NOT NULL, latency INTEGER, status INTEGER, error TEXT);
+                 CREATE TABLE hourly (monitor TEXT NOT NULL, hour INTEGER NOT NULL, total INTEGER NOT NULL, ok INTEGER NOT NULL, p50 INTEGER, p95 INTEGER, PRIMARY KEY (monitor, hour));
+                 CREATE TABLE incidents (id INTEGER PRIMARY KEY AUTOINCREMENT, monitor TEXT NOT NULL, started INTEGER NOT NULL, ended INTEGER, error TEXT);
+                 CREATE TABLE state (monitor TEXT PRIMARY KEY, json TEXT NOT NULL);
+                 INSERT INTO checks VALUES ('umami', 1000, 0, NULL, NULL, 'refused'), ('umami', 2000, 0, NULL, NULL, 'refused');
+                 INSERT INTO incidents (monitor, started, error) VALUES ('umami', 1000, 'refused');
+                 INSERT INTO state VALUES ('umami', '{\"state\":{\"status\":\"down\",\"fails\":2,\"notified\":\"down\"}}');
+                 INSERT INTO checks VALUES ('shop', 1000, 0, NULL, NULL, 'x'), ('shop', 5000, 1, 3, 200, NULL), ('shop', 6000, 0, NULL, NULL, 'x'), ('shop', 7000, 0, NULL, NULL, 'x');
+                 INSERT INTO incidents (monitor, started, error) VALUES ('shop', 1000, 'x'), ('shop', 6000, 'x');",
+            )
+            .unwrap();
+        }
+        let db = Db::open(&path).unwrap();
+        assert!(db.incidents(Some("umami"), 10, 9000).unwrap().is_empty());
+        let s: serde_json::Value = db.load_state("umami").unwrap().unwrap();
+        assert_eq!(s["state"]["status"], "pending");
+        assert!(db.recent("umami", 10).unwrap().iter().all(|c| c.pending));
+        assert_eq!(db.counts("umami", 0, 9000).unwrap(), (0, 0));
+        // A real outage after the first success stays.
+        let inc = db.incidents(Some("shop"), 10, 9000).unwrap();
+        assert_eq!(inc.len(), 1);
+        assert_eq!(inc[0].started, 6000);
+        assert_eq!(db.counts("shop", 0, 9000).unwrap(), (3, 1));
+        // A second open changes nothing.
+        drop(db);
+        let db = Db::open(&path).unwrap();
+        assert_eq!(db.incidents(Some("shop"), 10, 9000).unwrap().len(), 1);
     }
 
     #[test]

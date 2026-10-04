@@ -67,16 +67,32 @@ curl -H "Authorization: Bearer $ISB_TOKEN" -H 'Content-Type: application/json' \
   https://isb.example.com/orgs/acme/api/v1/tools/monitor_create
 ```
 
-## Down, up, and nothing in between
+## Pending, down, up, and nothing in between
 
+- A new monitor starts **pending** and stays so until its first successful
+  check. Checks that fail before that are *pending* checks: shown grey in the
+  UI ("Waiting for the first successful check"), never an incident, never a
+  `monitor.down`, not counted toward `failure_threshold`, and left out of
+  uptime percentages and the uptime bars' red. The first success makes it
+  **up**, without a `monitor.up`. After that the thresholds below apply as
+  usual, so real downtime is never hidden.
+- An `app` monitor (including an app's own) does not even look at the app
+  while it is pending and the app has no live deployment (no healthy replica
+  in rotation); it records a pending "waiting for the app's first live
+  deployment" check instead. Once it has been up, a failed rollout that leaves
+  the old revision serving does not page, and a real outage does.
+- A monitor still pending with only failures after 30 minutes is flagged **never came
+  up** (`never_up: true` in `monitor_list` and `monitor_get`; shown red as
+  "Never came up"). It opens an incident dated from its first check and sends
+  one `monitor.down` saying so; it stays pending, and its first success sends
+  `monitor.up` and closes the incident.
 - `failure_threshold` failures in a row make a monitor **down**: channels get
   `monitor.down` once, and an incident opens, dated from the first failure.
 - `recovery_threshold` successes in a row make it **up**: channels get
   `monitor.up` with how long it was down, and the incident closes. One
   success between failures does not count (hysteresis).
 - Notifications alternate: never two downs or two ups in a row, and an up only
-  after a down was sent. A new monitor's first success is not news; a new
-  monitor that is down is.
+  after a down was sent. A new monitor's first success is not news.
 - A monitor that went down 3 times within 30 minutes is **flapping**: the down
   that makes it so is sent (saying so), then nothing until it has held one
   state for 30 minutes; then the state it settled in is sent, if channels last
@@ -186,7 +202,8 @@ plane raises `server.unreachable` when a server stops answering its heartbeat
 
 Per org, in `<state>/orgs/<org>/monitors/monitors.db` (SQLite): every check
 for 7 days, hourly rollups (checks, successes, latency p50 and p95) for 90
-days, incidents for 90 days after they end. A monitor checked every 30 s keeps
+days (pending checks are kept but never counted), incidents for 90 days after
+they end. A monitor checked every 30 s keeps
 about 20,000 rows. `monitor_list` and `monitor_get` report uptime over 24 h,
 7 d and 30 d and latency p50/p95 over 24 h; `monitor_checks` returns buckets
 over `1h`, `24h`, `7d`, `30d` or `90d` and the latest raw checks. Definitions

@@ -4,14 +4,17 @@ import { StatusBadge } from "@/components/status";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TONE_DOT } from "@/lib/status";
 import { cn } from "@/lib/utils";
-import { type Monitor, msText, STATUS_LABEL, STATUS_TONE, uptimeText, uptimeTone } from "./api";
+import { type Bar, type Monitor, msText, NEVER_UP_HINT, PENDING_HINT, statusText, statusTone, uptimeText, uptimeTone } from "./api";
 
-export function MonitorBadge({ m, className }: { m: Pick<Monitor, "status" | "flapping">; className?: string }) {
+export function MonitorBadge({ m, className }: { m: Pick<Monitor, "status" | "flapping" | "never_up">; className?: string }) {
+  const hint = m.status === "pending" ? (m.never_up ? NEVER_UP_HINT : PENDING_HINT) : undefined;
   return (
-    <StatusBadge tone={STATUS_TONE[m.status]} pulse={m.status === "down"} className={className}>
-      {STATUS_LABEL[m.status]}
-      {m.flapping && m.status !== "paused" ? " · flapping" : ""}
-    </StatusBadge>
+    <span title={hint} className="inline-flex">
+      <StatusBadge tone={statusTone(m)} pulse={m.status === "down"} className={className}>
+        {statusText(m)}
+        {m.flapping && m.status !== "paused" ? " · flapping" : ""}
+      </StatusBadge>
+    </span>
   );
 }
 
@@ -20,17 +23,17 @@ const when = (at: number, stepMs: number) => {
   return stepMs >= 86_400_000 ? d.toLocaleDateString() : d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 };
 
-/** A row of bars, one per bucket, coloured by its uptime; grey without checks. */
-export function UptimeBars({ bars, stepMs = 3_600_000, className, height = "h-7" }: { bars: [number, number | null][]; stepMs?: number; className?: string; height?: string }) {
+/** A row of bars, one per bucket, coloured by its uptime; grey without checks, darker grey while only pending. */
+export function UptimeBars({ bars, stepMs = 3_600_000, className, height = "h-7" }: { bars: Bar[]; stepMs?: number; className?: string; height?: string }) {
   return (
     <div className={cn("flex items-stretch gap-[2px]", height, className)} role="img" aria-label={`Uptime over ${bars.length} periods`}>
-      {bars.map(([at, u]) => (
+      {bars.map(([at, u, pending]) => (
         <Tooltip key={at}>
           <TooltipTrigger asChild>
-            <span className={cn("min-w-[3px] flex-1 rounded-[2px] transition-opacity hover:opacity-70", u === null ? "bg-muted" : TONE_DOT[uptimeTone(u)])} />
+            <span className={cn("min-w-[3px] flex-1 rounded-[2px] transition-opacity hover:opacity-70", u === null ? (pending ? "bg-muted-foreground/40" : "bg-muted") : TONE_DOT[uptimeTone(u)])} />
           </TooltipTrigger>
           <TooltipContent>
-            {when(at, stepMs)}: {u === null ? "no checks" : `${uptimeText(u)} up`}
+            {when(at, stepMs)}: {u === null ? (pending ? "waiting for the first successful check" : "no checks") : `${uptimeText(u)} up`}
           </TooltipContent>
         </Tooltip>
       ))}
