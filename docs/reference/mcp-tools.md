@@ -323,7 +323,7 @@ and owners.
 | `org_delete` | platform admin | Refused while stacks are deployed; `force` deletes remaining sandboxes; `delete_vm` deletes a dedicated VM. |
 | `ingress_status` | anyone signed in | Listeners, CA, the Caddy process, every routed domain (URL, certificate state, upstreams), conflicts and refusals, each tunnel org's cloudflared. The caller's orgs only. |
 | `overview` | anyone signed in | Everything a dashboard shows in one call: host CPU and memory with history, every stack in detail, sandboxes with CPU and memory, the latest event number. |
-| `events` | anyone signed in | The event feed after a `since` cursor (`limit`), waiting up to 30 s (`wait`) for one. |
+| `events` | anyone signed in | The event feed after a `since` cursor (`limit`), waiting up to 30 s (`wait`) for one. Numbering restarts with the daemon: a `since` past the newest `seq` starts over from the kept events. |
 | `server_status` | platform admin | isb's and incus' versions, and the balancer's routes with live counters. |
 
 ## Audit and history

@@ -31,7 +31,6 @@ import { cn } from "@/lib/utils";
 import { type App, type AppState, appState, type Deployment, keys, type Project, serviceOf, type StackDetail, useApps, useProjects } from "./api";
 import { DeploymentBadge, Dot, EmptyState, QueryError, ToneBadge } from "./components";
 import { HEALTH_LABEL, HEALTH_TONE, parseSize, projectHealth, usageOf, useOrgOverview } from "./health";
-import { useOrgLive } from "./live";
 import { OrgActivity, actorLabel } from "./overview-activity";
 import { NewProjectDialog } from "./project-dialogs";
 import { bytes, duration, shortSha } from "./util";
@@ -72,7 +71,6 @@ export function OrgDashboard({ org }: { org: string }) {
   const projects = useProjects(org);
   const apps = useApps(org);
   const overview = useOrgOverview(org);
-  useOrgLive(org);
   const info = useQuery({
     queryKey: ["tool", "org_get", org],
     queryFn: () => callTool<OrgView>("org_get", {}, org),

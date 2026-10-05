@@ -4,6 +4,7 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { ApiError } from "@/api/client";
 import { callTool, type ServiceStatus } from "@/api/tools";
+import { LIVE_POLL } from "@/lib/freshness";
 import type { DomainSpec, DomainStatus } from "./domains";
 
 export interface EnvironmentInfo {
@@ -168,6 +169,8 @@ export function useProjects(org: string) {
   return useQuery({
     queryKey: keys.projects(org),
     queryFn: () => callTool<{ projects: Project[] }>("project_list", {}, org).then((r) => r.projects),
+    // No event says a project or an environment was made or removed.
+    refetchInterval: LIVE_POLL,
   });
 }
 
@@ -175,6 +178,8 @@ export function useApps(org: string) {
   return useQuery({
     queryKey: keys.apps(org),
     queryFn: () => callTool<{ apps: App[] }>("app_list", {}, org).then((r) => r.apps),
+    // Nor that an app was made, changed or removed without a deploy.
+    refetchInterval: LIVE_POLL,
   });
 }
 
@@ -210,7 +215,7 @@ export function useLatestDeployments(org: string, apps: string[]) {
 }
 
 /** A stack's status, or null when it is not deployed (no app has run yet). */
-export function useStack(org: string, stack: string | undefined, refetchInterval?: number) {
+export function useStack(org: string, stack: string | undefined, refetchInterval: number = LIVE_POLL) {
   return useQuery({
     queryKey: keys.stack(org, stack ?? ""),
     enabled: !!stack,

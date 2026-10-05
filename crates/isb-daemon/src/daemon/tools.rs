@@ -110,7 +110,7 @@ pub(super) fn events_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Resul
         d,
         "events",
         "Events",
-        "What happened, newest last: deploys, rollouts, health changes, restarts, failures. Pass the last `seq` you saw as `since` to get only newer ones; `wait` (seconds, at most 30) holds the call until one arrives. Every org the caller sees, or only `org` when it is given.",
+        "What happened, newest last: deploys, rollouts, health changes, restarts, failures. Pass the last `seq` you saw as `since` to get only newer ones; `wait` (seconds, at most 30) holds the call until one arrives. A `since` past the newest `seq` is from before the daemon restarted and starts over. Every org the caller sees, or only `org` when it is given.",
         obj(
             json!({
                 "since": {"type": "integer", "minimum": 0},
@@ -135,7 +135,7 @@ pub(super) fn events_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Resul
             }
             let a: A = args(a)?;
             let (seq, events) = d.ctl.wait_events(
-                a.since,
+                d.ctl.resume_from(a.since),
                 a.limit.unwrap_or(200).min(1000),
                 Duration::from_secs(a.wait.min(30)),
             );

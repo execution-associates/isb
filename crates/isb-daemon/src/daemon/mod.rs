@@ -736,7 +736,7 @@ fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate:
         let orgs = visible_orgs(c);
         let ctl = d.ctl.clone();
         Ok(Box::new(move |w: &mut dyn std::io::Write| {
-            let mut since = since;
+            let mut since = ctl.resume_from(since);
             loop {
                 let (seq, evs) = ctl.wait_events(since, 200, Duration::from_secs(15));
                 let mut wrote = false;

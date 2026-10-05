@@ -1,11 +1,11 @@
-// One shared connection to GET /api/v1/events for every app page, with the
-// deployment log lines (level `log`) included. Pages subscribe; the
-// connection opens with the first subscriber and closes shortly after the
-// last one leaves, so moving between pages keeps it.
+// One shared connection to GET /api/v1/events for the whole app, with the
+// deployment log lines (level `log`) included. The shell (useLiveSync) and
+// pages subscribe; the connection opens with the first subscriber and closes
+// shortly after the last one leaves.
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { backoff, eventsUrl, type StreamState } from "@/api/events";
-import { keys } from "./api";
+import { createInvalidator } from "@/lib/freshness";
 
 export interface LiveEvent {
   seq: number;
@@ -22,15 +22,13 @@ type Listener = (e: LiveEvent) => void;
 
 const LEVELS = ["info", "warn", "log"] as const;
 
-/** `org/stack` -> {org, stack}; a bare name is the default org's. */
-export function splitStack(s: string): { org: string; stack: string } {
-  const i = s.indexOf("/");
-  return i < 0 ? { org: "default", stack: s } : { org: s.slice(0, i), stack: s.slice(i + 1) };
-}
+export { splitStack } from "@/lib/freshness";
 
-class Hub {
+export class Hub {
   private listeners = new Set<Listener>();
   private stateListeners = new Set<(s: StreamState) => void>();
+  private reopenListeners = new Set<() => void>();
+  private opened = false;
   private es: EventSource | null = null;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private closeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -53,6 +51,12 @@ class Hub {
     return () => this.stateListeners.delete(f);
   }
 
+  /** Called when a connection opens after an earlier one: events may have been missed in between. */
+  onReopen(f: () => void): () => void {
+    this.reopenListeners.add(f);
+    return () => this.reopenListeners.delete(f);
+  }
+
   private setState(s: StreamState) {
     this.state = s;
     this.stateListeners.forEach((f) => f(s));
@@ -61,10 +65,10 @@ class Hub {
   private deliver = (m: MessageEvent) => {
     try {
       const e = JSON.parse(m.data) as LiveEvent;
-      if (typeof e.seq === "number") {
-        if (e.seq <= this.since) return; // a replay after reconnecting
-        this.since = e.seq;
-      }
+      // The server sends only events after the cursor, ascending. Not a
+      // high-water mark: numbering restarts with the daemon, and the
+      // server answers a cursor from before that from the start.
+      if (typeof e.seq === "number") this.since = e.seq;
       this.listeners.forEach((l) => l(e));
     } catch {
       // not an event we understand
@@ -78,6 +82,8 @@ class Hub {
     es.onopen = () => {
       this.attempt = 0;
       this.setState("live");
+      if (this.opened) this.reopenListeners.forEach((f) => f());
+      this.opened = true;
     };
     for (const l of LEVELS) es.addEventListener(l, this.deliver);
     // "error" is both an event level and EventSource's failure event; only
@@ -127,19 +133,20 @@ export function useLiveEvents(onEvent: Listener): StreamState {
 }
 
 /**
- * Keep an org's app queries fresh: any event in the org (but a log line)
- * refetches them, bursts coalesced.
+ * Keep every query in step with the server while signed in (mounted once,
+ * by the app shell): an event invalidates what its org shows, bursts
+ * coalesced, and a reconnect refetches everything, since events may have
+ * been missed while the stream was down.
  */
-export function useOrgLive(org: string): StreamState {
+export function useLiveSync(): StreamState {
   const qc = useQueryClient();
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(timer.current), []);
-  return useLiveEvents((e) => {
-    if (e.level === "log" || splitStack(e.stack).org !== org) return;
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      qc.invalidateQueries({ queryKey: keys.org(org) });
-      qc.invalidateQueries({ queryKey: ["tool", "stack_list"] });
-    }, 300);
-  });
+  const inv = useMemo(() => createInvalidator(qc), [qc]);
+  useEffect(() => {
+    const off = hub.onReopen(() => inv.resync());
+    return () => {
+      off();
+      inv.dispose();
+    };
+  }, [inv]);
+  return useLiveEvents((e) => inv.event(e));
 }

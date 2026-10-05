@@ -45,7 +45,6 @@ import { composePath } from "@/stacks/api";
 import { AppStateBadge, ConfirmDialog, Crumbs, DeploymentBadge, EmptyState, QueryError, TabLinks, ToneBadge } from "./components";
 import { autoHostLabel, ingressOff } from "./domains";
 import { HEALTH_LABEL, HEALTH_TONE, stackHealth, useStackList } from "./health";
-import { useOrgLive } from "./live";
 import { NewAppDialog } from "./new-app-dialog";
 import { NewEnvironmentDialog } from "./project-dialogs";
 import { imageName, shortSha } from "./util";
@@ -55,7 +54,6 @@ export function ProjectPage() {
   const writer = canWrite(useMe().data!, org);
   const projects = useProjects(org);
   const apps = useApps(org);
-  useOrgLive(org);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [newApp, setNewApp] = useState(false);

@@ -460,6 +460,18 @@ impl Controller {
         (e.0, out.into_iter().skip(skip).collect())
     }
 
+    /// A client's resume cursor for [`Self::events`]: one past the newest
+    /// event came from an earlier process (numbering restarts with the
+    /// daemon), so the client starts over from what is kept instead of
+    /// waiting for this feed to count back up to it.
+    pub fn resume_from(&self, since: u64) -> u64 {
+        if since > self.inner.events.lock().unwrap().0 {
+            0
+        } else {
+            since
+        }
+    }
+
     /// Wait up to `timeout` for an event after `since`.
     pub fn wait_events(&self, since: u64, limit: usize, timeout: Duration) -> (u64, Vec<Event>) {
         let started = Instant::now();

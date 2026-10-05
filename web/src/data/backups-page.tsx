@@ -8,7 +8,6 @@ import { toast } from "sonner";
 import { callTool } from "@/api/tools";
 import { keys } from "@/apps/api";
 import { ConfirmDialog, EmptyState, QueryError, Section } from "@/apps/components";
-import { useOrgLive } from "@/apps/live";
 import { bytes } from "@/apps/util";
 import { PageHeader } from "@/components/app-shell";
 import { ScheduleText } from "@/components/cron-field";
@@ -24,7 +23,6 @@ import { RunBadge, RunLogDialog, RunsTable } from "./runs";
 
 export function BackupsPage() {
   const { org = "" } = useParams();
-  useOrgLive(org);
   const dests = useDestinations(org);
   const backups = useBackups(org);
   const [restoring, setRestoring] = useState(false);

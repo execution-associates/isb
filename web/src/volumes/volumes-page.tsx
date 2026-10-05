@@ -3,7 +3,6 @@
 import { ChevronRight, HardDrive } from "lucide-react";
 import { Link, useParams } from "react-router";
 import { Crumbs, EmptyState, QueryError, Section } from "@/apps/components";
-import { useOrgLive } from "@/apps/live";
 import { PageHeader } from "@/components/app-shell";
 import { ScheduleText } from "@/components/cron-field";
 import { StatusBadge } from "@/components/status";
@@ -13,7 +12,6 @@ import { VolumePanel } from "./volume-panel";
 
 export function VolumesPage() {
   const { org = "" } = useParams();
-  useOrgLive(org);
   const vols = useVolumes(org);
   const o = encodeURIComponent(org);
   const list = (vols.data ?? []).filter((v) => !v.restore_of);
@@ -72,7 +70,6 @@ function VolumeRow({ org, v, staged }: { org: string; v: VolumeSummary; staged: 
 
 export function VolumePage() {
   const { org = "", name = "" } = useParams();
-  useOrgLive(org);
   const o = encodeURIComponent(org);
   return (
     <>

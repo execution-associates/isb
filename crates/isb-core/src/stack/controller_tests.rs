@@ -534,3 +534,18 @@ fn a_replica_that_passed_then_fails_is_restarted_as_before() {
     fail_at(&mut rt, &p, t0, &[30, 35, 40]);
     assert_eq!(rt.healthy, Some(false));
 }
+
+#[test]
+fn a_cursor_from_before_a_restart_starts_over() {
+    let ctl = quiet_controller();
+    ctl.note("info", "web", "one".into());
+    ctl.note("info", "web", "two".into());
+    let (head, _) = ctl.events(0, 10);
+    assert_eq!(head, 2);
+    assert_eq!(ctl.resume_from(head), head);
+    assert_eq!(ctl.resume_from(1), 1);
+    // A browser saw seq 500 from the last process; this one is at 2.
+    assert_eq!(ctl.resume_from(500), 0);
+    let (_, evs) = ctl.events(ctl.resume_from(500), 10);
+    assert_eq!(evs.len(), 2);
+}

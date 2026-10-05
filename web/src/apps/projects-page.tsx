@@ -13,7 +13,6 @@ import type { StackStatus } from "@/api/tools";
 import { type Deployment, type Project, useApps, useLatestDeployments, useProjects } from "./api";
 import { Dot, EmptyState, QueryError, ToneBadge } from "./components";
 import { envHealth, HEALTH_LABEL, HEALTH_TONE, projectHealth, useStackList } from "./health";
-import { useOrgLive } from "./live";
 import { NewProjectDialog } from "./project-dialogs";
 
 /** When anything in the project last deployed (Unix ms): an app's deployment or a compose stack's deploy. */
@@ -41,7 +40,6 @@ export function ProjectsPage() {
   const projects = useProjects(org);
   const apps = useApps(org);
   const stacks = useStackList();
-  useOrgLive(org);
   const latest = useLatestDeployments(
     org,
     (apps.data ?? []).map((a) => a.name),

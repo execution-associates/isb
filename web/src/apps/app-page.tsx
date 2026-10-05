@@ -25,7 +25,7 @@ import { AppStateBadge, ConfirmDialog, Crumbs, EmptyState, QueryError } from "./
 import { DeploymentBanner, ServiceHeader, ServiceTabBar } from "./service-page";
 import { DeploymentPage } from "./deployment-page";
 import { DeploymentsTab } from "./deployments-tab";
-import { splitStack, useLiveEvents, useOrgLive } from "./live";
+import { splitStack, useLiveEvents } from "./live";
 import { deploymentLine, stripAnsi } from "./logstream";
 import { engineLabel, isDatabase } from "@/data/api";
 import { deploymentPath, useDeploy } from "./use-deploy";
@@ -42,7 +42,6 @@ const PreviewsTab = lazy(() => import("@/previews/previews-tab").then((m) => ({ 
 export function AppPage() {
   const { org = "", app: name = "", tab, id } = useParams();
   const app = useApp(org, name);
-  useOrgLive(org);
   const o = encodeURIComponent(org);
   // Viewers read: no terminal (the server refuses it to them anyway).
   const writer = canWrite(useMe().data!, org);

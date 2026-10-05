@@ -24,7 +24,6 @@ import { useMe } from "@/lib/session";
 import { finished, isNotFound, keys, useProjects, useStack } from "@/apps/api";
 import { ConfirmDialog, Crumbs, EmptyState, QueryError, ToneBadge } from "@/apps/components";
 import { HEALTH_LABEL, HEALTH_TONE, stackHealth } from "@/apps/health";
-import { useOrgLive } from "@/apps/live";
 import { DeploymentBanner, ServiceHeader, ServiceTabBar } from "@/apps/service-page";
 import { activeServiceTab, serviceTabs, stackTab } from "@/apps/service-tabs";
 import {
@@ -83,7 +82,6 @@ export function StackPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [deploying, setDeploying] = useState(false);
-  useOrgLive(org);
   const o = encodeURIComponent(org);
 
   // The page's old tab names: Compose is YAML, Services is General.
