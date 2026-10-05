@@ -1843,7 +1843,7 @@ export interface paths {
         put?: never;
         /**
          * Events
-         * @description What happened, newest last: deploys, rollouts, health changes, restarts, failures. Pass the last `seq` you saw as `since` to get only newer ones; `wait` (seconds, at most 30) holds the call until one arrives. Every org the caller sees, or only `org` when it is given.
+         * @description What happened, newest last: deploys, rollouts, health changes, restarts, failures. Pass the last `seq` you saw as `since` to get only newer ones; `wait` (seconds, at most 30) holds the call until one arrives. A `since` past the newest `seq` is from before the daemon restarted and starts over. Every org the caller sees, or only `org` when it is given.
          */
         post: operations["events"];
         delete?: never;
