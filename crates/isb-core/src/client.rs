@@ -16,6 +16,7 @@ use serde_json::Value;
 
 use crate::error::{Error, Result};
 
+pub mod console;
 #[cfg(test)]
 pub(crate) mod fake;
 mod stream;
@@ -315,6 +316,7 @@ impl Client {
             status,
             body: bytes,
             etag,
+            ..
         } = self.raw(method, path, body, if_match, timeout)?;
         let env: Envelope = serde_json::from_slice(&bytes).map_err(|e| {
             Error::Protocol(format!(
@@ -406,6 +408,15 @@ impl Client {
         step: &str,
         deadline: Duration,
     ) -> Result<Value> {
+        if method == "DELETE" {
+            // A new instance under this name starts a new console log.
+            if let Some(name) = path.strip_prefix("/1.0/instances/") {
+                let name = name.split('?').next().unwrap_or_default();
+                if !name.contains('/') {
+                    console::forget(self.project_name(), name);
+                }
+            }
+        }
         match self.request(method, path, body, self.timeouts.request)? {
             Reply::Sync(v) => Ok(v),
             Reply::Async { operation, .. } => self.wait_operation(&operation, step, deadline),
@@ -640,22 +651,40 @@ impl Client {
         }
     }
 
-    /// An instance's console log as incus keeps it (an OCI app's output).
+    /// An instance's console log (an OCI app's output): the newest
+    /// [`console::KEEP`] bytes of it. See [`console`] for why isb keeps it.
     pub fn console_log(&self, instance: &str) -> Result<Vec<u8>> {
+        Ok(self.console_since(instance, 0)?.0)
+    }
+
+    /// The console output from position `pos` on (bytes since the log
+    /// began; all that is kept if `pos` was trimmed away), and the position
+    /// after it, for a follower.
+    pub fn console_since(&self, instance: &str, pos: u64) -> Result<(Vec<u8>, u64)> {
+        // Without a place to keep it, a read is still a read.
+        let log = console::Log::open(self.project_name(), instance).ok();
         let url = format!("/1.0/instances/{}/console", encode_segment(instance));
         let r = self.raw_bytes("GET", &url, &[], &[], self.timeouts.request)?;
-        match r.status {
-            200 => Ok(r.body),
-            404 => Ok(Vec::new()),
-            status => Err(Error::Api {
-                method: "GET".into(),
-                path: url,
-                status,
-                message: serde_json::from_slice::<Envelope>(&r.body)
-                    .map(|e| e.error)
-                    .unwrap_or_default(),
-            }),
+        let new = match r.status {
+            200 => r.body,
+            404 => Vec::new(),
+            status => {
+                return Err(Error::Api {
+                    method: "GET".into(),
+                    path: url,
+                    status,
+                    message: serde_json::from_slice::<Envelope>(&r.body)
+                        .map(|e| e.error)
+                        .unwrap_or_default(),
+                });
+            }
+        };
+        if let Some(mut log) = log
+            && log.add(&new, r.from_file).is_ok()
+        {
+            return Ok(log.since(pos));
         }
+        Ok((new, 0))
     }
 
     /// Read a file from an instance; `None` if it does not exist.
@@ -747,6 +776,9 @@ struct RawResponse {
     status: u16,
     body: Vec<u8>,
     etag: Option<String>,
+    /// incus answered with a file it keeps (`Content-Disposition` names
+    /// one): a stopped instance's console log.
+    from_file: bool,
 }
 
 /// If `buf` holds a complete HTTP response, return it with its body decoded.
@@ -764,9 +796,13 @@ fn complete_response(buf: &[u8]) -> Result<Option<RawResponse>> {
     let mut content_length: Option<usize> = None;
     let mut chunked = false;
     let mut etag = None;
+    let mut from_file = false;
     for h in resp.headers.iter() {
         if h.name.eq_ignore_ascii_case("etag") {
             etag = Some(String::from_utf8_lossy(h.value).trim().to_string());
+        }
+        if h.name.eq_ignore_ascii_case("content-disposition") {
+            from_file = disposition_names_a_file(h.value);
         }
         if h.name.eq_ignore_ascii_case("content-length") {
             content_length = std::str::from_utf8(h.value)
@@ -786,6 +822,7 @@ fn complete_response(buf: &[u8]) -> Result<Option<RawResponse>> {
             status,
             body: b,
             etag,
+            from_file,
         }));
     }
     match content_length {
@@ -793,6 +830,7 @@ fn complete_response(buf: &[u8]) -> Result<Option<RawResponse>> {
             status,
             body: body[..n].to_vec(),
             etag,
+            from_file,
         })),
         Some(_) => Ok(None),
         // No length and not chunked: body runs to EOF; the caller decides.
@@ -819,6 +857,14 @@ fn decode_chunked(mut body: &[u8]) -> Option<Vec<u8>> {
     }
 }
 
+/// Whether a `Content-Disposition` names a file (`inline;filename=/var/log/...`,
+/// not incus' empty `inline;filename=`).
+fn disposition_names_a_file(v: &[u8]) -> bool {
+    String::from_utf8_lossy(v)
+        .split_once("filename=")
+        .is_some_and(|(_, f)| !f.trim().trim_matches('"').is_empty())
+}
+
 /// When a response had no length and was cut by EOF, treat what we have as the body.
 fn eof_body(buf: &[u8]) -> Option<RawResponse> {
     let mut headers = [httparse::EMPTY_HEADER; 64];
@@ -828,6 +874,11 @@ fn eof_body(buf: &[u8]) -> Option<RawResponse> {
             status: resp.code?,
             body: buf[n..].to_vec(),
             etag: None,
+            from_file: resp
+                .headers
+                .iter()
+                .find(|h| h.name.eq_ignore_ascii_case("content-disposition"))
+                .is_some_and(|h| disposition_names_a_file(h.value)),
         }),
         httparse::Status::Partial => None,
     }
@@ -873,6 +924,14 @@ mod tests {
         assert_eq!(r.body, b"hello world".to_vec());
         let partial = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhel";
         assert_eq!(complete_response(partial).unwrap(), None);
+    }
+
+    #[test]
+    fn tells_a_kept_console_file() {
+        let running = b"HTTP/1.1 200 OK\r\nContent-Disposition: inline;filename=\r\nContent-Length: 2\r\n\r\nhi";
+        assert!(!complete_response(running).unwrap().unwrap().from_file);
+        let stopped = b"HTTP/1.1 200 OK\r\nContent-Disposition: inline;filename=/var/log/incus/x/console.log\r\nContent-Length: 2\r\n\r\nhi";
+        assert!(complete_response(stopped).unwrap().unwrap().from_file);
     }
 
     #[test]

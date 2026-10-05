@@ -256,5 +256,6 @@ Outside the state directory the daemon also uses:
 | `~/.config/isb/secrets.toml` | Break-glass recipients (`$ISB_SECRETS_CONFIG`). |
 | `$XDG_RUNTIME_DIR/isb/serve.sock` | The unix socket the local CLI talks to (`$ISB_SERVE_SOCKET`). |
 | `/var/lib/isb/dns/` | Service-name hosts files (`$ISB_DNS_DIR`). |
+| `$XDG_STATE_HOME/isb/console/<project>/<instance>.log` | OCI instances' console output, the newest 2 MiB each. incus hands a running container's console out once (each read drains it), so every isb process of this user, the daemon, the TUI, `isb logs` and `isb up`, records what it reads here and reads from here; it ignores `--state-dir` so that they all agree. Not worth backing up. |
 
 What to back up, and what to leave out, is in [Backing up isb](backups.md).
