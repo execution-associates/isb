@@ -222,7 +222,7 @@ class FakeServerTests(unittest.IsolatedAsyncioTestCase):
         path = fake_server(
             self.tmp.name,
             """\
-            echo '{"isb":"1.6.7","protocol":1}'
+            echo '{"isb":"1.6.8","protocol":1}'
             read line
             echo "boom" >&2
             exit 3
@@ -243,7 +243,7 @@ class FakeServerTests(unittest.IsolatedAsyncioTestCase):
         path = fake_server(
             self.tmp.name,
             """\
-            echo '{"isb":"1.6.7","protocol":1}'
+            echo '{"isb":"1.6.8","protocol":1}'
             cat >/dev/null
             """,
         )
@@ -261,7 +261,7 @@ class FakeServerTests(unittest.IsolatedAsyncioTestCase):
         path = fake_server(
             self.tmp.name,
             """\
-            echo '{"isb":"1.6.7","protocol":1}'
+            echo '{"isb":"1.6.8","protocol":1}'
             read a
             read b
             echo 'not json'

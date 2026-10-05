@@ -155,6 +155,7 @@ settings for it.
 |---|---|---|
 | `--listen` | the env file's `ISB_SERVE_LISTEN`, else `127.0.0.1:8092` | the loopback address to serve on; given explicitly, it is written to the env file |
 | `--machine` | `isb` | macOS: the machine the LaunchAgent starts |
+| `--no-host-setup` | off | do not run `sudo isb host setup` on a host that has not had it ([Host setup](../operations/host-setup.md)) |
 
 ## Environment variables
 
@@ -174,6 +175,7 @@ Everything else isb reads from its environment.
 | `ISB_PUBLIC_URL` | `isb invite` | prints the invitation as a link |
 | `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR`, `HOME` | everything | the default state directory, `~/.config/isb`, the daemon socket and `isb up`'s locks |
 | `ISB_DNS_DIR` | `isb org`, `isb host setup`, the daemon | the service-name hosts directory (default `/var/lib/isb/dns`) |
+| `ISB_CONSOLE_DIR` | every isb process that reads a console, `isb host setup` | the host's console log directory (default `/var/lib/isb/console`; [Console logs](../operations/host-setup.md#console-logs)) |
 | `ISB_HOST_PATH_MAP` | `isb up`, `create` | `FROM=TO`: rewrite bind sources for incusd's mount view ([Bind source resolution](compose.md#volumes)) |
 | `ISB_BIND_CALLER_OWNED` | `isb up`, the daemon | `1`: `idmap: auto` never maps, because every guest uid can write bind sources (set inside the macOS machine) |
 | `SUDO_USER` | `isb host setup` | the default `--user` |
