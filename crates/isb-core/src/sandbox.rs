@@ -14,13 +14,11 @@ use crate::idmap::SubIds;
 use crate::lock::NameLock;
 
 pub mod images;
-mod owner;
 use crate::plan::{
     self, Action, Actual, Desired, DesiredDevice, DiffOptions, HostFacts, Props, SandboxPlan,
     VolumeDefs, split_addr,
 };
 use crate::spec::{ExecDefaults, PortSpec, ReadyCheck, SandboxSpec};
-use owner::fix_owner;
 
 /// Config key recording which isb call created an instance. A half-created
 /// instance is only ever cleaned up by the call whose token it carries.
@@ -160,12 +158,18 @@ pub fn host_facts(client: &Client) -> Result<HostFacts> {
                 .collect()
         })
         .unwrap_or_default();
-    let initial_copy = client.has_extension("disk_initial_copy")?;
+    let info = client.server_info()?;
+    let ext = |n: &str| {
+        info["api_extensions"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|e| e == n))
+    };
     Ok(HostFacts {
         subids: SubIds::read_host(),
         pools,
         path_map: HostFacts::detect_path_map(),
-        initial_copy,
+        initial_copy: ext("disk_initial_copy"),
+        initial_owner: ext("storage_initial_owner"),
         incus_version: client.server_version()?,
         invoking_ids: crate::idmap::invoking_ids(),
         shared_root: shared_root(),
@@ -357,7 +361,12 @@ pub fn apply(
                 report(&format!("{name}: port {device} listening on {listen}"));
                 out.ports.insert(device.clone(), listen);
             }
-            Action::FixOwner { path, owner } => {
+            Action::FixOwner {
+                path,
+                owner,
+                mode,
+                fresh_only,
+            } => {
                 if desired.instance_type == crate::spec::InstanceType::VirtualMachine {
                     // In-guest work needs the VM's agent, which starts after boot.
                     wait_ready(
@@ -368,8 +377,23 @@ pub fn apply(
                         &desired.exec,
                     )?;
                 }
-                report(&format!("{name}: chown {owner} {path}"));
-                fix_owner(client, name, path, owner)?;
+                let fix = crate::owner::Fix {
+                    path,
+                    owner: owner.as_deref(),
+                    mode: mode
+                        .as_deref()
+                        .map(crate::owner::parse_mode)
+                        .transpose()
+                        .map_err(Error::invalid)?,
+                    fresh_only: *fresh_only,
+                };
+                if crate::owner::apply(client, name, &fix)? {
+                    report(&format!("{name}: {action}"));
+                } else {
+                    report(&format!(
+                        "{name}: {path} came seeded from the image; owner left as is"
+                    ));
+                }
             }
             _ => unreachable!("batched above"),
         }

@@ -127,6 +127,18 @@ merged. An unreferenced `x-` block is therefore never expanded; one pulled in wi
 
 - An unset variable with no default is an error, not an empty string. Use
   `${VAR:-}` to allow empty.
+- **`command` and `entrypoint` are interpolated too, as in docker compose.** A
+  `$` meant for the shell that runs the command is written `$$`; there is no
+  per-field opt-out. The error for an unset variable says so.
+
+  ```yaml
+  command:
+    - sh
+    - -c
+    - |
+      echo "home is $$HOME, tag is ${TAG:-latest}"   # $$HOME reaches sh as $HOME
+      exec app --port "$${PORT:-8080}"
+  ```
 - `default`, `message` and `alt` may contain interpolations themselves.
 - A `$` not followed by `$`, `{`, a letter or `_` is literal (`5$`, `$(cmd)`).
 - Names are `[A-Za-z_][A-Za-z0-9_]*`. Other `${...}` forms, such as
@@ -297,7 +309,15 @@ the process exits. It needs `skopeo` on the host and incus with the
 
 - `command` (with `entrypoint`, if set) becomes `oci.entrypoint`, the whole
   command line. It is instance config, reconciled like any other key, and takes
-  effect on restart.
+  effect on restart. incus keeps it on one line of the LXC config, splits it on
+  whitespace with quotes grouping, and has no escape character, so an argument
+  can hold neither a line break nor both `'` and `"`. The script of a shell's
+  `-c` (`sh`, `bash`, `ash`, `dash`, `zsh`, `ksh`, `mksh`, with options such as
+  `-ec` or `-o pipefail` before it) may hold either: isb then writes that one
+  argument as `eval "$(printf %b "...")"` with line breaks, quotes, `$`,
+  backticks and backslashes escaped, which the shell decodes and runs with the
+  same `$0` and arguments. A script that fits on the line is written as is. Any other argument with a
+  line break, or with both quotes, is an error when the file is loaded.
 - `working_dir` becomes `oci.cwd`, and `user` must be numeric (`1000` or
   `1000:1000`), becoming `oci.uid`/`oci.gid`.
 - It must be a container (`type: vm` is an error).
@@ -518,7 +538,7 @@ trailing `/` ignored) is an error.
 or `~` is a host path (a bind mount); anything else is the key of a named volume.
 `TARGET` is absolute. `OPTIONS` is a comma list of `ro`, `rw`, docker's
 propagation modes (`shared`, `rslave`, ...), `z`/`Z` (ignored), and isb's
-`owner=USER`, `device=NAME`, `pool=POOL`, `external`, and docker's `nocopy`. There are no anonymous
+`owner=USER`, `mode=MODE`, `device=NAME`, `pool=POOL`, `external`, and docker's `nocopy`. There are no anonymous
 volumes, so a bare `TARGET` is an error.
 
 **Long syntax:**
@@ -531,13 +551,14 @@ volumes, so a bare `TARGET` is an error.
 | `read_only` | both | bool | `false` | Mount read-only (`readonly: "true"`). |
 | `external` | volume | bool | `false` | The volume must already exist. |
 | `pool` | volume | string | see below | Pool of the named volume. |
-| `owner` | volume | string or int | | chown the mount point in the guest. |
+| `owner` | volume | string or int | the service's `user`, for a new volume | chown the mount point in the guest. |
+| `mode` | volume | octal string | | chmod the mount point (`"0770"`, `"2775"`). Quote it: YAML reads `0o770` as a number. |
 | `volume.nocopy` | volume | bool | `false` | Do not seed the volume from the image (see below). |
 | `device` | both | string | derived | incus device name. |
 | `options` | both | map of string | `{}` | Extra disk device properties (`shift`, `propagation`, ...), verbatim. |
 
-`owner`, `pool`, `external` and `volume.nocopy` on a bind mount are errors (isb
-never chowns host paths).
+`owner`, `mode`, `pool`, `external` and `volume.nocopy` on a bind mount are
+errors (isb never chowns host paths).
 
 **Device.** A bind mount becomes `{type: disk, path: GUEST, source: HOST}`; a
 named mount becomes `{type: disk, path: GUEST, pool: POOL, source: NAME}`, plus
@@ -588,28 +609,49 @@ or in a VM, the volume is mounted empty. Because the key only acts on first use,
 a disk that differs from the spec in nothing but `initial.copy` is correct and
 is not replaced, so upgrading isb or incus never remounts an existing volume.
 
-**`owner`.** `USER`, `USER:GROUP`, or a numeric uid (`1000`, `1000:1000`). After
-the volume is attached, isb runs a script in the guest as root:
+**`owner` and `mode`.** `owner` is `USER`, `USER:GROUP`, or numeric ids
+(`1000`, `1000:1000`); `mode` is octal. Nothing runs in the guest, so an image
+with no shell (distroless, `FROM scratch`) works like any other:
 
-1. Look up `USER` with `getent passwd`. If absent, it must be numeric, and then
-   uid and gid are that number and the home is empty.
-2. The group is `GROUP` if given (passed to `chown` verbatim, name or number),
-   else the user's primary gid.
-3. `chown` the mount point (not recursive).
-4. If the user has a home other than empty or `/`, and the mount point is
-   inside it, walk up its parents, chowning each one owned by uid 0, and stop at
-   the home, at `/`, or at the first parent not owned by root. A numeric owner
-   with no passwd entry has no home, so no parent is touched.
+1. **At creation.** When the server has the `storage_initial_owner` API
+   extension, a volume isb creates gets
+   `initial.uid`/`initial.gid` from a numeric `owner` and `initial.mode` from
+   `mode`, so it is right before the app's first start. A key the top-level
+   volume's `config` sets wins. A volume the image seeds takes the image's
+   owner and mode instead (see "Seeding"), so step 2 still runs.
+2. **After attach.** isb resolves `USER` (by name, or a number by uid) and
+   `GROUP` against the image's own `/etc/passwd` and `/etc/group`, read through
+   the incus file API. A number with no entry is that uid, with the same gid
+   when there is no `GROUP`, and no home; a name with no entry is an error
+   naming the user. Without `GROUP` the gid is the user's primary one. Then,
+   through incus' SFTP endpoint (run inside the instance, so ids are the
+   guest's whatever the idmap), it chowns the mount point (not recursively),
+   and, if the user has a home other than `/` that contains the mount point,
+   each parent owned by uid 0 up to the home, stopping at the first that is
+   not root's. A numeric owner with no passwd entry has no home, so no parent
+   is touched. `mode` is applied last.
 
-It runs after the first start of a new instance, and on an existing instance only
-when that mount's device was just added or replaced. A correct device is not
-chowned again. On a VM, isb first waits (up to `ready_timeout`) for the `agent`
-check, since the chown runs through the incus agent.
+Step 2 runs after the first start of a new instance, and on an existing
+instance only when that mount's device was just added or replaced. A correct
+device is not chowned again. On a VM, isb first waits (up to `ready_timeout`)
+for the `agent` check, since the file API and SFTP go through the incus agent.
+
+**A new volume belongs to the service's `user`.** With no `owner`, a named
+volume isb creates for a service with a `user` gets that user's ids, as a
+process running as that user expects of its data directory (an app as uid
+1000 can write to a fresh volume, whose root is otherwise root's with mode
+0711). A numeric `user` is set at creation (step 1); a user name, or a server
+without `storage_initial_owner`, is applied after attach, and only while the
+mount point is still root's with incus' fresh mode (0711, or `mode`), so a
+volume the image seeded keeps the image's owner. An existing volume is never
+changed this way, and `mode` without `owner` applies as in step 2. An OCI
+image's own `USER` is not known to isb: set `user` (or `owner`) for it.
 
 ```yaml
 volumes:
   - ./src:/home/dev/src:device=src
   - dev-cache:/home/dev/.cache:owner=dev
+  - {source: shared, target: /srv/shared, owner: "1000:1000", mode: "2775"}
   - {type: bind, source: ~/ref, target: /srv/ref, read_only: true, options: {shift: "true"}}
 ```
 
@@ -816,10 +858,26 @@ command line; see `image`.
 command: [sh, -c, "bun install && exec bun run dev"]
 ```
 
+`$` is interpolated here like anywhere else in the file, so a variable meant for
+the shell is written `$$VAR` (see "Interpolation"). On an OCI image, a
+multi-line argument must be the script of `sh -c` (or another shell's `-c`); see
+`image`.
+
+```yaml
+command:
+  - sh
+  - -ec
+  - |
+    mkdir -p "$$DATA_DIR"
+    exec app --data "$$DATA_DIR"
+```
+
 ### `entrypoint`
 
 OCI images only: argv or a string, like `command`. The command line is
-`entrypoint` followed by `command`. An error on any other image.
+`entrypoint` followed by `command`. An error on any other image. Interpolated,
+and limited to one line per argument outside a shell's `-c` script, as `command`
+is.
 
 ### `restart`
 
@@ -1031,7 +1089,7 @@ change, replace or chown, `-` remove, `>` start, `note:` informational.
 missing is an error). The instance is then created in one request with all
 config and all devices except searched ports, so every mount, label and idmap
 exists before first boot. Then it is started, searched ports are added, and
-`owner` fixups run.
+`owner` and `mode` fixups run.
 
 **Config.** Each key the file produces (`limits.*`, `security.privileged`,
 `raw.idmap`, `user.*` from `labels`, `environment.*`, `raw_config`) is set if its value
@@ -1132,7 +1190,7 @@ For a VM:
   edits are not delivered. File watchers inside the VM (dev servers, test
   watchers) need polling.
 - The default `ready` is `[running, agent]`: exec goes through the incus agent,
-  which starts some time after the VM does. `owner` fixups wait for the agent.
+  which starts some time after the VM does. `owner` and `mode` fixups wait for the agent.
 - A guest-initiated reboot during first boot is handled as described under
   `ready`.
 

@@ -4,7 +4,7 @@
 //!
 //! - Volume: `SRC:GUEST[:opt,...]`. `SRC` starting with `/`, `.` or `~` is a
 //!   host path (bind); anything else is a named volume. Options: `ro`, `rw`,
-//!   `owner=USER`, `device=NAME`, `pool=POOL`, `external`, plus docker's
+//!   `owner=USER`, `mode=MODE`, `device=NAME`, `pool=POOL`, `external`, plus docker's
 //!   propagation modes and `z`/`Z` (ignored).
 //! - Port (host listens): `[IP:]PUBLISHED:TARGET[/udp]`, as docker writes it
 //!   but with IP defaulting to 127.0.0.1. `PUBLISHED` may be a range. Or the
@@ -59,11 +59,12 @@ pub fn volume(s: &str) -> Result<VolumeSpec> {
                 None if o == "external" => v.external = true,
                 None if o == "nocopy" => v.volume.nocopy = true,
                 Some(("owner", u)) => v.owner = Some(u.into()),
+                Some(("mode", m)) => v.mode = Some(m.into()),
                 Some(("device", d)) => v.device = Some(d.into()),
                 Some(("pool", p)) => v.pool = Some(p.into()),
                 _ => {
                     return Err(Error::invalid(format!(
-                        "volume {s:?}: unknown option {o:?} (ro, rw, nocopy, owner=, device=, pool=, external)"
+                        "volume {s:?}: unknown option {o:?} (ro, rw, nocopy, owner=, mode=, device=, pool=, external)"
                     )));
                 }
             }
@@ -271,7 +272,8 @@ mod tests {
             (MountType::Bind, "./src")
         );
         assert!(v.read_only);
-        let v = volume("cache:/home/dev/.cache:owner=dev,device=c").unwrap();
+        let v = volume("cache:/home/dev/.cache:owner=dev,mode=0770,device=c").unwrap();
+        assert_eq!(v.mode.as_deref(), Some("0770"));
         assert_eq!(v.target, "/home/dev/.cache");
         assert_eq!(
             (v.mount_type, v.source.as_str()),

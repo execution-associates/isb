@@ -53,7 +53,7 @@ export type Action =
   | { action: "remove_device"; device: string; props: Props }
   | { action: "start_instance" }
   | { action: "add_port"; device: string; props: Props; search: number }
-  | { action: "fix_owner"; path: string; owner: string }
+  | { action: "fix_owner"; path: string; owner?: string; mode?: string; fresh_only?: boolean }
   | { action: "note"; message: string };
 
 export type ActionKind = Action["action"];

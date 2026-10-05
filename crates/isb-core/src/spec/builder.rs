@@ -39,6 +39,11 @@ impl VolumeSpec {
         self.owner = Some(owner.into());
         self
     }
+    /// The mount point's octal mode (`"0770"`).
+    pub fn mode(mut self, mode: impl Into<String>) -> Self {
+        self.mode = Some(mode.into());
+        self
+    }
     pub fn device(mut self, name: impl Into<String>) -> Self {
         self.device = Some(name.into());
         self
