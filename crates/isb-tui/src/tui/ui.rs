@@ -23,6 +23,26 @@ pub fn draw(f: &mut Frame, app: &App) {
         keybar(f, app, keys);
         return;
     }
+    let [head, side, detail_area, events_area, keys] = regions(area);
+    super::header::header(f, app, head);
+    sidebar(f, app, side);
+    detail(f, app, detail_area);
+    if events_area.height > 0 {
+        events(f, app, events_area);
+    }
+    keybar(f, app, keys);
+
+    match &app.mode {
+        Mode::Help => help(f, app, area),
+        Mode::Confirm(c) => confirm(f, app, c, area),
+        Mode::Prompt(p) => prompt(f, app, p, area),
+        Mode::Palette(t) => palette(f, app, t, area),
+        _ => {}
+    }
+}
+
+/// Header, sidebar, detail, events and key bar, in the normal view.
+pub(super) fn regions(area: Rect) -> [Rect; 5] {
     let events_h = if area.height >= 30 {
         7
     } else if area.height >= 20 {
@@ -37,27 +57,13 @@ pub fn draw(f: &mut Frame, app: &App) {
         Constraint::Length(1),
     ])
     .areas(area);
-    header(f, app, head);
     let side_w = (area.width / 4).clamp(24, 36);
     let [side, detail_area] =
         Layout::horizontal([Constraint::Length(side_w), Constraint::Fill(1)]).areas(body);
-    sidebar(f, app, side);
-    detail(f, app, detail_area);
-    if events_h > 0 {
-        events(f, app, events_area);
-    }
-    keybar(f, app, keys);
-
-    match &app.mode {
-        Mode::Help => help(f, app, area),
-        Mode::Confirm(c) => confirm(f, app, c, area),
-        Mode::Prompt(p) => prompt(f, app, p, area),
-        Mode::Palette(t) => palette(f, app, t, area),
-        _ => {}
-    }
+    [head, side, detail_area, events_area, keys]
 }
 
-fn pane<'a>(app: &App, title: &'a str, focused: bool) -> Block<'a> {
+pub(super) fn pane<'a>(app: &App, title: &'a str, focused: bool) -> Block<'a> {
     let t = &app.theme;
     let b = Block::bordered()
         .padding(Padding::horizontal(1))
@@ -84,135 +90,6 @@ fn status_word<'a>(t: &Theme, state: &str) -> Vec<Span<'a>> {
         Span::raw(" "),
         Span::styled(state.to_lowercase(), s),
     ]
-}
-
-// ---- header -----------------------------------------------------------
-
-#[expect(
-    clippy::too_many_lines,
-    reason = "predates the lint ratchet; split it when next changed"
-)]
-fn header(f: &mut Frame, app: &App, area: Rect) {
-    let t = &app.theme;
-    let h = &app.ov.host;
-    let host = if h.hostname.is_empty() {
-        "…"
-    } else {
-        &h.hostname
-    };
-    let mode = if app.daemon {
-        vec![
-            Span::styled("serve ", t.dim()),
-            Span::styled("●", Style::default().fg(t.ok)),
-        ]
-    } else {
-        vec![
-            Span::styled("direct · read-only ", t.dim()),
-            Span::styled("◌", Style::default().fg(t.warn)),
-        ]
-    };
-    let mut right = vec![Span::styled(format!("isb {} · ", app.ov.isb), t.faint())];
-    right.extend(mode);
-    let left = Line::from(vec![
-        Span::styled(" isb", t.accent().add_modifier(Modifier::BOLD)),
-        Span::styled(" · ", t.faint()),
-        Span::styled(host.to_string(), t.bold()),
-    ]);
-    let [l1, l2, rule] = Layout::vertical([Constraint::Length(1); 3]).areas(area);
-    f.render_widget(Paragraph::new(left), l1);
-    f.render_widget(
-        Paragraph::new(Line::from(right).alignment(Alignment::Right)),
-        Rect {
-            width: l1.width.saturating_sub(1),
-            ..l1
-        },
-    );
-
-    let (hl, tot) = app.ov.stacks.iter().fold((0, 0), |(a, b), s| {
-        let (h, t) = s.replicas();
-        (a + h, b + t)
-    });
-    if app.updated.is_none() {
-        f.render_widget(Paragraph::new(Span::styled(" connecting…", t.dim())), l2);
-        f.render_widget(
-            Paragraph::new(Span::styled("─".repeat(rule.width as usize), t.faint())),
-            rule,
-        );
-        return;
-    }
-    let up = app.ov.sandboxes.iter().filter(|s| s.running()).count();
-    let rep_style = if hl == tot {
-        Style::default().fg(t.ok)
-    } else {
-        Style::default().fg(t.warn)
-    };
-    let mem_frac = if h.mem_total > 0 {
-        h.mem_used as f64 / h.mem_total as f64
-    } else {
-        0.0
-    };
-    let mut stats = vec![Span::raw(" ")];
-    if app.daemon {
-        stats.extend([
-            Span::styled("stacks ", t.dim()),
-            Span::styled(app.ov.stacks.len().to_string(), t.bold()),
-            Span::styled("   replicas ", t.dim()),
-            Span::styled(
-                format!("{hl}/{tot}"),
-                rep_style.add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("   ", t.dim()),
-        ]);
-    }
-    stats.extend([
-        Span::styled("sandboxes ", t.dim()),
-        Span::styled(app.ov.sandboxes.len().to_string(), t.bold()),
-        Span::styled(format!(" ({up} up)"), t.dim()),
-    ]);
-    if area.width >= 100 {
-        stats.extend([
-            Span::styled("   cpu ", t.dim()),
-            Span::styled(spark(&h.cpu_history, 12, Some(100.0)), t.accent()),
-            Span::styled(format!(" {:>3.0}%", h.cpu_pct.unwrap_or(0.0)), t.bold()),
-            Span::styled("   mem ", t.dim()),
-            Span::styled(bar(mem_frac, 10), t.accent()),
-            Span::styled(
-                format!(" {}/{}", bytes(h.mem_used), bytes(h.mem_total)),
-                t.bold(),
-            ),
-        ]);
-        // An older daemon sends no storage numbers: leave it out.
-        if h.disk_total > 0 && area.width >= 130 {
-            stats.extend([
-                Span::styled("   disk ", t.dim()),
-                Span::styled(
-                    bar(h.disk_used as f64 / h.disk_total as f64, 10),
-                    t.accent(),
-                ),
-                Span::styled(
-                    format!(" {}/{}", bytes(h.disk_used), bytes(h.disk_total)),
-                    t.bold(),
-                ),
-            ]);
-        }
-    }
-    if area.width >= 120 {
-        stats.push(Span::styled(format!("   load {:.1}", h.load1), t.dim()));
-    }
-    f.render_widget(Paragraph::new(Line::from(stats)), l2);
-    let status = match (&app.error, app.updated) {
-        (Some(e), _) => Span::styled(format!("✖ {} ", trunc(e, 60)), Style::default().fg(t.err)),
-        (None, None) => Span::raw(""),
-        (None, Some(_)) => Span::raw(""),
-    };
-    f.render_widget(
-        Paragraph::new(Line::from(status).alignment(Alignment::Right)),
-        l2,
-    );
-    f.render_widget(
-        Paragraph::new(Span::styled("─".repeat(rule.width as usize), t.faint())),
-        rule,
-    );
 }
 
 // ---- sidebar ----------------------------------------------------------
@@ -307,8 +184,7 @@ fn sidebar(f: &mut Frame, app: &App, area: Rect) {
             t.dim(),
         ));
     }
-    let h = inner.height as usize;
-    let scroll = sel_line.saturating_sub(h.saturating_sub(2));
+    let scroll = super::mouse::sidebar_scroll(sel_line, inner.height);
     f.render_widget(Paragraph::new(lines).scroll((scroll as u16, 0)), inner);
 }
 

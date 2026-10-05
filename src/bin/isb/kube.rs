@@ -39,8 +39,11 @@ pub struct ExecArgs {
     #[arg(short, long = "env")]
     pub env: Vec<String>,
     /// Feed this process's stdin to the command (at most 1 MiB).
-    #[arg(short = 'i', long)]
+    #[arg(short = 'i', long, conflicts_with = "no_stdin")]
     pub stdin: bool,
+    /// Never feed stdin, and say nothing about piped input left unread.
+    #[arg(short = 'n', long)]
+    pub no_stdin: bool,
     /// Kill the command after this long (default 60s, at most 15m).
     #[arg(long)]
     pub timeout: Option<String>,
@@ -138,6 +141,9 @@ fn exec_args(org: &Option<String>, name: &str, a: &ExecArgs) -> Result<Value> {
     }
     if let Some(t) = &a.timeout {
         args["timeout"] = json!(t);
+    }
+    if !a.stdin && !a.no_stdin {
+        super::instances::hint_unforwarded_stdin();
     }
     if a.stdin {
         let mut s = String::new();
