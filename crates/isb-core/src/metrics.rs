@@ -1,6 +1,7 @@
-//! Live numbers for dashboards: the host's CPU, memory and storage, and
-//! every instance's status, address, CPU, memory and disk, each with a short
-//! history for sparklines.
+//! Live numbers for dashboards: the host's CPU, memory, storage, disk I/O
+//! and network, and every instance's status, address, CPU, memory, disk and
+//! network, each with a short history for sparklines, plus an hour of the
+//! host's own numbers for the monitor.
 //!
 //! One `GET /1.0/instances?recursion=2` per sample. CPU is a rate, so it needs
 //! two samples: the first one reports none. Instance CPU is a percentage of
@@ -15,12 +16,17 @@ use serde_json::Value;
 use crate::client::Client;
 use crate::error::Result;
 
+mod sys;
+
 /// Samples of history kept per series.
 pub const HISTORY: usize = 40;
 
 /// Disk counters come from `/1.0/metrics`, a heavier call: every this many
 /// samples.
 pub const DISK_EVERY: u32 = 5;
+
+/// Host points kept: an hour at the controller's two-second sample.
+pub const HOST_POINTS: usize = 1800;
 
 #[derive(Debug, Clone, Serialize, Default, PartialEq)]
 pub struct HostSample {
@@ -36,6 +42,55 @@ pub struct HostSample {
     pub disk_used: u64,
     pub disk_total: u64,
     pub load1: f32,
+    pub load5: Option<f32>,
+    pub load15: Option<f32>,
+    /// Busy share of each CPU, 0-100 (Linux only).
+    pub cpu_cores: Vec<f32>,
+    pub uptime_secs: Option<u64>,
+    pub swap_used: Option<u64>,
+    pub swap_total: Option<u64>,
+    /// Each storage pool, with its own used and total bytes.
+    pub pools: Vec<PoolSample>,
+    /// Bytes per second over the host's whole disks (not partitions, device
+    /// mapper or zvols, which would count the same bytes twice).
+    pub disk_read_rate: Option<f64>,
+    pub disk_write_rate: Option<f64>,
+    /// Bytes per second over [`HostSample::interfaces`].
+    pub net_rx_rate: Option<f64>,
+    pub net_tx_rate: Option<f64>,
+    /// Network interfaces but loopback and instances' own ends (veth, tap).
+    pub interfaces: Vec<IfaceSample>,
+}
+
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
+pub struct PoolSample {
+    pub name: String,
+    pub driver: String,
+    pub used: u64,
+    pub total: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
+pub struct IfaceSample {
+    pub name: String,
+    /// Global addresses, IPv4 and IPv6.
+    pub addresses: Vec<String>,
+    pub up: bool,
+    pub rx_bytes: u64,
+    pub tx_bytes: u64,
+    pub rx_rate: Option<f64>,
+    pub tx_rate: Option<f64>,
+}
+
+/// One host sample, kept [`HOST_POINTS`] deep for the monitor's charts.
+#[derive(Debug, Clone, Copy, Serialize, Default, PartialEq)]
+pub struct HostPoint {
+    /// Unix seconds.
+    pub t: u64,
+    pub cpu: Option<f32>,
+    pub mem_used: Option<u64>,
+    pub net_rx: Option<f64>,
+    pub net_tx: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Default, PartialEq)]
@@ -70,6 +125,15 @@ pub struct InstanceSample {
     pub disk_read_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disk_write_bytes: Option<u64>,
+    /// The counters above as bytes per second, from the previous sample.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub net_rx_rate: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub net_tx_rate: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disk_read_rate: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disk_write_rate: Option<f64>,
 }
 
 impl InstanceSample {
@@ -91,9 +155,49 @@ pub struct Sampler {
     host_hist: VecDeque<f32>,
     /// Pool usage moves slowly and costs a request per pool: refreshed every
     /// [`POOLS_EVERY`].
-    pools: Option<(Instant, (u64, u64))>,
+    pools: Option<(Instant, Vec<PoolSample>)>,
     /// Samples taken, for [`DISK_EVERY`].
     n: u32,
+    /// Per-core (busy, total) ticks.
+    host_cores: Vec<(u64, u64)>,
+    /// Per interface (rx, tx) bytes, and when they were read.
+    host_net: Option<(Instant, IfaceCounters)>,
+    host_disk: Option<(Instant, (u64, u64))>,
+    /// Per instance key: the last counters, for rates.
+    io: BTreeMap<String, Io>,
+    points: VecDeque<HostPoint>,
+}
+
+/// Per interface: (rx, tx) bytes.
+type IfaceCounters = BTreeMap<String, (u64, u64)>;
+
+#[derive(Debug, Default)]
+struct Io {
+    net: Option<(Instant, u64, u64)>,
+    disk: Option<(Instant, u64, u64)>,
+    /// Disk counters are read every [`DISK_EVERY`]th sample: the rate holds
+    /// between reads.
+    disk_rate: (Option<f64>, Option<f64>),
+}
+
+/// Bytes per second between two counter readings; none across a reset.
+fn per_sec(
+    prev: Option<(Instant, u64, u64)>,
+    now: Instant,
+    a: u64,
+    b: u64,
+) -> (Option<f64>, Option<f64>) {
+    match prev {
+        Some((at, pa, pb)) if a >= pa && b >= pb => {
+            let dt = now.duration_since(at).as_secs_f64();
+            if dt > 0.0 {
+                (Some((a - pa) as f64 / dt), Some((b - pb) as f64 / dt))
+            } else {
+                (None, None)
+            }
+        }
+        _ => (None, None),
+    }
 }
 
 /// How often storage pool usage is re-read.
@@ -132,20 +236,33 @@ impl Sampler {
                         .unwrap_or((0, 0));
                     i.disk_read_bytes = Some(r);
                     i.disk_write_bytes = Some(w);
+                    let e = self
+                        .io
+                        .entry(format!("{}/{}", i.project, i.name))
+                        .or_default();
+                    e.disk_rate = per_sec(e.disk, now, r, w);
+                    e.disk = Some((now, r, w));
                 }
+            }
+        }
+        for i in out.iter_mut().filter(|i| i.running()) {
+            if let Some(e) = self.io.get(&format!("{}/{}", i.project, i.name)) {
+                (i.disk_read_rate, i.disk_write_rate) = e.disk_rate;
             }
         }
         self.n = self.n.wrapping_add(1);
         out.sort_by(|a, b| (&a.project, &a.name).cmp(&(&b.project, &b.name)));
-        let keys: Vec<String> = out
+        let keys: std::collections::BTreeSet<String> = out
             .iter()
             .map(|i| format!("{}/{}", i.project, i.name))
             .collect();
         self.cpu.retain(|k, _| keys.contains(k));
         self.hist.retain(|k, _| keys.contains(k));
+        self.io.retain(|k, _| keys.contains(k));
         if self
             .pools
-            .is_none_or(|(at, _)| now.duration_since(at) >= POOLS_EVERY)
+            .as_ref()
+            .is_none_or(|(at, _)| now.duration_since(*at) >= POOLS_EVERY)
         {
             // Storage is a nicety: a pool that cannot be read leaves the
             // last numbers in place rather than failing the sample.
@@ -153,7 +270,12 @@ impl Sampler {
                 self.pools = Some((now, p));
             }
         }
-        Ok((self.host(), out))
+        Ok((self.host(now), out))
+    }
+
+    /// The host's last hour, oldest first.
+    pub fn host_points(&self) -> Vec<HostPoint> {
+        self.points.iter().copied().collect()
     }
 
     fn instance(&mut self, i: &Value, now: Instant) -> InstanceSample {
@@ -215,11 +337,27 @@ impl Sampler {
             if d.is_empty() { cfg("image.id") } else { d }
         };
         let (rx, tx) = net_counters(state);
+        let (net_rx_rate, net_tx_rate) = match (rx, tx) {
+            (Some(r), Some(t)) if running => {
+                let e = self.io.entry(key.clone()).or_default();
+                let v = per_sec(e.net, now, r, t);
+                e.net = Some((now, r, t));
+                v
+            }
+            _ => {
+                self.io.remove(&key);
+                (None, None)
+            }
+        };
         InstanceSample {
             net_rx_bytes: rx.filter(|_| running),
             net_tx_bytes: tx.filter(|_| running),
             disk_read_bytes: None,
             disk_write_bytes: None,
+            net_rx_rate,
+            net_tx_rate,
+            disk_read_rate: None,
+            disk_write_rate: None,
             ip: running.then(|| first_ip(state)).flatten(),
             cpu_pct,
             cpu_history: h.iter().copied().collect(),
@@ -239,7 +377,7 @@ impl Sampler {
         }
     }
 
-    fn host(&mut self) -> HostSample {
+    fn host(&mut self, now: Instant) -> HostSample {
         let mut h = HostSample {
             hostname: sys::hostname(),
             cpus: std::thread::available_parallelism()
@@ -258,37 +396,180 @@ impl Sampler {
             self.host_cpu = Some((busy, total));
         }
         h.cpu_history = self.host_hist.iter().copied().collect();
+        let cores = sys::cpu_cores();
+        if cores.len() == self.host_cores.len() {
+            h.cpu_cores = cores
+                .iter()
+                .zip(&self.host_cores)
+                .map(|((b, t), (pb, pt))| {
+                    if t > pt {
+                        b.saturating_sub(*pb) as f32 / (t - pt) as f32 * 100.0
+                    } else {
+                        0.0
+                    }
+                })
+                .collect();
+        }
+        self.host_cores = cores;
         if let Some((total, avail)) = sys::memory() {
             h.mem_total = total;
             h.mem_used = total.saturating_sub(avail);
         }
-        if let Some((_, (used, total))) = self.pools {
-            h.disk_used = used;
-            h.disk_total = total;
+        if let Some((total, free)) = sys::swap() {
+            h.swap_total = Some(total);
+            h.swap_used = Some(total.saturating_sub(free));
         }
-        h.load1 = sys::load1().unwrap_or(0.0);
+        if let Some((_, pools)) = &self.pools {
+            (h.disk_used, h.disk_total) =
+                sum_pools(pools.iter().map(|p| (p.used, p.total)).collect());
+            h.pools = pools.clone();
+        }
+        if let Some([l1, l5, l15]) = sys::loadavg() {
+            h.load1 = l1;
+            h.load5 = Some(l5);
+            h.load15 = Some(l15);
+        }
+        h.uptime_secs = sys::uptime();
+        if let Some((r, w)) = sys::disk_io() {
+            let prev = self.host_disk.map(|(at, (a, b))| (at, a, b));
+            (h.disk_read_rate, h.disk_write_rate) = per_sec(prev, now, r, w);
+            self.host_disk = Some((now, (r, w)));
+        }
+        self.interfaces(&mut h, now);
+        push_point(
+            &mut self.points,
+            HostPoint {
+                t: unix_secs(),
+                cpu: h.cpu_pct,
+                mem_used: (h.mem_total > 0).then_some(h.mem_used),
+                net_rx: h.net_rx_rate,
+                net_tx: h.net_tx_rate,
+            },
+        );
         h
+    }
+
+    fn interfaces(&mut self, h: &mut HostSample, now: Instant) {
+        let counters: BTreeMap<String, (u64, u64)> = sys::net_dev()
+            .into_iter()
+            .filter(|(name, _, _)| shown_iface(name))
+            .map(|(name, rx, tx)| (name, (rx, tx)))
+            .collect();
+        let addrs = sys::addresses();
+        let (mut rx_sum, mut tx_sum, mut rated) = (0.0, 0.0, false);
+        for (name, (rx, tx)) in &counters {
+            let prev = self
+                .host_net
+                .as_ref()
+                .and_then(|(at, m)| m.get(name).map(|(a, b)| (*at, *a, *b)));
+            let (rx_rate, tx_rate) = per_sec(prev, now, *rx, *tx);
+            if let (Some(r), Some(t)) = (rx_rate, tx_rate) {
+                rx_sum += r;
+                tx_sum += t;
+                rated = true;
+            }
+            h.interfaces.push(IfaceSample {
+                name: name.clone(),
+                addresses: addrs.get(name).cloned().unwrap_or_default(),
+                up: sys::iface_up(name),
+                rx_bytes: *rx,
+                tx_bytes: *tx,
+                rx_rate,
+                tx_rate,
+            });
+        }
+        if rated {
+            h.net_rx_rate = Some(rx_sum);
+            h.net_tx_rate = Some(tx_sum);
+        }
+        self.host_net = Some((now, counters));
     }
 }
 
-/// Used and total bytes over every storage pool.
-fn pools(client: &Client) -> Result<(u64, u64)> {
-    let names = client.get("/1.0/storage-pools")?;
-    let mut spaces = Vec::new();
-    for url in names
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-    {
-        let name = url.rsplit('/').next().unwrap_or_default();
-        let r = client.get(&format!("/1.0/storage-pools/{name}/resources"))?;
-        spaces.push((
-            r["space"]["used"].as_u64().unwrap_or(0),
-            r["space"]["total"].as_u64().unwrap_or(0),
-        ));
+fn push_point(points: &mut VecDeque<HostPoint>, p: HostPoint) {
+    if points.len() == HOST_POINTS {
+        points.pop_front();
     }
-    Ok(sum_pools(spaces))
+    points.push_back(p);
+}
+
+fn unix_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Interfaces the host view lists: loopback and the host ends of instances'
+/// NICs (one per instance, which would drown the rest) are left out.
+fn shown_iface(name: &str) -> bool {
+    name != "lo"
+        && !name.starts_with("veth")
+        && !name.starts_with("tap")
+        && !name.starts_with("macvtap")
+}
+
+/// Points within the last `range` seconds of `now`, averaged into buckets so
+/// at most `max` come back. Returns the bucket step in seconds.
+pub fn downsample(points: &[HostPoint], range: u64, now: u64, max: usize) -> (u64, Vec<HostPoint>) {
+    let max = max.max(1) as u64;
+    let step = range.div_ceil(max).max(2);
+    let from = now.saturating_sub(range);
+    let mut out: Vec<HostPoint> = Vec::new();
+    let mut acc: Option<(u64, [f64; 4], [u32; 4])> = None;
+    let flush = |out: &mut Vec<HostPoint>, a: (u64, [f64; 4], [u32; 4])| {
+        let avg = |i: usize| (a.2[i] > 0).then(|| a.1[i] / f64::from(a.2[i]));
+        out.push(HostPoint {
+            t: a.0,
+            cpu: avg(0).map(|v| v as f32),
+            mem_used: avg(1).map(|v| v as u64),
+            net_rx: avg(2),
+            net_tx: avg(3),
+        });
+    };
+    for p in points.iter().filter(|p| p.t > from && p.t <= now) {
+        let bucket = p.t / step * step;
+        if let Some(a) = acc.filter(|a| a.0 != bucket) {
+            flush(&mut out, a);
+            acc = None;
+        }
+        let a = acc.get_or_insert((bucket, [0.0; 4], [0; 4]));
+        for (i, v) in [
+            p.cpu.map(f64::from),
+            p.mem_used.map(|m| m as f64),
+            p.net_rx,
+            p.net_tx,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if let Some(v) = v {
+                a.1[i] += v;
+                a.2[i] += 1;
+            }
+        }
+    }
+    if let Some(a) = acc {
+        flush(&mut out, a);
+    }
+    (step, out)
+}
+
+/// Each storage pool's used and total bytes.
+fn pools(client: &Client) -> Result<Vec<PoolSample>> {
+    let list = client.get("/1.0/storage-pools?recursion=1")?;
+    let mut out = Vec::new();
+    for p in list.as_array().into_iter().flatten() {
+        let name = p["name"].as_str().unwrap_or_default();
+        let r = client.get(&format!("/1.0/storage-pools/{name}/resources"))?;
+        out.push(PoolSample {
+            name: name.to_string(),
+            driver: p["driver"].as_str().unwrap_or_default().to_string(),
+            used: r["space"]["used"].as_u64().unwrap_or(0),
+            total: r["space"]["total"].as_u64().unwrap_or(0),
+        });
+    }
+    Ok(out)
 }
 
 /// Pools that share a filesystem report the same total: count it once (with
@@ -300,132 +581,6 @@ fn sum_pools(spaces: Vec<(u64, u64)>) -> (u64, u64) {
         *u = (*u).max(used);
     }
     (by_total.values().sum(), by_total.keys().sum())
-}
-
-/// Host counters from /proc.
-#[cfg(target_os = "linux")]
-mod sys {
-    pub fn hostname() -> String {
-        std::fs::read_to_string("/proc/sys/kernel/hostname")
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default()
-    }
-
-    /// (busy, total) ticks since boot.
-    pub fn cpu_ticks() -> Option<(u64, u64)> {
-        super::parse_proc_stat(&std::fs::read_to_string("/proc/stat").ok()?)
-    }
-
-    /// (total, available) bytes.
-    pub fn memory() -> Option<(u64, u64)> {
-        Some(super::parse_meminfo(
-            &std::fs::read_to_string("/proc/meminfo").ok()?,
-        ))
-    }
-
-    pub fn load1() -> Option<f32> {
-        std::fs::read_to_string("/proc/loadavg")
-            .ok()?
-            .split_whitespace()
-            .next()?
-            .parse()
-            .ok()
-    }
-}
-
-/// Host counters from mach and sysctl.
-#[cfg(target_os = "macos")]
-mod sys {
-    use std::mem::{MaybeUninit, size_of};
-
-    pub fn hostname() -> String {
-        let mut buf = [0u8; 256];
-        // SAFETY: gethostname writes at most buf.len() bytes.
-        if unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) } != 0 {
-            return String::new();
-        }
-        let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-        String::from_utf8_lossy(&buf[..end]).into_owned()
-    }
-
-    /// The host port. Each mach_host_self() call adds a send-right reference,
-    /// so take one for the life of the process.
-    #[allow(deprecated)]
-    fn host() -> libc::mach_port_t {
-        static HOST: std::sync::OnceLock<libc::mach_port_t> = std::sync::OnceLock::new();
-        // SAFETY: no preconditions.
-        *HOST.get_or_init(|| unsafe { libc::mach_host_self() })
-    }
-
-    /// (busy, total) ticks since boot.
-    pub fn cpu_ticks() -> Option<(u64, u64)> {
-        let mut info = MaybeUninit::<libc::host_cpu_load_info>::zeroed();
-        let mut count = libc::HOST_CPU_LOAD_INFO_COUNT;
-        // SAFETY: `count` is the size of `info` in integer_t units.
-        let kr = unsafe {
-            libc::host_statistics(
-                host(),
-                libc::HOST_CPU_LOAD_INFO,
-                info.as_mut_ptr().cast(),
-                &mut count,
-            )
-        };
-        if kr != libc::KERN_SUCCESS {
-            return None;
-        }
-        // SAFETY: filled by host_statistics.
-        let t = unsafe { info.assume_init() }.cpu_ticks.map(u64::from);
-        let idle = t[libc::CPU_STATE_IDLE as usize];
-        let total: u64 = t.iter().sum();
-        Some((total - idle, total))
-    }
-
-    /// (total, available) bytes, available being free plus inactive pages:
-    /// what can be handed out without paging, as `vm_stat` reports them.
-    pub fn memory() -> Option<(u64, u64)> {
-        let mut total = 0u64;
-        let mut len = size_of::<u64>();
-        // SAFETY: hw.memsize is a u64 and `len` says so.
-        let rc = unsafe {
-            libc::sysctlbyname(
-                c"hw.memsize".as_ptr(),
-                (&raw mut total).cast(),
-                &mut len,
-                std::ptr::null_mut(),
-                0,
-            )
-        };
-        if rc != 0 {
-            return None;
-        }
-        let mut vm = MaybeUninit::<libc::vm_statistics64>::zeroed();
-        let mut count = libc::HOST_VM_INFO64_COUNT;
-        // SAFETY: `count` is the size of `vm` in integer_t units; the kernel
-        // fills at most that and lowers `count` if its struct is smaller.
-        let kr = unsafe {
-            libc::host_statistics64(
-                host(),
-                libc::HOST_VM_INFO64,
-                vm.as_mut_ptr().cast(),
-                &mut count,
-            )
-        };
-        if kr != libc::KERN_SUCCESS {
-            return Some((total, 0));
-        }
-        // SAFETY: zero-initialised, then (partly) filled by the kernel.
-        let vm = unsafe { vm.assume_init() };
-        // SAFETY: sysconf has no preconditions.
-        let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) }.max(0) as u64;
-        let avail = (u64::from(vm.free_count) + u64::from(vm.inactive_count)) * page;
-        Some((total, avail.min(total)))
-    }
-
-    pub fn load1() -> Option<f32> {
-        let mut l = [0f64; 1];
-        // SAFETY: room for the one sample asked for.
-        (unsafe { libc::getloadavg(l.as_mut_ptr(), 1) } == 1).then_some(l[0] as f32)
-    }
 }
 
 /// Bytes received and sent, summed over every interface but loopback.
@@ -519,38 +674,6 @@ fn first_ip(state: &Value) -> Option<String> {
     v6
 }
 
-/// (busy, total) jiffies from the aggregate `cpu` line.
-#[cfg(target_os = "linux")]
-fn parse_proc_stat(s: &str) -> Option<(u64, u64)> {
-    let line = s.lines().find(|l| l.starts_with("cpu "))?;
-    let f: Vec<u64> = line
-        .split_whitespace()
-        .skip(1)
-        .filter_map(|x| x.parse().ok())
-        .collect();
-    if f.len() < 4 {
-        return None;
-    }
-    // user nice system idle iowait irq softirq steal (guest is inside user).
-    let total: u64 = f.iter().take(8).sum();
-    let idle = f[3] + f.get(4).copied().unwrap_or(0);
-    Some((total - idle, total))
-}
-
-/// (total, available) bytes.
-#[cfg(target_os = "linux")]
-fn parse_meminfo(s: &str) -> (u64, u64) {
-    let get = |k: &str| {
-        s.lines()
-            .find(|l| l.starts_with(k))
-            .and_then(|l| l.split_whitespace().nth(1))
-            .and_then(|x| x.parse::<u64>().ok())
-            .unwrap_or(0)
-            * 1024
-    };
-    (get("MemTotal:"), get("MemAvailable:"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -570,26 +693,49 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn host_counters() {
-        assert!(!sys::hostname().is_empty());
-        let (busy, total) = sys::cpu_ticks().unwrap();
-        assert!(total > 0 && busy <= total);
-        let (total, avail) = sys::memory().unwrap();
-        assert!(total > 0 && avail > 0 && avail <= total);
-        assert!(sys::load1().is_some());
+    fn shown_interfaces() {
+        assert!(shown_iface("eth0") && shown_iface("incusbr0") && shown_iface("tailscale0"));
+        assert!(!shown_iface("lo") && !shown_iface("veth1a2b") && !shown_iface("tap0"));
     }
 
-    #[cfg(target_os = "linux")]
     #[test]
-    fn proc_parsers() {
-        assert_eq!(
-            parse_proc_stat("cpu  100 0 50 800 50 0 0 0 0 0\ncpu0 1 2 3 4\n"),
-            Some((150, 1000))
-        );
-        assert_eq!(
-            parse_meminfo("MemTotal:  1000 kB\nMemFree: 1 kB\nMemAvailable: 400 kB\n"),
-            (1024000, 409600)
-        );
+    fn host_points_downsample() {
+        let p = |t: u64, cpu: f32| HostPoint {
+            t,
+            cpu: Some(cpu),
+            mem_used: Some(100),
+            net_rx: None,
+            net_tx: Some(10.0),
+        };
+        let pts: Vec<HostPoint> = (0..60).map(|i| p(1000 + i * 2, i as f32)).collect();
+        // The last 60 s at most 10 points: 6 s buckets of three samples each.
+        let (step, out) = downsample(&pts, 60, 1118, 10);
+        assert_eq!(step, 6);
+        assert!(out.len() <= 11, "{}", out.len());
+        assert!(out.iter().all(|x| x.t > 1118 - 60 - step));
+        assert_eq!(out.last().unwrap().net_rx, None);
+        assert_eq!(out.last().unwrap().net_tx, Some(10.0));
+        // Short ranges keep the samples themselves.
+        let (step, out) = downsample(&pts, 10, 1118, 300);
+        assert_eq!(step, 2);
+        assert_eq!(out.len(), 5);
+        assert_eq!(out.last().unwrap().cpu, Some(59.0));
+    }
+
+    #[test]
+    fn instance_rates_from_counters() {
+        let mut s = Sampler::new();
+        let inst = |rx: u64| {
+            json!({"name": "a", "status": "Running", "type": "container",
+                   "state": {"network": {"eth0": {"counters": {"bytes_received": rx, "bytes_sent": 0}}}}})
+        };
+        let t0 = Instant::now();
+        assert_eq!(s.instance(&inst(1000), t0).net_rx_rate, None);
+        let b = s.instance(&inst(3000), t0 + Duration::from_secs(2));
+        assert_eq!((b.net_rx_rate, b.net_tx_rate), (Some(1000.0), Some(0.0)));
+        // A counter that went down (a restart) gives no rate.
+        let c = s.instance(&inst(10), t0 + Duration::from_secs(4));
+        assert_eq!(c.net_rx_rate, None);
     }
 
     #[test]

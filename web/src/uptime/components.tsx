@@ -41,12 +41,12 @@ export function UptimeBars({ bars, stepMs = 3_600_000, className, height = "h-7"
   );
 }
 
-/** Latencies left to right; a failed check is a red tick at the bottom. */
-export function Sparkline({ points, className, label = "Latency of the last checks" }: { points: [number, number | null][]; className?: string; label?: string }) {
+/** Latencies left to right; a failed check is a red tick at the bottom. `max` fixes the top (a percentage's 100). */
+export function Sparkline({ points, className, label = "Latency of the last checks", max }: { points: [number, number | null][]; className?: string; label?: string; max?: number }) {
   const w = 120;
   const h = 28;
   const vals = points.map(([, v]) => v).filter((v): v is number => v !== null);
-  const top = Math.max(1, ...vals);
+  const top = max ?? Math.max(1, ...vals);
   const n = points.length;
   const x = (i: number) => (n <= 1 ? w / 2 : (i / (n - 1)) * w);
   const y = (v: number) => h - 2 - (v / top) * (h - 6);

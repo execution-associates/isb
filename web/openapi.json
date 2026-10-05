@@ -7256,6 +7256,71 @@
         "x-isb-tool": "host_inventory"
       }
     },
+    "/api/v1/tools/host_monitor": {
+      "post": {
+        "description": "Live resource use of this host or one remote server, as `top`/`bottom` show it: CPU (overall and per core), load, uptime, memory and swap, each storage pool, disk I/O and every network interface with its addresses and rates, the last `range` seconds (60-3600, default 300) of CPU, memory and network, and every instance's CPU, memory, network and disk rates. `servers` has a card per server (this host first) with its health and latest heartbeat numbers; `server` picks a remote one by name. Superadmins only.",
+        "operationId": "host_monitor",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "type": "string"
+                  },
+                  "range": {
+                    "description": "Seconds of history (default 300)",
+                    "maximum": 3600,
+                    "minimum": 60,
+                    "type": "integer"
+                  },
+                  "server": {
+                    "description": "A remote server's name; omitted: this host",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Host monitor",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "host_monitor"
+      }
+    },
     "/api/v1/tools/host_policy": {
       "post": {
         "description": "How this daemon serves: listen addresses, Cloudflare Access, the tools remote callers see, what a remote caller's specs may ask for (bind roots, publish addresses, privileged, raw, any instance), and every superadmin source with its allow lists. Superadmins only.",

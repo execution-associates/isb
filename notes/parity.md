@@ -15,7 +15,7 @@ endpoint has neither a tool nor a documented reason in the
 
 | Category | Count |
 |---|---|
-| Tools in the web UI and MCP | 158 |
+| Tools in the web UI and MCP | 159 |
 | Account tools, the web UI through the identity endpoints | 20 |
 | Tools for MCP and the CLI only | 26 |
 | Identity endpoints with a tool | 21 |
@@ -176,6 +176,7 @@ cluster's pods. A person has the app page.
 | Verify the hash chains | Admin, History: Verify chain | `audit_verify` |
 | History | Org, History; Admin, History | `history_query` |
 | Host inventory and policy | Host (superadmins) | `host_inventory`, `host_policy` |
+| Live resource use of the host and each server | Monitor (superadmins) | `host_monitor` |
 | Superadmin tokens: list, revoke | Host, Tokens | `superadmin_token_list`, `superadmin_token_revoke` |
 
 ### Accounts

@@ -14,6 +14,7 @@ const UNBOUND = [
   "template_catalog_add", "template_catalog_remove", "audit_verify", "server_add", "server_list", "server_show",
   "server_remove", "server_rotate_cert", "server_provision_get", "server_upgrade", "user_list", "user_update",
   "host_inventory", "host_policy", "superadmin_token_list", "superadmin_token_revoke", "superadmin_list", "org_nesting",
+  "host_monitor",
 ];
 
 function sources(dir = join(web, "src")): { file: string; text: string }[] {

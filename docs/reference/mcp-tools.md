@@ -68,7 +68,7 @@ fills it in and refuses any other value. Then, in order:
   `ingress_status`) are open to anyone signed in and show only the caller's
   orgs, or only the one their `org` names (an org-bound endpoint names its
   own). `audit_list` and `history_query` filter themselves the same way.
-- **Superadmin tools** (`host_inventory`, `host_policy`,
+- **Superadmin tools** (`host_inventory`, `host_monitor`, `host_policy`,
   `superadmin_token_list`, `superadmin_token_revoke`, `superadmin_list`,
   `org_nesting`) are
   refused to everyone else, platform admins included.
@@ -397,6 +397,7 @@ superadmin tokens are minted on the host only.
 | Tool | Does |
 |---|---|
 | `host_inventory` | Every incus project and instance on the host, isb's or not: project, org, type, status, addresses, isb's stack and owner labels. |
+| `host_monitor` | Live resource use, as `top` or `bottom` show it, of this host or the remote `server` named: CPU overall and per core, load, uptime, memory and swap, each storage pool, disk I/O, every interface (not loopback, veth or tap) with its addresses and rates, the last `range` seconds (60 to 3600, default 300) of CPU, memory and network, and every instance's CPU, memory, network and disk rates. `servers` has a card per server with its health and heartbeat numbers. A server whose isb predates it answers with its heartbeat's numbers only (`partial`). |
 | `host_policy` | How the daemon serves: listen addresses, Access, the remote tool policy, what remote specs may ask for, and each superadmin source with its allow list and token count. |
 | `superadmin_token_list` | Superadmin tokens' metadata, never the token. |
 | `superadmin_token_revoke` | Revoke one by `id`. Minting is `isb token create NAME --superadmin`, on the host only. |

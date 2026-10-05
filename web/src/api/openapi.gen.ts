@@ -1892,6 +1892,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/host_monitor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Host monitor
+         * @description Live resource use of this host or one remote server, as `top`/`bottom` show it: CPU (overall and per core), load, uptime, memory and swap, each storage pool, disk I/O and every network interface with its addresses and rates, the last `range` seconds (60-3600, default 300) of CPU, memory and network, and every instance's CPU, memory, network and disk rates. `servers` has a card per server (this host first) with its health and latest heartbeat numbers; `server` picks a remote one by name. Superadmins only.
+         */
+        post: operations["host_monitor"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/host_policy": {
         parameters: {
             query?: never;
@@ -9358,6 +9378,47 @@ export interface operations {
             content: {
                 "application/json": {
                     org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    host_monitor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    org?: string;
+                    /** @description Seconds of history (default 300) */
+                    range?: number;
+                    /** @description A remote server's name; omitted: this host */
+                    server?: string;
                 };
             };
         };

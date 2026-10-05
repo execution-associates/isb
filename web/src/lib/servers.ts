@@ -68,6 +68,17 @@ export function percent(used: number | undefined | null, total: number | undefin
   return Math.max(0, Math.min(100, Math.round((used / total) * 100)));
 }
 
+/** A usage bar's fill: destructive from 90%, warning from 75%, else the brand. */
+export function meterTone(pct: number): string {
+  return pct >= 90 ? "bg-destructive" : pct >= 75 ? "bg-warning" : "bg-brand";
+}
+
+/** Bytes in GiB once past one (hosts' memory and disk), else MiB. */
+export function size(n: number): string {
+  const gib = n / 2 ** 30;
+  return gib >= 1 ? `${gib.toFixed(1)} GiB` : `${(n / 2 ** 20).toFixed(0)} MiB`;
+}
+
 /** Seconds between two unix times, as "42s", "3m 5s", "1h 2m". */
 export function duration(from: number | null | undefined, to: number | null | undefined): string {
   if (from == null || to == null) return "";

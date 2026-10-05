@@ -533,6 +533,7 @@ impl Gate {
 /// what reaches further into its kernel (nesting for an org's workspace).
 pub const TOOLS: &[&str] = &[
     "host_inventory",
+    "host_monitor",
     "host_policy",
     "superadmin_token_list",
     "superadmin_token_revoke",

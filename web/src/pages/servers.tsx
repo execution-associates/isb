@@ -20,7 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { plural } from "@/lib/admin";
 import { dateTime, relativeTime } from "@/lib/format";
 import { errorMessage } from "@/lib/messages";
-import { type AddServerForm, addServerArgs, type BinarySource, emptyAddServer, healthTone, percent, shortBuild, versionSkew } from "@/lib/servers";
+import { type AddServerForm, addServerArgs, type BinarySource, emptyAddServer, healthTone, meterTone, percent, shortBuild, size, versionSkew } from "@/lib/servers";
 import { cn } from "@/lib/utils";
 import { RowsSkeleton } from "@/pages/org-ui";
 
@@ -161,18 +161,12 @@ function Meter({ label, icon, pct, text }: { label: string; icon: ReactNode; pct
       <span className="shrink-0 text-muted-foreground [&_svg]:size-3.5">{icon}</span>
       <span className="h-1.5 w-12 shrink-0 overflow-hidden rounded-full bg-muted">
         {pct !== null && (
-          <span className={cn("block h-full rounded-full", pct >= 90 ? "bg-destructive" : pct >= 75 ? "bg-warning" : "bg-brand")} style={{ width: `${Math.max(pct, 3)}%` }} />
+          <span className={cn("block h-full rounded-full", meterTone(pct))} style={{ width: `${Math.max(pct, 3)}%` }} />
         )}
       </span>
       <span className="truncate text-xs text-muted-foreground tabular-nums">{text}</span>
     </div>
   );
-}
-
-/** Bytes in GiB once past one (hosts' memory and disk), else MiB. */
-function size(n: number): string {
-  const gib = n / 2 ** 30;
-  return gib >= 1 ? `${gib.toFixed(1)} GiB` : `${(n / 2 ** 20).toFixed(0)} MiB`;
 }
 
 function resources(s: ServerView) {

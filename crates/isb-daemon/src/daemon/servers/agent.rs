@@ -128,6 +128,11 @@ fn internal_routes(d: Arc<Daemon>, a: Arc<AgentState>) -> Routes {
         }
         Some(match (req.method.as_str(), p) {
             ("GET", "heartbeat") => Response::json(200, &heartbeat(&d, &a)),
+            ("POST", "monitor") => {
+                let args = serde_json::from_slice::<Value>(&req.body).unwrap_or(Value::Null);
+                let range = super::super::host_monitor::range(&args);
+                Response::json(200, &super::super::host_monitor::local(&d.ctl, range))
+            }
             ("POST", "orgs") => {
                 #[derive(Deserialize)]
                 struct B {
@@ -263,6 +268,9 @@ fn status(d: &Daemon, a: &AgentState) -> Value {
             "mem_total": snap.host.mem_total,
             "disk_used": snap.host.disk_used,
             "disk_total": snap.host.disk_total,
+            "cpu_history": snap.host.cpu_history,
+            "net_rx_rate": snap.host.net_rx_rate,
+            "net_tx_rate": snap.host.net_tx_rate,
         },
         "orgs": a.orgs.list(),
         "stacks": d.ctl.list().len(),

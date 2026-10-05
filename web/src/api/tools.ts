@@ -249,3 +249,125 @@ export interface ServerStatus {
     rejected: number;
   }[];
 }
+
+// Monitor (host_monitor, superadmin): live resource use of this host or one
+// remote server, its history, and its instances.
+
+/** A server's heartbeat numbers; an older agent leaves fields out. */
+export interface HostCard {
+  hostname?: string;
+  cpus?: number;
+  cpu_pct?: number | null;
+  /** The last ~40 samples, 2s apart, 0-100. */
+  cpu_history?: number[];
+  mem_used?: number;
+  mem_total?: number;
+  disk_used?: number;
+  disk_total?: number;
+  /** Bytes per second. */
+  net_rx_rate?: number | null;
+  net_tx_rate?: number | null;
+  load1?: number;
+}
+
+export interface MonitorServer {
+  name: string;
+  local: boolean;
+  kind: "local" | "ssh" | "vm";
+  /** For a dedicated VM, the org it is for. */
+  vm_org: string | null;
+  state: "up" | "unreachable" | "unknown";
+  /** Unix seconds of the last good heartbeat (null for this host). */
+  last_ok: number | null;
+  /** Null until a first heartbeat. */
+  host: HostCard | null;
+}
+
+export interface MonitorInterface {
+  name: string;
+  /** Global-scope addresses. */
+  addresses: string[];
+  up: boolean;
+  rx_bytes: number;
+  tx_bytes: number;
+  rx_rate: number | null;
+  tx_rate: number | null;
+}
+
+export interface MonitorHost {
+  hostname: string;
+  cpus: number;
+  /** 0-100 across every CPU. */
+  cpu_pct: number | null;
+  cpu_history: number[];
+  /** Per-core busy, 0-100; empty when unknown. */
+  cpu_cores: number[];
+  load1: number;
+  load5: number | null;
+  load15: number | null;
+  uptime_secs: number | null;
+  mem_used: number;
+  mem_total: number;
+  swap_used: number | null;
+  swap_total: number | null;
+  disk_used: number;
+  disk_total: number;
+  pools: { name: string; driver: string; used: number; total: number }[];
+  disk_read_rate: number | null;
+  disk_write_rate: number | null;
+  /** Sum of `interfaces`, bytes per second. */
+  net_rx_rate: number | null;
+  net_tx_rate: number | null;
+  /** lo, veth* and tap* left out. */
+  interfaces: MonitorInterface[];
+  isb: string;
+}
+
+export interface HistoryPoint {
+  t: number;
+  cpu: number | null;
+  mem_used: number | null;
+  net_rx: number | null;
+  net_tx: number | null;
+}
+
+export interface MonitorInstance {
+  name: string;
+  project: string;
+  org: string | null;
+  /** container, virtual-machine or oci */
+  kind: string;
+  status: string;
+  ip: string | null;
+  stack: string | null;
+  /** Percent of one core: can pass 100. */
+  cpu_pct: number | null;
+  cpu_history: number[];
+  mem_bytes: number | null;
+  net_rx_rate: number | null;
+  net_tx_rate: number | null;
+  disk_read_rate: number | null;
+  disk_write_rate: number | null;
+}
+
+export interface Monitor {
+  /** Unix ms of the sample. */
+  at: number;
+  host: MonitorHost;
+  /** `step` in seconds; points oldest first. */
+  history: { step: number; points: HistoryPoint[] };
+  instances: MonitorInstance[];
+}
+
+export interface HostMonitor {
+  /** This host first, then every remote server. */
+  servers: MonitorServer[];
+  /** The selected entry's name. */
+  server: string;
+  /** Null when the server could not be reached. */
+  monitor: Monitor | null;
+  /** Why `monitor` is null or partial. */
+  error: string | null;
+  /** The agent is too old for live detail: host numbers only, no history or instances. */
+  partial: boolean;
+}

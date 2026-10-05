@@ -218,6 +218,7 @@ function Palette({ me, org, close }: { me: Me; org: string | null; close: () => 
       out.push({ id: "admin:servers", group: "Platform", title: "Servers", icon: ShieldCheck, keywords: ["platform", "admin", "servers", "placement", "vm", "agent"], run: go("/admin/servers") });
     }
     if (me.superadmin) {
+      out.push({ id: "monitor", group: "Platform", title: "Monitor: live CPU, memory, network", icon: Activity, keywords: ["superadmin", "monitor", "cpu", "memory", "network", "disk", "bottom", "top", "servers"], run: go("/monitor") });
       out.push({ id: "host", group: "Platform", title: "Host: instances, policy, superadmin tokens", icon: ShieldCheck, keywords: ["superadmin", "incus", "host", "policy"], run: go("/host") });
     }
     if (!known && me.superadmin) {
