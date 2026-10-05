@@ -72,7 +72,7 @@ wheels = [
 
 [[package]]
 name = "isb-sdk"
-version = "1.6.5"
+version = "1.6.6"
 source = { editable = "." }
 
 [package.dev-dependencies]
