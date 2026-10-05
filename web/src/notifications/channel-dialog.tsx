@@ -377,12 +377,14 @@ function RuleEditor({
           </Button>
         )}
       </div>
-      <div className="grid gap-x-6 gap-y-2 md:grid-cols-2">
+      {/* Each group's name, then its kinds on a line beneath, indented to the
+          name's text; two groups to a row from sm up. */}
+      <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
         {EVENT_GROUPS.map((g) => {
           const on = g.kinds.filter((k) => rule.kinds.has(k.kind)).length;
           return (
-            <div key={g.subject} className="flex min-w-0 items-center gap-x-3 text-sm">
-              <label className="flex w-30 shrink-0 items-center gap-2 font-medium">
+            <div key={g.subject} className="grid content-start gap-1.5 text-sm">
+              <label className="flex items-center gap-2 font-medium">
                 <input
                   type="checkbox"
                   className="size-4 accent-foreground"
@@ -401,17 +403,19 @@ function RuleEditor({
                 />
                 {g.label}
               </label>
-              {g.kinds.map((k) => (
-                <label key={k.kind} className="flex items-center gap-1.5 text-muted-foreground">
-                  <input type="checkbox" className="size-3.5 accent-foreground" checked={rule.kinds.has(k.kind)} onChange={() => flip(k.kind)} />
-                  {k.label}
-                </label>
-              ))}
+              <div className="flex flex-wrap gap-x-4 gap-y-1 pl-6">
+                {g.kinds.map((k) => (
+                  <label key={k.kind} className="flex items-center gap-1.5 whitespace-nowrap text-muted-foreground">
+                    <input type="checkbox" className="size-3.5 accent-foreground" checked={rule.kinds.has(k.kind)} onChange={() => flip(k.kind)} />
+                    {k.label}
+                  </label>
+                ))}
+              </div>
             </div>
           );
         })}
       </div>
-      <div className="grid items-start gap-3 sm:grid-cols-3">
+      <div className="grid items-start gap-3 border-t pt-3 sm:grid-cols-3">
         <Field label="Projects" hint="Any, when empty.">
           {(id, d) => (
             <>
