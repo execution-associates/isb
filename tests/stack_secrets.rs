@@ -156,7 +156,7 @@ fn stack_external_secret_rolls() {
     let before = s.instance("app");
     assert_eq!(read(&before, "/run/secrets/db"), "first");
     // The definition holds the reference, never the value.
-    let def = s.ctl.definition(&s.name).unwrap();
+    let def = s.ctl.definition(&common::q(&s.name)).unwrap();
     assert_eq!(def.secrets["db"].name, store_name);
     assert_eq!(def.secrets["db"].version, 1);
     assert!(!serde_json::to_string(&def).unwrap().contains("first"));

@@ -785,7 +785,8 @@ impl Controller {
             .ok_or_else(|| Error::NotFound(format!("service {service} in stack {name}")))?;
         spec.deploy.get_or_insert_with(Default::default).replicas = Some(replicas);
         super::ports::check_replicas(service, spec)?;
-        instance_name(name, service, replicas.max(1), "0000")?;
+        // `name` is the controller key (`org/stack`); instances use the bare name.
+        instance_name(&def.name, service, replicas.max(1), "0000")?;
         self.inner.store.save(&def)?;
         self.apply(Arc::new(def));
         Ok(())

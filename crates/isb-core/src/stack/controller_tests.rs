@@ -549,3 +549,14 @@ fn a_cursor_from_before_a_restart_starts_over() {
     let (_, evs) = ctl.events(ctl.resume_from(500), 10);
     assert_eq!(evs.len(), 2);
 }
+
+#[test]
+fn a_stack_in_an_org_scales_by_its_key() {
+    let ctl = quiet_controller();
+    let d = org_def("app", "lab");
+    ctl.inner.store.save(&d).unwrap();
+    ctl.apply(d.clone());
+    ctl.scale(&d.qualified(), "web", 3).unwrap();
+    let def = ctl.definition(&d.qualified()).unwrap();
+    assert_eq!(def.file.services["web"].replicas(), 3);
+}

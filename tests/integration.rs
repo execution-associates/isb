@@ -1170,7 +1170,7 @@ fn stack_controller() {
     let secrets = test_secrets(state.path());
     let ctl = isb::stack::Controller::start(client.clone(), store, Duration::from_secs(2), secrets)
         .unwrap();
-    let stack = format!("isb-test-{}", std::process::id() % 100000);
+    let stack = format!("isb-test-c{}", std::process::id() % 100000);
     let port = free_port();
     let yaml = format!(
         "services:\n  web:\n    image: {}\n    labels: {{isb-test: '1'}}\n    user: dev\n\
@@ -1220,7 +1220,7 @@ fn stack_controller() {
             (ok, failed)
         })
     };
-    ctl.redeploy(&stack, "web").unwrap();
+    ctl.redeploy(&common::q(&stack), "web").unwrap();
     let st = isb::daemon::wait_settled(&ctl, &common::q(&stack), Duration::from_secs(300)).unwrap();
     stop.store(true, Ordering::SeqCst);
     let (ok, failed) = load.join().unwrap();
@@ -1430,7 +1430,7 @@ fn service_names() {
         test_secrets(state.path()),
     )
     .unwrap();
-    let stack = format!("isb-test-{}", std::process::id() % 100000);
+    let stack = format!("isb-test-o{}", std::process::id() % 100000);
     let yaml = format!(
         "services:\n  web:\n    image: {}\n    user: dev\n\
          \x20   command: [sh, -c, 'exec python3 -m http.server 8000 -d /tmp']\n\
@@ -1936,7 +1936,7 @@ fn ingress_routes_rolls_and_removes() {
     )
     .unwrap();
     m.start(ctl.clone()).unwrap();
-    let stack = format!("isb-test-{}", std::process::id() % 100000);
+    let stack = format!("isb-test-i{}", std::process::id() % 100000);
     let host = format!("{stack}.ingress.test");
     let plain = format!("plain-{stack}.ingress.test");
     let yaml = format!(
@@ -2044,7 +2044,7 @@ fn ingress_routes_rolls_and_removes() {
             (ok, failed)
         })
     };
-    ctl.redeploy(&stack, "web").unwrap();
+    ctl.redeploy(&common::q(&stack), "web").unwrap();
     // wait_settled can return before the rollout starts: give it a beat.
     std::thread::sleep(Duration::from_secs(3));
     let st = isb::daemon::wait_settled(&ctl, &common::q(&stack), Duration::from_secs(300)).unwrap();
