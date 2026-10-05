@@ -240,7 +240,11 @@ sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run] [--public-ingress
 
 `org create` on an existing org sets the flags given. `org update` changes
 an existing org through the daemon (the `org_update` tool): flags left out
-keep their value, and `none` lifts a limit. `org show` prints each limit with
+keep their value, and `none` lifts a limit. `--disk SIZE` is refused while
+an instance in the org has no root size, naming each (give its service
+`raw_devices: {root: {size: ...}}` and redeploy it, or delete it); under the
+limit, each new instance gets its own root size (its spec's, else 10GiB).
+`org show` prints each limit with
 what the org's instances are allocated against it
 (`cpus       3 of 4 allocated, 1 free`), and `--json` has it as `allocation`.
 `--allow-egress`, `--allow-domain` and `--allow-udp` replace the org's lists

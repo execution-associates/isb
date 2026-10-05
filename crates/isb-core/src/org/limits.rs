@@ -25,9 +25,9 @@ use super::OrgId;
 use crate::client::Client;
 use crate::error::Error;
 
-/// The root disk size an instance gets from the org's default profile when
-/// its spec sets none and the org has `limits.disk` (incus refuses an
-/// instance without one there). The same as a sandbox's.
+/// The root disk size isb gives an instance it creates in an org with
+/// `limits.disk` when its spec sets none (incus refuses an instance without
+/// one there); see [`super::disk`].
 pub const DEFAULT_ROOT_SIZE: &str = "10GiB";
 
 /// One of an org's limits, which `isb org update` can lift again.

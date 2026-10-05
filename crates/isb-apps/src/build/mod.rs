@@ -490,16 +490,16 @@ fn create_sandbox(
     deadline: Instant,
 ) -> Result<()> {
     let mut disk = json!({"type": "disk", "pool": pool, "source": cache});
-    // A VM gets a raw disk, which build.sh finds by this device name and
-    // formats once; a container, the directory itself.
-    if !vm {
+    let mut root = json!({"type": "disk", "path": "/", "pool": pool});
+    // A VM gets a raw disk, which build.sh finds by this device name and formats
+    // once, and a root with room for the source, export and BuildKit's scratch;
+    // a container, the directory itself and a root sized only under a disk limit.
+    if vm {
+        root["size"] = json!("20GiB");
+    } else {
         disk["path"] = json!("/var/lib/buildkit");
     }
-    let mut devices = json!({ CACHE_DEVICE: disk });
-    if vm {
-        // Room for the source, the export and BuildKit's scratch space.
-        devices["root"] = json!({"type": "disk", "path": "/", "pool": pool, "size": "20GiB"});
-    }
+    let devices = json!({ CACHE_DEVICE: disk, "root": root });
     let body = json!({
         "name": name,
         "type": if vm { "virtual-machine" } else { "container" },
@@ -516,7 +516,7 @@ fn create_sandbox(
     oc.mutate(
         "POST",
         "/1.0/instances",
-        Some(&body),
+        Some(&crate::org::disk::sized_root(oc, body)),
         &format!("create build sandbox {name}"),
         t.min(oc.get_timeouts().create.max(Duration::from_secs(600))),
     )?;
