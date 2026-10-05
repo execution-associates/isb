@@ -13,7 +13,7 @@
 
 use crate::error::Result;
 
-/// See [`Desired::before_start`]: called with the instance's name.
+/// See `Desired::before_start`: called with the instance's name.
 #[derive(Clone)]
 pub struct BeforeStart(pub std::sync::Arc<BeforeStartFn>);
 

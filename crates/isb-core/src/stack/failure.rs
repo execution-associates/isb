@@ -87,7 +87,7 @@ pub struct FailedAttempt {
     pub at_ms: u64,
     /// Why (the failure message without the output).
     pub reason: String,
-    /// The last lines it printed (at most [`READ_LINES`] and
+    /// The last lines it printed (at most `READ_LINES` and
     /// [`OUTPUT_BYTES`]).
     pub output: String,
     /// Why `output` is empty: it printed nothing, or it could not be read.
