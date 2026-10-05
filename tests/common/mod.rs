@@ -16,13 +16,26 @@ pub fn image() -> String {
     std::env::var("ISB_TEST_IMAGE").unwrap_or_else(|_| "dev-base".into())
 }
 
-/// The client for the default org's incus project (`isb-default`), where the
-/// default org's stacks and apps live; plain sandboxes stay in incus'
-/// `default` project. Creates the org the way `isb serve` does when it is
-/// missing, and leaves an existing one alone.
-pub fn default_org_client(base: &Client) -> Client {
-    isb::org::ensure_default(base, &mut |l| eprintln!("{l}")).unwrap();
-    isb::org::client(base, &isb::org::OrgId::default_org())
+/// The org the stack and app tests deploy into: `isb-test` (incus project
+/// `isb-isb-test`), never the default org, which holds a host's own apps.
+pub fn test_org() -> isb::org::OrgId {
+    isb::org::OrgId::new(TEST_ORG).unwrap()
+}
+
+pub const TEST_ORG: &str = "isb-test";
+
+/// The client for [`test_org`]'s incus project. Creates the org with default
+/// settings when it is missing and leaves an existing one alone; plain
+/// sandboxes stay in incus' `default` project.
+pub fn test_org_client(base: &Client) -> Client {
+    let org = test_org();
+    if isb::org::get(base, &org).is_err() {
+        isb::org::ensure(base, &org, &isb::org::OrgOptions::default(), &mut |l| {
+            eprintln!("{l}")
+        })
+        .unwrap();
+    }
+    isb::org::client(base, &org)
 }
 
 /// A VM's host bind mount at `/mnt/share` is translated by virtiofsd: guest root

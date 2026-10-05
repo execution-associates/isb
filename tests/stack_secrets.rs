@@ -7,7 +7,7 @@ use isb::{Client, Sandbox};
 
 #[allow(dead_code, reason = "each test binary uses some of the shared helpers")]
 mod common;
-use common::{default_org_client, enabled, image};
+use common::{enabled, image, test_org_client};
 
 /// A secret store under `state` with a throwaway key.
 fn test_secrets(state: &std::path::Path) -> std::sync::Arc<isb::secrets::Secrets> {
@@ -57,7 +57,7 @@ impl SecretStack {
             &|_| None,
         )
         .unwrap();
-        let org = isb::org::OrgId::default_org();
+        let org = common::test_org();
         let given = given
             .iter()
             .map(|(k, v)| (k.to_string(), v.as_bytes().to_vec()))
@@ -95,7 +95,7 @@ impl SecretStack {
         let st = self.ctl.status(&self.name).unwrap();
         let s = st.services.iter().find(|s| s.service == service).unwrap();
         assert_eq!(s.instances.len(), 1, "{s:?}");
-        let org_client = default_org_client(&Client::new());
+        let org_client = test_org_client(&Client::new());
         Sandbox::get(&org_client, &s.instances[0].name).unwrap()
     }
 }
@@ -136,7 +136,7 @@ fn stack_external_secret_rolls() {
         return;
     }
     let s = SecretStack::new("ext");
-    let org = isb::org::OrgId::default_org();
+    let org = common::test_org();
     let store_name = format!("{}.db", s.name);
     s.secrets
         .create(&org, &store_name, None, b"first", &Default::default())
@@ -201,7 +201,7 @@ fn stack_env_secret_delivery() {
         ),
         &[("tok", "t0k-value")],
     );
-    let org = isb::org::OrgId::default_org();
+    let org = common::test_org();
     // Stored as the stack's own secret.
     let owned = format!("{}_tok", s.name);
     assert_eq!(s.secrets.get(&org, &owned).unwrap().0, b"t0k-value");
@@ -275,7 +275,7 @@ fn wait_until(what: &str, f: impl Fn() -> bool) {
 /// the stack and the store names of f, e and n.
 fn in_place_stack(what: &str) -> (SecretStack, [String; 3]) {
     let s = SecretStack::new(what);
-    let org = isb::org::OrgId::default_org();
+    let org = common::test_org();
     let names = ["f", "e", "n"].map(|k| format!("{}.{k}", s.name));
     for k in &names {
         s.secrets
@@ -331,7 +331,7 @@ fn stack_secret_on_change_restart() {
         return;
     }
     let (s, [f, e, _]) = in_place_stack("restart");
-    let org = isb::org::OrgId::default_org();
+    let org = common::test_org();
     let (sys, oci) = (s.instance("sys"), s.instance("oci"));
     assert_eq!(read(&sys, "/tmp/t"), "one-one");
     let revs = revisions(&s);
@@ -384,7 +384,7 @@ fn stack_secret_on_change_none() {
         return;
     }
     let (s, [_, _, n]) = in_place_stack("none");
-    let org = isb::org::OrgId::default_org();
+    let org = common::test_org();
     let lazy = s.instance("lazy");
     let revs = revisions(&s);
     s.secrets.set(&org, &n, b"four").unwrap();
@@ -439,7 +439,7 @@ fn stack_secret_rotate_changes_database_passwords() {
         return;
     }
     let s = SecretStack::new("rotate");
-    let org = isb::org::OrgId::default_org();
+    let org = common::test_org();
     let n = |k: &str| format!("{}.{k}", s.name);
     for k in ["pg", "my", "myroot", "rd", "bad"] {
         s.secrets
