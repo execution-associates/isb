@@ -164,6 +164,9 @@ jobs:
   install:
     name: install.sh on ${{ matrix.runner }}
     needs: release
+    # A job skipped upstream (the rebuild or `check` a tag skips) fails an
+    # implicit success(), so this names the result it depends on.
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -182,6 +185,9 @@ jobs:
   crates:
     name: publish to crates.io
     needs: release
+    # A job skipped upstream (the rebuild or `check` a tag skips) fails an
+    # implicit success(), so this names the result it depends on.
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
