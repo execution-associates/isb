@@ -225,9 +225,10 @@ metadata. isb recognises all three and never counts them as up:
   `service` monitor that sets no Access headers of its own presents them, so
   the check goes through Access to the app, as users do: one request, end to
   end. Any monitor can also name them in `headers` (`CF-Access-Client-Id`,
-  `CF-Access-Client-Secret`). Access still stopping a request that carries a
-  token is down ("... with the service token: allow it in the Access
-  application's policy").
+  `CF-Access-Client-Secret`). When Access still stops a request that
+  carries the token, its policy does not allow that token: users still get
+  through, so the monitor checks hop by hop (below) and its note says to
+  allow the token in the Access application's policy.
 - **Without a token**, an `app` or `service` monitor checks hop by hop, and
   is up only when every hop is:
 

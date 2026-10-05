@@ -848,7 +848,7 @@
   "info": {
     "description": "isb serve's HTTP surface: the tools (also MCP), the workspace resource, the identity endpoints, streams, websockets and webhooks. docs/reference/http-api.md.",
     "title": "isb",
-    "version": "1.6.4"
+    "version": "1.6.5"
   },
   "openapi": "3.1.0",
   "paths": {
