@@ -141,6 +141,7 @@ mod tests {
             pools: vec!["default".into()],
             path_map: None,
             initial_copy: false,
+            initial_owner: false,
             incus_version: Some("7.5.1".into()),
             invoking_ids: (1000, 1000),
             shared_root: None,

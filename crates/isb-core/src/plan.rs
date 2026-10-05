@@ -26,6 +26,7 @@ use crate::spec::{
 };
 
 mod oci_cmd;
+mod owner;
 pub use oci_cmd::{check_oci_command, oci_command_line};
 
 pub type Props = BTreeMap<String, String>;
@@ -42,6 +43,8 @@ pub struct HostFacts {
     pub path_map: Option<(String, String)>,
     /// The server can seed a new volume from the image (`disk_initial_copy`).
     pub initial_copy: bool,
+    /// The server sets a new volume's owner and mode (`storage_initial_owner`).
+    pub initial_owner: bool,
     /// The incus server version (`environment.server_version`).
     pub incus_version: Option<String>,
     /// The (uid, gid) of the user running isb: what a VM's bind mounts map to.
@@ -132,12 +135,18 @@ pub struct EnsureVolume {
     pub external: bool,
 }
 
-/// chown a mount point (and root-owned parents inside the owner's home).
+/// chown (and root-owned parents in the owner's home) and/or chmod a mount point.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct OwnerFixup {
     pub device: String,
     pub path: String,
-    pub owner: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    /// The service user's default: only if this (pool, name) is new and unseeded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_volume: Option<(String, String)>,
 }
 
 /// A desired device.
@@ -771,22 +780,28 @@ pub fn resolve(
                 if !vm && host.initial_copy && !v.volume.nocopy {
                     props.insert("initial.copy".into(), "true".into());
                 }
+                let base = def.map(|d| d.config.clone()).unwrap_or_default();
+                let (config, fixups) = owner::for_mount(
+                    &name,
+                    spec,
+                    v,
+                    (&guest_norm, &dname),
+                    (&vpool, n, base),
+                    host,
+                )?;
                 let ev = EnsureVolume {
                     pool: vpool,
                     name: n.clone(),
-                    config: def.map(|d| d.config.clone()).unwrap_or_default(),
+                    config,
                     external: v.external || def.is_some_and(|d| d.external),
                 };
-                if !volumes.contains(&ev) {
+                if !volumes
+                    .iter()
+                    .any(|e| (&e.pool, &e.name) == (&ev.pool, &ev.name))
+                {
                     volumes.push(ev);
                 }
-                if let Some(o) = &v.owner {
-                    owners.push(OwnerFixup {
-                        device: dname.clone(),
-                        path: guest_norm.clone(),
-                        owner: o.clone(),
-                    });
-                }
+                owners.extend(fixups);
             }
         }
         if v.read_only {
@@ -1072,7 +1087,14 @@ pub enum Action {
     },
     FixOwner {
         path: String,
-        owner: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        owner: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        mode: Option<String>,
+        /// The service user's default for a new volume: only if the image
+        /// did not seed it.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        fresh_only: bool,
     },
     /// Something isb will not change (fixed at creation, or ambiguous). Informational.
     Note {
@@ -1151,7 +1173,12 @@ impl std::fmt::Display for Action {
                 props: p,
                 search,
             } => write!(f, "+ port {device}: {} (search {search})", props(p)),
-            Action::FixOwner { path, owner } => write!(f, "~ chown {owner} {path}"),
+            Action::FixOwner {
+                path,
+                owner,
+                mode,
+                fresh_only,
+            } => owner::describe(f, path, owner.as_deref(), mode.as_deref(), *fresh_only),
             Action::Note { message } => write!(f, "  note: {message}"),
         }
     }
@@ -1247,7 +1274,6 @@ fn restart_needed(key: &str) -> bool {
 /// `volumes_missing` lists named volumes (pool, name) that do not exist yet.
 #[expect(
     clippy::too_many_lines,
-    clippy::cognitive_complexity,
     reason = "predates the lint ratchet; split it when next changed"
 )]
 pub fn diff(
@@ -1299,12 +1325,7 @@ pub fn diff(
         });
         actions.push(Action::StartInstance);
         push_searched_ports(desired, &mut actions);
-        for o in &desired.owners {
-            actions.push(Action::FixOwner {
-                path: o.path.clone(),
-                owner: o.owner.clone(),
-            });
-        }
+        actions.extend(owner::actions(&desired.owners, &|_| true, volumes_missing));
         return Ok(SandboxPlan {
             name: desired.name.clone(),
             status: None,
@@ -1468,14 +1489,11 @@ pub fn diff(
             search: d.search.unwrap_or(0),
         });
     }
-    for o in &desired.owners {
-        if new_devices.contains(&o.device) {
-            actions.push(Action::FixOwner {
-                path: o.path.clone(),
-                owner: o.owner.clone(),
-            });
-        }
-    }
+    actions.extend(owner::actions(
+        &desired.owners,
+        &|d| new_devices.iter().any(|n| n == d),
+        volumes_missing,
+    ));
 
     Ok(SandboxPlan {
         name: desired.name.clone(),

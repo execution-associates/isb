@@ -12,10 +12,10 @@ crates/isb-core/src/compose.rs 1245
 crates/isb-core/src/ingress/caddy.rs 1130
 crates/isb-core/src/machine.rs 1097
 crates/isb-core/src/metrics_history.rs 1024
-crates/isb-core/src/plan.rs 1519
+crates/isb-core/src/plan.rs 1518
 crates/isb-core/src/registry/oci.rs 1081
-crates/isb-core/src/sandbox.rs 1375
-crates/isb-core/src/spec.rs 1760
+crates/isb-core/src/sandbox.rs 1349
+crates/isb-core/src/spec.rs 1584
 crates/isb-core/src/stack/controller.rs 2395
 crates/isb-daemon/src/daemon/audit.rs 1063
 crates/isb-daemon/src/daemon/mod.rs 1286
@@ -28,7 +28,7 @@ crates/isb-server/src/server/http.rs 1163
 crates/isb-server/src/server/mcp.rs 2271
 crates/isb-tui/src/tui/app.rs 1067
 crates/isb-tui/src/tui/ui.rs 1628
-lint:cognitive_complexity 15
+lint:cognitive_complexity 14
 lint:excessive_nesting 10
 lint:too_many_arguments 13
 lint:too_many_lines 80
