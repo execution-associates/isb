@@ -10,7 +10,7 @@ import { deploymentPath } from "@/apps/use-deploy";
 import { Lockup, Logo, Wordmark } from "@/components/brand";
 import { CommandPaletteProvider, SECTIONS, usePalette } from "@/components/command-palette";
 import { StatusDot } from "@/components/status";
-import { TextureItems, THEME_ICONS, THEMES } from "@/components/theme-toggle";
+import { THEME_ICONS, THEMES } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -296,7 +296,6 @@ function UserMenu({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>
-            {theme === "ea" && <TextureItems />}
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         {!ambientSuperadmin(me) && (

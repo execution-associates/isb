@@ -3,13 +3,10 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { setTexture, type Texture, TEXTURES, useTexture } from "@/lib/texture";
 import { setTheme, type Theme, useTheme } from "@/lib/theme";
 
 /** Every theme, in the order menus list them; the first is the default. */
@@ -23,24 +20,6 @@ export const THEMES: { value: Theme; label: string; icon: typeof Sun }[] = [
 /** Each theme's icon, for the account menu's Theme item. */
 
 export const THEME_ICONS: Record<Theme, typeof Sun> = { ea: Palette, light: Sun, dark: Moon, system: Monitor };
-
-/** The Execution Associates theme's texture setting (on, subtle, off), for the end of a theme menu. */
-export function TextureItems() {
-  const texture = useTexture();
-  return (
-    <>
-      <DropdownMenuSeparator />
-      <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">Texture</DropdownMenuLabel>
-      <DropdownMenuRadioGroup value={texture} onValueChange={(v) => setTexture(v as Texture)}>
-        {TEXTURES.map((t) => (
-          <DropdownMenuRadioItem key={t.value} value={t.value}>
-            {t.label}
-          </DropdownMenuRadioItem>
-        ))}
-      </DropdownMenuRadioGroup>
-    </>
-  );
-}
 
 export function ThemeToggle() {
   const { theme, effective } = useTheme();
@@ -61,7 +40,6 @@ export function ThemeToggle() {
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
-        {theme === "ea" && <TextureItems />}
       </DropdownMenuContent>
     </DropdownMenu>
   );

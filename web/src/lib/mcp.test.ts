@@ -311,18 +311,18 @@ describe("the MCP page's endpoint tabs", () => {
     expect(mcpEndpoint(false, "org")).toBeNull();
   });
 
-  it("opens a superadmin on the superadmin endpoint unless the URL picks the org's", () => {
-    expect(mcpEndpoint(true, null)).toBe("superadmin");
-    expect(mcpEndpoint(true, "superadmin")).toBe("superadmin");
+  it("opens a superadmin on the org endpoint unless the URL picks the superadmin one", () => {
+    expect(mcpEndpoint(true, null)).toBe("org");
     expect(mcpEndpoint(true, "org")).toBe("org");
-    expect(mcpEndpoint(true, "bogus")).toBe("superadmin");
-    expect(mcpEndpoint(true, "")).toBe("superadmin");
+    expect(mcpEndpoint(true, "superadmin")).toBe("superadmin");
+    expect(mcpEndpoint(true, "bogus")).toBe("org");
+    expect(mcpEndpoint(true, "")).toBe("org");
   });
 
-  it("puts the superadmin tab first, each linked by ?endpoint=", () => {
+  it("puts the org tab first, each linked by ?endpoint=", () => {
     expect(mcpEndpointTabs("acme")).toEqual([
-      { id: "superadmin", label: "Superadmin (/mcp)", to: "/orgs/acme/agents?endpoint=superadmin" },
-      { id: "org", label: "This org (/orgs/acme/mcp)", to: "/orgs/acme/agents?endpoint=org" },
+      { id: "org", label: "Organization", to: "/orgs/acme/agents?endpoint=org" },
+      { id: "superadmin", label: "Superadmin", to: "/orgs/acme/agents?endpoint=superadmin" },
     ]);
     // Every tab's link reads back as itself.
     for (const t of mcpEndpointTabs("acme")) expect(mcpEndpoint(true, new URL(t.to, "https://x").searchParams.get("endpoint"))).toBe(t.id);
