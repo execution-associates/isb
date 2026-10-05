@@ -21,6 +21,7 @@ OnChange = Literal["none", "restart", "roll"]
 PortBind = Literal["host", "guest"]
 RestartCondition = Literal["none", "on-failure", "any"]
 RestartMode = Literal["no", "always", "on-failure", "unless-stopped"]
+SecretAs = Literal["env", "file"]
 UpdateOrder = Literal["stop-first", "start-first"]
 
 
@@ -101,6 +102,10 @@ class _EnvValueSecretRequired(TypedDict):
 
 
 class EnvValueSecret(_EnvValueSecretRequired, total=False):
+    #: `env` (default): the variable holds the value. `file`: the value
+    #: is `/run/secrets/NAME` and `KEY_FILE` holds that path, so it is
+    #: never instance config.
+    as: Optional[SecretAs]
     #: What a new version of the secret does to this service (overrides
     #: the top-level secret's `on_change`).
     on_change: Optional[OnChange]
@@ -126,7 +131,9 @@ class Healthcheck(TypedDict, total=False):
     retries: Optional[int]
     #: Time between checks during `start_period`. Default `5s`.
     start_interval: Optional[IntOrString]
-    #: Grace after a start during which failures do not count. Default `0s`.
+    #: Grace after a start during which failures do not count. Unset, a
+    #: replica that has not yet passed gets `interval * retries * 2`
+    #: (60s to 5m) before its failures count; one that has passed, none.
     start_period: Optional[IntOrString]
     #: `[CMD, argv...]`, `[CMD-SHELL, "a shell line"]`, a plain string (a shell
     #: line), or `[NONE]`. Runs in the guest as the service's `user`.
@@ -438,11 +445,15 @@ class VolumeMount(_VolumeMountRequired, total=False):
     device: Optional[str]
     #: Named volumes only: the volume must already exist; isb never creates it.
     external: BoolOrString
+    #: Named volumes only: the mount point's octal mode (`"0770"`), set with
+    #: `owner`.
+    mode: Optional[IntOrString]
     #: Extra disk device properties (`shift`, `propagation`, ...), verbatim.
     options: Mapping[str, Scalar]
     #: Named volumes only: chown the mount point to this guest user (`dev`,
     #: `dev:dev` or `1000:1000`) after it is attached, plus any root-owned
-    #: parents inside that user's home that the mount conjured.
+    #: parents inside that user's home that the mount conjured. Default: a
+    #: new volume belongs to the service's `user`.
     owner: Optional[IntOrString]
     #: Named volumes only: the storage pool. Default: the top-level volume's
     #: pool, else the sandbox's root pool.
@@ -634,6 +645,7 @@ __all__ = [
     "SandboxSpec",
     "SandboxSpecFields",
     "Scalar",
+    "SecretAs",
     "SecretDef",
     "SecretRef",
     "UpdateConfig",

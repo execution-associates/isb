@@ -2,8 +2,9 @@
 //! multi-line `sh -c` script as an OCI command line, against a real incusd.
 //!
 //! Gated by `ISB_INTEGRATION=1`. Everything happens in a throwaway incus
-//! project of its own (`isb-test-own-<pid>`), deleted afterwards with all it
-//! holds; no org's project is touched.
+//! project of its own (`isbtest-own-<pid>`; not `isb-*`, which a running
+//! daemon would take for an org), deleted afterwards with all it holds; no
+//! org's project is touched.
 
 use std::time::{Duration, Instant};
 
@@ -45,7 +46,7 @@ impl Drop for Project {
 
 fn project() -> Project {
     let base = Client::new();
-    let name = format!("isb-test-own-{}", std::process::id());
+    let name = format!("isbtest-own-{}", std::process::id());
     let body = serde_json::json!({
         "name": name,
         "description": "isb volume_owner integration test (throwaway)",

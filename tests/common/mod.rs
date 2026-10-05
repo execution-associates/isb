@@ -24,6 +24,11 @@ pub fn test_org() -> isb::org::OrgId {
 
 pub const TEST_ORG: &str = "isb-test";
 
+/// A test stack's controller key: `isb-test/NAME`.
+pub fn q(stack: &str) -> String {
+    isb::stack::qualified(&test_org(), stack)
+}
+
 /// The client for [`test_org`]'s incus project. Creates the org with default
 /// settings when it is missing and leaves an existing one alone; plain
 /// sandboxes stay in incus' `default` project.
@@ -74,4 +79,27 @@ pub fn vm_share_is_translated(sb: &Sandbox, share: &std::path::Path) {
     }
     assert!(!share.join("dev").exists());
     assert!(!share.join("other").exists());
+}
+
+/// A stack as the tests deploy it: `file` with no secrets, by `test`.
+pub fn test_def(
+    name: &str,
+    org: isb::org::OrgId,
+    file: isb::spec::ComposeFile,
+    base_dir: &std::path::Path,
+) -> isb::stack::StackDef {
+    isb::stack::StackDef {
+        source: None,
+        domains: Default::default(),
+        name: name.to_string(),
+        org,
+        file,
+        base_dir: base_dir.to_path_buf(),
+        secrets: Default::default(),
+        force: Default::default(),
+        images: Default::default(),
+        deployed_at: 0,
+        deployed_by: "test".into(),
+        previous: None,
+    }
 }

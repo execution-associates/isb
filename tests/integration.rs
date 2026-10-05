@@ -24,7 +24,7 @@ use isb::{
 };
 
 mod common;
-use common::{enabled, image, test_org_client};
+use common::{enabled, image, test_def, test_org_client};
 
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
@@ -1157,29 +1157,6 @@ fn test_secrets(state: &std::path::Path) -> std::sync::Arc<isb::secrets::Secrets
     )))
 }
 
-/// A stack as the tests deploy it: `file` with no secrets, by `test`.
-fn test_def(
-    name: &str,
-    org: isb::org::OrgId,
-    file: isb::spec::ComposeFile,
-    base_dir: &std::path::Path,
-) -> isb::stack::StackDef {
-    isb::stack::StackDef {
-        source: None,
-        domains: Default::default(),
-        name: name.to_string(),
-        org,
-        file,
-        base_dir: base_dir.to_path_buf(),
-        secrets: Default::default(),
-        force: Default::default(),
-        images: Default::default(),
-        deployed_at: 0,
-        deployed_by: "test".into(),
-        previous: None,
-    }
-}
-
 /// The stack controller: replicas behind the balancer, a forced rolling
 /// redeploy with no failed request, scale down, remove.
 #[test]
@@ -1218,9 +1195,9 @@ fn stack_controller() {
             self.0.shutdown();
         }
     }
-    let _rm = Rm(ctl.clone(), stack.clone());
+    let _rm = Rm(ctl.clone(), common::q(&stack));
     ctl.deploy(def).unwrap();
-    let st = isb::daemon::wait_settled(&ctl, &stack, Duration::from_secs(300)).unwrap();
+    let st = isb::daemon::wait_settled(&ctl, &common::q(&stack), Duration::from_secs(300)).unwrap();
     assert!(st.converged, "{st:?}");
     let addr = format!("127.0.0.1:{port}");
     let seen: std::collections::BTreeSet<String> =
@@ -1244,7 +1221,7 @@ fn stack_controller() {
         })
     };
     ctl.redeploy(&stack, "web").unwrap();
-    let st = isb::daemon::wait_settled(&ctl, &stack, Duration::from_secs(300)).unwrap();
+    let st = isb::daemon::wait_settled(&ctl, &common::q(&stack), Duration::from_secs(300)).unwrap();
     stop.store(true, Ordering::SeqCst);
     let (ok, failed) = load.join().unwrap();
     assert!(st.converged, "{st:?}");
@@ -1253,13 +1230,18 @@ fn stack_controller() {
     assert!(after.is_disjoint(&seen), "{after:?} vs {seen:?}");
     assert!(ok > 0 && failed == 0, "ok {ok}, failed {failed}");
 
-    ctl.scale(&stack, "web", 1).unwrap();
+    ctl.scale(&common::q(&stack), "web", 1).unwrap();
     let deadline = Instant::now() + Duration::from_secs(120);
-    while ctl.status(&stack).unwrap().services[0].instances.len() != 1 {
+    while ctl.status(&common::q(&stack)).unwrap().services[0]
+        .instances
+        .len()
+        != 1
+    {
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_secs(1));
     }
-    ctl.remove(&stack, true, Duration::from_secs(120)).unwrap();
+    ctl.remove(&common::q(&stack), true, Duration::from_secs(120))
+        .unwrap();
     let org_client = test_org_client(&client);
     let left = Sandbox::list_with(&org_client, &[LabelFilter::parse("isb-test")])
         .unwrap()
@@ -1705,7 +1687,7 @@ fn apps_deploy_edit_rollback_git_webhook() {
             self.1.shutdown();
         }
     }
-    let _rm = Rm(apps.clone(), ctl.clone(), stack.clone());
+    let _rm = Rm(apps.clone(), ctl.clone(), common::q(&stack));
     apps.project_create(&org, &project, "", &["test".into()])
         .unwrap();
     let port = free_port();
@@ -1738,7 +1720,7 @@ fn apps_deploy_edit_rollback_git_webhook() {
         d
     };
     let instances = |svc: &str| -> Vec<String> {
-        let st = ctl.status(&stack).unwrap();
+        let st = ctl.status(&common::q(&stack)).unwrap();
         let s = st.services.iter().find(|s| s.service == svc).unwrap();
         let mut v: Vec<String> = s.instances.iter().map(|i| i.name.clone()).collect();
         v.sort();
@@ -1881,7 +1863,7 @@ fn apps_deploy_edit_rollback_git_webhook() {
     // Deleting the apps takes their services, and the stack with the last.
     apps.delete(&org, "src").unwrap();
     assert!(
-        ctl.status(&stack)
+        ctl.status(&common::q(&stack))
             .unwrap()
             .services
             .iter()
@@ -1890,7 +1872,7 @@ fn apps_deploy_edit_rollback_git_webhook() {
     apps.delete(&org, "other").unwrap();
     apps.delete(&org, "web").unwrap();
     assert!(
-        ctl.status(&stack).is_err(),
+        ctl.status(&common::q(&stack)).is_err(),
         "the stack went with its last app"
     );
     apps.project_delete(&org, &project).unwrap();
@@ -1987,10 +1969,10 @@ fn ingress_routes_rolls_and_removes() {
             self.2.shutdown();
         }
     }
-    let _rm = Rm(ctl.clone(), stack.clone(), m.clone());
+    let _rm = Rm(ctl.clone(), common::q(&stack), m.clone());
     m.check(&def).unwrap();
     ctl.deploy(def).unwrap();
-    let st = isb::daemon::wait_settled(&ctl, &stack, Duration::from_secs(300)).unwrap();
+    let st = isb::daemon::wait_settled(&ctl, &common::q(&stack), Duration::from_secs(300)).unwrap();
     assert!(st.converged, "{st:?}");
 
     let ca = state
@@ -2012,7 +1994,7 @@ fn ingress_routes_rolls_and_removes() {
         (0..10).map(|_| curl(&url, &resolve, Some(&ca)).1).collect();
     assert_eq!(seen.len(), 2, "{seen:?}");
 
-    let st = ctl.status(&stack).unwrap();
+    let st = ctl.status(&common::q(&stack)).unwrap();
     let doms = &st.services[0].domains;
     let d = doms.iter().find(|d| d.host == host).unwrap();
     assert_eq!(d.state, "serving", "{d:?}");
@@ -2065,7 +2047,7 @@ fn ingress_routes_rolls_and_removes() {
     ctl.redeploy(&stack, "web").unwrap();
     // wait_settled can return before the rollout starts: give it a beat.
     std::thread::sleep(Duration::from_secs(3));
-    let st = isb::daemon::wait_settled(&ctl, &stack, Duration::from_secs(300)).unwrap();
+    let st = isb::daemon::wait_settled(&ctl, &common::q(&stack), Duration::from_secs(300)).unwrap();
     std::thread::sleep(Duration::from_secs(2));
     stop.store(true, Ordering::SeqCst);
     let (ok, failed) = load.join().unwrap();
@@ -2078,7 +2060,8 @@ fn ingress_routes_rolls_and_removes() {
     assert_eq!(after.len(), 2, "{after:?}");
 
     // Removal takes the routes away.
-    ctl.remove(&stack, true, Duration::from_secs(120)).unwrap();
+    ctl.remove(&common::q(&stack), true, Duration::from_secs(120))
+        .unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let routes = m.status(None)["routes"].as_array().unwrap().len();

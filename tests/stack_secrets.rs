@@ -85,14 +85,15 @@ impl SecretStack {
 
     fn settle(&self) -> isb::stack::controller::StackStatus {
         let st =
-            isb::daemon::wait_settled(&self.ctl, &self.name, Duration::from_secs(300)).unwrap();
+            isb::daemon::wait_settled(&self.ctl, &common::q(&self.name), Duration::from_secs(300))
+                .unwrap();
         assert!(st.converged, "{st:?}");
         st
     }
 
     /// The one instance of a service.
     fn instance(&self, service: &str) -> Sandbox {
-        let st = self.ctl.status(&self.name).unwrap();
+        let st = self.ctl.status(&common::q(&self.name)).unwrap();
         let s = st.services.iter().find(|s| s.service == service).unwrap();
         assert_eq!(s.instances.len(), 1, "{s:?}");
         let org_client = test_org_client(&Client::new());
@@ -102,7 +103,9 @@ impl SecretStack {
 
 impl Drop for SecretStack {
     fn drop(&mut self) {
-        let _ = self.ctl.remove(&self.name, true, Duration::from_secs(120));
+        let _ = self
+            .ctl
+            .remove(&common::q(&self.name), true, Duration::from_secs(120));
         self.ctl.shutdown();
     }
 }
@@ -312,7 +315,7 @@ fn in_place_stack(what: &str) -> (SecretStack, [String; 3]) {
 
 /// Every service's revision, in order.
 fn revisions(s: &SecretStack) -> Vec<String> {
-    let st = s.ctl.status(&s.name).unwrap();
+    let st = s.ctl.status(&common::q(&s.name)).unwrap();
     st.services.iter().map(|x| x.rev.clone()).collect()
 }
 
@@ -401,7 +404,7 @@ fn stack_secret_on_change_none() {
     });
     assert_eq!(read(&lazy, "/tmp/t"), "one");
     let stale = || {
-        let st = s.ctl.status(&s.name).unwrap();
+        let st = s.ctl.status(&common::q(&s.name)).unwrap();
         let l = st.services.iter().find(|x| x.service == "lazy").unwrap();
         l.instances[0].stale_secrets.clone()
     };
@@ -485,7 +488,7 @@ fn stack_secret_rotate_changes_database_passwords() {
     };
     // Over the bridge address: the image trusts loopback, so only there is
     // the password checked.
-    let st = s.ctl.status(&s.name).unwrap();
+    let st = s.ctl.status(&common::q(&s.name)).unwrap();
     let ip = st
         .services
         .iter()

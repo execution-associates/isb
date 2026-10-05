@@ -1243,7 +1243,7 @@ export interface paths {
         put?: never;
         /**
          * An app's logs
-         * @description Recent output of an app's replicas, by app name (kubectl logs deploy/NAME): all replicas, or one with `replica`. `tail` lines (default 200, at most 5000); `since` keeps lines newer than a duration like 10m (for system images; an OCI image's console log has no timestamps). A replaced replica's logs go with it, so there is no `previous`, except that a replica that failed to come up (a crash loop) leaves its last output as `last_failed_attempt` while the app is not converged; app_events and history_query say what happened.
+         * @description Recent output of an app's replicas, by app name (kubectl logs deploy/NAME): all replicas, or one with `replica`. `tail` lines (default 200, at most 5000); `since` keeps lines newer than a duration like 10m or an RFC 3339 time (for system images; an OCI image's console log has no timestamps). A replaced replica's logs go with it, so there is no `previous`, except that a replica that failed to come up (a crash loop) leaves its last output as `last_failed_attempt` while the app is not converged; app_events and history_query say what happened.
          */
         post: operations["app_logs"];
         delete?: never;
@@ -1843,7 +1843,7 @@ export interface paths {
         put?: never;
         /**
          * Events
-         * @description What happened, newest last: deploys, rollouts, health changes, restarts, failures. Pass the last `seq` you saw as `since` to get only newer ones; `wait` (seconds, at most 30) holds the call until one arrives.
+         * @description What happened, newest last: deploys, rollouts, health changes, restarts, failures. Pass the last `seq` you saw as `since` to get only newer ones; `wait` (seconds, at most 30) holds the call until one arrives. Every org the caller sees, or only `org` when it is given.
          */
         post: operations["events"];
         delete?: never;
@@ -1923,7 +1923,7 @@ export interface paths {
         put?: never;
         /**
          * Ingress status
-         * @description The HTTP(S) edge: its listeners, CA and Caddy process; every routed domain with its URL, certificate state (issued, pending, failed, unsupported, cloudflare, none) and live upstreams; domain conflicts and refusals; and each Cloudflare-tunnel org's cloudflared and API sync. Shows the caller's orgs only.
+         * @description The HTTP(S) edge: its listeners, CA and Caddy process; every routed domain with its URL, certificate state (issued, pending, failed, unsupported, cloudflare, none) and live upstreams; domain conflicts and refusals; and each Cloudflare-tunnel org's cloudflared and API sync. Shows the caller's orgs only, or only `org` when it is given.
          */
         post: operations["ingress_status"];
         delete?: never;
@@ -2123,7 +2123,7 @@ export interface paths {
         put?: never;
         /**
          * Create a scheduled job
-         * @description Run a command on a cron schedule against an app or a stack service: in a running replica (mode exec) or a fresh one-off instance from its image (mode run). Each run keeps its exit code, duration and output (bounded); job.succeeded / job.failed events.
+         * @description Run a command on a cron schedule against an app or a stack service: in a running replica (mode exec) or a fresh one-off instance from its image (mode run). Each run keeps its exit code, duration and output (bounded); job.succeeded / job.failed events. enabled: false creates it disabled. Answers the job as job_get does.
          */
         post: operations["job_create"];
         delete?: never;
@@ -2163,7 +2163,7 @@ export interface paths {
         put?: never;
         /**
          * Get a job
-         * @description A job's settings, next run and last run.
+         * @description A job's settings (name, schedule, target, command, enabled, ...) with created_at, updated_at, next_run (RFC 3339; null when disabled) and last_run, all at the top level.
          */
         post: operations["job_get"];
         delete?: never;
@@ -2183,7 +2183,7 @@ export interface paths {
         put?: never;
         /**
          * List jobs
-         * @description An org's jobs with their next and last run.
+         * @description An org's jobs, each as job_get answers one.
          */
         post: operations["job_list"];
         delete?: never;
@@ -2743,7 +2743,7 @@ export interface paths {
         put?: never;
         /**
          * Show an org
-         * @description An org's limits, per-instance defaults, network (bridge and subnet), egress exceptions, bind roots and service-name domain, with its instance, stack and member counts.
+         * @description An org's limits with what is allocated against each (`allocation`: limit, allocated, free; allocated is the sum of every instance's limit, stopped ones included, which is what incus enforces), per-instance defaults, network (bridge and subnet), egress exceptions, bind roots and service-name domain, with its instance, stack and member counts.
          */
         post: operations["org_get"];
         delete?: never;
@@ -2803,7 +2803,7 @@ export interface paths {
         put?: never;
         /**
          * Change an org
-         * @description Platform admins: change an org's limits, per-instance defaults, egress exceptions or the UDP ports its stacks may publish. Fields left out keep their value; `egress` and `udp` replace their lists. A limit cannot be lifted once set (as with `isb org create`).
+         * @description Platform admins: change an org's limits, per-instance defaults, egress exceptions or the UDP ports its stacks may publish. Fields left out keep their value; a limit given as "none" (or null) is lifted; `egress` and `udp` replace their lists. The same as `isb org update`.
          */
         post: operations["org_update"];
         delete?: never;
@@ -2823,7 +2823,7 @@ export interface paths {
         put?: never;
         /**
          * Overview
-         * @description Everything a dashboard shows in one call: the host's CPU and memory (with history), every stack in detail (as stack_status), the sandboxes (status, IP, CPU, memory), and the latest event number for the events tool.
+         * @description Everything a dashboard shows in one call: the host's CPU and memory (with history), every stack in detail (as stack_status), the sandboxes (status, IP, CPU, memory), and the latest event number for the events tool. Every org the caller sees, or only `org` when it is given.
          */
         post: operations["overview"];
         delete?: never;
@@ -3663,7 +3663,7 @@ export interface paths {
         put?: never;
         /**
          * A stack deployment
-         * @description One deployment of a compose stack: its record (as stack_deployments lists it), the compose text it deployed (`source`, as stack_export gave it), the stack's environment (`env`, secret references only) and managed domains (`domains`) at the time, and its log: the stack's events while it ran, as `events` [{at (unix ms), level, service, message}] and as `log` text. Poll until `finished`. stack_rollback with `to` deploys it again.
+         * @description One deployment of a compose stack: its record (as stack_deployments lists it), the compose text it deployed (`source`, as stack_export gave it), the stack's environment (`env`, secret references only) and managed domains (`domains`) at the time, and its log: the stack's events while it ran, as `events` [{at (unix ms), level, service, message}] and as `log` text, and `failed_attempts`: per service, the last replica that failed to come up while it ran, with its last output (at most 200 lines, 32 KiB). Poll until `finished`. stack_rollback with `to` deploys it again.
          */
         post: operations["stack_deployment_get"];
         delete?: never;
@@ -3772,6 +3772,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/stack_exec": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a command in a stack service
+         * @description Run argv in one of a compose stack service's replicas and return its exit code and output, as app_exec does for an app: by default a running replica, healthy and in rotation first; `replica` (slot) or `instance` choose one. 60s default timeout (at most 15m); stdout and stderr are each capped at 1 MiB (the end is kept; `truncated` says so). Members and up.
+         */
+        post: operations["stack_exec"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/stack_export": {
         parameters: {
             query?: never;
@@ -3803,7 +3823,7 @@ export interface paths {
         put?: never;
         /**
          * List stacks
-         * @description List deployed stacks with each service's replica, health and rollout state, and the project environment each compose stack belongs to (`project`, `environment`).
+         * @description List deployed stacks with each service's replica, health and rollout state, and the project environment each compose stack belongs to (`project`, `environment`). Every org the caller sees, or only `org` when it is given; each row names its `org`.
          */
         post: operations["stack_list"];
         delete?: never;
@@ -3823,7 +3843,7 @@ export interface paths {
         put?: never;
         /**
          * Stack logs
-         * @description Recent output of a service's replicas: the journal of its supervised command, or an OCI image's console.
+         * @description Recent output of a service's replicas: the journal of its supervised command, or an OCI image's console. `tail` (or `lines`) per replica, default 200; `since` keeps lines newer than a duration like 10m or an RFC 3339 time (system images; an OCI console has no timestamps). A replica that failed to come up is deleted, so its last output (up to 200 lines, captured before the delete) is `last_failed_attempt`: while the service is not converged, when no live replica printed anything, or always with `failed: true` (then without the live logs). It outlives a daemon restart in the deployment that was rolling out (stack_deployment_get `failed_attempts`).
          */
         post: operations["stack_logs"];
         delete?: never;
@@ -7299,8 +7319,17 @@ export interface operations {
                     previews?: Record<string, never>;
                     project: string;
                     replicas?: number;
-                    /** @description {cpus, memory} per replica. */
-                    resources?: Record<string, never>;
+                    resources?: {
+                        /** @description CPUs per replica (limits.cpu), e.g. 2 or "2". null (app_update) removes the limit. */
+                        cpus?: string | number | null;
+                        /** @description Memory per replica: 512m, 2g, 2GiB, or a number of bytes. null (app_update) removes the limit. */
+                        memory?: string | number | null;
+                    };
+                    /**
+                     * @description What a new version of a secret the app uses (env or files) does to its replicas: roll (default; a rolling update), restart (each replica's app restarted in place with the new value, one at a time, waiting until healthy) or none (files updated, replicas reported stale until they next start).
+                     * @enum {string}
+                     */
+                    secret_on_change?: "roll" | "restart" | "none";
                     /** @description Exactly one of {"image": IMAGE} or {"git": {"url", "ref" (branch, tag or SHA; default main), "subdir", "auth": {"token_secret": NAME, "username"} | {"ssh_key_secret": NAME}, "submodules": false}}. IMAGE always carries its registry's prefix: Docker Hub is docker:NAME[:TAG] or docker:OWNER/NAME[:TAG] (docker:nginx:1.27, docker:traefik/whoami; never docker:traefik:whoami, which is the tag whoami of the image traefik), then ghcr:OWNER/NAME[:TAG], quay:OWNER/NAME[:TAG], oci:HOST/PATH[:TAG], registry:APP[:TAG] for the org's own builds; a name with no prefix is an image already on the host. A registry image is looked up when saved: one the registry does not have is refused, one that cannot be checked (offline, private) is saved with a warning. */
                     source: Record<string, never>;
                     /** @description The user the app runs as; numeric (uid[:gid]) on an OCI image. */
@@ -7308,11 +7337,6 @@ export interface operations {
                     /** @description Named volumes, NAME:/path[:ro]. No host paths. */
                     volumes?: string[];
                     working_dir?: string;
-                    /**
-                     * @description What a new version of a secret the app uses (env or files) does to its replicas: roll (default; a rolling update), restart (each replica's app restarted in place with the new value, one at a time, waiting until healthy) or none (files updated, replicas reported stale until they next start).
-                     * @enum {string}
-                     */
-                    secret_on_change?: "roll" | "restart" | "none";
                 };
             };
         };
@@ -7859,7 +7883,7 @@ export interface operations {
                     org?: string;
                     /** @description One replica's slot. */
                     replica?: number;
-                    /** @description e.g. 10m, 2h. */
+                    /** @description A duration back from now (10m, 2h) or an RFC 3339 time. */
                     since?: string;
                     tail?: number;
                 };
@@ -8089,8 +8113,17 @@ export interface operations {
                     /** @description Preview deployments per pull request (git sources): {enabled, branches (base branches; default the app's ref), max (default 3), env (.env text or {KEY: value | {secret: NAME}}), inherit_env (default false), domain (auto | *.suffix), port, replicas (default 1), resources, ttl (e.g. 7d), forks (default false; fork PRs build in a VM and get only fork_secrets), fork_secrets [NAME], status {token_secret, kind: github | gitea, api_url}}. See preview_list. */
                     previews?: Record<string, never>;
                     replicas?: number;
-                    /** @description {cpus, memory} per replica. */
-                    resources?: Record<string, never>;
+                    resources?: {
+                        /** @description CPUs per replica (limits.cpu), e.g. 2 or "2". null (app_update) removes the limit. */
+                        cpus?: string | number | null;
+                        /** @description Memory per replica: 512m, 2g, 2GiB, or a number of bytes. null (app_update) removes the limit. */
+                        memory?: string | number | null;
+                    };
+                    /**
+                     * @description What a new version of a secret the app uses (env or files) does to its replicas: roll (default; a rolling update), restart (each replica's app restarted in place with the new value, one at a time, waiting until healthy) or none (files updated, replicas reported stale until they next start).
+                     * @enum {string}
+                     */
+                    secret_on_change?: "roll" | "restart" | "none";
                     /** @description Exactly one of {"image": IMAGE} or {"git": {"url", "ref" (branch, tag or SHA; default main), "subdir", "auth": {"token_secret": NAME, "username"} | {"ssh_key_secret": NAME}, "submodules": false}}. IMAGE always carries its registry's prefix: Docker Hub is docker:NAME[:TAG] or docker:OWNER/NAME[:TAG] (docker:nginx:1.27, docker:traefik/whoami; never docker:traefik:whoami, which is the tag whoami of the image traefik), then ghcr:OWNER/NAME[:TAG], quay:OWNER/NAME[:TAG], oci:HOST/PATH[:TAG], registry:APP[:TAG] for the org's own builds; a name with no prefix is an image already on the host. A registry image is looked up when saved: one the registry does not have is refused, one that cannot be checked (offline, private) is saved with a warning. */
                     source?: Record<string, never>;
                     /** @description The user the app runs as; numeric (uid[:gid]) on an OCI image. */
@@ -8098,11 +8131,6 @@ export interface operations {
                     /** @description Named volumes, NAME:/path[:ro]. No host paths. */
                     volumes?: string[];
                     working_dir?: string;
-                    /**
-                     * @description What a new version of a secret the app uses (env or files) does to its replicas: roll (default; a rolling update), restart (each replica's app restarted in place with the new value, one at a time, waiting until healthy) or none (files updated, replicas reported stale until they next start).
-                     * @enum {string}
-                     */
-                    secret_on_change?: "roll" | "restart" | "none";
                 };
             };
         };
@@ -8962,14 +8990,18 @@ export interface operations {
                     project: string;
                     /** @description Publish the port on the host: [IP:]PORT (default address 127.0.0.1). Off by default. */
                     publish?: string;
-                    /** @description {cpus, memory}. */
-                    resources?: Record<string, never>;
-                    /** @description User created on first start (default: as database). Not Redis. */
-                    user?: string;
-                    /** @description More secrets isb keeps holding the internal URL, each with a query string for a driver's options ({"dsn.main-db.web": "sslmode=disable\ */
+                    resources?: {
+                        /** @description CPUs per replica (limits.cpu), e.g. 2 or "2". null (app_update) removes the limit. */
+                        cpus?: string | number | null;
+                        /** @description Memory per replica: 512m, 2g, 2GiB, or a number of bytes. null (app_update) removes the limit. */
+                        memory?: string | number | null;
+                    };
+                    /** @description More secrets isb keeps holding the internal URL, each with a query string for a driver's options ({"dsn.main-db.web": "sslmode=disable"}, "" for none). Written at deploy and again whenever the password changes, so no app holds a stale copy of it. */
                     urls?: {
                         [key: string]: string;
                     };
+                    /** @description User created on first start (default: as database). Not Redis. */
+                    user?: string;
                     /** @description Image tag (default: 17, 8.4, 11.4, 8.0, 7.4). */
                     version?: string;
                     /** @description Wait until it is up (default false). */
@@ -9822,6 +9854,7 @@ export interface operations {
                      */
                     concurrency?: "skip" | "allow";
                     cwd?: string;
+                    /** @description Default true. false: the job is kept but never runs on its schedule (job_run still runs it) until enabled. */
                     enabled?: boolean;
                     env?: {
                         [key: string]: string;
@@ -10129,6 +10162,7 @@ export interface operations {
                      */
                     concurrency?: "skip" | "allow";
                     cwd?: string;
+                    /** @description Default true. false: the job is kept but never runs on its schedule (job_run still runs it) until enabled. */
                     enabled?: boolean;
                     env?: {
                         [key: string]: string;
@@ -11135,20 +11169,20 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description CPUs across the org's instances. */
-                    cpus?: number;
+                    /** @description CPUs across the org: the sum of every instance's limits.cpu, stopped ones included. "none" or null lifts the limit. */
+                    cpus?: number | "none" | null;
                     /** @description CPUs an instance gets when its spec sets none. */
                     default_cpus?: number;
                     /** @description Memory an instance gets when its spec sets none, e.g. 512MiB. */
                     default_memory?: string;
-                    /** @description Disk across the org, e.g. 100GiB. */
-                    disk?: string;
+                    /** @description Disk across the org, e.g. 100GiB: the sum of every root disk's and volume's size. While set, an instance without a root size gets 10GiB from the org's default profile. "none" or null lifts the limit. */
+                    disk?: string | null;
                     /** @description Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/concepts/orgs.md). Replaces the list; [] clears it. */
                     egress?: string[];
-                    /** @description Instances in the org. */
-                    instances?: number;
-                    /** @description Memory across the org, e.g. 16GiB. */
-                    memory?: string;
+                    /** @description Instances in the org, stopped ones included. "none" or null lifts the limit. */
+                    instances?: number | "none" | null;
+                    /** @description Memory across the org, e.g. 16GiB: the sum of every instance's limits.memory, stopped ones included. "none" or null lifts the limit. */
+                    memory?: string | null;
                     /** @description The new org's name: [a-z0-9-], starts with a letter. */
                     org: string;
                     /** @description Where the org runs, set at creation: "local" (this host: an incus project sharing its kernel), {"server": NAME} (another host, server_list), or {"vm": {"cpus", "memory", "disk"}} (a dedicated VM this control plane makes on its own host: the org's own kernel; defaults 2 CPUs, 4GiB, 40GiB). An org is not moved afterwards. */
@@ -11363,20 +11397,20 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description CPUs across the org's instances. */
-                    cpus?: number;
+                    /** @description CPUs across the org: the sum of every instance's limits.cpu, stopped ones included. "none" or null lifts the limit. */
+                    cpus?: number | "none" | null;
                     /** @description CPUs an instance gets when its spec sets none. */
                     default_cpus?: number;
                     /** @description Memory an instance gets when its spec sets none, e.g. 512MiB. */
                     default_memory?: string;
-                    /** @description Disk across the org, e.g. 100GiB. */
-                    disk?: string;
+                    /** @description Disk across the org, e.g. 100GiB: the sum of every root disk's and volume's size. While set, an instance without a root size gets 10GiB from the org's default profile. "none" or null lifts the limit. */
+                    disk?: string | null;
                     /** @description Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/concepts/orgs.md). Replaces the list; [] clears it. */
                     egress?: string[];
-                    /** @description Instances in the org. */
-                    instances?: number;
-                    /** @description Memory across the org, e.g. 16GiB. */
-                    memory?: string;
+                    /** @description Instances in the org, stopped ones included. "none" or null lifts the limit. */
+                    instances?: number | "none" | null;
+                    /** @description Memory across the org, e.g. 16GiB: the sum of every instance's limits.memory, stopped ones included. "none" or null lifts the limit. */
+                    memory?: string | null;
                     /** @description The org. */
                     org: string;
                     /** @description Where the org runs, set at creation: "local" (this host: an incus project sharing its kernel), {"server": NAME} (another host, server_list), or {"vm": {"cpus", "memory", "disk"}} (a dedicated VM this control plane makes on its own host: the org's own kernel; defaults 2 CPUs, 4GiB, 40GiB). An org is not moved afterwards. */
@@ -13411,6 +13445,64 @@ export interface operations {
             };
         };
     };
+    stack_exec: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The command and its arguments; no shell unless you run one: ["sh", "-c", "..."]. `command` is accepted as an alias (a string runs as `sh -c`). */
+                    argv: string[];
+                    cwd?: string;
+                    env?: {
+                        [key: string]: string;
+                    };
+                    /** @description Or the replica's instance name. */
+                    instance?: string;
+                    /** @description The stack's name. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description The replica's slot (default: a running one, preferring healthy replicas in rotation). */
+                    replica?: number;
+                    /** @description The compose service. */
+                    service: string;
+                    /** @description Text fed to the command's stdin (at most 1 MiB). */
+                    stdin?: string;
+                    /** @description Kill the command after this long, e.g. 30s (default 60s, at most 15m). A command that runs out answers timed_out with the output so far. */
+                    timeout?: string;
+                    /** @description A guest user name, uid or uid:gid (default: the instance's default, root). */
+                    user?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
     stack_export: {
         parameters: {
             query?: never;
@@ -13498,14 +13590,20 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Default 200. */
+                    /** @description Only the last failed replica's output. */
+                    failed?: boolean;
+                    /** @description Same as tail. */
                     lines?: number;
                     name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
                     service: string;
+                    /** @description A duration back from now (10m, 2h) or an RFC 3339 time. */
+                    since?: string;
                     /** @description One replica only. */
                     slot?: number;
+                    /** @description Lines per replica (default 200). */
+                    tail?: number;
                 };
             };
         };

@@ -101,9 +101,9 @@ fn missing_images_are_refused_and_reported() {
             self.0.shutdown();
         }
     }
-    let _rm = Rm(ctl.clone(), stack.clone());
+    let _rm = Rm(ctl.clone(), common::q(&stack));
     ctl.deploy(def).unwrap();
-    let st = isb::daemon::wait_settled(&ctl, &stack, Duration::from_secs(180)).unwrap();
+    let st = isb::daemon::wait_settled(&ctl, &common::q(&stack), Duration::from_secs(180)).unwrap();
     let web = &st.services[0];
     assert_eq!(web.state, "failing", "{web:?}");
     let m = web.message.as_deref().unwrap_or("");
