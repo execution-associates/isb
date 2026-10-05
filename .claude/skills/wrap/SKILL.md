@@ -192,11 +192,17 @@ gh release view "v$VER" --json assets -q '.assets[].name'   # tarballs, SHA256SU
 
 All three workflows must be green, usually within about 6 minutes of the
 tag. Release signs SHA256SUMS (an unsigned
-release can't be installed by `isb update`), publishes the crates in
-dependency order, and its `install` job runs the published install.sh on
-Linux and macOS. Each publish step skips a version the registry already has,
-so a failed run is re-run from the Actions page, not re-tagged. A crate
-version can take a few minutes to show on crates.io, and an npm one up to ~10.
+release can't be installed by `isb update`) and its `install` job runs the
+published install.sh on Linux and macOS. Each publish step skips a version
+the registry already has, so a failed run is re-run from the Actions page,
+not re-tagged. An npm version can take up to ~10 minutes to show.
+
+**Do not wait for crates.io.** The `crates.io` workflow (crates.yml)
+publishes the crates after Release, on its own: it queues behind crates.io's
+limit of versions per crate per 24 hours, publishes only the newest release
+when it gets room, and retries hourly. A wrap neither waits for it nor
+treats its warning as a failure; crates.io may skip this version entirely
+when a newer one lands first.
 
 ## 8. Upgrade titan's isb, rolling nothing
 
@@ -291,7 +297,7 @@ rm -rf "$D" "$B"
 ## 10. Close this agent, LAST
 
 Print the summary first: merged `<feature>` as `#N`, released `v$VER`
-(crates.io, PyPI, npm), titan on `v$VER` with nothing rolled, installed skill
+(GitHub, PyPI, npm; crates.io queued), titan on `v$VER` with nothing rolled, installed skill
 refreshed. Then close **this agent's own** herdr pane:
 
 ```bash

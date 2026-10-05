@@ -86,11 +86,17 @@ x86_64 and aarch64) in the `Release binaries` workflow
 days. That workflow has no secrets. A `v*` tag on a `main` commit whose CI is
 green promotes them: `release.yml` refuses a commit that has not passed CI on
 `main`, downloads that commit's tarballs, checks they carry the tag's version,
-then signs `SHA256SUMS`, creates the GitHub release and publishes the crates.
-When `main` has no tarballs for the commit, it builds them itself. The SDK
+then signs `SHA256SUMS` and creates the GitHub release. When `main` has no
+tarballs for the commit, it builds them itself. The SDK
 workflows apply the same gate on the tag and skip the checks that already
 passed on `main` for the commit (`scripts/main-run.sh` finds those runs).
 So tag as soon as `main`'s runs for the merge commit are green.
+
+The crates go to crates.io separately, from `crates.yml`, because crates.io
+takes only so many new versions of a crate in 24 hours (it answers the rest
+with 429). That workflow runs after each release and hourly, one run at a
+time, and publishes the newest GitHub release when crates.io has room, so a
+burst of releases lands there as its newest version and nothing waits on it.
 
 ## Layout
 
