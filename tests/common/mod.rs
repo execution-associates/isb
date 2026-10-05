@@ -16,31 +16,45 @@ pub fn image() -> String {
     std::env::var("ISB_TEST_IMAGE").unwrap_or_else(|_| "dev-base".into())
 }
 
-/// The org the stack and app tests deploy into: `isb-test` (incus project
-/// `isb-isb-test`), never the default org, which holds a host's own apps.
+/// The org the stack and app tests deploy into: `isbt-<pid>`, one per test
+/// process, never the default org, which holds a host's own apps. Made on
+/// first use and deleted, with everything left in it, when the process
+/// exits, so no test org outlives its run.
 pub fn test_org() -> isb::org::OrgId {
-    isb::org::OrgId::new(TEST_ORG).unwrap()
+    static ORG: std::sync::OnceLock<isb::org::OrgId> = std::sync::OnceLock::new();
+    ORG.get_or_init(|| {
+        let org = isb::org::OrgId::new(format!("isbt-{}", std::process::id())).unwrap();
+        let base = Client::new();
+        isb::org::ensure(&base, &org, &isb::org::OrgOptions::default(), &mut |l| {
+            eprintln!("{l}")
+        })
+        .unwrap();
+        extern "C" fn remove_test_org() {
+            if let Some(org) = ORG.get() {
+                if let Err(e) = isb::org::remove(&Client::new(), org, true, &mut |_| {}) {
+                    eprintln!("cleanup: org {org}: {e}");
+                }
+            }
+        }
+        unsafe extern "C" {
+            fn atexit(f: extern "C" fn()) -> i32;
+        }
+        // SAFETY: registers a plain function with libc, run once at exit.
+        unsafe { atexit(remove_test_org) };
+        org
+    })
+    .clone()
 }
-
-pub const TEST_ORG: &str = "isb-test";
 
 /// A test stack's controller key: `isb-test/NAME`.
 pub fn q(stack: &str) -> String {
     isb::stack::qualified(&test_org(), stack)
 }
 
-/// The client for [`test_org`]'s incus project. Creates the org with default
-/// settings when it is missing and leaves an existing one alone; plain
-/// sandboxes stay in incus' `default` project.
+/// The client for [`test_org`]'s incus project; plain sandboxes stay in
+/// incus' `default` project.
 pub fn test_org_client(base: &Client) -> Client {
-    let org = test_org();
-    if isb::org::get(base, &org).is_err() {
-        isb::org::ensure(base, &org, &isb::org::OrgOptions::default(), &mut |l| {
-            eprintln!("{l}")
-        })
-        .unwrap();
-    }
-    isb::org::client(base, &org)
+    isb::org::client(base, &test_org())
 }
 
 /// A VM's host bind mount at `/mnt/share` is translated by virtiofsd: guest root

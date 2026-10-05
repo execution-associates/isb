@@ -1858,14 +1858,14 @@ fn apps_deploy_edit_rollback_git_webhook() {
         "sha256={}",
         isb::app::webhook::sign(b"guess", body)
     ));
-    let (st, _) = apps.webhook(common::TEST_ORG, "src", &bad, None, body);
+    let (st, _) = apps.webhook(common::test_org().as_str(), "src", &bad, None, body);
     assert_eq!(st, 401);
     assert_eq!(apps.deployments(&org, "src").unwrap().len(), 1);
     let good = hdr(format!(
         "sha256={}",
         isb::app::webhook::sign(secret.as_bytes(), body)
     ));
-    let (st, v) = apps.webhook(common::TEST_ORG, "src", &good, None, body);
+    let (st, v) = apps.webhook(common::test_org().as_str(), "src", &good, None, body);
     assert_eq!(st, 202, "{v}");
     let id = v["deployment"].as_u64().unwrap();
     let g2 = apps
