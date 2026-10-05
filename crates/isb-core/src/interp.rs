@@ -105,7 +105,8 @@ fn refs_in(chars: &[char], out: &mut Vec<String>) {
 
 fn unset(name: &str) -> Error {
     Error::Interpolation(format!(
-        "variable {name} is not set (use ${{{name}:-default}} to allow that)"
+        "variable {name} is not set (use ${{{name}:-default}} to allow that, or $${name} for a \
+         literal $ that a shell in the command should see)"
     ))
 }
 
@@ -285,7 +286,10 @@ mod tests {
     #[test]
     fn errors() {
         let e = run("${MISSING}").unwrap_err().to_string();
-        assert!(e.contains("MISSING is not set"), "{e}");
+        assert!(
+            e.contains("MISSING is not set") && e.contains("$$MISSING"),
+            "{e}"
+        );
         assert!(run("$MISSING").is_err());
         let e = run("${MISSING:?set the thing}").unwrap_err().to_string();
         assert!(e.contains("set the thing"), "{e}");

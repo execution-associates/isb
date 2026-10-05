@@ -25,6 +25,9 @@ use crate::spec::{
     ExecDefaults, InstanceType, MountType, PortBind, ReadyCheck, RestartMode, SandboxSpec,
 };
 
+mod oci_cmd;
+pub use oci_cmd::{check_oci_command, oci_command_line};
+
 pub type Props = BTreeMap<String, String>;
 
 /// Facts about the host that resolution depends on.
@@ -324,28 +327,6 @@ fn oci_reference(r: &str, docker_hub: bool) -> Result<String> {
         r.push_str(":latest");
     }
     Ok(r)
-}
-
-/// Quote argv for `oci.entrypoint`, which incus splits on whitespace with
-/// quotes grouping. There is no escape character, so an argument may not
-/// contain both kinds of quote.
-pub fn oci_command_line(argv: &[String]) -> std::result::Result<String, String> {
-    argv.iter()
-        .map(|a| {
-            if !a.is_empty() && !a.contains(|c: char| c.is_whitespace() || c == '"' || c == '\'') {
-                Ok(a.clone())
-            } else if !a.contains('"') {
-                Ok(format!("\"{a}\""))
-            } else if !a.contains('\'') {
-                Ok(format!("'{a}'"))
-            } else {
-                Err(format!(
-                    "argument {a:?} has both ' and \" in it, which an OCI command line cannot carry; use a script"
-                ))
-            }
-        })
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map(|v| v.join(" "))
 }
 
 /// A spec resolved against the host: exactly what incus should hold.

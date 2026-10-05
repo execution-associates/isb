@@ -519,6 +519,25 @@ mod tests {
         assert_ne!(a.revision("web").unwrap(), d.revision("web").unwrap());
     }
 
+    #[test]
+    fn revision_of_an_existing_spec_is_pinned() {
+        // Upgrading isb must not roll a service whose spec did not change: new
+        // mount and command fields serialize only when set.
+        let a = def(concat!(
+            "volumes: {data: {}}\n",
+            "services:\n",
+            "  web:\n",
+            "    image: docker:busybox\n",
+            "    user: '1000:1000'\n",
+            "    entrypoint: [sh, -c]\n",
+            "    command: ['echo $$HOME; exec sleep 1d']\n",
+            "    volumes:\n",
+            "      - data:/data\n",
+            "      - {source: data, target: /home/x, owner: '1000:1000'}\n",
+        ));
+        assert_eq!(a.revision("web").unwrap(), "d59025b7");
+    }
+
     fn binding(name: &str, version: u64) -> SecretBinding {
         SecretBinding {
             name: name.into(),

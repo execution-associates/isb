@@ -385,6 +385,7 @@ fn validate_services(file: &mut crate::spec::ComposeFile) -> std::result::Result
             }
         }
         let oci = crate::plan::ImageSource::parse(&spec.image).is_ok_and(|i| i.is_oci());
+        crate::plan::check_oci_command(service, spec)?;
         if !spec.env.secrets.is_empty() && !oci && spec.command.is_none() {
             // A system image's secret variables live in its command's unit
             // (or exec), never in instance config.

@@ -127,6 +127,18 @@ merged. An unreferenced `x-` block is therefore never expanded; one pulled in wi
 
 - An unset variable with no default is an error, not an empty string. Use
   `${VAR:-}` to allow empty.
+- **`command` and `entrypoint` are interpolated too, as in docker compose.** A
+  `$` meant for the shell that runs the command is written `$$`; there is no
+  per-field opt-out. The error for an unset variable says so.
+
+  ```yaml
+  command:
+    - sh
+    - -c
+    - |
+      echo "home is $$HOME, tag is ${TAG:-latest}"   # $$HOME reaches sh as $HOME
+      exec app --port "$${PORT:-8080}"
+  ```
 - `default`, `message` and `alt` may contain interpolations themselves.
 - A `$` not followed by `$`, `{`, a letter or `_` is literal (`5$`, `$(cmd)`).
 - Names are `[A-Za-z_][A-Za-z0-9_]*`. Other `${...}` forms, such as
@@ -297,7 +309,15 @@ the process exits. It needs `skopeo` on the host and incus with the
 
 - `command` (with `entrypoint`, if set) becomes `oci.entrypoint`, the whole
   command line. It is instance config, reconciled like any other key, and takes
-  effect on restart.
+  effect on restart. incus keeps it on one line of the LXC config, splits it on
+  whitespace with quotes grouping, and has no escape character, so an argument
+  can hold neither a line break nor both `'` and `"`. The script of a shell's
+  `-c` (`sh`, `bash`, `ash`, `dash`, `zsh`, `ksh`, `mksh`, with options such as
+  `-ec` or `-o pipefail` before it) may hold either: isb then writes that one
+  argument as `eval "$(printf %b "...")"` with line breaks, quotes, `$`,
+  backticks and backslashes escaped, which the shell decodes and runs with the
+  same `$0` and arguments. A script that fits on the line is written as is. Any other argument with a
+  line break, or with both quotes, is an error when the file is loaded.
 - `working_dir` becomes `oci.cwd`, and `user` must be numeric (`1000` or
   `1000:1000`), becoming `oci.uid`/`oci.gid`.
 - It must be a container (`type: vm` is an error).
@@ -797,10 +817,26 @@ command line; see `image`.
 command: [sh, -c, "bun install && exec bun run dev"]
 ```
 
+`$` is interpolated here like anywhere else in the file, so a variable meant for
+the shell is written `$$VAR` (see "Interpolation"). On an OCI image, a
+multi-line argument must be the script of `sh -c` (or another shell's `-c`); see
+`image`.
+
+```yaml
+command:
+  - sh
+  - -ec
+  - |
+    mkdir -p "$$DATA_DIR"
+    exec app --data "$$DATA_DIR"
+```
+
 ### `entrypoint`
 
 OCI images only: argv or a string, like `command`. The command line is
-`entrypoint` followed by `command`. An error on any other image.
+`entrypoint` followed by `command`. An error on any other image. Interpolated,
+and limited to one line per argument outside a shell's `-c` script, as `command`
+is.
 
 ### `restart`
 
