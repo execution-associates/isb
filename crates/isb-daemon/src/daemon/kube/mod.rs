@@ -2,7 +2,7 @@
 //! instances isb manages (docs/guides/kubectl.md).
 //!
 //! `instance_list` and `instance_get` are `get pods` and `describe pod`;
-//! `app_exec` and `instance_exec` are `exec`; `app_logs` is `logs`;
+//! `app_exec`, `stack_exec` and `instance_exec` are `exec`; `app_logs` is `logs`;
 //! `app_restart` and `instance_restart` are `rollout restart` and `delete pod`;
 //! `app_scale`, `app_top` and `app_events` are `scale`, `top` and `get
 //! events`; `instance_file_read` and `instance_file_write` are `cp`.
@@ -26,6 +26,7 @@ use crate::stack::controller::ServiceStatus;
 
 #[cfg(test)]
 use self::{exec::*, files::*, look::*};
+pub(super) use look::{SINCE_NOTE, read_lines, since_cutoff, window_logs};
 
 /// Tools that only read.
 pub(super) const READS: &[&str] = &[
@@ -41,6 +42,7 @@ pub(super) const SECRET_READS: &[&str] = &["instance_file_read"];
 /// Tools that change things or run code.
 pub(super) const WRITES: &[&str] = &[
     "app_exec",
+    "stack_exec",
     "instance_exec",
     "app_restart",
     "instance_restart",
@@ -173,6 +175,12 @@ fn managed_files(
     if let Ok(def) = d.ctl.definition(stack) {
         if let Ok(spec) = def.service(service) {
             out.extend(spec.secrets.iter().map(|s| s.guest_path()));
+            out.extend(
+                spec.env
+                    .files
+                    .values()
+                    .map(|k| crate::spec::Environment::file_path(k)),
+            );
         }
     }
     out

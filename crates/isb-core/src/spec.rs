@@ -11,7 +11,10 @@ use serde::{Deserialize, Serialize};
 use crate::flex;
 
 mod secret;
-pub use secret::{DEFAULT_SECRET_REFRESH, OnChange, SecretDef};
+pub use secret::{DEFAULT_SECRET_REFRESH, OnChange, SecretAs, SecretDef};
+
+mod env;
+pub use env::Environment;
 mod mount;
 pub(crate) use mount::is_host_path;
 pub use mount::{MountType, VolumeOptions, VolumeSpec};
@@ -44,120 +47,6 @@ pub struct ComposeFile {
     /// read when the file is deployed and never stored in instance config.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub secrets: BTreeMap<String, SecretDef>,
-}
-
-/// A service's environment: plain values, and variables whose value is a
-/// top-level secret (`KEY: {secret: NAME}`).
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Environment {
-    /// `KEY: VALUE`: instance config (`environment.KEY`).
-    pub vars: BTreeMap<String, String>,
-    /// `KEY: {secret: NAME}`: variable to top-level secret key.
-    pub secrets: BTreeMap<String, String>,
-    /// `KEY: {secret: NAME, on_change: ...}`: the variable's own setting.
-    pub on_change: BTreeMap<String, OnChange>,
-}
-
-impl Environment {
-    pub fn is_empty(&self) -> bool {
-        self.vars.is_empty() && self.secrets.is_empty()
-    }
-}
-
-/// The plain values, so `spec.env` reads as the map it mostly is.
-impl std::ops::Deref for Environment {
-    type Target = BTreeMap<String, String>;
-    fn deref(&self) -> &Self::Target {
-        &self.vars
-    }
-}
-
-impl std::ops::DerefMut for Environment {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.vars
-    }
-}
-
-impl<'a> IntoIterator for &'a Environment {
-    type Item = (&'a String, &'a String);
-    type IntoIter = std::collections::btree_map::Iter<'a, String, String>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.vars.iter()
-    }
-}
-
-impl From<BTreeMap<String, String>> for Environment {
-    fn from(vars: BTreeMap<String, String>) -> Self {
-        Environment {
-            vars,
-            secrets: BTreeMap::new(),
-            on_change: BTreeMap::new(),
-        }
-    }
-}
-
-impl Serialize for Environment {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeMap;
-        let mut m = s.serialize_map(None)?;
-        let mut keys: Vec<&String> = self.vars.keys().chain(self.secrets.keys()).collect();
-        keys.sort();
-        keys.dedup();
-        for k in keys {
-            match (self.vars.get(k), self.secrets.get(k)) {
-                (Some(v), _) => m.serialize_entry(k, v)?,
-                (None, Some(sec)) => {
-                    let mut v = BTreeMap::from([("secret", sec.as_str())]);
-                    if let Some(o) = self.on_change.get(k) {
-                        v.insert("on_change", o.as_str());
-                    }
-                    m.serialize_entry(k, &v)?
-                }
-                (None, None) => {}
-            }
-        }
-        m.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for Environment {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        use serde::de::Error as _;
-        let mut env = Environment::default();
-        match flex::EnvMapOrList::deserialize(d)? {
-            flex::EnvMapOrList::Map(m) => {
-                for (k, v) in m {
-                    match v {
-                        flex::EnvValue::Scalar(v) => {
-                            env.vars.insert(k, v.into_string());
-                        }
-                        flex::EnvValue::Secret { secret, .. } if secret.is_empty() => {
-                            return Err(D::Error::custom(format!(
-                                "environment {k}: secret needs a top-level secret's name"
-                            )));
-                        }
-                        flex::EnvValue::Secret { secret, on_change } => {
-                            if let Some(o) = on_change {
-                                env.on_change.insert(k.clone(), o);
-                            }
-                            env.secrets.insert(k, secret);
-                        }
-                    }
-                }
-            }
-            flex::EnvMapOrList::List(l) => {
-                for item in l {
-                    let Some((k, v)) = item.split_once('=') else {
-                        return Err(D::Error::custom(format!(
-                            "environment entry {item:?} has no value: write {item}=VALUE"
-                        )));
-                    };
-                    env.vars.insert(k.to_string(), v.to_string());
-                }
-            }
-        }
-        Ok(env)
-    }
 }
 
 /// A named custom storage volume.
@@ -1130,7 +1019,9 @@ pub struct Healthcheck {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retries: Option<u32>,
 
-    /// Grace after a start during which failures do not count. Default `0s`.
+    /// Grace after a start during which failures do not count. Unset, a
+    /// replica that has not yet passed gets `interval * retries * 2`
+    /// (60s to 5m) before its failures count; one that has passed, none.
     #[serde(
         default,
         deserialize_with = "flex::opt_string",
@@ -1174,6 +1065,37 @@ pub struct HealthProbe {
     pub retries: u32,
     pub start_period: std::time::Duration,
     pub start_interval: std::time::Duration,
+    /// How long a replica that has not passed since it (re)started may fail
+    /// before its failures count: `start_period` when set, else
+    /// [`HealthProbe::default_grace`].
+    pub startup_grace: std::time::Duration,
+}
+
+impl HealthProbe {
+    /// The startup grace of a healthcheck without `start_period`: twice the
+    /// failure budget a running replica gets (`interval * retries`), so a
+    /// slow first start (OIDC discovery, migrations, a JVM) is not taken
+    /// for a hang; at least 60s, as a fast probe's budget (5s x 3) is
+    /// shorter than many starts; at most 5 minutes, so a replica that
+    /// never comes up still fails its rollout in bounded time.
+    pub fn default_grace(interval: std::time::Duration, retries: u32) -> std::time::Duration {
+        (interval * retries * 2).clamp(
+            std::time::Duration::from_secs(60),
+            std::time::Duration::from_secs(300),
+        )
+    }
+
+    /// Whether a failed probe counts toward `retries`. A replica that has
+    /// not passed since it (re)started is starting: it stays out of the
+    /// load balancer, and its failures count only once the startup grace
+    /// is over. After a pass, they count once `start_period` is over.
+    pub fn failure_counts(&self, passed: bool, since_start: std::time::Duration) -> bool {
+        if passed {
+            since_start >= self.start_period
+        } else {
+            since_start >= self.startup_grace
+        }
+    }
 }
 
 impl Healthcheck {
@@ -1207,13 +1129,20 @@ impl Healthcheck {
                 None => Ok(std::time::Duration::from_secs(default)),
             }
         };
+        let interval = dur(&self.interval, 30)?;
+        let retries = self.retries.unwrap_or(3).max(1);
+        let start_period = dur(&self.start_period, 0)?;
         Ok(Some(HealthProbe {
             argv,
-            interval: dur(&self.interval, 30)?,
+            interval,
             timeout: dur(&self.timeout, 30)?,
-            retries: self.retries.unwrap_or(3).max(1),
-            start_period: dur(&self.start_period, 0)?,
+            retries,
+            start_period,
             start_interval: dur(&self.start_interval, 5)?,
+            startup_grace: match &self.start_period {
+                Some(_) => start_period,
+                None => HealthProbe::default_grace(interval, retries),
+            },
         }))
     }
 }
@@ -1533,7 +1462,14 @@ impl SandboxSpec {
             .iter()
             .map(|r| r.source.as_str())
             .chain(self.env.secrets.values().map(String::as_str))
+            .chain(self.env.files.values().map(String::as_str))
             .collect()
+    }
+
+    /// The service has secret files to deliver: `secrets:`, or
+    /// `environment` secrets `as: file`.
+    pub fn has_secret_files(&self) -> bool {
+        !self.secrets.is_empty() || !self.env.files.is_empty()
     }
 
     /// The service's own `on_change` for a top-level secret it uses: the
@@ -1547,6 +1483,7 @@ impl SandboxSpec {
                 self.env
                     .secrets
                     .iter()
+                    .chain(&self.env.files)
                     .filter(|(_, k)| *k == key)
                     .filter_map(|(var, _)| self.env.on_change.get(var).copied()),
             )

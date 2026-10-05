@@ -31,7 +31,7 @@ daemon's host it talks to the unix socket, anywhere else through
 | `edit`, `patch`, `set image`, `set env` | `isb app update -f PATCH`, `isb app env-set` | `app_update`, `app_env_set` |
 | `logs deploy/NAME` | `isb app logs NAME [--replica N] [-n 200] [--since 10m]` | `app_logs` |
 | `logs -f`, `logs` for a compose service | `isb stack logs NAME SERVICE` | `stack_logs` |
-| `exec POD -- CMD` | `isb app exec NAME -- CMD...`, `isb instance exec NAME -- CMD...` | `app_exec`, `instance_exec` |
+| `exec POD -- CMD` | `isb app exec NAME -- CMD...`, `isb stack exec STACK SERVICE -- CMD...`, `isb instance exec NAME -- CMD...` | `app_exec`, `stack_exec`, `instance_exec` |
 | `exec -it POD -- sh` | the app page's **Terminal** tab, or `ssh` ([SSH and herdr](ssh.md)) | the terminal websocket |
 | `cp POD:/path ./local`, `cp ./local POD:/path` | `isb cp INSTANCE:/path ./local`, `isb cp ./local INSTANCE:/path` | `instance_file_read`, `instance_file_write` |
 | `scale deploy/NAME --replicas=N` | `isb app scale NAME N` | `app_scale` |
@@ -107,7 +107,8 @@ so there is nothing to read from it later. isb reads its output before it
 deletes it, puts the last lines in the failure message (the deployment log,
 the app's status message) and keeps them: while the app is not converged,
 `app_logs` answers `last_failed_attempt` with the instance, the reason and
-the output, and `isb app logs` and `isb stack logs` print it after the live replicas' logs.
+the output, and `isb app logs` and `isb stack logs` print it after the live replicas' logs
+(`isb stack logs STACK SERVICE --failed` prints only it).
 
 The CLI's old `isb app logs` (a deployment's build and rollout log) is now
 `isb app deploy-log NAME [ID] [-f]`.

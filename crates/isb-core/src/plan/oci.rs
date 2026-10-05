@@ -1,13 +1,30 @@
-//! An OCI app's argv as `oci.entrypoint`.
+//! What an OCI instance needs beyond config: its command line, and work
+//! done on it between creation and first start.
 //!
-//! incus writes that key into the line-based LXC config and splits it on
-//! whitespace with quotes grouping. There is no escape character, so a line
-//! break cannot be carried at all, and an argument may hold only one kind of
-//! quote. The common case that needs more, `sh -c SCRIPT`, is rewritten so the
+//! The command line: incus writes `oci.entrypoint` into the line-based LXC
+//! config and splits it on whitespace with quotes grouping. There is no
+//! escape character, so a line break cannot be carried at all, and an
+//! argument may hold only one kind of quote. The common case that needs
+//! more, `sh -c SCRIPT`, is rewritten so the
 //! shell decodes the script itself: `eval "$(printf %b "...")"`, with every
 //! line break, quote, `$`, backtick and backslash written as a `printf %b`
 //! escape. `$0` and the positional arguments are the shell's, as with `-c`.
 //! Anything else that cannot be carried is refused.
+
+use crate::error::Result;
+
+/// See [`Desired::before_start`]: called with the instance's name.
+#[derive(Clone)]
+pub struct BeforeStart(pub std::sync::Arc<BeforeStartFn>);
+
+/// The work: given a client on the instance's project, and its name.
+pub type BeforeStartFn = dyn Fn(&crate::client::Client, &str) -> Result<()> + Send + Sync;
+
+impl std::fmt::Debug for BeforeStart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("BeforeStart")
+    }
+}
 
 /// Shells whose `-c` script may be rewritten (by basename).
 const SHELLS: &[&str] = &["sh", "bash", "dash", "ash", "zsh", "ksh", "mksh"];

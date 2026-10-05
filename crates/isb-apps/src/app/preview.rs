@@ -195,19 +195,15 @@ pub fn is_pr_suffix(s: &str) -> bool {
 /// The stack a preview runs in: `<project>-<env>-pr-<n>`, or
 /// `<project>-pr-<n>` when that is too long for a stack or its instances.
 pub fn preview_stack(project: &str, environment: &str, app: &str, n: u64) -> Result<String> {
-    for s in [
+    let names = [
         format!("{project}-{environment}-pr-{n}"),
         format!("{project}-pr-{n}"),
-    ] {
-        if crate::stack::validate_stack_name(&s).is_ok()
-            && crate::stack::instance_name(&s, app, 100, "0000").is_ok()
-        {
-            return Ok(s);
-        }
-    }
-    Err(Error::invalid(format!(
-        "app {app}: no preview stack name fits for pull request {n}; shorten the app or project name"
-    )))
+    ];
+    crate::stack::pick_stack_name(&names, app, 100).ok_or_else(|| {
+        Error::invalid(format!(
+            "app {app}: no preview stack name fits for pull request {n}; shorten the project name"
+        ))
+    })
 }
 
 /// A preview's image tag.

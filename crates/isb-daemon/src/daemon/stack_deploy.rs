@@ -290,7 +290,8 @@ pub(super) fn deploy(d: &Daemon, a: DeployArgs, c: &Caller) -> Result<Value> {
     if let Some(m) = &d.ingress {
         m.check(&def)?;
     }
-    let warnings = stack_images::check(&def, current.as_ref())?;
+    let mut warnings = stack_images::check(&def, current.as_ref())?;
+    warnings.extend(crate::stack::secrets::env_exposure_warning(&def.file));
     let bound = crate::stack::secrets::bind_reporting(
         &d.secrets,
         &org,

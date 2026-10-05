@@ -208,6 +208,11 @@ impl StackDef {
             h.write(var.as_bytes());
             h.write(&secret(key));
         }
+        for (var, key) in &spec.env.files {
+            h.write(b"envfile");
+            h.write(var.as_bytes());
+            h.write(&secret(key));
+        }
         // Named volumes are part of the instance's devices; their definitions
         // are only used at creation, but a renamed one must move the instance.
         for v in &spec.volumes {
@@ -303,18 +308,64 @@ pub fn validate_stack_name(name: &str) -> Result<()> {
     }
 }
 
-/// `<stack>-<service>-<slot>-<id>`, checked against incus' 63-character limit.
+/// incus' limit on an instance name.
+pub const INSTANCE_NAME_MAX: usize = 63;
+
+/// `<stack>-<service>-<slot>-<id>`, within incus' 63-character limit. A
+/// name that would be longer keeps the start of the service name plus a
+/// hash of all of it (`<stack>-<svc-prefix>-<hash6>-<slot>-<id>`), so two
+/// long services in one stack still differ. Nothing parses these names
+/// back: replicas are found by their `user.isb.*` labels.
 pub fn instance_name(stack: &str, service: &str, slot: u32, id: &str) -> Result<String> {
+    let svc = crate::compose::sanitize_name(service);
+    let n = format!("{stack}-{svc}-{slot}-{id}");
+    if n.len() <= INSTANCE_NAME_MAX {
+        crate::plan::validate_instance_name(&n)?;
+        return Ok(n);
+    }
+    let mut h = Fnv64::new();
+    h.write(service.as_bytes());
+    let hash = format!("{:06x}", h.finish() & 0xff_ffff);
+    let tail = format!("-{hash}-{slot}-{id}");
+    // What the service prefix may use: the stack, its `-`, and the tail.
+    let room = INSTANCE_NAME_MAX.saturating_sub(stack.len() + 1 + tail.len());
+    if room < 1 {
+        return Err(Error::invalid(format!(
+            "instance names of service {service:?} in stack {stack:?} (slot {slot}) cannot fit incus' {INSTANCE_NAME_MAX} characters even with the service name shortened; shorten the stack name ({} characters) or use fewer replicas",
+            stack.len()
+        )));
+    }
+    let prefix: String = svc.chars().take(room).collect();
+    let n = format!("{stack}-{}{tail}", prefix.trim_end_matches('-'));
+    crate::plan::validate_instance_name(&n)?;
+    Ok(n)
+}
+
+/// Whether `<stack>-<service>-<slot>-<id>` fits as is, without the
+/// shortening `instance_name` falls back to.
+pub fn instance_name_fits(stack: &str, service: &str, slot: u32) -> bool {
     let n = format!(
-        "{stack}-{}-{slot}-{id}",
+        "{stack}-{}-{slot}-0000",
         crate::compose::sanitize_name(service)
     );
-    crate::plan::validate_instance_name(&n).map_err(|_| {
-        Error::invalid(format!(
-            "instance name {n:?} is too long; shorten the stack or service name"
-        ))
-    })?;
-    Ok(n)
+    n.len() <= INSTANCE_NAME_MAX && crate::plan::validate_instance_name(&n).is_ok()
+}
+
+/// The first valid stack name of `candidates` whose instance names of
+/// `service` fit unshortened, else the first `instance_name` can shorten.
+/// Unshortened first, because that is how an existing stack (a running
+/// preview's) was picked, so it keeps its name.
+pub fn pick_stack_name(candidates: &[String], service: &str, slot: u32) -> Option<String> {
+    let valid = candidates.iter().filter(|s| validate_stack_name(s).is_ok());
+    valid
+        .clone()
+        .find(|s| instance_name_fits(s, service, slot))
+        .or_else(|| {
+            valid
+                .clone()
+                .find(|s| instance_name(s, service, slot, "0000").is_ok())
+        })
+        .cloned()
 }
 
 /// A short random id for a new instance.
@@ -581,6 +632,28 @@ mod tests {
         assert_eq!(f.revision("web").unwrap(), web);
     }
 
+    /// Specs written before `as: file` (secret variables, secret files, a
+    /// healthcheck without `start_period`) keep their revisions, so an
+    /// upgraded daemon replaces none of their instances. `as: file` is a
+    /// revision of its own.
+    #[test]
+    fn existing_specs_keep_their_revisions() {
+        let y = "secrets: {k: {external: true}, e: {external: true}}\nservices:\n  web: {image: x, secrets: [k], healthcheck: {test: [CMD, true], interval: 5s}}\n  api: {image: docker:busybox, environment: {PLAIN: '1', TOKEN: {secret: e}, OTHER: {secret: k, on_change: none}}}\n";
+        let mut a = def(y);
+        a.secrets.insert("k".into(), binding("k", 1));
+        a.secrets.insert("e".into(), binding("e", 1));
+        assert_eq!(a.revision("web").unwrap(), "76486ba4");
+        assert_eq!(a.revision("api").unwrap(), "8d6c644f");
+        let file = y.replace("TOKEN: {secret: e}", "TOKEN: {secret: e, as: file}");
+        let mut b = def(&file);
+        b.secrets = a.secrets.clone();
+        assert_ne!(b.revision("api").unwrap(), a.revision("api").unwrap());
+        let env = y.replace("TOKEN: {secret: e}", "TOKEN: {secret: e, as: env}");
+        let mut c = def(&env);
+        c.secrets = a.secrets.clone();
+        assert_eq!(c.revision("api").unwrap(), a.revision("api").unwrap());
+    }
+
     #[test]
     fn udp_ports_are_part_of_the_revision_tcp_ports_are_not() {
         let rev = |ports: &str| {
@@ -729,10 +802,63 @@ mod tests {
             instance_name("app", "web", 2, "ab12").unwrap(),
             "app-web-2-ab12"
         );
-        assert!(instance_name(&"a".repeat(30), &"b".repeat(40), 1, "ab12").is_err());
         assert!(validate_stack_name("my-app").is_ok());
         assert!(validate_stack_name("My_App").is_err());
         assert!(validate_stack_name("1app").is_err());
+    }
+
+    #[test]
+    fn names_that_fit_are_unchanged() {
+        // 63 exactly: as it always was.
+        let stack = "project-management-production";
+        let svc = "a".repeat(63 - stack.len() - 1 - "-1-ab12".len());
+        let n = instance_name(stack, &svc, 1, "ab12").unwrap();
+        assert_eq!(n, format!("{stack}-{svc}-1-ab12"));
+        assert_eq!(n.len(), 63);
+        assert!(instance_name_fits(stack, &svc, 1));
+        assert_eq!(
+            instance_name("shop-production", "My_Web", 12, "ab12").unwrap(),
+            "shop-production-my-web-12-ab12"
+        );
+    }
+
+    #[test]
+    fn long_names_are_shortened_with_a_hash() {
+        let stack = "project-management-production";
+        let svc = "project-management-postgres";
+        assert!(!instance_name_fits(stack, svc, 1));
+        let n = instance_name(stack, svc, 1, "ab12").unwrap();
+        assert!(n.len() <= 63, "{n}");
+        assert!(n.starts_with(&format!("{stack}-project-")), "{n}");
+        assert!(n.ends_with("-1-ab12"), "{n}");
+        crate::plan::validate_instance_name(&n).unwrap();
+        // Deterministic.
+        assert_eq!(n, instance_name(stack, svc, 1, "ab12").unwrap());
+        // Two long services sharing a prefix still differ.
+        let other = instance_name(stack, "project-management-postgres-replica", 1, "ab12").unwrap();
+        assert_ne!(n, other);
+        // The slot and id stay at the end, at any width.
+        let wide = instance_name(&"a".repeat(30), &"b".repeat(40), 4_000_000_000, "ab12").unwrap();
+        assert!(
+            wide.len() <= 63 && wide.ends_with("-4000000000-ab12"),
+            "{wide}"
+        );
+        // A stack too long to leave room for any service is refused, saying so.
+        let e = instance_name(&"s".repeat(50), "web-frontend-x", 4_000_000_000, "ab12")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("shorten the stack name"), "{e}");
+    }
+
+    #[test]
+    fn stack_names_prefer_unshortened_instances() {
+        let c = ["aaaa-production-pr-1".to_string(), "aaaa-pr-1".to_string()];
+        assert_eq!(pick_stack_name(&c, "web", 100).unwrap(), c[0]);
+        // As before shortening existed: the shorter stack, whose names fit.
+        assert_eq!(pick_stack_name(&c, &"w".repeat(35), 100).unwrap(), c[1]);
+        // Fits nowhere unshortened: the first, shortened.
+        assert_eq!(pick_stack_name(&c, &"w".repeat(60), 100).unwrap(), c[0]);
+        assert_eq!(pick_stack_name(&["Bad".to_string()], "web", 1), None);
     }
 
     #[test]

@@ -56,7 +56,7 @@ export function JobsTab({ org, target, picker }: { org: string; target: JobTarge
     );
   }
   if (jobs.error) return <QueryError error={jobs.error} />;
-  const mine = (jobs.data ?? []).filter((j) => sameTarget(j.job.target, target));
+  const mine = (jobs.data ?? []).filter((j) => sameTarget(j.target, target));
 
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
@@ -90,7 +90,7 @@ export function JobsTab({ org, target, picker }: { org: string; target: JobTarge
           </EmptyState>
         </Card>
       ) : (
-        mine.map((j) => <JobCard key={j.job.name} org={org} entry={j} canWrite={canWrite} onEdit={() => setEdit({ job: j.job })} onLog={(run) => setLog({ job: j.job.name, run })} />)
+        mine.map((j) => <JobCard key={j.name} org={org} entry={j} canWrite={canWrite} onEdit={() => setEdit({ job: j })} onLog={(run) => setLog({ job: j.name, run })} />)
       )}
       <JobDialog org={org} target={target} existing={edit?.job} open={!!edit} onOpenChange={(o) => !o && setEdit(null)} />
       <RunLogDialog
@@ -106,7 +106,7 @@ export function JobsTab({ org, target, picker }: { org: string; target: JobTarge
 }
 
 function JobCard({ org, entry, canWrite, onEdit, onLog }: { org: string; entry: JobEntry; canWrite: boolean; onEdit: () => void; onLog: (r: Run) => void }) {
-  const j = entry.job;
+  const j = entry;
   const qc = useQueryClient();
   const running = entry.last_run?.status === "running";
   const runs = useJobRuns(org, j.name, running ? 2000 : false);

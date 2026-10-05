@@ -25,9 +25,7 @@ use crate::spec::{
     ExecDefaults, InstanceType, MountType, PortBind, ReadyCheck, RestartMode, SandboxSpec,
 };
 
-mod oci_cmd;
 mod owner;
-pub use oci_cmd::{check_oci_command, oci_command_line};
 
 pub type Props = BTreeMap<String, String>;
 
@@ -338,6 +336,9 @@ fn oci_reference(r: &str, docker_hub: bool) -> Result<String> {
     Ok(r)
 }
 
+mod oci;
+pub use oci::{BeforeStart, check_oci_command, oci_command_line};
+
 /// A spec resolved against the host: exactly what incus should hold.
 #[derive(Debug, Clone, Serialize)]
 pub struct Desired {
@@ -366,6 +367,11 @@ pub struct Desired {
     /// The egress plumbing the spec asks for (`egress:`).
     #[serde(skip)]
     pub egress: Option<crate::egress::Plumbing>,
+    /// Run on an instance this apply created, before its first start: an
+    /// OCI app reads its secret files as it starts, and a container's files
+    /// can be written while it is stopped.
+    #[serde(skip)]
+    pub before_start: Option<BeforeStart>,
 }
 
 /// Named-volume definitions available to a sandbox (from a compose file's
@@ -653,6 +659,10 @@ pub fn resolve(
     for (k, v) in &spec.env {
         config.insert(format!("environment.{k}"), v.clone());
     }
+    // `as: file` secrets: only the path is config; the value is a file.
+    for (k, v) in spec.env.file_vars() {
+        config.insert(format!("environment.{k}"), v);
+    }
     if let Some(r) = spec.restart {
         // incus' default (no boot.autostart) already restores the state the
         // instance had at shutdown, which is exactly unless-stopped.
@@ -780,15 +790,8 @@ pub fn resolve(
                 if !vm && host.initial_copy && !v.volume.nocopy {
                     props.insert("initial.copy".into(), "true".into());
                 }
-                let base = def.map(|d| d.config.clone()).unwrap_or_default();
-                let (config, fixups) = owner::for_mount(
-                    &name,
-                    spec,
-                    v,
-                    (&guest_norm, &dname),
-                    (&vpool, n, base),
-                    host,
-                )?;
+                let at = (&*guest_norm, &*dname, &*vpool, n.as_str());
+                let (config, fixups) = owner::for_mount(&name, spec, v, def, host, at)?;
                 let ev = EnsureVolume {
                     pool: vpool,
                     name: n.clone(),
@@ -964,6 +967,7 @@ pub fn resolve(
             .map(|k| format!("environment.{k}"))
             .collect(),
         egress,
+        before_start: None,
     })
 }
 
@@ -1173,12 +1177,7 @@ impl std::fmt::Display for Action {
                 props: p,
                 search,
             } => write!(f, "+ port {device}: {} (search {search})", props(p)),
-            Action::FixOwner {
-                path,
-                owner,
-                mode,
-                fresh_only,
-            } => owner::describe(f, path, owner.as_deref(), mode.as_deref(), *fresh_only),
+            a @ Action::FixOwner { .. } => owner::describe(f, a),
             Action::Note { message } => write!(f, "  note: {message}"),
         }
     }

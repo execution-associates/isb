@@ -72,7 +72,10 @@ pub enum TemplateCmd {
 #[derive(Subcommand)]
 pub enum CatalogCmd {
     #[command(alias = "list")]
-    Ls,
+    Ls {
+        #[arg(long)]
+        json: bool,
+    },
     /// Add a catalog: a host directory or an https URL.
     Add {
         name: String,
@@ -348,8 +351,12 @@ pub fn template(org: &Option<String>, cmd: TemplateCmd) -> Result<u8> {
             );
         }
         TemplateCmd::Catalog(c) => match c {
-            CatalogCmd::Ls => {
+            CatalogCmd::Ls { json } => {
                 let r = call_t("template_catalog_list", json!({}), SHORT)?;
+                if json {
+                    print_json(&r["catalogs"]);
+                    return Ok(0);
+                }
                 let mut rows = vec![vec!["NAME".into(), "FORMAT".into(), "LOCATION".into()]];
                 rows.push(vec!["builtin".into(), "native".into(), "(in isb)".into()]);
                 for c in r["catalogs"].as_array().cloned().unwrap_or_default() {

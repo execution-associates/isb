@@ -98,8 +98,10 @@ pub struct AppCreate {
     /// The command, split like a shell would.
     #[arg(long)]
     command: Option<String>,
+    /// CPUs per replica, e.g. 2.
     #[arg(long)]
     cpus: Option<String>,
+    /// Memory per replica: 512m, 2g, 2GiB.
     #[arg(long)]
     memory: Option<String>,
     /// Deploy right away and follow the deployment.
@@ -121,7 +123,12 @@ pub enum AppCmd {
     },
     /// An app's settings.
     #[command(alias = "get")]
-    Show { name: String },
+    Show {
+        name: String,
+        /// Print app_get's answer as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Change settings with a JSON or YAML merge patch from FILE (or stdin
     /// for -), and/or the flags.
     Update {
@@ -138,6 +145,12 @@ pub enum AppCmd {
         replicas: Option<u32>,
         #[arg(long)]
         port: Option<u16>,
+        /// CPUs per replica, e.g. 2.
+        #[arg(long)]
+        cpus: Option<String>,
+        /// Memory per replica: 512m, 2g, 2GiB.
+        #[arg(long)]
+        memory: Option<String>,
         /// Deploy after the change.
         #[arg(long)]
         deploy: bool,
@@ -242,7 +255,13 @@ pub enum PreviewCmd {
     },
     /// One preview and its deployments.
     #[command(alias = "get")]
-    Show { name: String, number: u64 },
+    Show {
+        name: String,
+        number: u64,
+        /// Print preview_get's answer as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// A preview deployment's log (default: the latest); -f follows it.
     Logs {
         name: String,
@@ -436,10 +455,23 @@ fn create_args(c: AppCreate) -> Result<Value> {
     if let Some(cmd) = &c.command {
         a["command"] = json!(cmd);
     }
-    if c.cpus.is_some() || c.memory.is_some() {
-        a["resources"] = json!({"cpus": c.cpus, "memory": c.memory});
+    if let Some(r) = resources_arg(&c.cpus, &c.memory) {
+        a["resources"] = r;
     }
     Ok(a)
+}
+
+/// `{cpus?, memory?}` from the flags given, or None for neither. Only the
+/// set ones, so in an update's merge patch the other is kept.
+pub(super) fn resources_arg(cpus: &Option<String>, memory: &Option<String>) -> Option<Value> {
+    let mut r = json!({});
+    if let Some(c) = cpus {
+        r["cpus"] = json!(c);
+    }
+    if let Some(m) = memory {
+        r["memory"] = json!(m);
+    }
+    (cpus.is_some() || memory.is_some()).then_some(r)
 }
 
 /// Print a deployment's log as it grows until it finishes: 0 when it ended
@@ -571,8 +603,13 @@ pub fn app(org: &Option<String>, cmd: AppCmd) -> Result<u8> {
             }
             table(rows);
         }
-        AppCmd::Show { name } => {
-            print_app(&call("app_get", json!({"name": name}))?);
+        AppCmd::Show { name, json } => {
+            let a = call("app_get", json!({"name": name}))?;
+            if json {
+                print_json(&a);
+            } else {
+                print_app(&a);
+            }
         }
         AppCmd::Update {
             name,
@@ -581,6 +618,8 @@ pub fn app(org: &Option<String>, cmd: AppCmd) -> Result<u8> {
             reference,
             replicas,
             port,
+            cpus,
+            memory,
             deploy,
         } => {
             let mut patch = match &file {
@@ -605,6 +644,9 @@ pub fn app(org: &Option<String>, cmd: AppCmd) -> Result<u8> {
             }
             if let Some(p) = port {
                 patch["port"] = json!(p);
+            }
+            if let Some(r) = resources_arg(&cpus, &memory) {
+                patch["resources"] = r;
             }
             patch["name"] = json!(name);
             let r = call("app_update", patch)?;
@@ -786,8 +828,12 @@ fn previews(org: &Option<String>, cmd: PreviewCmd) -> Result<u8> {
             }
             table(rows);
         }
-        PreviewCmd::Show { name, number } => {
+        PreviewCmd::Show { name, number, json } => {
             let p = call("preview_get", json!({"name": name, "number": number}))?;
+            if json {
+                print_json(&p);
+                return Ok(0);
+            }
             println!(
                 "preview:     #{} of {} ({}{})",
                 p["number"],

@@ -346,6 +346,9 @@ pub fn apply(
                 out.created = true;
             }
             Action::StartInstance => {
+                if let (true, Some(h)) = (out.created, &desired.before_start) {
+                    (h.0)(client, name)?;
+                }
                 report(&format!("{name}: starting"));
                 retry_once(report, || start_instance(client, name))?;
             }

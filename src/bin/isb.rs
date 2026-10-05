@@ -789,7 +789,7 @@ fn volume_local(ctx: &Ctx, v: VolumeCmd) -> Result<u8> {
                 table(t);
             }
         }
-        VolumeCmd::Inspect { name, pool: p } => {
+        VolumeCmd::Inspect { name, pool: p, .. } => {
             let pool = pool(p)?;
             let v = isb::volume::get(&c, &pool, &name)?
                 .ok_or_else(|| Error::NotFound(format!("volume {name} in pool {pool}")))?;

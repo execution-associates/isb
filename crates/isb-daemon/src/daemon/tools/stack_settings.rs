@@ -178,6 +178,7 @@ impl Pending {
                 domains: def.domains.clone(),
                 events: Vec::new(),
                 events_seq: seq,
+                failed_attempts: Default::default(),
             },
             touched: how.touched.clone(),
         })
@@ -561,7 +562,7 @@ fn stack_deployment_get_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Re
         d,
         "stack_deployment_get",
         "A stack deployment",
-        "One deployment of a compose stack: its record (as stack_deployments lists it), the compose text it deployed (`source`, as stack_export gave it), the stack's environment (`env`, secret references only) and managed domains (`domains`) at the time, and its log: the stack's events while it ran, as `events` [{at (unix ms), level, service, message}] and as `log` text. Poll until `finished`. stack_rollback with `to` deploys it again.",
+        "One deployment of a compose stack: its record (as stack_deployments lists it), the compose text it deployed (`source`, as stack_export gave it), the stack's environment (`env`, secret references only) and managed domains (`domains`) at the time, and its log: the stack's events while it ran, as `events` [{at (unix ms), level, service, message}] and as `log` text, and `failed_attempts`: per service, the last replica that failed to come up while it ran, with its last output (at most 200 lines, 32 KiB). Poll until `finished`. stack_rollback with `to` deploys it again.",
         obj(
             json!({"name": {"type": "string"}, "id": {"type": "integer", "minimum": 1}}),
             &["name", "id"]
@@ -587,6 +588,7 @@ fn stack_deployment_get_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Re
             out["domains"] = json!(r.domains);
             out["log"] = json!(r.log());
             out["events"] = json!(r.events);
+            out["failed_attempts"] = json!(r.failed_attempts);
             Ok(out)
         }
     );

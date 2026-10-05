@@ -110,6 +110,7 @@ mod names;
 pub use ensure::{Names, ensure_service_names};
 pub use names::{ensure_all_service_names, ensure_default};
 pub(crate) mod limits;
+pub use limits::{Budget, DEFAULT_ROOT_SIZE, Limit, bytes as format_bytes};
 pub mod nesting;
 mod udp;
 pub use udp::{allowed_udp, check_proxies, check_udp_port};
@@ -158,6 +159,9 @@ pub struct OrgOptions {
     /// Total disk, e.g. `100GiB`.
     pub disk: Option<String>,
     pub instances: Option<u32>,
+    /// Limits to remove, so the org is no longer limited by them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lift: Vec<Limit>,
     /// Per-instance defaults (incus requires one once the project is limited).
     pub default_cpus: Option<u32>,
     pub default_memory: Option<String>,
@@ -195,6 +199,11 @@ pub struct OrgInfo {
     /// What an instance gets when its spec sets no limits (the org's default profile).
     pub default_cpus: Option<String>,
     pub default_memory: Option<String>,
+    /// The root disk size it gets: set while the org has a disk limit.
+    pub default_disk: Option<String>,
+    /// Each limit's budget (`cpu`, `memory`, `disk`, `instances`): what
+    /// every instance's limit adds up to, stopped ones included.
+    pub allocation: BTreeMap<String, Budget>,
     pub bind_roots: Vec<String>,
     /// Egress exceptions, as `isb org create --allow-egress` takes them.
     pub egress: Vec<String>,
@@ -591,8 +600,14 @@ fn info(base: &Client, org: OrgId, p: &Value) -> Result<OrgInfo> {
         .as_array()
         .map(|a| a.len())
         .unwrap_or(0);
-    let defaults = strmap(&oc.get_opt("/1.0/profiles/default")?.unwrap_or_default()["config"]);
+    let profile = oc.get_opt("/1.0/profiles/default")?.unwrap_or_default();
+    let defaults = strmap(&profile["config"]);
+    let allocation = limits::read_budgets(base, &org.incus_project());
     Ok(OrgInfo {
+        default_disk: profile["devices"]["root"]["size"]
+            .as_str()
+            .map(String::from),
+        allocation,
         project: org.incus_project(),
         name: org,
         network,

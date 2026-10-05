@@ -23,8 +23,8 @@ export interface JobSpec {
   missed_grace?: string;
 }
 
-export interface JobEntry {
-  job: JobSpec;
+/** A job as job_list and job_get answer: its settings, plus these. */
+export interface JobEntry extends JobSpec {
   created_at: number;
   updated_at: number;
   /** RFC 3339, null when disabled. */

@@ -24,7 +24,7 @@ use isb::{
 };
 
 mod common;
-use common::{default_org_client, enabled, image};
+use common::{enabled, image, test_org_client};
 
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
@@ -1210,7 +1210,7 @@ fn stack_controller() {
         &|_| None,
     )
     .unwrap();
-    let def = test_def(&stack, isb::org::OrgId::default_org(), p.file, state.path());
+    let def = test_def(&stack, common::test_org(), p.file, state.path());
     struct Rm(isb::stack::Controller, String);
     impl Drop for Rm {
         fn drop(&mut self) {
@@ -1260,7 +1260,7 @@ fn stack_controller() {
         std::thread::sleep(Duration::from_secs(1));
     }
     ctl.remove(&stack, true, Duration::from_secs(120)).unwrap();
-    let org_client = default_org_client(&client);
+    let org_client = test_org_client(&client);
     let left = Sandbox::list_with(&org_client, &[LabelFilter::parse("isb-test")])
         .unwrap()
         .into_iter()
@@ -1690,14 +1690,14 @@ fn apps_deploy_edit_rollback_git_webhook() {
     let apps = isb::app::Apps::new(state.path(), client.clone(), ctl.clone(), secrets.clone())
         .with_build(build)
         .with_timeout(Duration::from_secs(400));
-    let org = isb::org::OrgId::default_org();
-    let org_client = default_org_client(&client);
+    let org = common::test_org();
+    let org_client = test_org_client(&client);
     let project = format!("isbt{}", std::process::id() % 100000);
     let stack = format!("{project}-test");
     struct Rm(isb::app::Apps, isb::stack::Controller, String);
     impl Drop for Rm {
         fn drop(&mut self) {
-            let org = isb::org::OrgId::default_org();
+            let org = common::test_org();
             for a in ["web", "other", "src"] {
                 let _ = self.0.delete(&org, a);
             }
@@ -1859,14 +1859,14 @@ fn apps_deploy_edit_rollback_git_webhook() {
         "sha256={}",
         isb::app::webhook::sign(b"guess", body)
     ));
-    let (st, _) = apps.webhook("default", "src", &bad, None, body);
+    let (st, _) = apps.webhook(common::TEST_ORG, "src", &bad, None, body);
     assert_eq!(st, 401);
     assert_eq!(apps.deployments(&org, "src").unwrap().len(), 1);
     let good = hdr(format!(
         "sha256={}",
         isb::app::webhook::sign(secret.as_bytes(), body)
     ));
-    let (st, v) = apps.webhook("default", "src", &good, None, body);
+    let (st, v) = apps.webhook(common::TEST_ORG, "src", &good, None, body);
     assert_eq!(st, 202, "{v}");
     let id = v["deployment"].as_u64().unwrap();
     let g2 = apps
@@ -1974,7 +1974,7 @@ fn ingress_routes_rolls_and_removes() {
         &|_| None,
     )
     .unwrap();
-    let def = test_def(&stack, isb::org::OrgId::default_org(), p.file, state.path());
+    let def = test_def(&stack, common::test_org(), p.file, state.path());
     struct Rm(
         isb::stack::Controller,
         String,

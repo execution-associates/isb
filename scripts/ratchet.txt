@@ -8,14 +8,13 @@ crates/isb-apps/src/backup.rs 1675
 crates/isb-apps/src/build/mod.rs 1094
 crates/isb-apps/src/notify/mod.rs 1263
 crates/isb-apps/src/s3.rs 1263
-crates/isb-core/src/compose.rs 1245
 crates/isb-core/src/ingress/caddy.rs 1130
 crates/isb-core/src/machine.rs 1097
 crates/isb-core/src/metrics_history.rs 1024
-crates/isb-core/src/plan.rs 1518
+crates/isb-core/src/plan.rs 1517
 crates/isb-core/src/registry/oci.rs 1081
-crates/isb-core/src/sandbox.rs 1349
-crates/isb-core/src/spec.rs 1584
+crates/isb-core/src/sandbox.rs 1352
+crates/isb-core/src/spec.rs 1521
 crates/isb-core/src/stack/controller.rs 2395
 crates/isb-daemon/src/daemon/audit.rs 1063
 crates/isb-daemon/src/daemon/mod.rs 1286

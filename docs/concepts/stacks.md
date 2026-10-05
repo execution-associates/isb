@@ -81,7 +81,13 @@ directory without touching healthy instances.
 
 Each service has `deploy.replicas` slots. A slot holds one instance named
 `<stack>-<service>-<slot>-<id>`, with `id` new for every instance, labelled
-`user.isb.stack`, `user.isb.service`, `user.isb.slot` and `user.isb.rev`. A
+`user.isb.stack`, `user.isb.service`, `user.isb.slot` and `user.isb.rev`.
+When that name would pass incus' 63 characters, the service part is cut short
+and followed by a 6-character hash of the whole service name
+(`<stack>-<service-prefix>-<hash>-<slot>-<id>`), so two long services in one
+stack still get different names; isb finds replicas by their labels, never by
+parsing names. A stack name too long to leave room for any service is refused
+when the stack is deployed or scaled, naming the stack to shorten. A
 `container_name` in the file is ignored. Named volumes are `<stack>_<key>`
 and are shared by every replica, as docker volumes are on one host: a service
 that must own its volume should stay at one replica with `stop-first`
@@ -105,8 +111,9 @@ that service's instances, in batches of `update_config.parallelism`:
   slot serving.
 
 "Wait for it" means: readiness checks pass, then the healthcheck passes (or,
-with none, the app's unit is active), within `start_period + interval x
-retries + 30s` (at least a minute); then it must stay healthy for
+with none, the app's unit is active), within its startup grace + `interval
+x retries` + 30s (at least a minute; see [Health and
+restarts](#health-and-restarts)); then it must stay healthy for
 `update_config.monitor` (5 s). A failure deletes the new instance and applies
 `failure_action`: `pause` (default) stops the rollout and leaves the service
 as it is until the next deploy, `rollback` redeploys the previous version of
@@ -244,10 +251,22 @@ as the bare name.
 
 ## Health and restarts
 
-A replica's probe runs every `start_interval` until its first result, then
-every `interval`. Failures during `start_period` do not count. After
-`retries` consecutive failures it is unhealthy: out of rotation, and its app
-is restarted (the unit, or the OCI instance). `deploy.restart_policy` bounds
+The healthcheck is Kubernetes' readiness probe throughout, and its liveness
+probe once the replica has passed. A replica's probe runs every
+`start_interval` until its first result, then every `interval`. Each
+replica is in one of three states (`isb stack ps`):
+
+- `starting`: it has not passed since it (re)started. It is out of rotation,
+  and failing does not restart it until its **startup grace** is over:
+  `start_period` when set, else `interval x retries x 2`, at least 60s and at
+  most 5m (180s with the defaults). A slow first start (an app blocking on
+  OIDC discovery, migrations, a JVM) is not taken for a hang. After the grace,
+  `retries` consecutive failures make it unhealthy.
+- `healthy`: it passed; it is in rotation. From then on, failures after
+  `start_period` count.
+- `unhealthy`: `retries` consecutive counted failures. It is out of
+  rotation, and its app is restarted (the unit, or the OCI instance), which
+  makes it `starting` again with a new grace. `deploy.restart_policy` bounds
 this: `condition: none` never restarts, and `max_attempts` within `window`
 stops restarting once spent (the status says so). Under a stack, `restart`
 in the file is ignored, as swarm ignores it: the app is always supervised,
@@ -276,7 +295,24 @@ state:
 
 and per replica its status, health, address, whether it is in rotation, its
 restarts and its last probe output. `isb stack logs STACK SERVICE` shows each
-replica's recent output.
+replica's recent output (`--tail N`, `--since 10m` or an RFC 3339 time).
+
+A replica that does not come up (it exits, or never passes its healthcheck
+before its deadline) is deleted and made again. Before it is deleted, isb
+reads its last 200 lines of output (its journal, or an OCI image's console;
+at most 32 KiB) and keeps them with the failed attempt: `isb stack ps` names
+the attempt while the service is not converged, `isb stack logs STACK SERVICE`
+prints its output after the live replicas' (alone with `--failed`, and
+whenever no live replica printed anything), and the deployment that was
+rolling out keeps it (`stack_deployment_get` `failed_attempts`), so it
+outlives a restart of the daemon.
+
+`isb stack exec STACK SERVICE -- CMD...` runs a command in one of the
+service's replicas, as `isb app exec` does for an app: a running replica,
+healthy and in rotation first, or the one `--replica N` names. It prints the
+output and exits with the command's status; it is not interactive (`-i` feeds
+stdin), and it works over the socket and, from a workspace, over `$ISB_URL`.
+Members and up.
 
 ## Editing in the web UI
 
@@ -373,7 +409,8 @@ their apps have their own.
 isb stack deploy [NAME] [-f FILE...] [-d] [--timeout 10m]   deploy or update; waits unless -d
 isb stack ls [--json]
 isb stack ps NAME [--json]
-isb stack logs NAME SERVICE [--slot N] [-n 100]
+isb stack logs NAME SERVICE [--slot N] [-n|--tail 100] [--since 10m|TIME] [--failed]
+isb stack exec NAME SERVICE [--replica N] [-u USER] [-w DIR] [-e K=V]... [-i] -- CMD...
 isb stack scale NAME SERVICE=N...
 isb stack redeploy NAME SERVICE
 isb stack rollback NAME [--to ID]

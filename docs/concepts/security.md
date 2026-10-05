@@ -114,7 +114,7 @@ these checks by isb. Refused unless the operator allows it:
 | Refused | Allowed by |
 |---|---|
 | `privileged: true` | `--allow-privileged` |
-| `raw_config`, `raw_devices`, `incus_profiles`, an `idmap` other than `auto`/`none`, guest-bound ports (`bind: guest`, a guest reaching into the host) | `--allow-raw` |
+| `raw_config`, `raw_devices` (other than `root: {size}`, a quota), `incus_profiles`, an `idmap` other than `auto`/`none`, guest-bound ports (`bind: guest`, a guest reaching into the host) | `--allow-raw` |
 | bind mounts, and any whose real path (symlinks followed) is outside the roots | `--bind-root DIR` (repeatable) |
 | publishing a port on anything but loopback | `--publish-address IP` (repeatable), e.g. a tailnet address |
 | reaching instances `isb serve` does not manage (exec, remove, list) | `--any-instance` |
@@ -183,8 +183,15 @@ Details: [Identity API](../reference/identity-api.md).
   never come from argv, and listings never show them.
 - Delivered as files under `/run/secrets` (0400 by default), they never reach
   instance config. **On an OCI image, a secret delivered as an environment
-  variable is instance config, plaintext in the incus database**: mount it as
-  a file when that matters.
+  variable is instance config, plaintext in the incus database**, readable by
+  anyone who can read the instance (`incus config show`, an incus backup or
+  export, anyone with access to its incus project). `isb stack deploy` and
+  `isb up` warn about each one. Deliver it with `{secret: NAME, as: file}`
+  instead: the value is a 0400 file under `/run/secrets`, owned by the app's
+  user and written before the app first starts, and only its path is config
+  (`KEY_FILE`, the convention postgres, mariadb and many other images
+  follow). On a system image a secret variable lives in a 0600 file and never
+  reaches instance config either way.
 - Members of an org can read its secret values (the org is the trust
   boundary); the web UI keeps them off screen behind **Reveal** for owners
   and admins. Viewers and `read`/`deploy` tokens get no secret material.

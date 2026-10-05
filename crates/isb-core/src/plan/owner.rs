@@ -20,9 +20,9 @@ pub(super) fn for_mount(
     name: &str,
     spec: &SandboxSpec,
     v: &VolumeSpec,
-    (path, device): (&str, &str),
-    volume: (&str, &str, Props),
+    def: Option<&crate::spec::NamedVolumeSpec>,
     host: &HostFacts,
+    (path, device, pool, volume): (&str, &str, &str, &str),
 ) -> Result<(Props, Vec<OwnerFixup>)> {
     let mode = v
         .mode
@@ -35,7 +35,7 @@ pub(super) fn for_mount(
         path: path.into(),
         owner: owner.cloned(),
         mode: mode.map(|m| format!("{m:04o}")),
-        new_volume: new_volume.then(|| (volume.0.to_string(), volume.1.to_string())),
+        new_volume: new_volume.then(|| (pool.to_string(), volume.to_string())),
     };
     let mut initial = Props::new();
     let mut fixups = Vec::new();
@@ -60,7 +60,7 @@ pub(super) fn for_mount(
             fixups.push(fixup(None, mode, false));
         }
     }
-    let mut config = volume.2;
+    let mut config = def.map(|d| d.config.clone()).unwrap_or_default();
     for (k, val) in initial {
         config.entry(k).or_insert(val);
     }
@@ -68,19 +68,22 @@ pub(super) fn for_mount(
 }
 
 /// How a plan shows a fixup.
-pub(super) fn describe(
-    f: &mut std::fmt::Formatter<'_>,
-    path: &str,
-    owner: Option<&str>,
-    mode: Option<&str>,
-    fresh_only: bool,
-) -> std::fmt::Result {
+pub(super) fn describe(f: &mut std::fmt::Formatter<'_>, a: &Action) -> std::fmt::Result {
+    let Action::FixOwner {
+        path,
+        owner,
+        mode,
+        fresh_only,
+    } = a
+    else {
+        return Ok(());
+    };
     match (owner, mode) {
         (Some(o), Some(m)) => write!(f, "~ chown {o} {path}, chmod {m}")?,
         (Some(o), None) => write!(f, "~ chown {o} {path}")?,
-        (None, m) => write!(f, "~ chmod {} {path}", m.unwrap_or("-"))?,
+        (None, m) => write!(f, "~ chmod {} {path}", m.as_deref().unwrap_or("-"))?,
     }
-    if fresh_only {
+    if *fresh_only {
         write!(f, " (new volume the image did not seed)")?;
     }
     Ok(())

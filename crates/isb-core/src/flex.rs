@@ -52,6 +52,14 @@ pub(crate) fn string<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error
     })
 }
 
+/// As `opt_string`, with `null` read as unset (JSON API bodies send it).
+pub fn opt_string_or_null<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    Ok(Option::<IntOrString>::deserialize(d)?.map(|v| match v {
+        IntOrString::Int(n) => n.to_string(),
+        IntOrString::String(s) => s,
+    }))
+}
+
 pub(crate) fn opt_string<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     Ok(Some(match IntOrString::deserialize(d)? {
         IntOrString::Int(n) => n.to_string(),
@@ -91,7 +99,7 @@ pub(crate) fn string_map<'de, D: Deserializer<'de>>(
 }
 
 /// One `environment` value: a scalar, or a top-level secret delivered as the
-/// variable.
+/// variable (or, `as: file`, as a file whose path is `KEY_FILE`).
 #[derive(Deserialize, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
 pub(crate) enum EnvValue {
@@ -103,6 +111,11 @@ pub(crate) enum EnvValue {
         /// the top-level secret's `on_change`).
         #[serde(default)]
         on_change: Option<crate::spec::OnChange>,
+        /// `env` (default): the variable holds the value. `file`: the value
+        /// is `/run/secrets/NAME` and `KEY_FILE` holds that path, so it is
+        /// never instance config.
+        #[serde(default, rename = "as")]
+        delivery: Option<crate::spec::SecretAs>,
     },
 }
 

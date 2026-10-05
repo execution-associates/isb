@@ -42,7 +42,7 @@ written `--flag=false`.
 | `--bind-root` | `ISB_SERVE_BIND_ROOTS` (comma-separated) | none | host directories remote callers may bind-mount from |
 | `--publish-address` | `ISB_SERVE_PUBLISH_ADDRESSES` (comma-separated) | none: loopback only | host addresses remote callers may publish ports on |
 | `--allow-privileged` | `ISB_SERVE_ALLOW_PRIVILEGED` | off | let remote callers create privileged containers |
-| `--allow-raw` | `ISB_SERVE_ALLOW_RAW` | off | let remote callers use `raw_config`, `raw_devices`, `incus_profiles`, `idmap` maps and guest-bound ports |
+| `--allow-raw` | `ISB_SERVE_ALLOW_RAW` | off | let remote callers use `raw_config`, `raw_devices` (other than `root: {size}`), `incus_profiles`, `idmap` maps and guest-bound ports |
 | `--any-instance` | `ISB_SERVE_ANY_INSTANCE` | off | let remote callers reach instances isb does not manage |
 
 With HTTP listeners and Access configured, Access guards the loopback

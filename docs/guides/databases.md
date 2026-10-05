@@ -31,7 +31,8 @@ $ isb app create web --project shop --image ghcr:umami-software/umami:postgresql
 
 ```text
 isb db create NAME --project P [--environment E] --engine ENGINE[:VERSION] [--database D] [--user U]
-              [--publish [IP:]PORT] [--no-deploy]     postgres, mysql, mariadb, mongodb, redis
+              [--publish [IP:]PORT] [--url SECRET[?QUERY]]... [--cpus N] [--memory M]
+              [--no-deploy]     postgres, mysql, mariadb, mongodb, redis
 isb db ls [--project P] [--json] | show NAME [--show-password] [--json] | rm NAME
 ```
 

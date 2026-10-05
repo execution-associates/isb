@@ -64,6 +64,28 @@ pub fn used_keys(file: &ComposeFile) -> BTreeSet<String> {
         .collect()
 }
 
+/// One warning for the secrets an OCI image takes as variables: those are
+/// instance config (`environment.KEY`), plain text to anyone who can read
+/// the instance (`incus config show`). A system image's stay in a 0600 file.
+pub fn env_exposure_warning(file: &ComposeFile) -> Option<String> {
+    let exposed: Vec<String> = file
+        .services
+        .iter()
+        .filter(|(_, s)| crate::plan::ImageSource::parse(&s.image).is_ok_and(|i| i.is_oci()))
+        .flat_map(|(svc, s)| s.env.secrets.keys().map(move |var| format!("{svc}.{var}")))
+        .collect();
+    if exposed.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{} secret variable{} ({}) {} plain text in instance config, readable by anyone with access to the incus project; `{{secret: NAME, as: file}}` delivers a file under /run/secrets and sets KEY_FILE instead",
+        exposed.len(),
+        if exposed.len() == 1 { "" } else { "s" },
+        exposed.join(", "),
+        if exposed.len() == 1 { "is" } else { "are" },
+    ))
+}
+
 fn declared<'a>(file: &'a ComposeFile, key: &str) -> Result<&'a SecretDef> {
     file.secrets.get(key).ok_or_else(|| {
         Error::invalid(format!(

@@ -7,8 +7,9 @@
 //! skip all of this: they could run isb directly.
 //!
 //! Refused unless the operator opts in:
-//! - `privileged`, `raw_config`, `raw_devices`, `incus_profiles`, a custom
-//!   `idmap` map, and guest-bound proxies (a guest reaching into the host);
+//! - `privileged`, `raw_config`, `raw_devices` (but `root: {size}`),
+//!   `incus_profiles`, a custom `idmap` map, and guest-bound proxies (a
+//!   guest reaching into the host);
 //! - bind mounts outside `--bind-root` directories (none by default), and
 //!   symlinks that lead out of them;
 //! - publishing on anything but loopback, unless the address is listed in
@@ -74,7 +75,13 @@ impl RemotePolicy {
             if !spec.raw_config.is_empty() {
                 return Err(refuse("raw_config"));
             }
-            if !spec.raw_devices.is_empty() {
+            // `root: {size: ...}` alone is a quota, counted against the
+            // org's disk limit like any other: allowed.
+            let root_size_only = spec
+                .raw_devices
+                .iter()
+                .all(|(name, props)| name == "root" && props.keys().all(|k| k == "size"));
+            if !root_size_only {
                 return Err(refuse("raw_devices"));
             }
             if spec.profiles.is_some() {
@@ -187,6 +194,21 @@ mod tests {
         assert!(
             p.check_spec(&spec("image: x\nraw_devices: {d: {type: disk}}\n"), base)
                 .is_err()
+        );
+        // The root disk's size alone is a quota, not an escape.
+        assert!(
+            p.check_spec(
+                &spec("image: x\nraw_devices: {root: {size: 20GiB}}\n"),
+                base
+            )
+            .is_ok()
+        );
+        assert!(
+            p.check_spec(
+                &spec("image: x\nraw_devices: {root: {size: 20GiB, pool: other}}\n"),
+                base
+            )
+            .is_err()
         );
         assert!(
             p.check_spec(&spec("image: x\nincus_profiles: [default]\n"), base)

@@ -59,12 +59,12 @@ pub(super) fn overview_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Res
         d,
         "overview",
         "Overview",
-        "Everything a dashboard shows in one call: the host's CPU and memory (with history), every stack in detail (as stack_status), the sandboxes (status, IP, CPU, memory), and the latest event number for the events tool.",
+        "Everything a dashboard shows in one call: the host's CPU and memory (with history), every stack in detail (as stack_status), the sandboxes (status, IP, CPU, memory), and the latest event number for the events tool. Every org the caller sees, or only `org` when it is given.",
         obj(json!({}), &[]),
         ann.ro,
-        |d: &Daemon, _a: Value, c: &Caller| -> Result<Value> {
+        |d: &Daemon, a: Value, c: &Caller| -> Result<Value> {
             let snap = d.ctl.snapshot();
-            let orgs = visible_orgs(c);
+            let orgs = read_orgs(c, &a)?;
             let sees = |org: &str| {
                 orgs.as_ref()
                     .is_none_or(|v| v.iter().any(|o| o.as_str() == org))
@@ -110,7 +110,7 @@ pub(super) fn events_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Resul
         d,
         "events",
         "Events",
-        "What happened, newest last: deploys, rollouts, health changes, restarts, failures. Pass the last `seq` you saw as `since` to get only newer ones; `wait` (seconds, at most 30) holds the call until one arrives.",
+        "What happened, newest last: deploys, rollouts, health changes, restarts, failures. Pass the last `seq` you saw as `since` to get only newer ones; `wait` (seconds, at most 30) holds the call until one arrives. Every org the caller sees, or only `org` when it is given.",
         obj(
             json!({
                 "since": {"type": "integer", "minimum": 0},
@@ -121,6 +121,7 @@ pub(super) fn events_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Resul
         ),
         ann.ro,
         |d: &Daemon, a: Value, c: &Caller| -> Result<Value> {
+            let orgs = read_orgs(c, &a)?;
             #[derive(Deserialize)]
             struct A {
                 #[serde(default)]
@@ -138,7 +139,6 @@ pub(super) fn events_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Resul
                 a.limit.unwrap_or(200).min(1000),
                 Duration::from_secs(a.wait.min(30)),
             );
-            let orgs = visible_orgs(c);
             let events: Vec<_> = events
                 .into_iter()
                 .filter(|e| event_visible(&orgs, &e.stack))
@@ -155,17 +155,17 @@ pub(super) fn ingress_status_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) 
         d,
         "ingress_status",
         "Ingress status",
-        "The HTTP(S) edge: its listeners, CA and Caddy process; every routed domain with its URL, certificate state (issued, pending, failed, unsupported, cloudflare, none) and live upstreams; domain conflicts and refusals; and each Cloudflare-tunnel org's cloudflared and API sync. Shows the caller's orgs only.",
+        "The HTTP(S) edge: its listeners, CA and Caddy process; every routed domain with its URL, certificate state (issued, pending, failed, unsupported, cloudflare, none) and live upstreams; domain conflicts and refusals; and each Cloudflare-tunnel org's cloudflared and API sync. Shows the caller's orgs only, or only `org` when it is given.",
         obj(json!({}), &[]),
         ann.ro,
-        |d: &Daemon, _a: Value, c: &Caller| -> Result<Value> {
+        |d: &Daemon, a: Value, c: &Caller| -> Result<Value> {
             let Some(m) = &d.ingress else {
                 return Ok(json!({
                     "enabled": false,
                     "message": "isb serve runs without an ingress (--ingress-http, --ingress-https or --ingress-tunnels)",
                 }));
             };
-            let orgs = visible_orgs(c);
+            let orgs = read_orgs(c, &a)?;
             Ok(m.status(orgs.as_deref()))
         }
     );
@@ -178,11 +178,11 @@ pub(super) fn stack_list_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> R
         d,
         "stack_list",
         "List stacks",
-        "List deployed stacks with each service's replica, health and rollout state, and the project environment each compose stack belongs to (`project`, `environment`).",
+        "List deployed stacks with each service's replica, health and rollout state, and the project environment each compose stack belongs to (`project`, `environment`). Every org the caller sees, or only `org` when it is given; each row names its `org`.",
         obj(json!({}), &[]),
         ann.ro,
-        |d: &Daemon, _a: Value, c: &Caller| -> Result<Value> {
-            let orgs = visible_orgs(c);
+        |d: &Daemon, a: Value, c: &Caller| -> Result<Value> {
+            let orgs = read_orgs(c, &a)?;
             let stacks: Vec<_> = d
                 .ctl
                 .list()
@@ -272,39 +272,90 @@ pub(super) fn stack_logs_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> R
         d,
         "stack_logs",
         "Stack logs",
-        "Recent output of a service's replicas: the journal of its supervised command, or an OCI image's console.",
+        "Recent output of a service's replicas: the journal of its supervised command, or an OCI image's console. `tail` (or `lines`) per replica, default 200; `since` keeps lines newer than a duration like 10m or an RFC 3339 time (system images; an OCI console has no timestamps). A replica that failed to come up is deleted, so its last output (up to 200 lines, captured before the delete) is `last_failed_attempt`: while the service is not converged, when no live replica printed anything, or always with `failed: true` (then without the live logs). It outlives a daemon restart in the deployment that was rolling out (stack_deployment_get `failed_attempts`).",
         obj(
             json!({
                 "name": {"type": "string"},
                 "service": {"type": "string"},
                 "slot": {"type": "integer", "minimum": 1, "description": "One replica only."},
-                "lines": {"type": "integer", "minimum": 1, "maximum": 5000, "description": "Default 200."}
+                "tail": {"type": "integer", "minimum": 1, "maximum": 5000, "description": "Lines per replica (default 200)."},
+                "lines": {"type": "integer", "minimum": 1, "maximum": 5000, "description": "Same as tail."},
+                "since": {"type": "string", "description": "A duration back from now (10m, 2h) or an RFC 3339 time."},
+                "failed": {"type": "boolean", "description": "Only the last failed replica's output."}
             }),
             &["name", "service"]
         ),
         ann.ro,
-        |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
-            #[derive(Deserialize)]
-            struct A {
-                name: String,
-                #[serde(default)]
-                org: Option<String>,
-                service: String,
-                slot: Option<u32>,
-                lines: Option<usize>,
-            }
-            let a: A = args(a)?;
-            let stack = qname(&a.org, &a.name)?;
-            let lines = a.lines.unwrap_or(200).min(5000);
-            let logs = d.ctl.logs(&stack, &a.service, a.slot, lines)?;
-            let mut out = json!({"logs": logs});
-            if let Some(f) = d.ctl.last_failure(&stack, &a.service) {
-                out["last_failed_attempt"] = json!(f);
-            }
-            Ok(out)
-        }
+        stack_logs
     );
     Ok(())
+}
+
+fn stack_logs(d: &Daemon, a: Value, _c: &Caller) -> Result<Value> {
+    #[derive(Deserialize)]
+    struct A {
+        name: String,
+        #[serde(default)]
+        org: Option<String>,
+        service: String,
+        slot: Option<u32>,
+        tail: Option<usize>,
+        lines: Option<usize>,
+        since: Option<String>,
+        #[serde(default)]
+        failed: bool,
+    }
+    let a: A = args(a)?;
+    let stack = qname(&a.org, &a.name)?;
+    let cutoff = a.since.as_deref().map(kube::since_cutoff).transpose()?;
+    let lines = a.tail.or(a.lines).unwrap_or(200).clamp(1, 5000);
+    let mut out = json!({});
+    let mut quiet = true;
+    if !a.failed {
+        let mut logs = d
+            .ctl
+            .logs(&stack, &a.service, a.slot, kube::read_lines(cutoff, lines))?;
+        if !kube::window_logs(&mut logs, cutoff, lines) {
+            out["note"] = json!(kube::SINCE_NOTE);
+        }
+        quiet = logs.values().all(|t| t.trim().is_empty());
+        out["logs"] = json!(logs);
+    } else {
+        // An unknown stack or service is an error, not "no failure".
+        d.ctl.definition(&stack)?.service(&a.service)?;
+    }
+    let want = a.failed || quiet;
+    let failure = d.ctl.last_failure(&stack, &a.service, want).or_else(|| {
+        want.then(|| kept_failure(d, &a.org, &a.name, &a.service))
+            .flatten()
+    });
+    match failure {
+        Some(f) => out["last_failed_attempt"] = json!(f),
+        None if a.failed => {
+            return Err(Error::NotFound(format!(
+                "a failed replica of {}/{}: none was kept (a failure is kept until the daemon restarts, and in the deployment that rolled it out)",
+                a.name, a.service
+            )));
+        }
+        None => {}
+    }
+    Ok(out)
+}
+
+/// The newest failed attempt of a service that a deployment record kept:
+/// what is left after a daemon restart.
+fn kept_failure(
+    d: &Daemon,
+    org: &Option<String>,
+    name: &str,
+    service: &str,
+) -> Option<crate::stack::failure::FailedAttempt> {
+    let org = crate::org::OrgId::new(org.as_deref().unwrap_or(crate::org::DEFAULT_ORG)).ok()?;
+    d.meta
+        .deployments(&org, name)
+        .ok()?
+        .into_iter()
+        .find_map(|mut r| r.failed_attempts.remove(service))
 }
 
 pub(super) fn stack_scale_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> {

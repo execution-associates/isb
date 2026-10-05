@@ -87,7 +87,7 @@ isb app update NAME [-f PATCH|-] [--image REF] [--ref R] [--replicas N] [--port 
 | `replicas` | Default 1 (0 to 100). |
 | `port` | The port the app listens on. |
 | `healthcheck` | A compose `healthcheck` (`test`, `interval`, `timeout`, `retries`, `start_period`). Without one, a running replica is in rotation. |
-| `resources` | `{cpus, memory}` per replica. |
+| `resources` | `{cpus, memory}` per replica, each a string or a number: `{cpus: 2, memory: 1g}`; a bare number of memory is bytes. |
 | `command` | argv, or a line split like a shell would. |
 | `previews` | Preview deployments per pull request: see [Preview deployments](previews.md). |
 | `files` | `[{path, secret, mode?}]`: the org secret `secret`'s value as a file at the absolute `path` (config files, certificates), delivered like a stack's file secrets ([Secrets](secrets.md#stacks)). Mode default `0400`, owned by the app's numeric user or root. |

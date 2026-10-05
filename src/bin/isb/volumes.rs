@@ -73,7 +73,11 @@ pub enum SnapshotCmd {
         hook_optional: bool,
     },
     /// Snapshot runs, newest first.
-    Runs { name: String },
+    Runs {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// A snapshot run's log (default: the latest).
     Logs { name: String, run: Option<u64> },
 }
@@ -83,7 +87,7 @@ pub enum Cmd {
     Snapshot(SnapshotCmd),
     Show(String),
     Restore(RestoreArgs),
-    Restores(Option<String>),
+    Restores(Option<String>, bool),
     Discard(String, String),
 }
 
@@ -118,8 +122,12 @@ pub fn run(org: &Option<String>, cmd: Cmd) -> Result<u8> {
             Ok(0)
         }
         Cmd::Restore(a) => restore(org, a),
-        Cmd::Restores(name) => {
+        Cmd::Restores(name, json) => {
             let r = c("volume_restore_list", json!({"name": name}))?;
+            if json {
+                print_json(&r["restores"]);
+                return Ok(0);
+            }
             let mut rows = vec![vec![
                 "OF".into(),
                 "STAMP".into(),
@@ -194,8 +202,12 @@ fn snapshot(org: &Option<String>, cmd: SnapshotCmd) -> Result<u8> {
             Ok(0)
         }
         cmd @ SnapshotCmd::Schedule { .. } => schedule(org, cmd),
-        SnapshotCmd::Runs { name } => {
+        SnapshotCmd::Runs { name, json } => {
             let r = c("volume_snapshot_runs", json!({"name": name}))?;
+            if json {
+                print_json(&r["runs"]);
+                return Ok(0);
+            }
             let mut rows = vec![vec![
                 "RUN".into(),
                 "STATUS".into(),
