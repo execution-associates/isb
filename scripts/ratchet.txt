@@ -24,7 +24,6 @@ crates/isb-server/src/auth/mod.rs 1668
 crates/isb-server/src/history.rs 1581
 crates/isb-server/src/server/http.rs 1163
 crates/isb-server/src/server/mcp.rs 2271
-crates/isb-tui/src/tui/app.rs 1067
 crates/isb-tui/src/tui/ui.rs 1628
 lint:cognitive_complexity 14
 lint:excessive_nesting 10

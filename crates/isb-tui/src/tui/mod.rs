@@ -9,6 +9,7 @@
 pub mod app;
 pub mod fmt;
 mod header;
+mod logs;
 pub mod model;
 mod mouse;
 pub mod source;
