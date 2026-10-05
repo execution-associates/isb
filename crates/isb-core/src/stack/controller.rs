@@ -14,7 +14,6 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use serde_json::Value;
 
 use super::changes::diff;
 use super::ports::{Published, published};
@@ -24,7 +23,7 @@ use super::{
     now_secs, validate_stack_name,
 };
 use crate::balance::Balancer;
-use crate::client::{Client, encode_query, encode_segment};
+use crate::client::{Client, encode_segment};
 use crate::error::{Error, Result};
 use crate::org::OrgId;
 use crate::plan::Desired;
@@ -37,7 +36,10 @@ use crate::spec::{
 use crate::supervise;
 
 mod dns;
+mod instances;
 pub use dns::{DnsScope, DnsScopeFn};
+use instances::instance_state;
+pub use instances::list_instances;
 
 /// How long a replaced instance's connections may drain before it is stopped.
 const DRAIN: Duration = Duration::from_secs(10);
@@ -114,6 +116,10 @@ pub struct ServiceStatus {
     /// The service's domains as the ingress serves them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub domains: Vec<crate::ingress::DomainStatus>,
+    /// While not converged: the last replica that failed to come up, without
+    /// its output (`stack_logs` has that).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_failed_attempt: Option<serde_json::Value>,
 }
 
 /// Something that follows which replicas receive traffic: the ingress.
@@ -861,6 +867,13 @@ impl Controller {
                 s.domains = o.domains(name, &s.service);
             }
         }
+        for s in services.iter_mut().filter(|s| s.state != "converged") {
+            s.last_failed_attempt = self
+                .inner
+                .failures
+                .last(name, &s.service)
+                .map(|f| f.summary());
+        }
         let converged = services.iter().all(|s| s.state == "converged");
         Ok(StackStatus {
             name: def.name.clone(),
@@ -888,18 +901,28 @@ impl Controller {
     }
 
     /// The last replica of a service that failed to come up, with its
-    /// output, while the service is not converged: after the instance is
-    /// deleted, this is all that is left to read.
-    pub fn last_failure(&self, name: &str, service: &str) -> Option<super::failure::FailedAttempt> {
+    /// output, while the service is not converged (or `always`): after the
+    /// instance is deleted, this is all that is left to read.
+    pub fn last_failure(
+        &self,
+        name: &str,
+        service: &str,
+        always: bool,
+    ) -> Option<super::failure::FailedAttempt> {
         let state = self.inner.status.lock().unwrap();
         let converged = state
             .get(&(name.to_string(), service.to_string()))
             .is_some_and(|s| s.state == "converged");
         drop(state);
-        if converged {
+        if converged && !always {
             return None;
         }
         self.inner.failures.last(name, service)
+    }
+
+    /// The last failed attempt of each of a stack's services, converged or not.
+    pub fn failed_attempts(&self, name: &str) -> BTreeMap<String, super::failure::FailedAttempt> {
+        self.inner.failures.of_stack(name)
     }
 
     /// Stop every worker and the balancer. Apps keep running in their
@@ -980,91 +1003,6 @@ impl Inst {
     fn running(&self) -> bool {
         self.status.eq_ignore_ascii_case("running")
     }
-}
-
-/// A stack's instances (of one service), using incus' server-side filter.
-#[doc(hidden)]
-pub fn list_instances(client: &Client, stack: &str, service: Option<&str>) -> Result<Vec<Inst>> {
-    let mut filter = format!("config.user.{LABEL_STACK} eq {stack}");
-    if let Some(s) = service {
-        filter.push_str(&format!(" and config.user.{LABEL_SERVICE} eq {s}"));
-    }
-    let v = client.get(&format!(
-        "/1.0/instances?recursion=1&filter={}",
-        encode_query(&filter)
-    ))?;
-    let mut out = Vec::new();
-    for i in v.as_array().into_iter().flatten() {
-        let info = crate::sandbox::SandboxInfo::from_api(i);
-        let c = &info.config;
-        // Filter again: an incus without filter support returns everything.
-        if c.get(&format!("user.{LABEL_STACK}")).map(String::as_str) != Some(stack) {
-            continue;
-        }
-        let svc = c
-            .get(&format!("user.{LABEL_SERVICE}"))
-            .cloned()
-            .unwrap_or_default();
-        if service.is_some_and(|s| s != svc) {
-            continue;
-        }
-        out.push(Inst {
-            name: info.name.clone(),
-            slot: c
-                .get(&format!("user.{LABEL_SLOT}"))
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0),
-            rev: c
-                .get(&format!("user.{LABEL_REV}"))
-                .cloned()
-                .unwrap_or_default(),
-            status: info.status.clone(),
-            secrets: super::secrets::parse_versions_label(
-                c.get(&format!("user.{LABEL_SECRETS}")).map(String::as_str),
-            ),
-        });
-    }
-    out.sort_by(|a, b| (a.slot, &a.name).cmp(&(b.slot, &b.name)));
-    Ok(out)
-}
-
-/// An instance's init pid (changes on every start) and its first global
-/// address on any interface but loopback, IPv4 preferred.
-fn instance_state(client: &Client, name: &str) -> Result<(i64, Option<IpAddr>)> {
-    let v = client.get(&format!("/1.0/instances/{}/state", encode_segment(name)))?;
-    let pid = v.get("pid").and_then(Value::as_i64).unwrap_or(0);
-    let mut v4 = None;
-    let mut v6 = None;
-    if let Some(nets) = v.get("network").and_then(Value::as_object) {
-        for (ifname, n) in nets {
-            if ifname == "lo" {
-                continue;
-            }
-            for a in n
-                .get("addresses")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-            {
-                if a.get("scope").and_then(Value::as_str) != Some("global") {
-                    continue;
-                }
-                let Some(ip) = a
-                    .get("address")
-                    .and_then(Value::as_str)
-                    .and_then(|s| s.parse::<IpAddr>().ok())
-                else {
-                    continue;
-                };
-                match ip {
-                    IpAddr::V4(_) if v4.is_none() => v4 = Some(ip),
-                    IpAddr::V6(_) if v6.is_none() => v6 = Some(ip),
-                    _ => {}
-                }
-            }
-        }
-    }
-    Ok((pid, v4.or(v6)))
 }
 
 /// Per-instance memory of a worker.
@@ -2370,6 +2308,7 @@ impl Worker {
             rollout: self.rollout.clone(),
             checked_at: now_secs(),
             domains: Vec::new(),
+            last_failed_attempt: None,
         };
         self.inner.status.lock().unwrap().insert(self.key(), st);
     }

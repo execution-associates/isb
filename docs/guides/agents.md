@@ -167,7 +167,7 @@ called. The local socket always has every tool.
 
 ```dotenv
 # ~/.config/isb/serve.env: remote callers never read secret values or exec
-ISB_SERVE_DENY_TOOLS=secret_*,sandbox_exec,app_exec,instance_exec,instance_file_*
+ISB_SERVE_DENY_TOOLS=secret_*,sandbox_exec,app_exec,stack_exec,instance_exec,instance_file_*
 ```
 
 ## What an agent can and cannot do
@@ -180,7 +180,7 @@ tool.
 
 It can also look inside what runs, as `kubectl` does for pods:
 `instance_list` and `instance_get` describe every instance of the org,
-`app_exec` and `instance_exec` run a command in a replica (or any instance),
+`app_exec`, `stack_exec` and `instance_exec` run a command in a replica (or any instance),
 `app_logs`, `app_top` and `app_events` read an app's output, use and events,
 `app_restart`, `app_scale` and `instance_restart` roll, resize and replace
 replicas, and `instance_file_read` and `instance_file_write` copy small files

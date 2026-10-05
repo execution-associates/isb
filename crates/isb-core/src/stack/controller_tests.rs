@@ -72,6 +72,7 @@ fn status(state: &str, message: Option<&str>) -> ServiceStatus {
         rollout: None,
         checked_at: 0,
         domains: vec![],
+        last_failed_attempt: None,
     }
 }
 

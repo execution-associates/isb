@@ -272,39 +272,90 @@ pub(super) fn stack_logs_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> R
         d,
         "stack_logs",
         "Stack logs",
-        "Recent output of a service's replicas: the journal of its supervised command, or an OCI image's console.",
+        "Recent output of a service's replicas: the journal of its supervised command, or an OCI image's console. `tail` (or `lines`) per replica, default 200; `since` keeps lines newer than a duration like 10m or an RFC 3339 time (system images; an OCI console has no timestamps). A replica that failed to come up is deleted, so its last output (up to 200 lines, captured before the delete) is `last_failed_attempt`: while the service is not converged, when no live replica printed anything, or always with `failed: true` (then without the live logs). It outlives a daemon restart in the deployment that was rolling out (stack_deployment_get `failed_attempts`).",
         obj(
             json!({
                 "name": {"type": "string"},
                 "service": {"type": "string"},
                 "slot": {"type": "integer", "minimum": 1, "description": "One replica only."},
-                "lines": {"type": "integer", "minimum": 1, "maximum": 5000, "description": "Default 200."}
+                "tail": {"type": "integer", "minimum": 1, "maximum": 5000, "description": "Lines per replica (default 200)."},
+                "lines": {"type": "integer", "minimum": 1, "maximum": 5000, "description": "Same as tail."},
+                "since": {"type": "string", "description": "A duration back from now (10m, 2h) or an RFC 3339 time."},
+                "failed": {"type": "boolean", "description": "Only the last failed replica's output."}
             }),
             &["name", "service"]
         ),
         ann.ro,
-        |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
-            #[derive(Deserialize)]
-            struct A {
-                name: String,
-                #[serde(default)]
-                org: Option<String>,
-                service: String,
-                slot: Option<u32>,
-                lines: Option<usize>,
-            }
-            let a: A = args(a)?;
-            let stack = qname(&a.org, &a.name)?;
-            let lines = a.lines.unwrap_or(200).min(5000);
-            let logs = d.ctl.logs(&stack, &a.service, a.slot, lines)?;
-            let mut out = json!({"logs": logs});
-            if let Some(f) = d.ctl.last_failure(&stack, &a.service) {
-                out["last_failed_attempt"] = json!(f);
-            }
-            Ok(out)
-        }
+        stack_logs
     );
     Ok(())
+}
+
+fn stack_logs(d: &Daemon, a: Value, _c: &Caller) -> Result<Value> {
+    #[derive(Deserialize)]
+    struct A {
+        name: String,
+        #[serde(default)]
+        org: Option<String>,
+        service: String,
+        slot: Option<u32>,
+        tail: Option<usize>,
+        lines: Option<usize>,
+        since: Option<String>,
+        #[serde(default)]
+        failed: bool,
+    }
+    let a: A = args(a)?;
+    let stack = qname(&a.org, &a.name)?;
+    let cutoff = a.since.as_deref().map(kube::since_cutoff).transpose()?;
+    let lines = a.tail.or(a.lines).unwrap_or(200).clamp(1, 5000);
+    let mut out = json!({});
+    let mut quiet = true;
+    if !a.failed {
+        let mut logs = d
+            .ctl
+            .logs(&stack, &a.service, a.slot, kube::read_lines(cutoff, lines))?;
+        if !kube::window_logs(&mut logs, cutoff, lines) {
+            out["note"] = json!(kube::SINCE_NOTE);
+        }
+        quiet = logs.values().all(|t| t.trim().is_empty());
+        out["logs"] = json!(logs);
+    } else {
+        // An unknown stack or service is an error, not "no failure".
+        d.ctl.definition(&stack)?.service(&a.service)?;
+    }
+    let want = a.failed || quiet;
+    let failure = d.ctl.last_failure(&stack, &a.service, want).or_else(|| {
+        want.then(|| kept_failure(d, &a.org, &a.name, &a.service))
+            .flatten()
+    });
+    match failure {
+        Some(f) => out["last_failed_attempt"] = json!(f),
+        None if a.failed => {
+            return Err(Error::NotFound(format!(
+                "a failed replica of {}/{}: none was kept (a failure is kept until the daemon restarts, and in the deployment that rolled it out)",
+                a.name, a.service
+            )));
+        }
+        None => {}
+    }
+    Ok(out)
+}
+
+/// The newest failed attempt of a service that a deployment record kept:
+/// what is left after a daemon restart.
+fn kept_failure(
+    d: &Daemon,
+    org: &Option<String>,
+    name: &str,
+    service: &str,
+) -> Option<crate::stack::failure::FailedAttempt> {
+    let org = crate::org::OrgId::new(org.as_deref().unwrap_or(crate::org::DEFAULT_ORG)).ok()?;
+    d.meta
+        .deployments(&org, name)
+        .ok()?
+        .into_iter()
+        .find_map(|mut r| r.failed_attempts.remove(service))
 }
 
 pub(super) fn stack_scale_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> {

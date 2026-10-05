@@ -10,7 +10,8 @@
 //! or the rollout outlasts its timeout, `superseded` when a newer deploy
 //! came first. It keeps the compose source it deployed, the environment
 //! and managed domains of the moment (secret references, never values),
-//! and the stack's events while it ran.
+//! the stack's events while it ran, and the output of each service's last
+//! replica that failed to come up during it.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -109,6 +110,10 @@ pub struct Deployment {
     /// The event feed's sequence number it has read up to.
     #[serde(default)]
     pub events_seq: u64,
+    /// Per service, the last replica that failed to come up while it rolled
+    /// out, with its output (each bounded by [`super::failure::OUTPUT_BYTES`]).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub failed_attempts: BTreeMap<String, super::failure::FailedAttempt>,
 }
 
 impl Deployment {
@@ -124,6 +129,7 @@ impl Deployment {
                 "domains",
                 "events",
                 "events_seq",
+                "failed_attempts",
             ] {
                 o.remove(k);
             }
@@ -435,7 +441,15 @@ impl StackMeta {
                 )),
                 Ok(None) => None,
             };
+            // After `settled`: a replica's attempt is kept before its
+            // service says it failed.
+            let failed: BTreeMap<_, _> = ctl
+                .failed_attempts(&q)
+                .into_iter()
+                .filter(|(_, a)| a.at_ms >= d.created_at * 1000)
+                .collect();
             let r = self.update(org, name, id, |d| {
+                d.failed_attempts.extend(failed);
                 d.events.extend(lines);
                 let over = d.events.len().saturating_sub(EVENTS_KEPT);
                 d.events.drain(..over);
@@ -509,6 +523,7 @@ mod tests {
             domains: BTreeMap::new(),
             events: vec![],
             events_seq: 0,
+            failed_attempts: BTreeMap::new(),
         }
     }
 
@@ -576,6 +591,28 @@ mod tests {
         m.remove(&org, "shop").unwrap();
         assert!(!m.exists(&org, "shop"));
         assert!(m.deployments(&org, "shop").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_failed_attempt_is_kept_in_the_record_but_not_the_listing() {
+        let mut d = rec("shop");
+        // A record written before the field reads back without it.
+        let old = serde_json::to_value(&d).unwrap();
+        assert!(old.get("failed_attempts").is_none());
+        assert_eq!(serde_json::from_value::<Deployment>(old).unwrap(), d);
+        d.failed_attempts.insert(
+            "web".into(),
+            super::super::failure::FailedAttempt {
+                instance: "shop-web-1-abc".into(),
+                at_ms: 1,
+                reason: "not serving after 90s".into(),
+                output: "starting\nwaiting for the store".into(),
+                output_note: None,
+            },
+        );
+        let back: Deployment = serde_json::from_value(serde_json::to_value(&d).unwrap()).unwrap();
+        assert_eq!(back, d);
+        assert!(d.summary().get("failed_attempts").is_none());
     }
 
     #[test]
