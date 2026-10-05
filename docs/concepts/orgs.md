@@ -80,8 +80,17 @@ own owners and admins, who see them read-only. Bind roots are host paths and
 are set only on the host (`isb org create --bind-root`): an update through
 the API keeps them, as it keeps any field it is not given. Creating an org through
 the API also adds it to the identity store, and deleting one removes its
-memberships, invitations and tokens; its secrets stay under the state
-directory.
+memberships, invitations and tokens, its metrics history and its
+service-name hosts directory; its secrets stay under the state directory
+(`<state>/orgs/<org>/`, which goes too when nothing else is left in it).
+
+The orgs that exist are the incus projects below, not the identity store's
+rows: `whoami` (and the web UI's org switcher) lists every one of them to a
+platform admin or superadmin, and to anyone else their memberships among
+them, so an org made or removed past the daemon (`isb org` against another
+state directory, a test) shows or goes as it should. A daemon notices an org
+removed by another process within a minute and drops its metrics history
+and hosts directory then.
 
 ## What an org is in incus
 
@@ -92,7 +101,9 @@ all trust. `org_get` says so as `placement.isolation`: `shared-kernel` here,
 ([Placement](placement.md)).
 
 Org `acme` is the incus project `isb-acme` (config `user.isb.org=acme`), its
-bridge `isbbr<hash>` and its network ACL `isb-acme`.
+bridge `isbbr<hash>` and its network ACL `isb-acme`. A project named `isb-*`
+without that key is no org: it is not listed, and its instances get no
+metrics history.
 
 The `default` org is an org like any other: the incus project
 `isb-default`, with its own bridge, ACL and service names, settings, limits,
@@ -175,17 +186,33 @@ default))`), and how to raise or lift it: `isb org update lab --cpus N` (or
 `--cpus none`) on the host, or `org_update`.
 
 **Disk.** Under `limits.disk` incus refuses an instance whose root disk has
-no `size`. While an org has a disk limit, its default profile's root disk
-gets a size of 10GiB (the same as a sandbox's; a size an operator set on the
-profile is kept), so stack replicas, job runs and anything else whose spec
-sets none fit. A compose service sets its own with
-`raw_devices: {root: {size: 20GiB}}` (allowed for remote callers without
-`--allow-raw`, since it is only a quota); sandboxes get 10GiB and workspaces
-20GiB on their own. Setting the profile's size applies to the instances that
-take their root disk from it: incus resizes their root volumes to 10GiB,
-and refuses the change for a root that holds more than that, until that
-instance is given its own size or removed. `isb org update ORG --disk none`
-lifts the limit and takes the size off the profile again.
+no `size`. isb gives every instance it creates in such an org a size of its
+own, in the create request: the service's `raw_devices.root.size`
+(`raw_devices: {root: {size: 20GiB}}`, allowed for remote callers without
+`--allow-raw`, since it is only a quota), else 10GiB. That covers stack
+replicas, job runs, builds and sandboxes; workspaces get 20GiB. The size is
+not part of a stack service's revision, so setting or lifting a limit never
+rolls a service, and an existing instance is never resized. isb puts no size
+on the org's default profile: incus applies a profile's size to every
+instance that takes its root disk from the profile. Custom volumes count too:
+a named volume whose `config` sets no `size` is created with 10GiB, and a
+build's cache volume with the build cache size (`ISB_BUILD_CACHE_SIZE`,
+default 20GiB).
+
+Setting a disk limit (`isb org update ORG --disk 100GiB`, `org_update`) on an
+org that has instances without a root size is refused up front, naming each
+and what it holds: give its service `raw_devices: {root: {size: ...}}` (at
+least what it holds) and redeploy it, or delete it, then set the limit.
+`--disk none` lifts the limit; instances keep their sizes.
+
+A root size of exactly 10GiB on the default profile is taken to be isb's
+own and comes off at the next `org update`, unless the org has a disk limit
+and some instance has no root disk of its own (it takes the profile's):
+then it stays, and the update says which instances. Give each a
+size (`incus config device override NAME root size=10GiB --project
+isb-ORG`) and run the update again, or remove it by hand with
+`incus profile device unset default root size --project isb-ORG` once no
+limit is set. Any other size on the profile is an operator's and stays.
 
 The project's bind paths are the `--bind-root` directories plus the host
 folders of the org's workspace homes, which are recorded on the project, so

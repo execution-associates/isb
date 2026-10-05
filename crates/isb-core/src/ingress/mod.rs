@@ -113,6 +113,11 @@ pub struct DomainStatus {
     pub message: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub upstreams: Vec<String>,
+    /// The ingress listener the domain's requests come in on: the org's
+    /// tunnel listener (what its cloudflared forwards to,
+    /// `http://10.64.3.1:8480`), or Caddy's public one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
 /// A certificate's state, from Caddy's log and storage.

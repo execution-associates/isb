@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { Navigate, useParams } from "react-router";
 import type { Me } from "@/api/auth";
 import { PageHeader } from "@/components/app-shell";
-import { rememberOrg, useMe } from "@/lib/session";
+import { canOpenOrg, rememberOrg, useMe } from "@/lib/session";
 
 /**
  * The org a page under /orgs/:org shows, and who is looking. `redirect` is
@@ -11,7 +11,7 @@ import { rememberOrg, useMe } from "@/lib/session";
 export function useOrgPage(): { org: string; me: Me; redirect: React.ReactNode | null } {
   const { org = "" } = useParams();
   const me = useMe().data!;
-  const known = me.orgs.includes(org);
+  const known = canOpenOrg(me, org);
   useEffect(() => {
     if (known) rememberOrg(org);
   }, [org, known]);

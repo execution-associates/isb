@@ -169,6 +169,8 @@ export interface DomainStatus {
   cert: string;
   message?: string;
   upstreams?: string[];
+  /** The ingress listener the domain's requests come in on. */
+  origin?: string;
 }
 
 /**

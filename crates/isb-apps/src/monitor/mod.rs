@@ -4,9 +4,10 @@
 //! A monitor is an HTTP(S) request (status range, keyword present or
 //! absent, headers from secrets, redirects, a certificate expiry warning),
 //! a TCP connect, or an **app** monitor that follows an app by reference:
-//! its served domain's public URL, or (with no domain, or when the domain
-//! sits behind Cloudflare Access without a service token) the app's own
-//! endpoint. A **service** monitor does the same for one service of a
+//! its served domain's public URL, or with no domain the app's own
+//! endpoint. When the domain sits behind Cloudflare Access without a
+//! service token, it is checked hop by hop (`chain`): Cloudflare's edge,
+//! the org's tunnel, and the ingress. A **service** monitor does the same for one service of a
 //! compose stack. Every app with a served domain gets an app monitor of its
 //! own (`app-<name>`, `auto`), and every compose stack service with one a
 //! service monitor (`stack-<stack>-<service>`, `auto`, see [`auto`]), unless
@@ -21,6 +22,7 @@
 //! org's settings beside them in `settings.json`.
 
 pub mod auto;
+mod chain;
 mod health_path;
 pub mod heartbeat;
 pub mod probe;

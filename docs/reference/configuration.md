@@ -59,7 +59,11 @@ policy](../concepts/security.md#the-remote-spec-policy).
 | `--superadmin-tailnet` | `ISB_SUPERADMIN_TAILNET` | off | tailnet login names and `tag:` node tags, comma-separated, that are superadmins on a tailnet `--listen` address (orgs map their own tailnet agents, [Agent identities](../concepts/access.md#agent-identities)) |
 | `--superadmin-access` | `ISB_SUPERADMIN_ACCESS` | off | Access emails and service token client ids, comma-separated and exact, that are superadmins; needs Access and `--public-url` |
 
-See [Superadmins](../concepts/access.md#superadmins) and
+Both are read at start-up, as the bootstrap. Identities added with `isb
+superadmin add` are kept in `isb.db` and count beside them, with no flag and
+no restart ([Superadmin identities in
+isb.db](../concepts/access.md#superadmin-identities-in-isbdb)). See
+[Superadmins](../concepts/access.md#superadmins) and
 [Reach isb serve remotely](../guides/remote-access.md).
 
 ### Identity

@@ -1,6 +1,6 @@
 {
   "name": "@execution-associates/isb",
-  "version": "1.6.3",
+  "version": "1.6.5",
   "description": "TypeScript SDK for isb: declarative incus sandboxes (containers and VMs)",
   "license": "MIT",
   "type": "module",
@@ -51,8 +51,8 @@
     "prepack": "bun run build"
   },
   "optionalDependencies": {
-    "@execution-associates/isb-linux-arm64": "1.6.3",
-    "@execution-associates/isb-linux-x64": "1.6.3"
+    "@execution-associates/isb-linux-arm64": "1.6.5",
+    "@execution-associates/isb-linux-x64": "1.6.5"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.2.0",

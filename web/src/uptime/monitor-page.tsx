@@ -153,6 +153,17 @@ function LastCheck({ m }: { m: Monitor }) {
       <span className="ml-auto text-xs text-muted-foreground" title={new Date(l.at).toLocaleString()}>
         {relativeTime(l.at / 1000)}
       </span>
+      {l.hops && l.hops.length > 0 && (
+        <ul className="basis-full space-y-0.5 text-xs">
+          {l.hops.map((h) => (
+            <li key={h.hop} className="flex items-baseline gap-2">
+              <StatusDot tone={h.ok ? "success" : "danger"} />
+              <span className="font-medium">{h.hop}</span>
+              {h.detail && <span className="min-w-0 break-words text-muted-foreground">{h.detail}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
       {l.note && <p className="basis-full text-xs text-muted-foreground">{l.note}</p>}
     </div>
   );

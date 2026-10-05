@@ -143,6 +143,7 @@ gets, platform admins included:
 | `host_inventory` | every incus project and instance on the host, isb's or not: project, org, type, status, addresses, isb's stack and owner labels |
 | `host_policy` | how the daemon serves: listen addresses, Access, the remote tool policy, what remote specs may ask for, and each superadmin source with its allow list and token count |
 | `superadmin_token_list`, `superadmin_token_revoke` | superadmin tokens' metadata, and revoking one by id |
+| `superadmin_list` | every tailnet and Access superadmin identity, from the flags and from `isb.db`, with whether the daemon can match it (read only) |
 
 Four sources grant it, and nothing else:
 
@@ -150,15 +151,16 @@ Four sources grant it, and nothing else:
 |---|---|---|
 | the unix socket | the daemon's own user | `local(uid N)` |
 | a superadmin token | `Authorization: Bearer isb_sa_...` | `token:<name>` |
-| a tailnet identity | a peer on a tailnet `--listen` address whose login or node tag is on `--superadmin-tailnet` | `tailnet:<login>` (a tagged node: `tailnet:<node>`) |
-| a Cloudflare Access identity | a verified `Cf-Access-Jwt-Assertion` whose email or service token client id is on `--superadmin-access` | `access:<name>` |
+| a tailnet identity | a peer on a tailnet `--listen` address whose login or node tag is on `--superadmin-tailnet` or added with `isb superadmin add --tailnet` | `tailnet:<login>` (a tagged node: `tailnet:<node>`) |
+| a Cloudflare Access identity | a verified `Cf-Access-Jwt-Assertion` whose email or service token client id is on `--superadmin-access` or added with `isb superadmin add --access` / `--access-token` | `access:<name>` |
 
 A debug build has one more, for developing isb: `ISB_DEV_SUPERADMIN`, which
 makes every loopback request with no credential a superadmin, `dev:<email>`
 ([Developing isb](../reference/configuration.md#developing-isb)). A release
 build refuses to start with it set.
 
-`isb serve` logs at start-up which superadmin sources are on, and the web
+`isb serve` logs at start-up which superadmin sources are on, each list
+with where it comes from (the flag, or `isb.db`), and the web
 UI's **Host** pages show them ([The web UI](../getting-started/web-ui.md)).
 Turning on the tailnet and Access sources is in
 [Reach isb serve remotely](../guides/remote-access.md).
@@ -180,6 +182,38 @@ mint one, a superadmin included (`POST tokens` with `"superadmin": true` is
 revoked with `isb token revoke sa-ID`, the web UI's Host page, or
 `superadmin_token_revoke`. Names are unique, 1 to 64 of `[A-Za-z0-9._-]`.
 Minting and revoking are in the audit log.
+
+### Superadmin identities in isb.db
+
+Tailnet and Access superadmins come from two places, and both count:
+
+- the flags `--superadmin-tailnet` and `--superadmin-access`, read at
+  start-up: the bootstrap, for the first superadmin of a new host;
+- identities kept in `isb.db`, added and removed on the host while the
+  daemon runs. The daemon reads them on each request that could match one,
+  so a change takes effect at the next request, with no config edit and no
+  restart:
+
+```sh
+isb superadmin add --access alice@example.com     # an Access user, by email
+isb superadmin add --access-token abc123.access   # an Access service token, by client id
+isb superadmin add --tailnet tag:ops              # a tailnet login or node tag
+isb superadmin ls                                 # flags and isb.db, with SOURCE and EFFECTIVE
+isb superadmin rm --access alice@example.com
+```
+
+Like superadmin tokens, they are written only by the daemon's user on the
+host, which opens `isb.db` directly; no HTTP endpoint or tool writes them, a
+superadmin included, so an HTTP credential never makes itself or anyone
+else a durable superadmin. Values are exact, as the flags take them: emails
+and logins match case-insensitively, a client id exactly, a tag only a
+tagged node; an empty value, a wildcard, a comma or a duplicate is refused.
+An Access entry matches only where the daemon has Access and `--public-url`,
+a tailnet entry only where it has a tailnet `--listen` address; elsewhere
+`ls`, `superadmin_list` and the start-up log mark it not effective, and
+`add` warns. An entry from a flag is removed from the flag. Adding and
+removing are in the audit log (`auth.superadmin_add`,
+`auth.superadmin_remove`).
 
 ### Tailnet and Access superadmins
 
@@ -212,7 +246,8 @@ Minting and revoking are in the audit log.
   on the loopback listeners Access guards; emails match case-insensitively
   and exactly, service tokens by client id, with no wildcards or domains.
   `--superadmin-access` is refused without Access configured and without
-  `--public-url` (an Access superadmin's `Host` must be it).
+  `--public-url` (an Access superadmin's `Host` must be it); an Access
+  identity in `isb.db` matches only when both are there.
 - A request carrying a bearer token is judged by the token alone; a tailnet
   or Access superadmin is signed in ahead of any session cookie, and signing
   out does not change who it is.
@@ -320,8 +355,8 @@ A request carrying `Authorization` is judged by it alone: a bad token is a
   a server is judged on the control plane, then again by the server's agent
   ([Placement](placement.md#how-the-control-plane-works)).
 - The unix socket is the daemon's own user and reaches everything; so does a
-  superadmin. `host_inventory`, `host_policy`, `superadmin_token_list` and
-  `superadmin_token_revoke` are for superadmins only.
+  superadmin. `host_inventory`, `host_policy`, `superadmin_token_list`,
+  `superadmin_token_revoke` and `superadmin_list` are for superadmins only.
 - `--allow-tools` and `--deny-tools` (names or globs, deny wins) choose which
   tools remote callers see at all; the local socket always has every tool
   ([Security model](security.md#tool-policy)).

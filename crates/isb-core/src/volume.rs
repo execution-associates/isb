@@ -90,6 +90,16 @@ pub fn ensure(client: &Client, pool: &str, name: &str, config: &Props) -> Result
     if get(client, pool, name)?.is_some() {
         return Ok(false);
     }
+    // Under an org's disk limit incus counts every custom volume's size and
+    // refuses one without: a volume whose definition sets none gets the
+    // default, as a root disk does there.
+    let mut config = config.clone();
+    if !config.contains_key("size") && crate::org::disk::disk_limited(client) {
+        config.insert(
+            "size".into(),
+            crate::org::limits::DEFAULT_ROOT_SIZE.to_string(),
+        );
+    }
     let body =
         json!({"name": name, "type": "custom", "content_type": "filesystem", "config": config});
     match client.mutate(

@@ -17,7 +17,7 @@ endpoint has neither a tool nor a documented reason in the
 |---|---|
 | Tools in the web UI and MCP | 158 |
 | Account tools, the web UI through the identity endpoints | 20 |
-| Tools for MCP and the CLI only | 25 |
+| Tools for MCP and the CLI only | 26 |
 | Identity endpoints with a tool | 21 |
 | Identity endpoints for the browser only | 23 |
 | Other routes with no tool | 4 |
@@ -60,6 +60,7 @@ cluster's pods. A person has the app page.
 |---|---|---|
 | List the org's instances, describe one | *MCP/CLI only*: the app page shows its replicas (General: Scale) with their health, and Monitoring their CPU and memory | `instance_list`, `instance_get` |
 | Run a command in an app's or a stack service's replica, or any instance | *MCP/CLI only*: a person opens a shell: App, Terminal (the terminal websocket) | `app_exec`, `stack_exec`, `instance_exec` |
+| List superadmin identities (flags and `isb superadmin add`) | *MCP/CLI only*: the Host page shows the flag lists; `isb superadmin ls` both | `superadmin_list` |
 | An app's logs by app name, its resource use, its events | *MCP/CLI only*: the Logs tab calls `stack_logs`, Monitoring reads `metrics_query`, and the activity feed shows the events | `app_logs`, `app_top`, `app_events` |
 | Restart an app's replicas, rolling | *MCP/CLI only*: a person deploys, or restarts one replica at a time | `app_restart` |
 | Scale an app by its name | *MCP/CLI only*: the Scale control saves the setting and calls `stack_scale` | `app_scale` |

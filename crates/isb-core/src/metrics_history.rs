@@ -20,7 +20,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, SyncSender};
+use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -582,10 +582,14 @@ pub fn aggregate(series: &[Series], how: &str, name: String) -> Result<Series> {
 pub struct History {
     state: PathBuf,
     dbs: Arc<Mutex<BTreeMap<OrgId, OrgDb>>>,
+    /// Orgs deleted this run, and when: buckets their instances close on
+    /// the way out must not make their database again, nor an org list
+    /// read before the deletion.
+    gone: Arc<Mutex<BTreeMap<OrgId, std::time::Instant>>>,
 }
 
-/// One sample for the writer thread.
-pub type Sample = (u64, Vec<InstanceSample>);
+mod orgs;
+pub use orgs::{OrgSet, Sample};
 
 /// How often roll-ups and retention run.
 const MAINTAIN_EVERY: Duration = Duration::from_secs(60);
@@ -595,6 +599,7 @@ impl History {
         History {
             state: state.to_path_buf(),
             dbs: Arc::new(Mutex::new(BTreeMap::new())),
+            gone: Default::default(),
         }
     }
 
@@ -635,48 +640,6 @@ impl History {
             .name("isb-metrics-history".into())
             .spawn(move || me.writer(rx));
         tx
-    }
-
-    fn writer(&self, rx: Receiver<Sample>) {
-        let mut rec = Recorder::default();
-        let mut last_maintain = std::time::Instant::now() - MAINTAIN_EVERY;
-        loop {
-            match rx.recv_timeout(MAINTAIN_EVERY) {
-                Ok((at, samples)) => {
-                    let rows = rec.add(at, &samples);
-                    let mut by: BTreeMap<OrgId, Vec<Row>> = BTreeMap::new();
-                    for r in rows {
-                        by.entry(r.org.clone()).or_default().push(r);
-                    }
-                    for (org, rows) in by {
-                        if let Err(e) = self.with(&org, |db| db.insert(&rows)) {
-                            eprintln!("isb serve: {e}");
-                        }
-                    }
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
-            }
-            if last_maintain.elapsed() >= MAINTAIN_EVERY {
-                last_maintain = std::time::Instant::now();
-                for org in self.orgs_on_disk() {
-                    if let Err(e) = self.with(&org, |db| db.maintain(now_secs())) {
-                        eprintln!("isb serve: {e}");
-                    }
-                }
-            }
-        }
-    }
-
-    /// Orgs with a history database.
-    fn orgs_on_disk(&self) -> Vec<OrgId> {
-        let Ok(rd) = std::fs::read_dir(self.state.join("orgs")) else {
-            return Vec::new();
-        };
-        rd.flatten()
-            .filter(|e| e.path().join("metrics.db").exists())
-            .filter_map(|e| OrgId::new(e.file_name().to_string_lossy().to_string()).ok())
-            .collect()
     }
 }
 

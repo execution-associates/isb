@@ -226,6 +226,31 @@ fn check_size(what: &str, v: &str) -> Result<()> {
 
 /// An org as the tools answer it: the incus side, the service-name domain,
 /// and how many members it has.
+/// The orgs that exist: this host's (incus projects with isb's marker)
+/// and, on a control plane, the ones it placed on its servers. What
+/// `whoami` lists, rather than the identity store's org rows, which an org
+/// made or removed past this daemon leaves behind.
+pub(super) fn existing(
+    client: &crate::client::Client,
+    servers: Option<&crate::servers::Servers>,
+) -> Result<Vec<OrgId>> {
+    let mut v = org::names(client)?;
+    if let Some(s) = servers {
+        v.extend(s.placements().into_keys());
+    }
+    v.sort();
+    v.dedup();
+    Ok(v)
+}
+
+/// [`existing`] for the identity endpoints and `whoami`.
+pub(super) fn existing_fn(
+    client: crate::client::Client,
+    servers: Option<Arc<crate::servers::Servers>>,
+) -> crate::auth::ops::OrgsFn {
+    Arc::new(move || existing(&client, servers.as_deref()).map_err(|e| e.to_string()))
+}
+
 fn view(d: &Daemon, o: &OrgInfo) -> Value {
     let mut v = serde_json::to_value(o).unwrap_or_default();
     v["domain"] = json!(format!("{}.isb", o.name));
@@ -252,7 +277,7 @@ fn settings_props() -> Value {
     json!({
         "cpus": {"anyOf": [{"type": "integer", "minimum": 1}, {"type": "string", "enum": ["none"]}, {"type": "null"}], "description": "CPUs across the org: the sum of every instance's limits.cpu, stopped ones included. \"none\" or null lifts the limit."},
         "memory": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Memory across the org, e.g. 16GiB: the sum of every instance's limits.memory, stopped ones included. \"none\" or null lifts the limit."},
-        "disk": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Disk across the org, e.g. 100GiB: the sum of every root disk's and volume's size. While set, an instance without a root size gets 10GiB from the org's default profile. \"none\" or null lifts the limit."},
+        "disk": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Disk across the org, e.g. 100GiB: the sum of every root disk's and volume's size. While set, each instance isb creates gets a root size of its own (raw_devices.root.size, else 10GiB); setting it is refused while an instance has none, naming each. \"none\" or null lifts the limit."},
         "instances": {"anyOf": [{"type": "integer", "minimum": 1}, {"type": "string", "enum": ["none"]}, {"type": "null"}], "description": "Instances in the org, stopped ones included. \"none\" or null lifts the limit."},
         "default_cpus": {"type": "integer", "minimum": 1, "description": "CPUs an instance gets when its spec sets none."},
         "default_memory": {"type": "string", "description": "Memory an instance gets when its spec sets none, e.g. 512MiB."},
@@ -392,7 +417,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
     tool!(
         "org_delete",
         "Delete an org",
-        "Platform admins: delete an org: its project with its volumes, its network, ACL and service names, and its members, invitations and tokens. Refused while stacks are deployed in it (remove them first); with force=true its remaining sandboxes are deleted too. Its secrets stay on disk under the state directory.",
+        "Platform admins: delete an org: its project with its volumes, its network, ACL and service names, its members, invitations and tokens, and its metrics history. Refused while stacks are deployed in it (remove them first); with force=true its remaining sandboxes are deleted too. Its secrets stay on disk under the state directory.",
         schema(
             json!({
                 "force": {"type": "boolean", "description": "Also delete the org's sandboxes."},
@@ -441,6 +466,9 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
             d.users
                 .delete_org(&id)
                 .map_err(|e| Error::invalid(e.to_string()))?;
+            // Its metrics history, and its state directory when that leaves
+            // it empty (secrets stay).
+            d.history.forget(&id);
             Ok(json!({"ok": true, "notes": notes}))
         }
     );

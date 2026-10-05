@@ -240,7 +240,11 @@ sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run] [--public-ingress
 
 `org create` on an existing org sets the flags given. `org update` changes
 an existing org through the daemon (the `org_update` tool): flags left out
-keep their value, and `none` lifts a limit. `org show` prints each limit with
+keep their value, and `none` lifts a limit. `--disk SIZE` is refused while
+an instance in the org has no root size, naming each (give its service
+`raw_devices: {root: {size: ...}}` and redeploy it, or delete it); under the
+limit, each new instance gets its own root size (its spec's, else 10GiB).
+`org show` prints each limit with
 what the org's instances are allocated against it
 (`cpus       3 of 4 allocated, 1 free`), and `--json` has it as `allocation`.
 `--allow-egress`, `--allow-domain` and `--allow-udp` replace the org's lists
@@ -510,6 +514,9 @@ isb token create NAME [--org ORG] [--expires 90d] [--user EMAIL] [--scope S]...
 isb token create NAME --superadmin [--expires 30d]
 isb token ls [--json]
 isb token revoke ID|sa-ID...
+isb superadmin ls [--json]
+isb superadmin add --access EMAIL | --access-token CLIENT_ID | --tailnet LOGIN_OR_TAG
+isb superadmin rm  --access EMAIL | --access-token CLIENT_ID | --tailnet LOGIN_OR_TAG
 ```
 
 - The first user is always a platform admin and owner of the `default` org.
@@ -521,6 +528,16 @@ isb token revoke ID|sa-ID...
   repeatable) only narrows the user's role. `--superadmin` mints a token
   that belongs to nobody and has the unix socket's reach; it is the only way
   to make one. See [Users, roles and superadmins](../concepts/access.md).
+- `superadmin add` makes one tailnet or Access identity a superadmin, `rm`
+  removes one it made; the running daemon picks either up at the next
+  request, with no restart. They are the only way to change these
+  identities: no HTTP caller can. `superadmin ls` asks the running daemon
+  (`superadmin_list`), so it shows the `--superadmin-tailnet` and
+  `--superadmin-access` entries too, each with `SOURCE` (`flag` or `state`)
+  and `EFFECTIVE` (`NO` with a reason when the daemon has no Access or no
+  tailnet listen address for it); with `--state-dir`, or when the daemon
+  does not answer, it shows `isb.db`'s alone. See [Superadmin identities in
+  isb.db](../concepts/access.md#superadmin-identities-in-isbdb).
 
 Passwords never come from argv.
 

@@ -165,6 +165,20 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX org_agent_identities_subject ON org_agent_identities(kind, subject);
     ",
+    // 7: superadmin identities kept as state (`isb superadmin add`), on top
+    // of `--superadmin-access` / `--superadmin-tailnet`: tailnet logins and
+    // tags, Access emails and service token client ids. Written only on the
+    // host, never over HTTP.
+    "
+    CREATE TABLE superadmin_identities (
+        id       INTEGER PRIMARY KEY,
+        kind     TEXT NOT NULL,
+        value    TEXT NOT NULL,
+        added_at INTEGER NOT NULL,
+        added_by TEXT NOT NULL DEFAULT '',
+        UNIQUE (kind, value)
+    );
+    ",
 ];
 
 /// The schema version this build writes.

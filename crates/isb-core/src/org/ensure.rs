@@ -461,9 +461,9 @@ fn put_project(
     Ok(())
 }
 
-/// The default profile: root disk (with `root_size`, while the org has a
-/// disk limit), the org NIC, per-instance defaults and an isolated uid range
-/// per instance.
+/// The default profile: root disk (with `root_size`, only one an operator
+/// set), the org NIC, per-instance defaults and an isolated uid range per
+/// instance.
 fn default_profile(org: &OrgId, pool: &str, opts: &OrgOptions, root_size: Option<&str>) -> Value {
     let mut root = json!({"type": "disk", "path": "/", "pool": pool});
     if let Some(size) = root_size {
@@ -483,40 +483,86 @@ fn default_profile(org: &OrgId, pool: &str, opts: &OrgOptions, root_size: Option
     })
 }
 
-/// Write the default profile. Under a disk limit incus refuses an instance
-/// whose root disk has no size, so the profile gives one to every instance
-/// whose spec sets none (stack replicas, job runs, apps): the size the
-/// profile has, else [`limits::DEFAULT_ROOT_SIZE`]. incus applies a change to
-/// the instances that take their root from the profile, resizing their root
-/// volumes. Without a disk limit the profile has no size.
+/// The root size the default profile keeps. isb gives the profile none
+/// (instances get their own, see [`disk`]); one an operator set stays. The
+/// [`limits::DEFAULT_ROOT_SIZE`] isb itself once put there goes, except
+/// while the org has a disk limit and some instance takes its root disk
+/// from the profile: incus would refuse it, so it stays and `report` says
+/// why. `on_profile_root` lists those instances.
+fn kept_root_size(
+    org: &OrgId,
+    current: Option<&str>,
+    disk_limited: bool,
+    on_profile_root: &mut dyn FnMut() -> Result<Vec<String>>,
+    report: &mut dyn FnMut(&str),
+) -> Result<Option<String>> {
+    let Some(size) = current else {
+        return Ok(None);
+    };
+    if size != limits::DEFAULT_ROOT_SIZE {
+        return Ok(Some(size.to_string()));
+    }
+    if !disk_limited {
+        return Ok(None);
+    }
+    let users = on_profile_root()?;
+    if users.is_empty() {
+        return Ok(None);
+    }
+    report(&format!(
+        "{org}: the default profile keeps its root size {size}: under the disk limit, \
+         these instances take their root disk from it: {}. Give each a size of its own \
+         (incus config device override NAME root size={size} --project {}); \
+         the next org update then removes the profile's",
+        users.join(", "),
+        org.incus_project(),
+    ));
+    Ok(Some(size.to_string()))
+}
+
+/// Write the default profile, its root size as [`kept_root_size`] decides.
+/// Taking the size off lifts it from the instances that use the profile's
+/// root disk; should incus refuse that, the size stays and `report` says so.
 fn set_default_profile(
     base: &Client,
     h: &Client,
     org: &OrgId,
     opts: &OrgOptions,
     disk_limited: bool,
+    report: &mut dyn FnMut(&str),
 ) -> Result<()> {
     let oc = client(base, org);
     let pool = crate::sandbox::host_facts(h)?.pick_pool(None)?;
-    let root_size = if disk_limited {
-        let current = oc.get_opt("/1.0/profiles/default")?.unwrap_or_default();
-        Some(
-            current["devices"]["root"]["size"]
-                .as_str()
-                .unwrap_or(limits::DEFAULT_ROOT_SIZE)
-                .to_string(),
-        )
-    } else {
-        None
-    };
-    let profile = default_profile(org, &pool, opts, root_size.as_deref());
-    oc.mutate(
-        "PUT",
-        "/1.0/profiles/default",
-        Some(&profile),
-        &format!("set {org}'s default profile"),
-        oc.get_timeouts().other,
+    let current = oc.get_opt("/1.0/profiles/default")?.unwrap_or_default();
+    let current = current["devices"]["root"]["size"].as_str();
+    let size = kept_root_size(
+        org,
+        current,
+        disk_limited,
+        &mut || disk::on_profile_root(&oc),
+        report,
     )?;
+    let put = |size: Option<&str>| {
+        oc.mutate(
+            "PUT",
+            "/1.0/profiles/default",
+            Some(&default_profile(org, &pool, opts, size)),
+            &format!("set {org}'s default profile"),
+            oc.get_timeouts().other,
+        )
+    };
+    match put(size.as_deref()) {
+        Err(e) if size.is_none() && current.is_some() => {
+            report(&format!(
+                "{org}: kept the default profile's root size {}: removing it failed: {e}",
+                current.unwrap_or_default()
+            ));
+            put(current)?;
+        }
+        r => {
+            r?;
+        }
+    }
     Ok(())
 }
 
@@ -554,24 +600,23 @@ pub fn ensure(
             )));
         }
     }
+    // incus refuses a disk limit while an instance's root disk has no size
+    // (and isb never sizes them all through the profile): name them first.
+    if existing.is_some() && opts.disk.is_some() {
+        let list = disk::unsized_roots(&client(base, org))?;
+        if !list.is_empty() {
+            return Err(disk::refuse_unsized(org, &list));
+        }
+    }
     let k = kept(opts, existing.as_ref())?;
     let raw_dnsmasq = raw_dnsmasq(org, report)?;
     let net = ensure_network(&h, org, &raw_dnsmasq, report)?;
     ensure_acl(&h, org, &net, &k.egress, report)?;
     attach(&h, org, &net, &raw_dnsmasq, report)?;
     let config = project_config(org, &k, opts, existing.as_ref());
-    let disk = disk_limited(&config, existing.as_ref());
-    if existing.is_some() && disk {
-        // incus refuses a disk limit while an instance has no root size, so
-        // the profile gives them one first.
-        set_default_profile(base, &h, org, opts, disk)?;
-        put_project(&h, org, existing.as_ref(), &config, report)?;
-    } else {
-        // A lifted disk limit goes before the profile loses its size: incus
-        // refuses a sizeless root while the limit stands.
-        put_project(&h, org, existing.as_ref(), &config, report)?;
-        set_default_profile(base, &h, org, opts, disk)?;
-    }
+    let limited = disk_limited(&config, existing.as_ref());
+    put_project(&h, org, existing.as_ref(), &config, report)?;
+    set_default_profile(base, &h, org, opts, limited, report)?;
     get(base, org)
 }
 
@@ -718,14 +763,53 @@ mod tests {
     }
 
     #[test]
-    fn the_default_profile_sizes_the_root_disk_only_under_a_disk_limit() {
+    fn the_default_profile_has_a_root_size_only_when_one_is_kept() {
         let org = OrgId::new("lab").unwrap();
         let opts = OrgOptions::default();
         let p = default_profile(&org, "default", &opts, None);
         assert!(p["devices"]["root"].get("size").is_none(), "{p}");
         assert_eq!(p["config"]["limits.cpu"], "1");
-        let p = default_profile(&org, "default", &opts, Some(limits::DEFAULT_ROOT_SIZE));
-        assert_eq!(p["devices"]["root"]["size"], "10GiB");
         assert_eq!(p["devices"]["root"]["pool"], "default");
+        let p = default_profile(&org, "default", &opts, Some("25GiB"));
+        assert_eq!(p["devices"]["root"]["size"], "25GiB");
+    }
+
+    #[test]
+    fn isbs_own_profile_root_size_goes_unless_instances_rely_on_it() {
+        let org = OrgId::new("lab").unwrap();
+        let mut lines = Vec::new();
+        let mut keep = |current: Option<&str>, limited: bool, users: &[&str]| {
+            let users: Vec<String> = users.iter().map(|u| u.to_string()).collect();
+            kept_root_size(
+                &org,
+                current,
+                limited,
+                &mut || Ok(users.clone()),
+                &mut |l| lines.push(l.to_string()),
+            )
+            .unwrap()
+        };
+        // isb never adds one, with a disk limit or without.
+        assert_eq!(keep(None, true, &[]), None);
+        assert_eq!(keep(None, false, &[]), None);
+        // An operator's own size stays.
+        assert_eq!(keep(Some("25GiB"), false, &["a"]), Some("25GiB".into()));
+        // isb's 10GiB goes without a limit, or when every instance has its own.
+        assert_eq!(keep(Some("10GiB"), false, &["a"]), None);
+        assert_eq!(keep(Some("10GiB"), true, &[]), None);
+        // Under the limit, while an instance takes its root from the
+        // profile, it stays (incus would refuse) and the report says why.
+        assert_eq!(
+            keep(Some("10GiB"), true, &["build-1"]),
+            Some("10GiB".into())
+        );
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("from it: build-1."), "{}", lines[0]);
+        assert!(
+            lines[0]
+                .contains("incus config device override NAME root size=10GiB --project isb-lab"),
+            "{}",
+            lines[0]
+        );
     }
 }

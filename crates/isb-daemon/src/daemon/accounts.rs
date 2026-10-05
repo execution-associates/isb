@@ -203,7 +203,8 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
         schema(json!({}), &[], NO_ORG),
         ann.ro,
         |d: &Daemon, p: &Principal, _a: Value, c: &Caller| -> Result<Value> {
-            let mut v = ops::me(&d.users, p).map_err(err)?;
+            let orgs = super::orgs::existing_fn(d.client.clone(), d.servers.clone());
+            let mut v = ops::me(&d.users, p, Some(&orgs)).map_err(err)?;
             if c.is_local() {
                 v["user"] = Value::Null;
                 v["auth"] = json!({"kind": "local"});

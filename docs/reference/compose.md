@@ -1069,8 +1069,10 @@ Reconciled per the device rules.
 (`{type: disk, path: /, pool: <storage pool>}`), for example to set `size`, and
 need no `type`. `root: {size: ...}` alone is allowed for remote callers without
 `--allow-raw`: it is how a stack service sizes its root disk against an org's
-disk limit ([Orgs](../concepts/orgs.md#limits-are-budgets)). Like the rest of the root disk, they are used only at creation
-and never reconciled.
+disk limit ([Orgs](../concepts/orgs.md#limits-are-budgets)); in such an org a
+root disk without one gets 10GiB at creation, outside the spec (a stack
+revision is the same with or without the limit). Like the rest of the root
+disk, they are used only at creation and never reconciled.
 
 ```yaml
 raw_devices:
