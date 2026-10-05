@@ -621,3 +621,119 @@ fn a_service_behind_access_is_checked_at_its_own_endpoint() {
         );
     }
 }
+
+/// A server that answers 200 for requests of `path` and 404 for any other.
+fn answering_only(path: &'static str) -> u16 {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for s in l.incoming() {
+            let Ok(mut s) = s else { continue };
+            let mut b = [0u8; 4096];
+            let n = s.read(&mut b).unwrap_or(0);
+            let req = String::from_utf8_lossy(&b[..n]);
+            let got = req.split(' ').nth(1).unwrap_or_default();
+            let status = if got == path {
+                "200 OK"
+            } else {
+                "404 Not Found"
+            };
+            let _ = write!(s, "HTTP/1.1 {status}\r\nContent-Length: 2\r\n\r\nok");
+        }
+    });
+    port
+}
+
+#[test]
+fn a_service_monitor_requests_the_path_of_its_healthcheck() {
+    let org = OrgId::new("acme").unwrap();
+    let origin = answering_only("/healthz");
+    let upstream = format!("127.0.0.1:{origin}");
+    let mut m = Monitor::new("stack-api-web", Kind::Service);
+    (m.stack, m.service) = (Some("api".into()), Some("web".into()));
+    // (route path, strip_prefix, the path checked, via, the note says)
+    for (path, strip, url, via, says) in [
+        (
+            "/",
+            false,
+            "/healthz",
+            "public",
+            "path of the service's healthcheck",
+        ),
+        (
+            "/api",
+            true,
+            "/api/healthz",
+            "public",
+            "path of the service's healthcheck",
+        ),
+        (
+            "/sso",
+            false,
+            "/healthz",
+            "internal",
+            "is not under the domain's path /sso",
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let y = format!(
+            "services:\n  web:\n    image: x\n    domains: [{{host: wiki.acme.dev, path: {path}, port: {origin}, strip_prefix: {strip}}}]\n    healthcheck: {{test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:{origin}/healthz']}}\n"
+        );
+        let (svc, ing) = service_with(dir.path(), &[("api", &y)], true);
+        // The fake domain is the origin itself: it does not strip, so a
+        // stripped route's public check sees the prefix.
+        let answer = if strip {
+            answering_only("/api/healthz")
+        } else {
+            origin
+        };
+        let mut d = serving(&format!("http://127.0.0.1:{answer}{path}"), &upstream);
+        d.path = path.into();
+        ing.set("acme/api", "web", vec![d]);
+        svc.create(&org, m.clone()).unwrap();
+        svc.edit_state(&org, &m.name, |s| s.status = Status::Up)
+            .unwrap();
+        let o = svc.check(&org, &m);
+        assert!(o.ok, "{path}: {o:?}");
+        let checked = o.url.clone().unwrap_or_default();
+        assert!(checked.ends_with(url), "{path}: {o:?}");
+        assert!(
+            o.via.as_deref().unwrap_or_default().starts_with(via),
+            "{path}: {o:?}"
+        );
+        assert!(
+            o.note.as_deref().unwrap_or_default().contains(says),
+            "{path}: {o:?}"
+        );
+    }
+}
+
+#[test]
+fn a_stripped_prefix_is_stripped_on_the_replica_too() {
+    let org = OrgId::new("acme").unwrap();
+    let access = answering(
+        "HTTP/1.1 302 Found\r\nLocation: https://team.cloudflareaccess.com/cdn-cgi/access/login/x",
+    );
+    let origin = answering_only("/status");
+    let upstream = format!("127.0.0.1:{origin}");
+    let dir = tempfile::tempdir().unwrap();
+    let y = format!(
+        "services:\n  web: {{image: x, domains: [{{host: wiki.acme.dev, path: /api, port: {origin}, strip_prefix: true}}]}}\n"
+    );
+    let (svc, ing) = service_with(dir.path(), &[("api", &y)], true);
+    let mut d = serving(&format!("http://127.0.0.1:{access}/api"), &upstream);
+    d.path = "/api".into();
+    ing.set("acme/api", "web", vec![d]);
+    let mut m = Monitor::new("api-status", Kind::Service);
+    (m.stack, m.service) = (Some("api".into()), Some("web".into()));
+    m.path = Some("/api/status".into());
+    svc.create(&org, m.clone()).unwrap();
+    svc.edit_state(&org, &m.name, |s| s.status = Status::Up)
+        .unwrap();
+    // Behind Access: the replica is asked for what the ingress hands it.
+    let o = svc.check(&org, &m);
+    assert!(o.ok, "{o:?}");
+    let checked = o.url.clone().unwrap_or_default();
+    assert!(checked.ends_with(&format!(":{origin}/status")), "{o:?}");
+    assert!(!o.note.unwrap_or_default().contains("healthcheck"));
+}

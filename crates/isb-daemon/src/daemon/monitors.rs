@@ -80,7 +80,7 @@ fn props(with_type: bool) -> Value {
         "stack": {"type": "string", "description": "service: the compose stack's name."},
         "service": {"type": "string", "description": "service: the stack's service."},
         "domain": {"type": "string", "description": "app, service: which of its domains (default: the first one served)."},
-        "path": {"type": "string", "description": "app, service: the path to request (default: the domain's path)."},
+        "path": {"type": "string", "description": "app, service: the path to request (default: the path the service's healthcheck requests over HTTP, else the domain's path)."},
         "method": {"type": "string", "enum": ["GET", "HEAD"], "description": "Default GET."},
         "expected_status": {"type": "string", "description": "Codes that count as up: 200-399 (default), 200,204, 200-299,301."},
         "keyword": {"type": "string", "description": "The body (its first 256 KiB) must contain this."},
