@@ -942,6 +942,11 @@ impl Apps {
                             db.engine,
                             db.version()
                         ));
+                        // A `urls` entry added since the last deploy is
+                        // written now, not at the next password change.
+                        for n in self.write_urls(org, &app.spec, db)? {
+                            log.line(&format!("secret {n}: the connection URL"));
+                        }
                         self.resolve(&i, log)
                     }
                     Source::Git(g) => {

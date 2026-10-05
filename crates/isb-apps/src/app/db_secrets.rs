@@ -38,7 +38,7 @@ impl Apps {
 
     /// Store the URL secret and the database's `urls` again from its
     /// current password; returns the names whose value moved.
-    fn write_urls(
+    pub(super) fn write_urls(
         &self,
         org: &OrgId,
         spec: &AppSpec,
@@ -156,6 +156,25 @@ mod tests {
             ap.database_password_changed(&org, "dsn.main-db.web")
                 .unwrap()
                 .is_empty()
+        );
+
+        // An entry added later is written by the next deploy (which then
+        // fails here, with no incusd: the secrets come first).
+        ap.update(
+            &org,
+            "main-db",
+            &serde_json::json!({"source": {"database": {"urls": {"dsn.main-db.jobs": "x=1"}}}}),
+        )
+        .unwrap();
+        assert!(secrets.get(&org, "dsn.main-db.jobs").is_err());
+        let d = ap
+            .deploy(&org, "main-db", super::super::Trigger::Api, "t", None)
+            .unwrap();
+        ap.wait(&org, "main-db", d.id, Duration::from_secs(60))
+            .unwrap();
+        assert_eq!(
+            value("dsn.main-db.jobs"),
+            format!("{}?x=1", value("db.main-db.url"))
         );
     }
 }
