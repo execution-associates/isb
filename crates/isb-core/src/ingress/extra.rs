@@ -105,11 +105,6 @@ impl Manager {
     /// provider, and no other claim on its name.
     pub fn check_extra(&self, r: &Route) -> Result<()> {
         let oi = self.org_settings(&r.org, true)?;
-        if oi.tunnel && r.org.is_default() {
-            return Err(Error::invalid(
-                "the default org cannot use a Cloudflare tunnel",
-            ));
-        }
         if !r.auto && !domain::allowed(&r.host, &oi.domains) {
             return Err(Error::invalid(not_allowed(&r.host, &r.org, &oi.domains)));
         }
@@ -161,8 +156,6 @@ impl Manager {
                 Some(format!("org settings: {err}"))
             } else if !r.auto && !domain::allowed(&r.host, &oi.domains) {
                 Some(not_allowed(&r.host, &r.org, &oi.domains))
-            } else if oi.tunnel && r.org.is_default() {
-                Some("the default org cannot use a Cloudflare tunnel".into())
             } else {
                 None
             };
@@ -245,5 +238,33 @@ mod tests {
         );
         assert_eq!(rotation[&key], vec![ip]);
         assert!(refused[&key][0].2.contains("outside org acme's domains"));
+    }
+
+    #[test]
+    fn the_default_org_serves_extras_through_its_tunnel() {
+        let org = OrgId::default_org();
+        let ip: IpAddr = "10.1.2.3".parse().unwrap();
+        let e = ExtraRoute {
+            route: workspace_route(&org, "workspace", 3000, "3000-workspace.acme.dev", None)
+                .unwrap(),
+            upstream: Some(ip),
+        };
+        let orgs = BTreeMap::from([(
+            org,
+            OrgIngress {
+                domains: vec!["acme.dev".into()],
+                tunnel: true,
+                ..Default::default()
+            },
+        )]);
+        let (mut routes, mut rotation, mut refused) = (Vec::new(), Rotation::new(), Refused::new());
+        Manager::merge_extras(
+            &[e],
+            &orgs,
+            &BTreeMap::new(),
+            (&mut routes, &mut rotation, &mut refused),
+        );
+        assert_eq!(routes.len(), 1, "{refused:?}");
+        assert!(refused.is_empty());
     }
 }
