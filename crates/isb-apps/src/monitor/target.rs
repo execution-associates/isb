@@ -460,27 +460,18 @@ fn run_app(ctx: &Ctx, org: &OrgId, m: &Monitor, at: u64) -> Outcome {
         return Outcome { note, ..o };
     }
     let status = o.status.unwrap_or_default();
-    if access && has_access_token(&hs) {
-        // The token went with the request, and Access still stopped it.
-        let error = format!(
-            "HTTP {status}: {} with the service token: allow it in the Access application's policy",
-            access_why(&err)
-        );
-        return Outcome {
-            note,
-            error: Some(error),
-            ..o
-        };
-    }
     // Users see it through its domain, but this daemon may not check it
     // there: check every hop it can see instead.
     let edge =
         access.then(|| Hop::new("edge", true, format!("HTTP {status}: {}", access_why(&err))));
+    // A token Access stops is one its policy does not allow: users still
+    // get through, so this is no outage; check hop by hop and say so.
     let c = Chain {
         view: &view,
         noun,
         edge,
         note,
+        token_refused: access && has_access_token(&hs),
     };
     hop_by_hop(ctx, org, m, hs, at, c)
 }
@@ -507,6 +498,8 @@ struct Chain<'a> {
     /// address the policy refuses.
     edge: Option<Hop>,
     note: Option<String>,
+    /// Access stopped the request although it carried a service token.
+    token_refused: bool,
 }
 
 fn hop_by_hop(
@@ -557,7 +550,11 @@ fn hop_by_hop(
         }
     };
     let names = chain::labels(&hops);
-    let mut why = if behind_access {
+    let mut why = if c.token_refused {
+        format!(
+            "checked hop by hop ({names}): Access does not allow the org's service token (CF_ACCESS_CLIENT_ID), so the Access policy is not verified; allow the token in the Access application's policy for an end-to-end check"
+        )
+    } else if behind_access {
         format!(
             "checked hop by hop ({names}); the Access policy is not verified: add CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET secrets for an end-to-end check"
         )

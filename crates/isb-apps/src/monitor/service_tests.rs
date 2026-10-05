@@ -715,15 +715,16 @@ fn a_service_behind_access_is_checked_hop_by_hop() {
             secret: None,
         },
     ];
+    // A token Access does not allow is no outage: hop by hop, and said.
     let o = check_once(&[("wiki", WIKI)], true, d, &mt);
-    assert!(!o.ok);
-    assert!(o.hops.is_empty(), "{o:?}");
-    assert_eq!(o.via.as_deref(), Some("public"));
-    assert_eq!(
-        o.error.as_deref(),
-        Some(
-            "HTTP 302: redirected to Cloudflare Access sign-in with the service token: allow it in the Access application's policy"
-        )
+    assert!(
+        o.hops.first().is_some_and(|h| h.hop == "edge" && h.ok),
+        "{o:?}"
+    );
+    assert!(
+        o.note
+            .unwrap_or_default()
+            .contains("Access does not allow the org's service token"),
     );
 }
 
