@@ -629,6 +629,48 @@ pub fn update_user(store: &AuthStore, p: &Principal, id: i64, b: &UserChange) ->
     Ok(json!({"user": store.user(id)?}))
 }
 
+// ---- someone else's account (platform admins) ----
+//
+// What `isb token ls` and `isb key --user` do on the host, for a platform
+// admin's agent. Nothing here hands out a way into an account: making
+// users, setting passwords, minting tokens and adding keys for someone stay
+// on the host, so revoking a leaked token always ends what it did.
+
+fn admin_change(p: &Principal) -> R<()> {
+    platform_admin(p)?;
+    may_change_accounts(p)
+}
+
+/// Every API token on the platform, with who holds each.
+pub fn all_tokens(store: &AuthStore, p: &Principal) -> R<Value> {
+    platform_admin(p)?;
+    let list: Vec<Value> = store
+        .list_all_api_tokens()?
+        .into_iter()
+        .map(|t| {
+            let u = store.user(t.user_id)?;
+            let mut v = serde_json::to_value(&t).unwrap_or_default();
+            v["user"] = json!({"id": u.id, "email": u.email, "name": u.name});
+            Ok(v)
+        })
+        .collect::<R<_>>()?;
+    Ok(json!({"tokens": list}))
+}
+
+pub fn user_ssh_keys(store: &AuthStore, p: &Principal, id: i64) -> R<Value> {
+    platform_admin(p)?;
+    store.user(id)?;
+    Ok(json!({"ssh_keys": store.list_ssh_keys(id)?}))
+}
+
+pub fn delete_user_ssh_key(store: &AuthStore, p: &Principal, id: i64, key: i64) -> R<()> {
+    admin_change(p)?;
+    if !store.delete_ssh_key(id, key)? {
+        return Err(AuthError::NotFound(format!("SSH key {key}")));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "ops_tests.rs"]
 mod tests;

@@ -31,8 +31,14 @@ pub(super) const PLATFORM_TOOLS: &[&str] = &[
 ];
 
 /// Read-only tools that span orgs: any signed-in user, filtered to their
-/// orgs by the tool itself.
-pub(super) const CROSS_ORG_READS: &[&str] = &["overview", "events", "stack_list", "ingress_status"];
+/// orgs by the tool itself (`guide` holds nothing of any org's).
+pub(super) const CROSS_ORG_READS: &[&str] = &[
+    "overview",
+    "events",
+    "stack_list",
+    "ingress_status",
+    "guide",
+];
 
 /// Does `tools/list` show `tool`? An org-bound endpoint (`/orgs/<org>/mcp`,
 /// `scope` set) is an org's: host, superadmin and platform tools are not on
@@ -106,6 +112,11 @@ pub(super) fn authorize_class(
                 accounts::authorize(p, tool, cls)?;
                 if PLATFORM_TOOLS.contains(&tool) && !p.platform_admin {
                     return Err(Error::Forbidden(format!("{tool} is for platform admins")));
+                }
+                if accounts::names_another_user(tool, &args) && !p.platform_admin {
+                    return Err(Error::Forbidden(format!(
+                        "{tool} on another user's account, or every org's, is for platform admins"
+                    )));
                 }
                 return Ok(args);
             }

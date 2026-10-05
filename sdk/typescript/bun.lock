@@ -12,8 +12,8 @@
         "typescript": "^5.9.0",
       },
       "optionalDependencies": {
-        "@execution-associates/isb-linux-arm64": "1.6.11",
-        "@execution-associates/isb-linux-x64": "1.6.11",
+        "@execution-associates/isb-linux-arm64": "1.7.0",
+        "@execution-associates/isb-linux-x64": "1.7.0",
       },
     },
   },

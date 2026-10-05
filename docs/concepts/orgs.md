@@ -70,12 +70,12 @@ and the web UI's org Settings and Platform pages use them:
 | `org_get` | the org's members | limits with what is allocated against each (`allocation`), defaults, network, egress, bind roots, service-name domain (`<org>.isb`), counts, `placement` |
 | `org_list` | platform admins | every org, each with the `server` it runs on (`local` for this daemon) and its `placement` |
 | `org_create` | platform admins | `isb org create` without `--bind-root`; `placement` puts it on a server or in a dedicated VM |
-| `org_update` | platform admins | `isb org update`: limits (`"none"` or `null` lifts one), per-instance defaults, egress exceptions (a different `server` or `placement` is refused) |
+| `org_update` | platform admins | `isb org update`: limits (`"none"` or `null` lifts one), per-instance defaults, egress exceptions, UDP ports, the domain allowlist (`domains`) and ingress provider (`ingress`, `cloudflare_account`, `cloudflare_zone`) (a different `server` or `placement` is refused) |
 | `org_delete` | platform admins | `isb org rm`, refused while stacks are deployed in the org, and while it has sandboxes unless `force`; `delete_vm` also deletes a dedicated VM |
 | `org_nesting` | superadmins | whether the org's workspace may run Docker (`isb org nesting ORG on\|off`); `org_get` shows it as `allow_nesting` |
 
-Limits and egress exceptions are what keep one org from the others and from
-the host's networks, so changing them is for platform admins, not the org's
+Limits, egress exceptions and the domain allowlist are what keep one org from
+the others and from the host's networks, so changing them is for platform admins, not the org's
 own owners and admins, who see them read-only. Bind roots are host paths and
 are set only on the host (`isb org create --bind-root`): an update through
 the API keeps them, as it keeps any field it is not given. Creating an org through
@@ -315,7 +315,9 @@ The hostnames an org's stacks may serve through the ingress
   suffix: `example.com` allows `example.com` and `shop.example.com`.
   `*.example.com` also allows wildcard hosts (`*.example.com`,
   `*.team.example.com`). Giving the flag replaces the list; `none` clears
-  it. Stored in the project's `user.isb.domains`.
+  it. Stored in the project's `user.isb.domains`. Through the API it is
+  `org_create`'s and `org_update`'s `domains` (`[]` clears it), for
+  platform admins only, so an org's owners cannot widen their own list.
 - Without a list, any concrete name is allowed and no wildcard.
 - Generated names (`host: auto`, under sslip.io) are always allowed.
 - Whatever the lists say, a name one org serves is refused to every other:
@@ -328,7 +330,8 @@ Cloudflare Tunnel, whose token the org keeps in its secret
 well, isb manages the tunnel's ingress rules and the hostnames' DNS records;
 `--cloudflare-account` and `--cloudflare-zone` name the account (default:
 the tunnel token's) and zone (default: looked up per hostname). Stored in
-`user.isb.ingress` and `user.isb.ingress.cloudflare.*`.
+`user.isb.ingress` and `user.isb.ingress.cloudflare.*`; the tools take them
+as `ingress`, `cloudflare_account` and `cloudflare_zone`.
 
 ## Service names
 

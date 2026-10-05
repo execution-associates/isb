@@ -169,7 +169,11 @@ isb device rm NAME DEV...                              (root cannot be removed)
 ```
 
 These talk to incus directly. `port add` leaves a correct device alone;
-`--search N` steps past up to N taken host ports. The org's named-volume
+`--search N` steps past up to N taken host ports. Through `isb serve` (MCP and the
+HTTP API) an org's sandboxes have the same as tools: `sandbox_port_list`,
+`sandbox_port_add`, `sandbox_port_remove`, `sandbox_device_remove`,
+`volume_create` and `volume_delete`, beside `sandbox_start`,
+`sandbox_stop` and `sandbox_logs` ([MCP tools](mcp-tools.md)). The org's named-volume
 snapshots, backups and restores are below, under [Platform:
 volumes](#volumes-snapshots-and-restores).
 
@@ -250,7 +254,9 @@ limit, each new instance gets its own root size (its spec's, else 10GiB).
 what the org's instances are allocated against it
 (`cpus       3 of 4 allocated, 1 free`), and `--json` has it as `allocation`.
 `--allow-egress`, `--allow-domain` and `--allow-udp` replace the org's lists
-(`none` clears them). `--server` and `--vm` place the org once, through the local
+(`none` clears them); over the API they are `org_update`'s `egress`, `domains`
+and `udp`, and `--ingress` and `--cloudflare-*` its `ingress`,
+`cloudflare_account` and `cloudflare_zone` (platform admins). `--server` and `--vm` place the org once, through the local
 daemon (`--vm` takes a few minutes; rerun to retry). `org rm` refuses an
 org with instances unless `--force`; `--delete-vm` also deletes a dedicated
 VM. See [Orgs](../concepts/orgs.md), [Placement](../concepts/placement.md)
@@ -522,6 +528,12 @@ isb superadmin rm  --access EMAIL | --access-token CLIENT_ID | --tailnet LOGIN_O
 ```
 
 - The first user is always a platform admin and owner of the `default` org.
+- Creating users, setting passwords, and minting tokens or adding SSH keys
+  for someone stay here: each hands out a way into an account. Over MCP a
+  platform admin lists every org's tokens (`token_list` with `all_orgs`;
+  superadmin tokens: `superadmin_token_list`) and lists or removes another
+  user's SSH keys (`ssh_key_list`, `ssh_key_remove` with `user`)
+  ([MCP tools](mcp-tools.md#accounts)).
 - `invite` prints the invitation token once, or its link when
   `ISB_PUBLIC_URL` is set.
 - `token create` prints the token once. `--org` confines it to one org
