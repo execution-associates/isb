@@ -69,24 +69,46 @@ Some features need more on the host:
 
 ### 2. The binary
 
+Install isb with the installer:
+
 ```sh
-mise use -g github:execution-associates/isb   # the static binary, nothing to compile
-# or build it from source:
-cargo install isb
+curl -fsSL https://github.com/execution-associates/isb/releases/latest/download/install.sh | sh
 ```
 
-Prebuilt static (musl) binaries for x86_64 and aarch64 Linux, and macOS
-binaries for Apple silicon and Intel, are on the
-[releases page](https://github.com/execution-associates/isb/releases), with
-a `SHA256SUMS` file and its signature. A binary installed from there keeps
-itself current with `isb update`.
+It downloads the release for your platform (static musl binaries for
+x86_64 and aarch64 Linux; macOS for Apple silicon and Intel), checks the
+release signature and the checksum, and installs `isb` to `~/.local/bin`
+(`/usr/local/bin` as root; set `ISB_INSTALL_DIR` to choose). It installs
+nothing that does not verify. It needs `curl`, `tar` and OpenSSL 3 or later
+(on macOS, `brew install openssl@3`: the system's LibreSSL cannot check the
+signature). To pin a version, pass it: `... | sh -s -- 1.2.0`. To read the
+script before running it, download it first:
+
+```sh
+curl -fsSLO https://github.com/execution-associates/isb/releases/latest/download/install.sh
+less install.sh && sh install.sh
+```
+
+From then on isb keeps itself current with `isb update`, which checks the
+same signature. The installer is the only supported way to install the
+binary; the alternative is building it from source with `cargo install isb`.
+
+**Do not install isb with mise.** mise installs of isb are deprecated: mise
+downloads the release without checking its signature, which is the check
+that catches a tampered release. If you have one, replace it:
+
+```sh
+curl -fsSL https://github.com/execution-associates/isb/releases/latest/download/install.sh | sh
+mise unuse -g github:execution-associates/isb
+isb serve install    # if you run the daemon as a service: points the unit at ~/.local/bin/isb
+```
 
 #### Releases are signed
 
 Each release's `SHA256SUMS` is signed with the isb release key (Ed25519;
 the signature is `SHA256SUMS.sig`, 64 raw bytes), and isb has the public key
-built in: `isb update`, `isb machine init` and `isb server` upgrades install
-nothing whose signature does not verify, so a release changed after it was
+built in: the installer, `isb update`, `isb machine init` and `isb server`
+upgrades install nothing whose signature does not verify, so a release changed after it was
 built is refused even when its checksums were changed to match. Releases
 before 1.1.1 are unsigned and cannot be installed that way. The public key
 is
@@ -116,9 +138,9 @@ incus runs only on Linux, so on a Mac isb runs incus in a Linux VM that it
 manages with [Lima](https://lima-vm.io):
 
 ```sh
-brew install lima                            # Lima 2.0 or later
-mise use -g github:execution-associates/isb  # or download the darwin binary from the releases page
-isb machine init                             # first boot downloads Ubuntu and installs incus: a minute or two
+brew install lima openssl@3   # Lima 2.0 or later; OpenSSL 3 for the installer's signature check
+curl -fsSL https://github.com/execution-associates/isb/releases/latest/download/install.sh | sh
+isb machine init              # first boot downloads Ubuntu and installs incus: a minute or two
 ```
 
 Your home directory is shared with the VM at the same path and published
@@ -147,11 +169,10 @@ Claude Code, `~/.claude/skills/isb/SKILL.md`).
 
 ## Upgrading
 
-Replace the binary (`mise up`, a new release, `cargo install isb` again).
-Sandboxes and stacks keep running across an upgrade. If you run the daemon
-as a service, run `isb serve install` again afterwards: when the binary's
-path contains its version (a mise install), the unit runs that exact path.
-See [upgrading](../operations/upgrades.md).
+`isb update` replaces the binary with the latest release (`cargo install
+isb` again for a source build). Sandboxes and stacks keep running across an
+upgrade. If you run the daemon as a service, restart it afterwards
+(`systemctl --user restart isb`). See [upgrading](../operations/upgrades.md).
 
 ## Next
 

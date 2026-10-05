@@ -37,8 +37,10 @@ isb --version           # the CLI
 incus info >/dev/null   # on a host: isb needs incusd and its socket
 ```
 
-If `isb` is missing on a host: `mise use -g github:execution-associates/isb`
-(static binary), or `cargo install isb`. On macOS, incus runs in a Lima VM
+If `isb` is missing on a host: `curl -fsSL https://github.com/execution-associates/isb/releases/latest/download/install.sh | sh`
+(static binary in `~/.local/bin`, signature checked; `isb update` keeps it
+current), or `cargo install isb`. Do not install isb with mise: it does not
+check the release signature. On macOS, incus runs in a Lima VM
 isb manages: `isb machine status`, `isb machine init`, `isb machine start`.
 
 ## Safety rules

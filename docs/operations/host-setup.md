@@ -58,10 +58,10 @@ stack in `isb-default` with new, empty volumes, and the old instances and
 volumes keep running in `default` until you delete them.
 
 It is idempotent: run it again after changing the env file or upgrading isb.
-The unit runs the binary that installed it, by its full path, so a version
-manager that keeps each version in its own directory (mise does) pins that
-version; the installer says so, and you rerun `isb serve install` after an
-upgrade ([Upgrading isb](upgrades.md)).
+The unit runs the binary that installed it, by its full path. With the
+installer that is `~/.local/bin/isb`, which `isb update` replaces in place,
+so a restart picks up an upgrade; a binary at another path needs
+`isb serve install` again ([Upgrading isb](upgrades.md)).
 
 Without lingering, user services stop when you log out. The installer checks
 `/var/lib/systemd/linger` and prints the `loginctl enable-linger` line when

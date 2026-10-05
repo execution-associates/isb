@@ -27,11 +27,13 @@ domains with certificates, a web UI, and an MCP server for AI agents.
 isb needs a Linux host with [incus](https://linuxcontainers.org/incus/docs/main/installing/)
 and access to its socket (usually the `incus-admin` group, which is
 root-equivalent on that host). On macOS, isb runs incus in a Lima VM it
-manages (`brew install lima`, then `isb machine init`).
+manages (`brew install lima openssl@3`, the installer below, then
+`isb machine init`).
 
 ```sh
-mise use -g github:execution-associates/isb   # the CLI: one static binary
-# or: cargo install isb, or a binary from the releases page
+curl -fsSL https://github.com/execution-associates/isb/releases/latest/download/install.sh | sh
+# the CLI: one static binary in ~/.local/bin, its release signature checked;
+# `isb update` keeps it current. Or build it: cargo install isb
 
 pip install isb-sdk                           # Python SDK (imported as `isb`)
 bun add @execution-associates/isb             # TypeScript SDK

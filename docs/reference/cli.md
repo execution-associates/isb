@@ -543,9 +543,11 @@ be older, down to 1.1.1, the first signed release). The release's
 and the tarball for this platform must match it; it is then unpacked next
 to the binary, run once with `--version`, and renamed over it, so a failed
 update leaves the old binary in place.
-`--check` only compares versions. A binary installed by mise, cargo, npm or
-pip is refused with that manager's upgrade command, since replacing it would
-leave the manager's record wrong; `--force` replaces it anyway, and also
+`--check` only compares versions. A binary installed by cargo, npm or pip is
+refused with that manager's upgrade command, since replacing it would leave
+the manager's record wrong. A mise install is refused with the installer's
+command instead, since mise installs are deprecated (mise does not check the
+release signature); `--force` replaces it anyway, and also
 reinstalls the same version. A running `isb serve` keeps the old binary
 until it restarts ([Upgrading isb](../operations/upgrades.md)).
 
