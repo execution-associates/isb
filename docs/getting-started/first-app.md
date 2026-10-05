@@ -10,33 +10,26 @@ months: the `isb serve` daemon keeps it running, health-checks it,
 load-balances it, rolls out new versions without downtime and rolls them
 back. This page takes a Linux host with isb installed from nothing to an app
 answering on a URL, then opens the web UI. (On a Mac the daemon runs in the
-[isb machine](macos.md#the-daemon-lives-in-the-vm); start at step 3.)
+[isb machine](macos.md#the-daemon-lives-in-the-vm); start at step 2.)
 
-## 1. Prepare the host, once
-
-Each org gets its own bridge network. A host with a default-deny firewall
-(ufw) drops DHCP, DNS and forwarding on new bridges (and on incus' own
-`incusbr0`, where image builds run), and service names need a directory the
-daemon writes. One command, as root, does all of it:
-
-```console
-$ sudo "$(command -v isb)" host setup             # --dry-run prints what it would do
-```
-
-See [host setup](../operations/host-setup.md#host-firewall) for exactly what
-it changes. Run it before the daemon: the daemon then makes the `default` org
-with service names. (The other order works too: a running daemon turns service
-names on for the orgs that lack them within a minute of the setup, and at
-every start.)
-
-## 2. Run the daemon
+## 1. Run the daemon
 
 ```console
 $ isb serve install
 $ systemctl --user status isb
 ```
 
-`isb serve install` writes the systemd user unit
+The first time, `isb serve install` prepares the host, which needs root, so
+it runs `isb host setup` through `sudo` and asks for your password. Each org
+gets its own bridge network, and a host with a default-deny firewall (ufw)
+drops DHCP, DNS and forwarding on new bridges (and on incus' own `incusbr0`,
+where image builds run); service names and the shared console log need
+directories. See [host setup](../operations/host-setup.md#host-firewall) for
+exactly what it changes (`isb host setup --dry-run`
+prints it). On a host that has had it, `serve install` says so and skips it;
+`--no-host-setup` skips it anyway.
+
+Then it writes the systemd user unit
 `~/.config/systemd/user/isb.service` and its settings file
 `~/.config/isb/serve.env`, sets up the daemon's secrets key, starts the
 service and waits until it answers on `http://127.0.0.1:8092/healthz`. The
@@ -54,7 +47,7 @@ Two things it may tell you:
 The daemon's user needs the incus socket (the `incus-admin` group). Logs:
 `journalctl --user -u isb -f`.
 
-## 3. The first admin
+## 2. The first admin
 
 isb keeps its own users. While none exists, create the first one on the
 host, as the daemon's user; it is a platform admin and the owner of the
@@ -70,7 +63,7 @@ setup link the daemon logged (`journalctl --user -u isb | grep setup`); its
 token is also in `~/.local/state/isb/setup-token`. See [the first
 admin](../guides/sign-in.md#the-first-admin).
 
-## 4. An org
+## 3. An org
 
 An org is the trust boundary: its own incus project, network, quotas and
 secrets. Its members administer what is in it and nothing outside it.
@@ -85,7 +78,7 @@ platform commands work in the `default` org, which always exists once the
 daemon has started (the incus project `isb-default`). See
 [orgs](../concepts/orgs.md).
 
-## 5. A project and an app
+## 4. A project and an app
 
 Apps live in a project's environment (`production` unless you add others),
 and each environment runs as one stack:
@@ -121,7 +114,7 @@ $ isb stack ps shop-production       # the stack underneath: replicas, health, p
 An app from a git repository is the same with `--git URL --ref main`; the
 daemon builds it in a fresh sandbox. See [deploying apps](../guides/deploy-apps.md).
 
-## 6. A public URL
+## 5. A public URL
 
 To serve the app on a hostname with a certificate, the daemon runs an
 ingress (Caddy) on the host's 80 and 443, or an org uses its own Cloudflare
@@ -139,7 +132,7 @@ The name's DNS must point at the host. Without a name of your own, `--domain
 auto` gets a generated `*.sslip.io` name for the host's public address. See
 [domains and ingress](../guides/domains.md).
 
-## 7. The web UI
+## 6. The web UI
 
 Open `http://127.0.0.1:8092` in a browser on the host (or through an SSH
 tunnel: `ssh -L 8092:127.0.0.1:8092 host`) and sign in. Pick **acme** in the

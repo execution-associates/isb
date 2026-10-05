@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { startGl } from "@/lib/texture-gl";
-import { selectRenderer, useTexture } from "@/lib/texture";
+import { selectRenderer } from "@/lib/texture";
 import { useTheme } from "@/lib/theme";
 
 /**
@@ -11,10 +11,9 @@ import { useTheme } from "@/lib/theme";
  */
 export function TextureLayer() {
   const { theme } = useTheme();
-  const texture = useTexture();
   useEffect(() => {
     const root = document.documentElement;
-    if (theme !== "ea" || texture === "off") {
+    if (theme !== "ea") {
       root.dataset.textureFx = "none";
       return;
     }
@@ -25,8 +24,8 @@ export function TextureLayer() {
       canvas.remove();
       root.dataset.textureFx = "css";
     };
-    const gl = startGl(canvas, texture, fallBack);
-    const r = selectRenderer({ theme, texture, webgl: gl !== null, software: gl?.software ?? false });
+    const gl = startGl(canvas, fallBack);
+    const r = selectRenderer({ theme, webgl: gl !== null, software: gl?.software ?? false });
     if (r === "gl") {
       document.body.prepend(canvas);
       root.dataset.textureFx = "gl";
@@ -38,6 +37,6 @@ export function TextureLayer() {
       gl?.stop();
       canvas.remove();
     };
-  }, [theme, texture]);
+  }, [theme]);
   return null;
 }

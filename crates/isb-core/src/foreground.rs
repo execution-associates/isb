@@ -247,31 +247,24 @@ pub fn run(services: &[Service], opts: Options, report: &mut dyn FnMut(&str)) ->
 }
 
 /// Poll an instance's console log and print what is new. incus offers no
-/// streaming read of it; a log that shrank (the instance restarted) is printed
-/// from its start.
+/// streaming read of it.
 fn follow_console(sb: Sandbox, prefix: Option<String>, tx: mpsc::Sender<Msg>) {
     std::thread::spawn(move || {
         let mut out = LineWriter::new(prefix);
         // Skip what was logged before this run, like `journalctl -n 0`.
-        let mut seen = sb
+        let mut pos = sb
             .client()
-            .console_log(sb.name())
-            .map(|b| b.len())
-            .unwrap_or(0);
+            .console_since(sb.name(), u64::MAX)
+            .map_or(0, |(_, end)| end);
         loop {
             std::thread::sleep(Duration::from_secs(1));
-            let Ok(log) = sb.client().console_log(sb.name()) else {
+            let Ok((new, end)) = sb.client().console_since(sb.name(), pos) else {
                 continue;
             };
-            if log.len() < seen {
-                seen = 0;
-            }
-            if log.len() > seen {
-                if out.write(&mut io::stdout().lock(), &log[seen..]).is_err() {
-                    let _ = tx.send(Msg::OutputClosed);
-                    return;
-                }
-                seen = log.len();
+            pos = end;
+            if !new.is_empty() && out.write(&mut io::stdout().lock(), &new).is_err() {
+                let _ = tx.send(Msg::OutputClosed);
+                return;
             }
         }
     });

@@ -31,10 +31,18 @@ ISB_INTEGRATION=1 cargo test        # against a real incusd
 The integration tests need a local image with a `dev` user at uid 1000 and
 `python3` (`ISB_TEST_IMAGE`, default `dev-base`). Everything they create is
 named `isb-test-*` and is removed afterwards, pass or fail. The stack and app
-tests deploy into an org of their own, `isbt-<pid>` (one per test process,
-made on first use), which is deleted with everything left in it when the
-process exits; they never create or remove anything in the default org
-(`isb-default`), where a host's own apps run. Plain sandboxes go in incus'
+tests deploy into an org of their own, `isbt-<pid>-<start>` (one per test
+process, made on first use; `<start>` is the process's start time from
+`/proc/<pid>/stat`), which is deleted with everything left in it when the
+process exits or is stopped by SIGINT, SIGTERM or SIGHUP (Ctrl-C,
+`timeout`). A run killed outright (SIGKILL, a crash) cannot clean up, so a
+test process's first use also sweeps the orgs of runs that are gone: every
+`isbt-<pid>-<start>` whose pid is not running or is running with another
+start time (a reused pid), along with the bridge, ACL and names directory
+of one killed before its project was made, each logged to stderr. Nothing
+else matches; the sweep never touches an org outside that pattern. The tests never create or
+remove anything in the default org (`isb-default`), where a host's own apps
+run. Plain sandboxes go in incus'
 `default` project. Because they need the incus socket, build the test binaries in the sandbox without it
 (`cargo test --no-run`) and run them on the host.
 
