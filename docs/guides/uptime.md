@@ -44,6 +44,35 @@ service of a stack deployed with `stack_deploy` the same way; its own
 endpoint is where the ingress sends the domain's requests (a replica in
 rotation, on the domain's port).
 
+### Which path an `app` or `service` monitor requests
+
+1. The monitor's `path`, when it sets one.
+2. Otherwise the service's own health path: when its compose `healthcheck`
+   requests an HTTP URL on `127.0.0.1`, `localhost` or `[::1]` at the port
+   the domain routes to (no port is 80), that URL's path and query. isb
+   finds it in `[CMD, ...]`, `[CMD-SHELL, "..."]` and plain-string tests:
+   `curl -f`, `wget -q --spider`, `wget -qO-`, a Python `urlopen(...)`, or a
+   hand-written `GET <path> HTTP/1.x` to bash's `/dev/tcp/127.0.0.1/<port>`.
+   A URL on another port or host, a variable in it, or no URL at all
+   derives nothing.
+3. Otherwise the domain's path (`/` without a domain).
+
+A derived health path `P` meets the domain's path `D` like this:
+
+| The domain | Public URL | Own endpoint |
+|---|---|---|
+| `D` is `/` | `P` | `P` |
+| `strip_prefix: true` | `D` + `P` | `P` |
+| `P` is under `D` (`/api/health` under `/api`) | `P` | `P` |
+| anything else (`/healthz` under `/sso`) | not checked | `P`, with the note "the health path P is not under the domain's path D: checked the service's own endpoint" |
+
+A derived path says so in the check's `note` ("/healthz is the path of the
+service's healthcheck"), and the check's `url` shows the path requested. On
+a route that strips its prefix, the own-endpoint check requests the path
+without it, as the ingress hands it to the replica (`path: /api/status` on
+a `/api` route that strips asks the replica for `/status`). Set `path` to
+check something else; `path` always wins.
+
 HTTP checks take:
 
 | Field | Default | |
@@ -155,7 +184,9 @@ details never carry their query string, which may hold a token.
 
 Every app with a served domain gets `app-<name>`, and every service of a
 compose stack with a served domain gets `stack-<stack>-<service>` (a `service`
-monitor): GET its first domain, `200-399`, every 60 s, down after 2 failures.
+monitor): GET its first domain, at the service's health path when its
+healthcheck names one ([which path](#which-path-an-app-or-service-monitor-requests)),
+`200-399`, every 60 s, down after 2 failures.
 Each is made within a minute of the domain being served. Edit it like any
 other monitor (it stays the app's or service's). It goes away when its target
 does, or no longer declares a domain; a domain that is briefly not served (a

@@ -21,6 +21,7 @@
 //! org's settings beside them in `settings.json`.
 
 pub mod auto;
+mod health_path;
 pub mod heartbeat;
 pub mod probe;
 pub mod service;
@@ -109,7 +110,7 @@ pub struct Monitor {
     /// app, service: which of its domains (default: the first one served).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub domain: Option<String>,
-    /// app, service: the path to request (default: the domain's path).
+    /// app, service: the path to request (default: the path the service's healthcheck requests over HTTP, else the domain's path).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
     /// `GET` or `HEAD`.

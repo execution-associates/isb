@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use super::health_path;
 use super::probe::{self, HttpAnswer, HttpProbe};
 use super::{ACCESS_ID_SECRET, ACCESS_SECRET_SECRET, Kind, Monitor, parse_status};
 use crate::app::Apps;
@@ -62,13 +63,17 @@ pub(crate) struct Ctx<'a> {
 
 /// An app's or stack service's endpoints right now.
 struct AppView {
-    /// The served domain's URL (with the monitor's path).
+    /// The served domain's URL (with the path to check), unless the domain
+    /// cannot reach that path.
     public: Option<String>,
     /// Its own endpoint and how it was found, or why there is none.
     internal: Result<(SocketAddr, String), String>,
     /// The domain's host, for the Host header on the internal endpoint.
     host: Option<String>,
+    /// The path on its own endpoint: what the ingress hands the replica.
     path: String,
+    /// Where the path came from, or why only its own endpoint is checked.
+    note: Option<String>,
 }
 
 fn loopback_for(ip: IpAddr) -> IpAddr {
@@ -148,6 +153,36 @@ pub(crate) fn is_live(apps: &Apps, org: &OrgId, m: &Monitor) -> bool {
         .is_some_and(|s| s.healthy > 0 && s.instances.iter().any(|i| i.in_rotation))
 }
 
+/// The paths a check requests, from the monitor's `path`, the service's
+/// healthcheck and the picked domain's route (its prefix, whether it strips
+/// it, the port it routes to).
+fn view_paths(
+    ctx: &Ctx,
+    m: &Monitor,
+    f: &Followed,
+    pick: Option<&crate::ingress::DomainStatus>,
+) -> health_path::Paths {
+    let def = ctx.ctl.definition(&f.stack).ok();
+    let spec = def.as_ref().and_then(|d| d.file.services.get(&f.service));
+    let route = pick
+        .zip(spec)
+        .and_then(|(d, s)| health_path::spec_of(&s.domains, &d.host, &d.path));
+    let domain = pick.map_or("/", |d| d.path.as_str());
+    let strip = route.is_some_and(|r| r.strip_prefix);
+    // The port the domain's requests reach, or the app's own.
+    let port = route.and_then(|r| r.port).or_else(|| {
+        pick.and_then(|d| d.upstreams.first())
+            .and_then(|u| u.parse::<SocketAddr>().ok())
+            .map(|a| a.port())
+            .or_else(|| f.port.as_ref().and_then(|p| p.as_ref().ok().copied()))
+    });
+    let health = match (&m.path, spec.and_then(|s| s.healthcheck.as_ref()), port) {
+        (None, Some(h), Some(port)) => health_path::from_healthcheck(&h.test, port),
+        _ => None,
+    };
+    health_path::choose(m.path.as_deref(), domain, strip, health.as_deref(), f.noun)
+}
+
 fn app_view(ctx: &Ctx, org: &OrgId, m: &Monitor) -> Result<(AppView, &'static str), String> {
     let f = followed(ctx.apps, org, m)?;
     let what = &f.what;
@@ -174,14 +209,11 @@ fn app_view(ctx: &Ctx, org: &OrgId, m: &Monitor) -> Result<(AppView, &'static st
         ),
         None => served.first().copied(),
     };
-    let path = m
-        .path
-        .clone()
-        .or_else(|| pick.map(|d| d.path.clone()))
-        .unwrap_or_else(|| "/".into());
+    let paths = view_paths(ctx, m, &f, pick);
     let public = pick
         .and_then(|d| d.url.as_deref())
-        .map(|u| with_path(u, &path));
+        .zip(paths.public.as_deref())
+        .map(|(u, p)| with_path(u, p));
     let replica = |ip: IpAddr| {
         svc.instances
             .iter()
@@ -229,7 +261,8 @@ fn app_view(ctx: &Ctx, org: &OrgId, m: &Monitor) -> Result<(AppView, &'static st
             public,
             internal,
             host: pick.map(|d| d.host.clone()),
-            path,
+            path: paths.internal,
+            note: paths.note,
         },
         f.noun,
     ))
@@ -388,7 +421,7 @@ fn run_app(ctx: &Ctx, org: &OrgId, m: &Monitor, at: u64) -> Outcome {
         Ok(h) => h,
         Err(e) => return Outcome::fail(at, e),
     };
-    let mut note = None;
+    let mut note = view.note.clone();
     if let Some(url) = &view.public {
         let o = http_outcome(m, &probe_for(ctx, m, url.clone(), hs.clone()), at, "public");
         let refused = o
@@ -400,11 +433,11 @@ fn run_app(ctx: &Ctx, org: &OrgId, m: &Monitor, at: u64) -> Outcome {
             .as_deref()
             .is_some_and(|e| e.contains("Cloudflare Access"));
         if !refused && !access {
-            return o;
+            return Outcome { note, ..o };
         }
         // Users see it through its domain, but this daemon may not check
         // it there: say why, and check its own endpoint.
-        note = Some(if access {
+        let why = if access {
             format!(
                 "the domain is behind Cloudflare Access: checked the {noun}'s own endpoint instead (add CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET secrets to check the public URL)"
             )
@@ -412,6 +445,10 @@ fn run_app(ctx: &Ctx, org: &OrgId, m: &Monitor, at: u64) -> Outcome {
             format!(
                 "the domain resolves to a private address: checked the {noun}'s own endpoint instead (a platform admin can allow private targets)"
             )
+        };
+        note = Some(match note {
+            Some(n) => format!("{n}; {why}"),
+            None => why,
         });
     }
     let (addr, what) = match view.internal {

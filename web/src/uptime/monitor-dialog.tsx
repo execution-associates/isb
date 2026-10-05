@@ -255,7 +255,7 @@ export function MonitorDialog({ org, existing, app, open, onOpenChange, onSaved 
               <Field label="Domain (optional)" hint="Default: the first one served.">
                 {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.domain} onChange={(e) => set({ domain: e.target.value })} placeholder="shop.example.com" />}
               </Field>
-              <Field label="Path (optional)" hint="Default: the domain's path.">
+              <Field label="Path (optional)" hint="Default: the path of the app's healthcheck, else the domain's path.">
                 {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.path} onChange={(e) => set({ path: e.target.value })} placeholder="/healthz" />}
               </Field>
             </div>
@@ -272,7 +272,7 @@ export function MonitorDialog({ org, existing, app, open, onOpenChange, onSaved 
               <Field label="Domain (optional)" hint="Default: the first one served.">
                 {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.domain} onChange={(e) => set({ domain: e.target.value })} placeholder="wiki.example.com" />}
               </Field>
-              <Field label="Path (optional)" hint="Default: the domain's path.">
+              <Field label="Path (optional)" hint="Default: the path of the service's healthcheck, else the domain's path.">
                 {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.path} onChange={(e) => set({ path: e.target.value })} placeholder="/healthz" />}
               </Field>
             </div>
@@ -298,7 +298,7 @@ export function MonitorDialog({ org, existing, app, open, onOpenChange, onSaved 
               <Field label="Domain (optional)" hint="Default: the first one served.">
                 {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.domain} onChange={(e) => set({ domain: e.target.value })} placeholder="wiki.example.com" />}
               </Field>
-              <Field label="Path (optional)" hint="Default: the domain's path.">
+              <Field label="Path (optional)" hint="Default: the path of the service's healthcheck, else the domain's path.">
                 {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.path} onChange={(e) => set({ path: e.target.value })} placeholder="/healthz" />}
               </Field>
             </div>
