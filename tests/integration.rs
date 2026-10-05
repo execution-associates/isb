@@ -24,7 +24,7 @@ use isb::{
 };
 
 mod common;
-use common::{default_org_client, enabled, image};
+use common::{enabled, image, test_def, test_org_client};
 
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
@@ -1157,29 +1157,6 @@ fn test_secrets(state: &std::path::Path) -> std::sync::Arc<isb::secrets::Secrets
     )))
 }
 
-/// A stack as the tests deploy it: `file` with no secrets, by `test`.
-fn test_def(
-    name: &str,
-    org: isb::org::OrgId,
-    file: isb::spec::ComposeFile,
-    base_dir: &std::path::Path,
-) -> isb::stack::StackDef {
-    isb::stack::StackDef {
-        source: None,
-        domains: Default::default(),
-        name: name.to_string(),
-        org,
-        file,
-        base_dir: base_dir.to_path_buf(),
-        secrets: Default::default(),
-        force: Default::default(),
-        images: Default::default(),
-        deployed_at: 0,
-        deployed_by: "test".into(),
-        previous: None,
-    }
-}
-
 /// The stack controller: replicas behind the balancer, a forced rolling
 /// redeploy with no failed request, scale down, remove.
 #[test]
@@ -1193,7 +1170,7 @@ fn stack_controller() {
     let secrets = test_secrets(state.path());
     let ctl = isb::stack::Controller::start(client.clone(), store, Duration::from_secs(2), secrets)
         .unwrap();
-    let stack = format!("isb-test-{}", std::process::id() % 100000);
+    let stack = format!("isb-test-c{}", std::process::id() % 100000);
     let port = free_port();
     let yaml = format!(
         "services:\n  web:\n    image: {}\n    labels: {{isb-test: '1'}}\n    user: dev\n\
@@ -1210,7 +1187,7 @@ fn stack_controller() {
         &|_| None,
     )
     .unwrap();
-    let def = test_def(&stack, isb::org::OrgId::default_org(), p.file, state.path());
+    let def = test_def(&stack, common::test_org(), p.file, state.path());
     struct Rm(isb::stack::Controller, String);
     impl Drop for Rm {
         fn drop(&mut self) {
@@ -1218,9 +1195,9 @@ fn stack_controller() {
             self.0.shutdown();
         }
     }
-    let _rm = Rm(ctl.clone(), stack.clone());
+    let _rm = Rm(ctl.clone(), common::q(&stack));
     ctl.deploy(def).unwrap();
-    let st = isb::daemon::wait_settled(&ctl, &stack, Duration::from_secs(300)).unwrap();
+    let st = isb::daemon::wait_settled(&ctl, &common::q(&stack), Duration::from_secs(300)).unwrap();
     assert!(st.converged, "{st:?}");
     let addr = format!("127.0.0.1:{port}");
     let seen: std::collections::BTreeSet<String> =
@@ -1243,8 +1220,8 @@ fn stack_controller() {
             (ok, failed)
         })
     };
-    ctl.redeploy(&stack, "web").unwrap();
-    let st = isb::daemon::wait_settled(&ctl, &stack, Duration::from_secs(300)).unwrap();
+    ctl.redeploy(&common::q(&stack), "web").unwrap();
+    let st = isb::daemon::wait_settled(&ctl, &common::q(&stack), Duration::from_secs(300)).unwrap();
     stop.store(true, Ordering::SeqCst);
     let (ok, failed) = load.join().unwrap();
     assert!(st.converged, "{st:?}");
@@ -1253,14 +1230,19 @@ fn stack_controller() {
     assert!(after.is_disjoint(&seen), "{after:?} vs {seen:?}");
     assert!(ok > 0 && failed == 0, "ok {ok}, failed {failed}");
 
-    ctl.scale(&stack, "web", 1).unwrap();
+    ctl.scale(&common::q(&stack), "web", 1).unwrap();
     let deadline = Instant::now() + Duration::from_secs(120);
-    while ctl.status(&stack).unwrap().services[0].instances.len() != 1 {
+    while ctl.status(&common::q(&stack)).unwrap().services[0]
+        .instances
+        .len()
+        != 1
+    {
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_secs(1));
     }
-    ctl.remove(&stack, true, Duration::from_secs(120)).unwrap();
-    let org_client = default_org_client(&client);
+    ctl.remove(&common::q(&stack), true, Duration::from_secs(120))
+        .unwrap();
+    let org_client = test_org_client(&client);
     let left = Sandbox::list_with(&org_client, &[LabelFilter::parse("isb-test")])
         .unwrap()
         .into_iter()
@@ -1448,7 +1430,7 @@ fn service_names() {
         test_secrets(state.path()),
     )
     .unwrap();
-    let stack = format!("isb-test-{}", std::process::id() % 100000);
+    let stack = format!("isb-test-o{}", std::process::id() % 100000);
     let yaml = format!(
         "services:\n  web:\n    image: {}\n    user: dev\n\
          \x20   command: [sh, -c, 'exec python3 -m http.server 8000 -d /tmp']\n\
@@ -1690,14 +1672,14 @@ fn apps_deploy_edit_rollback_git_webhook() {
     let apps = isb::app::Apps::new(state.path(), client.clone(), ctl.clone(), secrets.clone())
         .with_build(build)
         .with_timeout(Duration::from_secs(400));
-    let org = isb::org::OrgId::default_org();
-    let org_client = default_org_client(&client);
+    let org = common::test_org();
+    let org_client = test_org_client(&client);
     let project = format!("isbt{}", std::process::id() % 100000);
     let stack = format!("{project}-test");
     struct Rm(isb::app::Apps, isb::stack::Controller, String);
     impl Drop for Rm {
         fn drop(&mut self) {
-            let org = isb::org::OrgId::default_org();
+            let org = common::test_org();
             for a in ["web", "other", "src"] {
                 let _ = self.0.delete(&org, a);
             }
@@ -1705,7 +1687,7 @@ fn apps_deploy_edit_rollback_git_webhook() {
             self.1.shutdown();
         }
     }
-    let _rm = Rm(apps.clone(), ctl.clone(), stack.clone());
+    let _rm = Rm(apps.clone(), ctl.clone(), common::q(&stack));
     apps.project_create(&org, &project, "", &["test".into()])
         .unwrap();
     let port = free_port();
@@ -1738,7 +1720,7 @@ fn apps_deploy_edit_rollback_git_webhook() {
         d
     };
     let instances = |svc: &str| -> Vec<String> {
-        let st = ctl.status(&stack).unwrap();
+        let st = ctl.status(&common::q(&stack)).unwrap();
         let s = st.services.iter().find(|s| s.service == svc).unwrap();
         let mut v: Vec<String> = s.instances.iter().map(|i| i.name.clone()).collect();
         v.sort();
@@ -1859,14 +1841,14 @@ fn apps_deploy_edit_rollback_git_webhook() {
         "sha256={}",
         isb::app::webhook::sign(b"guess", body)
     ));
-    let (st, _) = apps.webhook("default", "src", &bad, None, body);
+    let (st, _) = apps.webhook(common::TEST_ORG, "src", &bad, None, body);
     assert_eq!(st, 401);
     assert_eq!(apps.deployments(&org, "src").unwrap().len(), 1);
     let good = hdr(format!(
         "sha256={}",
         isb::app::webhook::sign(secret.as_bytes(), body)
     ));
-    let (st, v) = apps.webhook("default", "src", &good, None, body);
+    let (st, v) = apps.webhook(common::TEST_ORG, "src", &good, None, body);
     assert_eq!(st, 202, "{v}");
     let id = v["deployment"].as_u64().unwrap();
     let g2 = apps
@@ -1881,7 +1863,7 @@ fn apps_deploy_edit_rollback_git_webhook() {
     // Deleting the apps takes their services, and the stack with the last.
     apps.delete(&org, "src").unwrap();
     assert!(
-        ctl.status(&stack)
+        ctl.status(&common::q(&stack))
             .unwrap()
             .services
             .iter()
@@ -1890,7 +1872,7 @@ fn apps_deploy_edit_rollback_git_webhook() {
     apps.delete(&org, "other").unwrap();
     apps.delete(&org, "web").unwrap();
     assert!(
-        ctl.status(&stack).is_err(),
+        ctl.status(&common::q(&stack)).is_err(),
         "the stack went with its last app"
     );
     apps.project_delete(&org, &project).unwrap();
@@ -1954,7 +1936,7 @@ fn ingress_routes_rolls_and_removes() {
     )
     .unwrap();
     m.start(ctl.clone()).unwrap();
-    let stack = format!("isb-test-{}", std::process::id() % 100000);
+    let stack = format!("isb-test-i{}", std::process::id() % 100000);
     let host = format!("{stack}.ingress.test");
     let plain = format!("plain-{stack}.ingress.test");
     let yaml = format!(
@@ -1974,7 +1956,7 @@ fn ingress_routes_rolls_and_removes() {
         &|_| None,
     )
     .unwrap();
-    let def = test_def(&stack, isb::org::OrgId::default_org(), p.file, state.path());
+    let def = test_def(&stack, common::test_org(), p.file, state.path());
     struct Rm(
         isb::stack::Controller,
         String,
@@ -1987,10 +1969,10 @@ fn ingress_routes_rolls_and_removes() {
             self.2.shutdown();
         }
     }
-    let _rm = Rm(ctl.clone(), stack.clone(), m.clone());
+    let _rm = Rm(ctl.clone(), common::q(&stack), m.clone());
     m.check(&def).unwrap();
     ctl.deploy(def).unwrap();
-    let st = isb::daemon::wait_settled(&ctl, &stack, Duration::from_secs(300)).unwrap();
+    let st = isb::daemon::wait_settled(&ctl, &common::q(&stack), Duration::from_secs(300)).unwrap();
     assert!(st.converged, "{st:?}");
 
     let ca = state
@@ -2012,7 +1994,7 @@ fn ingress_routes_rolls_and_removes() {
         (0..10).map(|_| curl(&url, &resolve, Some(&ca)).1).collect();
     assert_eq!(seen.len(), 2, "{seen:?}");
 
-    let st = ctl.status(&stack).unwrap();
+    let st = ctl.status(&common::q(&stack)).unwrap();
     let doms = &st.services[0].domains;
     let d = doms.iter().find(|d| d.host == host).unwrap();
     assert_eq!(d.state, "serving", "{d:?}");
@@ -2062,10 +2044,10 @@ fn ingress_routes_rolls_and_removes() {
             (ok, failed)
         })
     };
-    ctl.redeploy(&stack, "web").unwrap();
+    ctl.redeploy(&common::q(&stack), "web").unwrap();
     // wait_settled can return before the rollout starts: give it a beat.
     std::thread::sleep(Duration::from_secs(3));
-    let st = isb::daemon::wait_settled(&ctl, &stack, Duration::from_secs(300)).unwrap();
+    let st = isb::daemon::wait_settled(&ctl, &common::q(&stack), Duration::from_secs(300)).unwrap();
     std::thread::sleep(Duration::from_secs(2));
     stop.store(true, Ordering::SeqCst);
     let (ok, failed) = load.join().unwrap();
@@ -2078,7 +2060,8 @@ fn ingress_routes_rolls_and_removes() {
     assert_eq!(after.len(), 2, "{after:?}");
 
     // Removal takes the routes away.
-    ctl.remove(&stack, true, Duration::from_secs(120)).unwrap();
+    ctl.remove(&common::q(&stack), true, Duration::from_secs(120))
+        .unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let routes = m.status(None)["routes"].as_array().unwrap().len();

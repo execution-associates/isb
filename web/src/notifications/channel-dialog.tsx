@@ -7,7 +7,7 @@ import { useEffect, useId, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
-import { keys, useApps, useProjects, useSecretNames } from "@/apps/api";
+import { useApps, useProjects, useSecretNames } from "@/apps/api";
 import { Field, FormError } from "@/components/form";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -18,6 +18,7 @@ import { errorMessage } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 import { PROVIDER_ICON } from "./icons";
 import { buildRule, type Channel, channelNameProblem, EVENT_GROUPS, type Provider, type ProviderType, PROVIDERS, providerSecrets, selectedKinds, splitList } from "./api";
+import { invalidateOrg } from "@/lib/freshness";
 
 interface RuleForm {
   kinds: Set<string>;
@@ -172,7 +173,7 @@ export function ChannelDialog({ org, existing, open, onOpenChange }: { org: stri
     try {
       const args = { name, provider: prov.provider, rules: rules.map((r) => buildRule(r.kinds, r, r.keep)), enabled };
       await callTool<unknown, string>(existing ? "notification_channel_update" : "notification_channel_create", args, org);
-      await qc.invalidateQueries({ queryKey: keys.org(org) });
+      await invalidateOrg(qc, org);
       toast.success(existing ? `Channel ${name} saved` : `Channel ${name} added: send a test to check it`);
       setPending(false);
       onOpenChange(false);

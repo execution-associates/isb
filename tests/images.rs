@@ -5,19 +5,17 @@
 //! Gated like the other integration tests (`ISB_INTEGRATION=1`; build them
 //! in a sandbox with `cargo test --no-run`, run the binary on the host). It
 //! needs skopeo and network access to Docker Hub, and deploys into the
-//! default org (`isb-default`); its stack is removed afterwards, pass or fail.
+//! test org (`isb-test`, never the default org); its stack is removed
+//! afterwards, pass or fail.
+
+#[allow(dead_code, reason = "each test binary uses some of the shared helpers")]
+mod common;
 
 use std::time::Duration;
 
 use isb::Client;
 
-fn enabled() -> bool {
-    if std::env::var("ISB_INTEGRATION").as_deref() == Ok("1") {
-        return true;
-    }
-    eprintln!("skipped: set ISB_INTEGRATION=1 to run against incusd");
-    false
-}
+use common::enabled;
 
 fn test_secrets(state: &std::path::Path) -> std::sync::Arc<isb::secrets::Secrets> {
     let k = isb::secrets::Keyring::new(age::x25519::Identity::generate(), vec![]);
@@ -68,8 +66,8 @@ fn missing_images_are_refused_and_reported() {
         None
     );
 
-    // The stack runs in the default org; this makes its project.
-    isb::org::ensure_default(&client, &mut |l| eprintln!("{l}")).unwrap();
+    // The stack runs in the test org; this makes its project.
+    common::test_org_client(&client);
     let stack = format!("isb-test-img-{}", std::process::id() % 100000);
     let p = isb::compose::load_docs(
         &[(
@@ -84,7 +82,7 @@ fn missing_images_are_refused_and_reported() {
     .unwrap();
     let def = isb::stack::StackDef {
         name: stack.clone(),
-        org: isb::org::OrgId::default_org(),
+        org: common::test_org(),
         file: p.file,
         base_dir: state.path().to_path_buf(),
         secrets: Default::default(),
@@ -103,9 +101,9 @@ fn missing_images_are_refused_and_reported() {
             self.0.shutdown();
         }
     }
-    let _rm = Rm(ctl.clone(), stack.clone());
+    let _rm = Rm(ctl.clone(), common::q(&stack));
     ctl.deploy(def).unwrap();
-    let st = isb::daemon::wait_settled(&ctl, &stack, Duration::from_secs(180)).unwrap();
+    let st = isb::daemon::wait_settled(&ctl, &common::q(&stack), Duration::from_secs(180)).unwrap();
     let web = &st.services[0];
     assert_eq!(web.state, "failing", "{web:?}");
     let m = web.message.as_deref().unwrap_or("");

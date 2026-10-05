@@ -323,7 +323,8 @@ impl Client {
             ))
         })?;
         if env.kind == "error" || status >= 400 {
-            if let Some(e) = crate::org::limits::translate(self, &env.error) {
+            let request = body.map(|b| (path, b));
+            if let Some(e) = crate::org::limits::translate(self, &env.error, request) {
                 return Err(e);
             }
             return Err(Error::Api {
@@ -470,7 +471,7 @@ impl Client {
                     } else {
                         "operation failed"
                     });
-                if let Some(e) = crate::org::limits::translate(self, err) {
+                if let Some(e) = crate::org::limits::translate(self, err, None) {
                     return Err(e);
                 }
                 Err(Error::OperationFailed {
@@ -583,6 +584,46 @@ impl Client {
             });
         }
         Ok(())
+    }
+
+    /// `GET path` upgraded to `protocol` (incus' `/sftp`): the raw stream
+    /// once incusd answers 101, with `timeout` on every read and write.
+    pub(crate) fn upgrade(
+        &self,
+        path: &str,
+        protocol: &str,
+        timeout: Duration,
+    ) -> Result<UnixStream> {
+        let path = self.with_project(path);
+        let mut stream = self.connect(timeout)?;
+        let head = format!(
+            "GET {path} HTTP/1.1\r\nHost: incus\r\nUser-Agent: isb/{}\r\nUpgrade: {protocol}\r\nConnection: Upgrade\r\n\r\n",
+            env!("CARGO_PKG_VERSION")
+        );
+        stream.write_all(head.as_bytes())?;
+        // Byte by byte, so nothing past the headers (the protocol's own
+        // first bytes) is consumed here.
+        let mut buf = Vec::new();
+        let mut b = [0u8; 1];
+        while !buf.ends_with(b"\r\n\r\n") {
+            if buf.len() > 16384 || stream.read(&mut b)? == 0 {
+                return Err(Error::Protocol(format!(
+                    "no answer to the upgrade of {path}"
+                )));
+            }
+            buf.push(b[0]);
+        }
+        let head = String::from_utf8_lossy(&buf);
+        let status = head.split_whitespace().nth(1).unwrap_or_default();
+        if status != "101" {
+            return Err(Error::Api {
+                method: "GET".into(),
+                path,
+                status: status.parse().unwrap_or(0),
+                message: head.lines().next().unwrap_or_default().to_string(),
+            });
+        }
+        Ok(stream)
     }
 
     /// A `GET` whose answer is not the JSON envelope (`/1.0/metrics`).

@@ -246,7 +246,7 @@ export function humanize(items: HistoryItem[], max = 10): ActivityEntry[] {
 
 export function OrgActivity({ org, className }: { org: string; className?: string }) {
   const o = encodeURIComponent(org);
-  // Under the org's keys: useOrgLive refetches it as events arrive.
+  // Under the org's keys: useLiveSync refetches it as events arrive.
   const q = useQuery({
     queryKey: [...keys.org(org), "activity"],
     queryFn: () => callTool<HistoryPage>("history_query", { limit: 200, source: "controller,audit" }, org),

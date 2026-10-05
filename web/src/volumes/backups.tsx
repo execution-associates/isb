@@ -6,7 +6,6 @@ import { ArchiveRestore, Cloud, DatabaseBackup, FileArchive, Loader2, Pause, Pla
 import { useState } from "react";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
-import { keys } from "@/apps/api";
 import { ConfirmDialog, EmptyState, QueryError } from "@/apps/components";
 import { bytes } from "@/apps/util";
 import { ScheduleText } from "@/components/cron-field";
@@ -20,6 +19,7 @@ import { errorMessage } from "@/lib/messages";
 import type { VolumeBackupEntry } from "./api";
 import type { RestoreFrom } from "./dialogs";
 import type { VolumeLog } from "./volume-panel";
+import { invalidateOrg } from "@/lib/freshness";
 
 export function VolumeBackups({
   org,
@@ -77,7 +77,7 @@ function BackupRow({
     setBusy(true);
     try {
       await f();
-      await qc.invalidateQueries({ queryKey: keys.org(org) });
+      await invalidateOrg(qc, org);
       toast.success(ok);
     } catch (e) {
       toast.error(errorMessage(e));
@@ -155,7 +155,7 @@ function BackupRow({
         confirmLabel="Delete schedule"
         onConfirm={async () => {
           await callTool("backup_delete", { name: b.name }, org);
-          await qc.invalidateQueries({ queryKey: keys.org(org) });
+          await invalidateOrg(qc, org);
           toast.success(`Backup ${b.name} deleted`);
         }}
       />

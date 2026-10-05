@@ -34,6 +34,8 @@ import { errorMessage } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 import { useOrgPage } from "@/pages/org-common";
 import { Tag } from "@/pages/org-ui";
+import { invalidateOrg } from "@/lib/freshness";
+import { keys } from "@/apps/api";
 
 /** The local secret the onepassword driver reads its service-account token from. */
 const OP_TOKEN = "onepassword-token";
@@ -44,7 +46,7 @@ export function SecretsPage() {
   const { org, me, redirect } = useOrgPage();
   const [creating, setCreating] = useState(false);
   const list = useQuery({
-    queryKey: ["tool", "secret_list", org],
+    queryKey: keys.secretList(org),
     queryFn: () => callTool<SecretList>("secret_list", {}, org),
     enabled: !redirect,
   });
@@ -260,7 +262,7 @@ function SecretsTable({ org, secrets, reveal }: { org: string; secrets: SecretMe
         onConfirm={async () => {
           await callTool("secret_delete", { name: deleting!.name }, org);
           toast.success(`Secret ${deleting!.name} deleted`);
-          await qc.invalidateQueries({ queryKey: ["tool", "secret_list", org] });
+          await invalidateOrg(qc, org);
         }}
       />
     </>
@@ -313,7 +315,7 @@ function useRefresh(org: string) {
         what ? `${name} is at v${r.version}; ${what}` : `${name} is at v${r.version}; nothing to roll`,
         { id: t },
       );
-      await qc.invalidateQueries({ queryKey: ["tool", "secret_list", org] });
+      await invalidateOrg(qc, org);
     } catch (e) {
       toast.error(errorMessage(e), { id: t });
     }
@@ -544,7 +546,7 @@ function ValueDialog({
         await callTool("secret_create", { name: theName, value, labels: labelMap }, org);
         toast.success(`Secret ${theName} created`);
       }
-      await qc.invalidateQueries({ queryKey: ["tool", "secret_list", org] });
+      await invalidateOrg(qc, org);
       close(false);
     } catch (err) {
       setError(errorMessage(err));

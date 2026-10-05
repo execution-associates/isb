@@ -124,7 +124,7 @@ fn job_props() -> Value {
         "timeout": {"type": "string", "description": "Kill after this long (default 10m, at most 24h)."},
         "concurrency": {"type": "string", "enum": ["skip", "allow"], "description": "skip (default): a run due while one is going is skipped."},
         "keep": {"type": "integer", "minimum": 1, "maximum": 1000, "description": "Runs kept (default 20)."},
-        "enabled": {"type": "boolean"},
+        "enabled": {"type": "boolean", "description": "Default true. false: the job is kept but never runs on its schedule (job_run still runs it) until enabled."},
         "user": {"type": "string"},
         "cwd": {"type": "string"},
         "env": {"type": "object", "additionalProperties": {"type": "string"}},
@@ -161,14 +161,15 @@ fn argv(a: &mut Value) -> Result<()> {
     Ok(())
 }
 
+/// A job as the tools answer: its settings, plus `created_at`, `updated_at`,
+/// `next_run` and `last_run`, all at the top level.
 fn job_json(j: &Jobs, org: &OrgId, job: &crate::jobs::Job) -> Value {
-    json!({
-        "job": job.spec,
-        "created_at": job.created_at,
-        "updated_at": job.updated_at,
-        "next_run": unix_rfc3339(j.next_run(job)),
-        "last_run": j.runs(org, &job.spec.name).last(),
-    })
+    let mut v = json!(job.spec);
+    v["created_at"] = json!(job.created_at);
+    v["updated_at"] = json!(job.updated_at);
+    v["next_run"] = json!(unix_rfc3339(j.next_run(job)));
+    v["last_run"] = json!(j.runs(org, &job.spec.name).last());
+    v
 }
 
 pub fn register(r: &mut Registry, ctx: Ctx) -> Result<()> {
@@ -236,7 +237,7 @@ fn database_create_tool(r: &mut Registry, ctx: &Ctx, ann: &Ann) -> Result<()> {
                 "urls": {"type": "object", "additionalProperties": {"type": "string"}, "description": "More secrets isb keeps holding the internal URL, each with a query string for a driver's options ({\"dsn.main-db.web\": \"sslmode=disable\"}, \"\" for none). Written at deploy and again whenever the password changes, so no app holds a stale copy of it."},
                 "publish": {"type": "string", "description": "Publish the port on the host: [IP:]PORT (default address 127.0.0.1). Off by default."},
                 "env": {"description": "Extra environment (.env text or a map), e.g. POSTGRES_INITDB_ARGS."},
-                "resources": {"type": "object", "description": "{cpus, memory}."},
+                "resources": crate::app::resources_schema(),
                 "deploy": {"type": "boolean", "description": "Deploy right away (default true)."},
                 "wait": {"type": "boolean", "description": "Wait until it is up (default false)."}
             }),
@@ -764,7 +765,7 @@ fn job_create_tool(r: &mut Registry, ctx: &Ctx, ann: &Ann) -> Result<()> {
         ctx,
         "job_create",
         "Create a scheduled job",
-        "Run a command on a cron schedule against an app or a stack service: in a running replica (mode exec) or a fresh one-off instance from its image (mode run). Each run keeps its exit code, duration and output (bounded); job.succeeded / job.failed events.",
+        "Run a command on a cron schedule against an app or a stack service: in a running replica (mode exec) or a fresh one-off instance from its image (mode run). Each run keeps its exit code, duration and output (bounded); job.succeeded / job.failed events. enabled: false creates it disabled. Answers the job as job_get does.",
         obj(job_props(), &["name", "schedule", "target", "command"]),
         ann.write,
         |x: &Ctx, mut a: Value, _c: &Caller| -> Result<Value> {
@@ -785,7 +786,7 @@ fn job_list_tool(r: &mut Registry, ctx: &Ctx, ann: &Ann) -> Result<()> {
         ctx,
         "job_list",
         "List jobs",
-        "An org's jobs with their next and last run.",
+        "An org's jobs, each as job_get answers one.",
         obj(json!({}), &[]),
         ann.ro,
         |x: &Ctx, a: Value, _c: &Caller| -> Result<Value> {
@@ -808,7 +809,7 @@ fn job_get_tool(r: &mut Registry, ctx: &Ctx, ann: &Ann) -> Result<()> {
         ctx,
         "job_get",
         "Get a job",
-        "A job's settings, next run and last run.",
+        "A job's settings (name, schedule, target, command, enabled, ...) with created_at, updated_at, next_run (RFC 3339; null when disabled) and last_run, all at the top level.",
         obj(json!({"name": {"type": "string"}}), &["name"]),
         ann.ro,
         |x: &Ctx, a: Value, _c: &Caller| -> Result<Value> {

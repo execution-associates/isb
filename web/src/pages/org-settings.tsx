@@ -71,6 +71,23 @@ export function SettingsPage() {
 /** A number a quota limit may cap, as a whole number (incus states counts as strings). */
 const count = (v: string | null) => (v && /^\d+$/.test(v.trim()) ? Number(v) : null);
 
+/** One limit's budget: what every instance's own limit adds up to, stopped ones included (bytes for memory and disk). */
+type Budget = { limit: number; allocated: number; free: number };
+const budgetOf = (o: OrgView, name: string): Budget | undefined =>
+  (o as OrgView & { allocation?: Record<string, Budget> }).allocation?.[name];
+
+/** Bytes as incus writes sizes: 512MiB, 3.5GiB. */
+function size(n: number): string {
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let v = n;
+  let u = 0;
+  while (v >= 1024 && u < units.length - 1) {
+    v /= 1024;
+    u++;
+  }
+  return `${Number.isInteger(v) ? v : v.toFixed(1)}${units[u]}`;
+}
+
 /** Used against limit as a bar; the tone warms as it fills. */
 function Meter({ used, limit }: { used: number; limit: number }) {
   const pct = Math.min(100, Math.round((used / Math.max(limit, 1)) * 100));
@@ -122,7 +139,7 @@ function LimitsPanel({ org, o, editable }: { org: string; o: OrgView; editable: 
   return (
     <Panel
       title="Quota"
-      description="Totals across the org's instances, and what each instance gets when its spec sets no limits."
+      description="Totals across the org's instances: each caps the sum of every instance's own limit, stopped ones included. Below, what an instance gets when its spec sets no limits."
       action={
         editable && (
           <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
@@ -150,9 +167,26 @@ function LimitsPanel({ org, o, editable }: { org: string; o: OrgView; editable: 
           limit={instLimit}
           sub={instLimit ? `${Math.max(instLimit - o.instances, 0)} left` : "No limit"}
         />
-        <QuotaTile icon={Cpu} label="CPUs" value={o.cpus ? limitLabel(o.cpus) : unlimited} sub={o.cpus ? "Across the org" : "No limit"} />
-        <QuotaTile icon={MemoryStick} label="Memory" value={o.memory ? limitLabel(o.memory) : unlimited} sub={o.memory ? "Across the org" : "No limit"} />
-        <QuotaTile icon={HardDrive} label="Disk" value={o.disk ? limitLabel(o.disk) : unlimited} sub={o.disk ? "Across the org" : "No limit"} />
+        {(
+          [
+            [Cpu, "CPUs", o.cpus, "cpu", String],
+            [MemoryStick, "Memory", o.memory, "memory", size],
+            [HardDrive, "Disk", o.disk, "disk", size],
+          ] as [typeof Cpu, string, string | null, string, (n: number) => string][]
+        ).map(([icon, label, limit, name, fmt]) => {
+          const b = budgetOf(o, name);
+          return (
+            <QuotaTile
+              key={name}
+              icon={icon}
+              label={label}
+              value={limit ? limitLabel(limit) : unlimited}
+              used={b?.allocated}
+              limit={b?.limit}
+              sub={b ? `${fmt(b.allocated)} allocated, ${fmt(b.free)} free` : limit ? "Across the org" : "No limit"}
+            />
+          );
+        })}
       </div>
       <dl className="grid grid-cols-2 border-t text-sm sm:grid-cols-4 sm:divide-x">
         {(
@@ -176,11 +210,11 @@ function LimitsPanel({ org, o, editable }: { org: string; o: OrgView; editable: 
   );
 }
 
-const LIMIT_FIELDS: { key: keyof OrgView & string; arg: string; label: string; hint: string; int?: boolean }[] = [
-  { key: "cpus", arg: "cpus", label: "CPUs", hint: "Across the org.", int: true },
-  { key: "memory", arg: "memory", label: "Memory", hint: "Across the org, e.g. 16GiB." },
-  { key: "disk", arg: "disk", label: "Disk", hint: "Across the org, e.g. 100GiB." },
-  { key: "instances_limit", arg: "instances", label: "Instances", hint: "Containers and VMs.", int: true },
+const LIMIT_FIELDS: { key: keyof OrgView & string; arg: string; label: string; hint: string; int?: boolean; lift?: boolean }[] = [
+  { key: "cpus", arg: "cpus", label: "CPUs", hint: "Across the org, or none.", int: true, lift: true },
+  { key: "memory", arg: "memory", label: "Memory", hint: "Across the org, e.g. 16GiB, or none.", lift: true },
+  { key: "disk", arg: "disk", label: "Disk", hint: "Across the org, e.g. 100GiB, or none.", lift: true },
+  { key: "instances_limit", arg: "instances", label: "Instances", hint: "Containers and VMs, or none.", int: true, lift: true },
   { key: "default_cpus", arg: "default_cpus", label: "Default CPUs", hint: "Per instance.", int: true },
   { key: "default_memory", arg: "default_memory", label: "Default memory", hint: "Per instance, e.g. 512MiB." },
 ];
@@ -203,6 +237,10 @@ function LimitsDialog({ org, o, open, onOpenChange }: { org: string; o: OrgView;
     for (const f of LIMIT_FIELDS) {
       const v = (vals[f.arg] ?? "").trim();
       if (!v) continue;
+      if (f.lift && v.toLowerCase() === "none") {
+        args[f.arg] = "none";
+        continue;
+      }
       if (f.int) {
         const n = Number(v);
         if (!Number.isInteger(n) || n < 1) {
@@ -232,7 +270,10 @@ function LimitsDialog({ org, o, open, onOpenChange }: { org: string; o: OrgView;
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Quota for {org}</DialogTitle>
-          <DialogDescription>Leave a field empty to keep it. A limit can be changed but not lifted once set.</DialogDescription>
+          <DialogDescription>
+            Leave a field empty to keep it, or enter none to lift a limit. A limit caps the sum of every instance&apos;s own
+            limit, stopped ones included.
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="grid gap-4">
           <FormError>{error}</FormError>
@@ -547,8 +588,9 @@ export function DeleteOrgDialog({
         for (const n of r?.notes ?? []) toast.info(n);
         // Leave the org's pages before they learn it is gone.
         onDeleted();
+        for (const k of [["apps", org], ["stacks", org], ["workspace", org], ["workspace-sandboxes", org]]) qc.removeQueries({ queryKey: k });
         await qc.invalidateQueries({ queryKey: ["me"] });
-        await qc.invalidateQueries({ queryKey: ["tool", "org_list"] });
+        await qc.invalidateQueries({ queryKey: ["tool"] });
       }}
     >
       <label className="flex items-start gap-3 rounded-md border p-3 text-sm">

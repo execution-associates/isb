@@ -480,3 +480,31 @@ fn a_deploy_reuses_stored_secrets_unless_told_not_to() {
         "secret db_password: no value given; reusing the value stored on 2026-09-21T14:13:20Z (version 3)"
     );
 }
+
+#[test]
+fn cross_org_reads_narrow_to_the_named_org() {
+    let o = |s: &str| OrgId::new(s).unwrap();
+    let member = user(&[("a", Role::Viewer), ("b", Role::Viewer)], false);
+    // No org: every org the caller sees.
+    assert_eq!(
+        read_orgs(&member, &json!({})).unwrap(),
+        Some(vec![o("a"), o("b")])
+    );
+    // --org: that one only, and nothing for an org the caller can't see.
+    assert_eq!(
+        read_orgs(&member, &json!({"org": "b"})).unwrap(),
+        Some(vec![o("b")])
+    );
+    assert_eq!(
+        read_orgs(&member, &json!({"org": "c"})).unwrap(),
+        Some(vec![])
+    );
+    // An admin (or the socket) sees all, or the one named.
+    let admin = user(&[], true);
+    assert_eq!(read_orgs(&admin, &json!({})).unwrap(), None);
+    assert_eq!(
+        read_orgs(&admin, &json!({"org": "c"})).unwrap(),
+        Some(vec![o("c")])
+    );
+    assert!(read_orgs(&admin, &json!({"org": "Bad Org"})).is_err());
+}

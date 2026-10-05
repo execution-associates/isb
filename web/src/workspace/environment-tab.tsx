@@ -14,6 +14,7 @@ import { errorMessage } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 import { type Workspace, wsCall, wsKeys } from "./api";
 import { envProblems } from "./util";
+import { keys } from "@/apps/api";
 
 export function EnvironmentTab({ org, ws, admin }: { org: string; ws: Workspace; admin: boolean }) {
   const qc = useQueryClient();
@@ -21,7 +22,7 @@ export function EnvironmentTab({ org, ws, admin }: { org: string; ws: Workspace;
   const [chosen, setChosen] = useState<string[]>(() => ws.secrets ?? []);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const secrets = useQuery({ queryKey: ["secrets", org], queryFn: () => callTool<SecretList>("secret_list", {}, org), enabled: admin });
+  const secrets = useQuery({ queryKey: keys.secretList(org), queryFn: () => callTool<SecretList>("secret_list", {}, org), enabled: admin });
   const parsed = parseKv(text);
   const problems = [...parsed.errors, ...envProblems(parsed.map)];
   const names = [...new Set([...(secrets.data?.secrets.map((s) => s.name) ?? []), ...chosen])].toSorted();

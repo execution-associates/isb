@@ -31,8 +31,10 @@ ISB_INTEGRATION=1 cargo test        # against a real incusd
 The integration tests need a local image with a `dev` user at uid 1000 and
 `python3` (`ISB_TEST_IMAGE`, default `dev-base`). Everything they create is
 named `isb-test-*` and is removed afterwards, pass or fail. The stack and app
-tests deploy into the default org, the incus project `isb-default`, which they
-create (as `isb serve` does) if the host lacks it and leave in place. Because they need
+tests deploy into their own org, `isb-test` (the incus project
+`isb-isb-test`), which they create if the host lacks it and leave in place;
+they never create or remove anything in the default org (`isb-default`),
+where a host's own apps run. Plain sandboxes go in incus' `default` project. Because they need
 the incus socket, build the test binaries in the sandbox without it
 (`cargo test --no-run`) and run them on the host.
 

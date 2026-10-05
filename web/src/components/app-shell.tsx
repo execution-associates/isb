@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import type { Me } from "@/api/auth";
 import { isMine, queuedEvent } from "@/apps/follow";
 import { CrumbTrail } from "@/apps/components";
-import { splitStack, useLiveEvents } from "@/apps/live";
+import { splitStack, useLiveEvents, useLiveSync } from "@/apps/live";
 import { deploymentPath } from "@/apps/use-deploy";
 import { Lockup, Logo, Wordmark } from "@/components/brand";
 import { CommandPaletteProvider, SECTIONS, usePalette } from "@/components/command-palette";
@@ -425,6 +425,12 @@ function DeployWatcher({ org }: { org: string | null }) {
   return null;
 }
 
+/** Keeps every query in step with the server while signed in (lib/freshness.ts). */
+function LiveSync() {
+  useLiveSync();
+  return null;
+}
+
 export function AppShell({ me }: { me: Me }) {
   const [open, setOpen] = useState(false);
   const org = useCurrentOrg(me);
@@ -464,6 +470,7 @@ export function AppShell({ me }: { me: Me }) {
           </main>
         </div>
       </div>
+      <LiveSync />
       <DeployWatcher org={org && me.orgs.includes(org) ? org : null} />
     </CommandPaletteProvider>
   );

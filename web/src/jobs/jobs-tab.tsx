@@ -6,7 +6,6 @@ import { CalendarClock, Loader2, MoreHorizontal, Pause, Pencil, Play, Plus, Squa
 import { type ReactNode, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
-import { keys } from "@/apps/api";
 import { ConfirmDialog, EmptyState, QueryError } from "@/apps/components";
 import { formatKv, parseKv } from "@/apps/util";
 import { CronField, ScheduleText } from "@/components/cron-field";
@@ -29,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { scheduleNameProblem, type Run } from "@/data/api";
 import { RunBadge, RunLogDialog, RunsTable } from "@/data/runs";
 import { durationSeconds, type JobEntry, type JobSpec, type JobTarget, joinWords, sameTarget, splitWords, targetName, useJobRuns, useJobs } from "./api";
+import { invalidateOrg } from "@/lib/freshness";
 
 /** The jobs of one target: `{app}`, or a compose stack's `{stack, service}`; `picker` (a service picker) sits above the intro. */
 export function JobsTab({ org, target, picker }: { org: string; target: JobTarget; picker?: ReactNode }) {
@@ -56,7 +56,7 @@ export function JobsTab({ org, target, picker }: { org: string; target: JobTarge
     );
   }
   if (jobs.error) return <QueryError error={jobs.error} />;
-  const mine = (jobs.data ?? []).filter((j) => sameTarget(j.job.target, target));
+  const mine = (jobs.data ?? []).filter((j) => sameTarget(j.target, target));
 
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
@@ -90,7 +90,7 @@ export function JobsTab({ org, target, picker }: { org: string; target: JobTarge
           </EmptyState>
         </Card>
       ) : (
-        mine.map((j) => <JobCard key={j.job.name} org={org} entry={j} canWrite={canWrite} onEdit={() => setEdit({ job: j.job })} onLog={(run) => setLog({ job: j.job.name, run })} />)
+        mine.map((j) => <JobCard key={j.name} org={org} entry={j} canWrite={canWrite} onEdit={() => setEdit({ job: j })} onLog={(run) => setLog({ job: j.name, run })} />)
       )}
       <JobDialog org={org} target={target} existing={edit?.job} open={!!edit} onOpenChange={(o) => !o && setEdit(null)} />
       <RunLogDialog
@@ -106,13 +106,13 @@ export function JobsTab({ org, target, picker }: { org: string; target: JobTarge
 }
 
 function JobCard({ org, entry, canWrite, onEdit, onLog }: { org: string; entry: JobEntry; canWrite: boolean; onEdit: () => void; onLog: (r: Run) => void }) {
-  const j = entry.job;
+  const j = entry;
   const qc = useQueryClient();
   const running = entry.last_run?.status === "running";
   const runs = useJobRuns(org, j.name, running ? 2000 : false);
   const [busy, setBusy] = useState(false);
   const [del, setDel] = useState(false);
-  const refresh = () => qc.invalidateQueries({ queryKey: keys.org(org) });
+  const refresh = () => invalidateOrg(qc, org);
 
   const runNow = async () => {
     setBusy(true);
@@ -346,7 +346,7 @@ function JobDialog({ org, target, existing, open, onOpenChange }: { org: string;
       if (f.user.trim() || existing?.user) args.user = f.user.trim() || null;
       if (f.cwd.trim() || existing?.cwd) args.cwd = f.cwd.trim() || null;
       await callTool<unknown, string>(existing ? "job_update" : "job_create", args, org);
-      await qc.invalidateQueries({ queryKey: keys.org(org) });
+      await invalidateOrg(qc, org);
       toast.success(existing ? `Job ${f.name} saved` : `Job ${f.name} created`);
       setPending(false);
       onOpenChange(false);

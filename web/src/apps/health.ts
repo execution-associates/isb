@@ -1,6 +1,7 @@
 // Health of environments and projects, from the org's stacks.
 import { useQuery } from "@tanstack/react-query";
 import { callTool, type StackList, type StackStatus } from "@/api/tools";
+import { LIVE_POLL } from "@/lib/freshness";
 import { type EnvironmentInfo, keys, type Project, type StackDetail } from "./api";
 
 export type Health = "healthy" | "degraded" | "failing" | "updating" | "idle";
@@ -10,7 +11,7 @@ export function useStackList() {
   return useQuery({
     queryKey: ["tool", "stack_list"],
     queryFn: () => callTool<StackList>("stack_list"),
-    refetchInterval: 30_000,
+    refetchInterval: LIVE_POLL,
   });
 }
 
@@ -67,7 +68,7 @@ export function useOrgOverview(org: string) {
   return useQuery({
     queryKey: [...keys.org(org), "overview"],
     queryFn: () => callTool<{ stacks?: StackDetail[] }>("overview", {}, org),
-    refetchInterval: 15_000,
+    refetchInterval: LIVE_POLL,
     select: (r) => (r.stacks ?? []).filter((s) => s.org === org),
   });
 }

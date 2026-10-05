@@ -7,7 +7,7 @@ use isb::{Client, Sandbox};
 
 #[allow(dead_code, reason = "each test binary uses some of the shared helpers")]
 mod common;
-use common::{default_org_client, enabled, image};
+use common::{enabled, image, test_org_client};
 
 /// A secret store under `state` with a throwaway key.
 fn test_secrets(state: &std::path::Path) -> std::sync::Arc<isb::secrets::Secrets> {
@@ -57,7 +57,7 @@ impl SecretStack {
             &|_| None,
         )
         .unwrap();
-        let org = isb::org::OrgId::default_org();
+        let org = common::test_org();
         let given = given
             .iter()
             .map(|(k, v)| (k.to_string(), v.as_bytes().to_vec()))
@@ -85,24 +85,27 @@ impl SecretStack {
 
     fn settle(&self) -> isb::stack::controller::StackStatus {
         let st =
-            isb::daemon::wait_settled(&self.ctl, &self.name, Duration::from_secs(300)).unwrap();
+            isb::daemon::wait_settled(&self.ctl, &common::q(&self.name), Duration::from_secs(300))
+                .unwrap();
         assert!(st.converged, "{st:?}");
         st
     }
 
     /// The one instance of a service.
     fn instance(&self, service: &str) -> Sandbox {
-        let st = self.ctl.status(&self.name).unwrap();
+        let st = self.ctl.status(&common::q(&self.name)).unwrap();
         let s = st.services.iter().find(|s| s.service == service).unwrap();
         assert_eq!(s.instances.len(), 1, "{s:?}");
-        let org_client = default_org_client(&Client::new());
+        let org_client = test_org_client(&Client::new());
         Sandbox::get(&org_client, &s.instances[0].name).unwrap()
     }
 }
 
 impl Drop for SecretStack {
     fn drop(&mut self) {
-        let _ = self.ctl.remove(&self.name, true, Duration::from_secs(120));
+        let _ = self
+            .ctl
+            .remove(&common::q(&self.name), true, Duration::from_secs(120));
         self.ctl.shutdown();
     }
 }
@@ -136,7 +139,7 @@ fn stack_external_secret_rolls() {
         return;
     }
     let s = SecretStack::new("ext");
-    let org = isb::org::OrgId::default_org();
+    let org = common::test_org();
     let store_name = format!("{}.db", s.name);
     s.secrets
         .create(&org, &store_name, None, b"first", &Default::default())
@@ -153,7 +156,7 @@ fn stack_external_secret_rolls() {
     let before = s.instance("app");
     assert_eq!(read(&before, "/run/secrets/db"), "first");
     // The definition holds the reference, never the value.
-    let def = s.ctl.definition(&s.name).unwrap();
+    let def = s.ctl.definition(&common::q(&s.name)).unwrap();
     assert_eq!(def.secrets["db"].name, store_name);
     assert_eq!(def.secrets["db"].version, 1);
     assert!(!serde_json::to_string(&def).unwrap().contains("first"));
@@ -201,7 +204,7 @@ fn stack_env_secret_delivery() {
         ),
         &[("tok", "t0k-value")],
     );
-    let org = isb::org::OrgId::default_org();
+    let org = common::test_org();
     // Stored as the stack's own secret.
     let owned = format!("{}_tok", s.name);
     assert_eq!(s.secrets.get(&org, &owned).unwrap().0, b"t0k-value");
@@ -275,7 +278,7 @@ fn wait_until(what: &str, f: impl Fn() -> bool) {
 /// the stack and the store names of f, e and n.
 fn in_place_stack(what: &str) -> (SecretStack, [String; 3]) {
     let s = SecretStack::new(what);
-    let org = isb::org::OrgId::default_org();
+    let org = common::test_org();
     let names = ["f", "e", "n"].map(|k| format!("{}.{k}", s.name));
     for k in &names {
         s.secrets
@@ -312,7 +315,7 @@ fn in_place_stack(what: &str) -> (SecretStack, [String; 3]) {
 
 /// Every service's revision, in order.
 fn revisions(s: &SecretStack) -> Vec<String> {
-    let st = s.ctl.status(&s.name).unwrap();
+    let st = s.ctl.status(&common::q(&s.name)).unwrap();
     st.services.iter().map(|x| x.rev.clone()).collect()
 }
 
@@ -331,7 +334,7 @@ fn stack_secret_on_change_restart() {
         return;
     }
     let (s, [f, e, _]) = in_place_stack("restart");
-    let org = isb::org::OrgId::default_org();
+    let org = common::test_org();
     let (sys, oci) = (s.instance("sys"), s.instance("oci"));
     assert_eq!(read(&sys, "/tmp/t"), "one-one");
     let revs = revisions(&s);
@@ -384,7 +387,7 @@ fn stack_secret_on_change_none() {
         return;
     }
     let (s, [_, _, n]) = in_place_stack("none");
-    let org = isb::org::OrgId::default_org();
+    let org = common::test_org();
     let lazy = s.instance("lazy");
     let revs = revisions(&s);
     s.secrets.set(&org, &n, b"four").unwrap();
@@ -401,7 +404,7 @@ fn stack_secret_on_change_none() {
     });
     assert_eq!(read(&lazy, "/tmp/t"), "one");
     let stale = || {
-        let st = s.ctl.status(&s.name).unwrap();
+        let st = s.ctl.status(&common::q(&s.name)).unwrap();
         let l = st.services.iter().find(|x| x.service == "lazy").unwrap();
         l.instances[0].stale_secrets.clone()
     };
@@ -439,7 +442,7 @@ fn stack_secret_rotate_changes_database_passwords() {
         return;
     }
     let s = SecretStack::new("rotate");
-    let org = isb::org::OrgId::default_org();
+    let org = common::test_org();
     let n = |k: &str| format!("{}.{k}", s.name);
     for k in ["pg", "my", "myroot", "rd", "bad"] {
         s.secrets
@@ -485,7 +488,7 @@ fn stack_secret_rotate_changes_database_passwords() {
     };
     // Over the bridge address: the image trusts loopback, so only there is
     // the password checked.
-    let st = s.ctl.status(&s.name).unwrap();
+    let st = s.ctl.status(&common::q(&s.name)).unwrap();
     let ip = st
         .services
         .iter()

@@ -1,18 +1,111 @@
-//! incus' project-limit refusals, said in isb's terms: which of the org's
-//! quotas is full, how much of it is in use, and how to raise it.
+//! An org's quotas: what is allocated against them, and incus' refusals
+//! said in isb's terms.
 //!
-//! incus checks a project's `limits.*` when an instance or a volume is
-//! created or resized, and refuses with text such as `Reached maximum
-//! aggregate value "2" for "limits.cpu" in project "isb-lab"`. The client
-//! turns any such answer into [`Error::Invalid`] with [`explain`]'s message,
-//! so every path that creates instances in an org (sandboxes, workspaces,
-//! apps, databases, builds) says the same thing.
+//! An org's `limits.cpu`, `limits.memory` and `limits.disk` are incus
+//! project limits, and incus enforces them as budgets: the sum of what every
+//! instance in the project is configured with (its `limits.cpu`, its
+//! `limits.memory`, its root disk's `size`, and the volumes' sizes), stopped
+//! instances included, against the limit. Nothing measures actual use. A
+//! shared ceiling on what the org's instances use together would need a
+//! parent cgroup per project, which incus does not offer.
+//!
+//! incus checks the budgets when an instance or a volume is created or
+//! resized, and refuses with text such as `Reached maximum aggregate value
+//! "2" for "limits.cpu" in project "isb-lab"`. The client turns any such
+//! answer into [`Error::Invalid`] with [`explain`]'s message, so every path
+//! that creates instances in an org (sandboxes, workspaces, apps, databases,
+//! builds, stacks) says the same thing.
 
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::OrgId;
 use crate::client::Client;
 use crate::error::Error;
+
+/// The root disk size an instance gets from the org's default profile when
+/// its spec sets none and the org has `limits.disk` (incus refuses an
+/// instance without one there). The same as a sandbox's.
+pub const DEFAULT_ROOT_SIZE: &str = "10GiB";
+
+/// One of an org's limits, which `isb org update` can lift again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Limit {
+    Cpus,
+    Memory,
+    Disk,
+    Instances,
+}
+
+impl Limit {
+    /// The incus project key.
+    pub fn key(self) -> &'static str {
+        match self {
+            Limit::Cpus => "limits.cpu",
+            Limit::Memory => "limits.memory",
+            Limit::Disk => "limits.disk",
+            Limit::Instances => "limits.instances",
+        }
+    }
+}
+
+/// One limit of an org: the limit, what its instances are allocated against
+/// it (summed over every instance, stopped ones included), and what is left.
+/// Bytes for memory and disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Budget {
+    pub limit: i64,
+    pub allocated: i64,
+    pub free: i64,
+}
+
+impl Budget {
+    /// `3 of 4 allocated, 1 free`, sizes as incus writes them.
+    pub fn text(&self, in_bytes: bool) -> String {
+        let f = |n: i64| if in_bytes { bytes(n) } else { n.to_string() };
+        format!(
+            "{} of {} allocated, {} free",
+            f(self.allocated),
+            f(self.limit),
+            f(self.free)
+        )
+    }
+}
+
+/// The org's limited resources (`cpu`, `memory`, `disk`, `instances`) as
+/// budgets, from `/1.0/projects/<p>/state`. A resource without a limit is
+/// left out: incus does not total what nothing limits.
+pub(crate) fn budgets(state: &Value) -> BTreeMap<String, Budget> {
+    ["cpu", "memory", "disk", "instances"]
+        .into_iter()
+        .filter_map(|name| {
+            let (limit, allocated) = usage(state, &format!("limits.{name}"))?;
+            (limit >= 0).then(|| {
+                let b = Budget {
+                    limit,
+                    allocated,
+                    free: (limit - allocated).max(0),
+                };
+                (name.to_string(), b)
+            })
+        })
+        .collect()
+}
+
+/// A project's budgets, read from incus; empty when its state can't be read.
+pub(crate) fn read_budgets(c: &Client, project: &str) -> BTreeMap<String, Budget> {
+    c.clone()
+        .project("")
+        .get(&format!(
+            "/1.0/projects/{}/state",
+            crate::client::encode_segment(project)
+        ))
+        .map(|s| budgets(&s))
+        .unwrap_or_default()
+}
 
 /// A refusal of one of a project's limits.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,8 +158,9 @@ pub(crate) fn parse(msg: &str) -> Option<Refusal> {
     None
 }
 
-/// The project's limit and usage of what `key` limits, from
-/// `/1.0/projects/<p>/state` (`resources.<name>.{Limit,Usage}`).
+/// The project's limit and allocation of what `key` limits, from
+/// `/1.0/projects/<p>/state` (`resources.<name>.{Limit,Usage}`; incus'
+/// "usage" is the sum of the instances' configured limits).
 pub(crate) fn usage(state: &Value, key: &str) -> Option<(i64, i64)> {
     let name = key.strip_prefix("limits.")?;
     let r = &state["resources"][name];
@@ -75,7 +169,7 @@ pub(crate) fn usage(state: &Value, key: &str) -> Option<(i64, i64)> {
 }
 
 /// Bytes as incus sizes are written: `3.5GiB`, `512MiB`.
-fn bytes(n: i64) -> String {
+pub fn bytes(n: i64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut v = n as f64;
     let mut u = 0;
@@ -90,67 +184,129 @@ fn bytes(n: i64) -> String {
     }
 }
 
-/// What the limit counts, and `isb org create`'s flag that sets it.
+/// What the limit counts, and `isb org update`'s flag that sets it.
 fn describe(key: &str) -> (&'static str, Option<&'static str>) {
     match key {
-        "limits.cpu" => ("CPU", Some("--cpus N")),
-        "limits.memory" => ("memory", Some("--memory SIZE")),
-        k if k.starts_with("limits.disk") => ("disk", Some("--disk SIZE")),
-        "limits.instances" => ("instance", Some("--instances N")),
+        "limits.cpu" => ("CPU", Some("--cpus")),
+        "limits.memory" => ("memory", Some("--memory")),
+        k if k.starts_with("limits.disk") => ("disk", Some("--disk")),
+        "limits.instances" => ("instance", Some("--instances")),
         "limits.containers" => ("container", None),
         "limits.virtual-machines" => ("VM", None),
         _ => ("resource", None),
     }
 }
 
-/// The message for a refusal, given the project's limit and usage when
-/// they could be read.
-pub(crate) fn explain(r: &Refusal, used: Option<(i64, i64)>) -> String {
+/// What the refused request asked for: the instance (or volume) and its
+/// amount of the limited resource.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Need {
+    pub name: Option<String>,
+    pub amount: String,
+}
+
+/// What a refused create or update of an instance or volume (`path`,
+/// `body`) asked for of `key`: the body's own value, else the org's
+/// default profile's (what the instance would have got).
+fn needed(c: &Client, key: &str, path: &str, body: &Value) -> Option<Need> {
+    let tail = path.split('?').next().unwrap_or(path);
+    let name = body["name"]
+        .as_str()
+        .map(String::from)
+        .or_else(|| tail.rsplit('/').next().map(String::from))
+        .filter(|n| !n.is_empty() && n != "instances" && n != "volumes");
+    let disk = key.starts_with("limits.disk");
+    let amount = if tail.contains("/volumes") {
+        disk.then(|| body["config"]["size"].as_str().map(String::from))??
+    } else if tail.starts_with("/1.0/instances") {
+        let own = if disk {
+            body["devices"]["root"]["size"].as_str()
+        } else {
+            body["config"][key].as_str()
+        };
+        match own {
+            Some(v) => v.to_string(),
+            None if key == "limits.cpu" || key == "limits.memory" || disk => {
+                let p = c.get("/1.0/profiles/default").ok()?;
+                let v = if disk {
+                    &p["devices"]["root"]["size"]
+                } else {
+                    &p["config"][key]
+                };
+                format!("{} (the org's default)", v.as_str()?)
+            }
+            None => return None,
+        }
+    } else {
+        return None;
+    };
+    Some(Need { name, amount })
+}
+
+/// The message for a refusal, given the project's limit and allocation when
+/// they could be read, and what the request needed when it is known.
+pub(crate) fn explain(r: &Refusal, used: Option<(i64, i64)>, need: Option<&Need>) -> String {
     let (what, flag) = describe(&r.key);
     let in_bytes = matches!(what, "memory" | "disk");
     let fmt = |n: i64| if in_bytes { bytes(n) } else { n.to_string() };
-    let limit = r
-        .value
-        .clone()
-        .or_else(|| used.map(|(l, _)| fmt(l)))
-        .unwrap_or_else(|| "?".into());
-    let in_use = used
-        .map(|(_, u)| format!(", {} in use", fmt(u)))
+    let counted = matches!(what, "instance" | "container" | "VM");
+    let state = match used {
+        Some((l, u)) if counted => format!("{}: {u} of {l}, stopped ones included", r.key),
+        Some((l, u)) => format!(
+            "{}: allocated {} of {}, the sum of every instance's limit, stopped ones included",
+            r.key,
+            fmt(u),
+            fmt(l)
+        ),
+        None => format!("{} {}", r.key, r.value.as_deref().unwrap_or("?")),
+    };
+    let need = need
+        .map(|n| match &n.name {
+            Some(name) => format!("; {name} needs {}", n.amount),
+            None => format!("; the request needs {}", n.amount),
+        })
         .unwrap_or_default();
-    let free = "stop or delete something in it, or ask for less";
+    let free = if counted {
+        "delete one, or ask for fewer"
+    } else {
+        "delete an instance or lower one's limit (stopping one frees nothing), or ask for less"
+    };
     match OrgId::from_incus_project(&r.project) {
         Some(org) => {
             let raise = match flag {
                 Some(f) => format!(
-                    "a platform admin raises it with `isb org create {org} {f}` on the host or the org_update tool"
+                    "a platform admin raises it with `isb org update {org} {f} N` on the host, or lifts it with `{f} none` (or the org_update tool)"
                 ),
                 None => format!(
                     "isb does not set {}; an operator raises it with `incus project set {} {}=N`",
                     r.key, r.project, r.key
                 ),
             };
-            format!(
-                "org {org} is at its {what} quota ({} {limit}{in_use}): {free}, or {raise}",
-                r.key
-            )
+            format!("org {org} is at its {what} quota ({state}{need}): {free}, or {raise}")
         }
         None => format!(
-            "incus project {} is at its {what} limit ({} {limit}{in_use}): {free}, or raise it with `incus project set {} {}=...`",
-            r.project, r.key, r.project, r.key
+            "incus project {} is at its {what} limit ({state}{need}): {free}, or raise it with `incus project set {} {}=...`",
+            r.project, r.project, r.key
         ),
     }
 }
 
 /// `message` from incusd, as the error to return: a clear quota error when
-/// it is a project-limit refusal (with the usage `c` can read), else `None`.
-pub(crate) fn translate(c: &Client, message: &str) -> Option<Error> {
+/// it is a project-limit refusal (with the allocation `c` can read and what
+/// `request`, the refused path and body, asked for), else `None`.
+pub(crate) fn translate(
+    c: &Client,
+    message: &str,
+    request: Option<(&str, &Value)>,
+) -> Option<Error> {
     let r = parse(message)?;
     let state = c.clone().project("").get(&format!(
         "/1.0/projects/{}/state",
         crate::client::encode_segment(&r.project)
     ));
     let used = state.ok().and_then(|s| usage(&s, &r.key));
-    Some(Error::Invalid(explain(&r, used)))
+    let need = request.and_then(|(path, body)| needed(c, &r.key, path, body));
+    Some(Error::Invalid(explain(&r, used, need.as_ref())))
 }
 
 #[cfg(test)]
@@ -174,21 +330,27 @@ mod tests {
                 status: 200,
                 body: json!({"resources": {"cpu": {"Limit": 2, "Usage": 2}}}),
             },
+            Route {
+                prefix: "GET /1.0/profiles/default",
+                status: 200,
+                body: json!({"config": {"limits.cpu": "1"}, "devices": {}}),
+            },
         ]);
         let c = c.project("isb-lab");
         let e = c
             .mutate(
                 "POST",
                 "/1.0/instances",
-                Some(&json!({})),
+                Some(&json!({"name": "web-1", "config": {}})),
                 "create",
                 c.timeouts.other,
             )
             .unwrap_err();
         assert!(matches!(e, Error::Invalid(_)), "{e:?}");
         assert!(
-            e.to_string()
-                .starts_with("org lab is at its CPU quota (limits.cpu 2, 2 in use)"),
+            e.to_string().starts_with(
+                "org lab is at its CPU quota (limits.cpu: allocated 2 of 2, the sum of every instance's limit, stopped ones included; web-1 needs 1 (the org's default))"
+            ),
             "{e}"
         );
         // Any other incus error is passed on as it was.
@@ -225,18 +387,82 @@ mod tests {
     }
 
     #[test]
-    fn explains_a_full_quota_with_its_usage_and_the_way_to_raise_it() {
+    fn budgets_are_the_limited_resources_with_what_is_left() {
+        let s = json!({"resources": {
+            "cpu": {"Limit": 4, "Usage": 3},
+            "memory": {"Limit": 4i64 << 30, "Usage": 5i64 << 30},
+            "disk": {"Limit": -1, "Usage": 0},
+            "instances": {"Limit": 5, "Usage": 3},
+            "networks": {"Limit": 2, "Usage": 0},
+        }});
+        let b = budgets(&s);
+        assert_eq!(b.keys().collect::<Vec<_>>(), ["cpu", "instances", "memory"]);
+        assert_eq!(
+            b["cpu"],
+            Budget {
+                limit: 4,
+                allocated: 3,
+                free: 1
+            }
+        );
+        assert_eq!(b["cpu"].text(false), "3 of 4 allocated, 1 free");
+        // Over budget (the limit was lowered under what is allocated): none free.
+        assert_eq!(b["memory"].free, 0);
+        assert_eq!(b["memory"].text(true), "5GiB of 4GiB allocated, 0B free");
+    }
+
+    #[test]
+    fn a_refused_request_says_what_it_needed() {
+        let (_d, c) = crate::client::fake::serve(vec![]);
+        let body = json!({"name": "db-1", "config": {"limits.memory": "2GiB"}, "devices": {"root": {"size": "20GiB"}}});
+        let n = needed(&c, "limits.memory", "/1.0/instances", &body).unwrap();
+        assert_eq!(
+            (n.name.as_deref(), n.amount.as_str()),
+            (Some("db-1"), "2GiB")
+        );
+        let n = needed(&c, "limits.disk", "/1.0/instances", &body).unwrap();
+        assert_eq!(n.amount, "20GiB");
+        // A resize names the instance from the path.
+        let n = needed(
+            &c,
+            "limits.cpu",
+            "/1.0/instances/web-2",
+            &json!({"config": {"limits.cpu": "4"}}),
+        )
+        .unwrap();
+        assert_eq!((n.name.as_deref(), n.amount.as_str()), (Some("web-2"), "4"));
+        let v = json!({"name": "data", "config": {"size": "5GiB"}});
+        let n = needed(&c, "limits.disk", "/1.0/storage-pools/p/volumes/custom", &v).unwrap();
+        assert_eq!(
+            (n.name.as_deref(), n.amount.as_str()),
+            (Some("data"), "5GiB")
+        );
+        // Counts, and requests that are not about an instance or a volume: nothing.
+        assert_eq!(
+            needed(&c, "limits.instances", "/1.0/instances", &body),
+            None
+        );
+        assert_eq!(
+            needed(&c, "limits.cpu", "/1.0/projects/isb-lab", &body),
+            None
+        );
+    }
+
+    #[test]
+    fn explains_a_full_quota_with_its_allocation_and_the_way_to_raise_it() {
         let r = Refusal {
             key: "limits.cpu".into(),
             value: Some("2".into()),
             project: "isb-lab".into(),
         };
-        let m = explain(&r, Some((2, 2)));
+        let m = explain(&r, Some((2, 2)), None);
         assert!(
-            m.starts_with("org lab is at its CPU quota (limits.cpu 2, 2 in use)"),
+            m.starts_with("org lab is at its CPU quota (limits.cpu: allocated 2 of 2, the sum of every instance's limit, stopped ones included):"),
             "{m}"
         );
-        assert!(m.contains("`isb org create lab --cpus N`"), "{m}");
+        assert!(m.contains("stopping one frees nothing"), "{m}");
+        assert!(m.contains("`isb org update lab --cpus N`"), "{m}");
+        assert!(m.contains("`--cpus none`"), "{m}");
         assert!(m.contains("org_update"), "{m}");
 
         let r = Refusal {
@@ -244,16 +470,34 @@ mod tests {
             value: None,
             project: "isb-lab".into(),
         };
-        let m = explain(&r, Some((4 << 30, 3584 << 20)));
-        assert!(m.contains("(limits.memory 4GiB, 3.5GiB in use)"), "{m}");
-        assert!(m.contains("--memory SIZE"), "{m}");
+        let need = Need {
+            name: Some("db-1".into()),
+            amount: "1GiB".into(),
+        };
+        let m = explain(&r, Some((4 << 30, 3584 << 20)), Some(&need));
+        assert!(
+            m.contains("(limits.memory: allocated 3.5GiB of 4GiB, the sum of every instance's limit, stopped ones included; db-1 needs 1GiB)"),
+            "{m}"
+        );
+        assert!(m.contains("--memory N"), "{m}");
+
+        let r = Refusal {
+            key: "limits.instances".into(),
+            value: None,
+            project: "isb-lab".into(),
+        };
+        let m = explain(&r, Some((3, 3)), None);
+        assert!(
+            m.contains("(limits.instances: 3 of 3, stopped ones included): delete one"),
+            "{m}"
+        );
 
         let r = Refusal {
             key: "limits.containers".into(),
             value: None,
             project: "isb-lab".into(),
         };
-        let m = explain(&r, None);
+        let m = explain(&r, None, None);
         assert!(m.contains("(limits.containers ?)"), "{m}");
         assert!(
             m.contains("incus project set isb-lab limits.containers=N"),
@@ -265,9 +509,9 @@ mod tests {
             value: Some("8".into()),
             project: "someone-else".into(),
         };
-        let m = explain(&r, None);
+        let m = explain(&r, None, None);
         assert!(
-            m.starts_with("incus project someone-else is at its CPU limit"),
+            m.starts_with("incus project someone-else is at its CPU limit (limits.cpu 8)"),
             "{m}"
         );
     }

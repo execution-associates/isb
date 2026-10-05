@@ -158,12 +158,18 @@ pub fn host_facts(client: &Client) -> Result<HostFacts> {
                 .collect()
         })
         .unwrap_or_default();
-    let initial_copy = client.has_extension("disk_initial_copy")?;
+    let info = client.server_info()?;
+    let ext = |n: &str| {
+        info["api_extensions"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|e| e == n))
+    };
     Ok(HostFacts {
         subids: SubIds::read_host(),
         pools,
         path_map: HostFacts::detect_path_map(),
-        initial_copy,
+        initial_copy: ext("disk_initial_copy"),
+        initial_owner: ext("storage_initial_owner"),
         incus_version: client.server_version()?,
         invoking_ids: crate::idmap::invoking_ids(),
         shared_root: shared_root(),
@@ -340,6 +346,9 @@ pub fn apply(
                 out.created = true;
             }
             Action::StartInstance => {
+                if let (true, Some(h)) = (out.created, &desired.before_start) {
+                    (h.0)(client, name)?;
+                }
                 report(&format!("{name}: starting"));
                 retry_once(report, || start_instance(client, name))?;
             }
@@ -352,7 +361,12 @@ pub fn apply(
                 report(&format!("{name}: port {device} listening on {listen}"));
                 out.ports.insert(device.clone(), listen);
             }
-            Action::FixOwner { path, owner } => {
+            Action::FixOwner {
+                path,
+                owner,
+                mode,
+                fresh_only,
+            } => {
                 if desired.instance_type == crate::spec::InstanceType::VirtualMachine {
                     // In-guest work needs the VM's agent, which starts after boot.
                     wait_ready(
@@ -363,8 +377,23 @@ pub fn apply(
                         &desired.exec,
                     )?;
                 }
-                report(&format!("{name}: chown {owner} {path}"));
-                fix_owner(client, name, path, owner)?;
+                let fix = crate::owner::Fix {
+                    path,
+                    owner: owner.as_deref(),
+                    mode: mode
+                        .as_deref()
+                        .map(crate::owner::parse_mode)
+                        .transpose()
+                        .map_err(Error::invalid)?,
+                    fresh_only: *fresh_only,
+                };
+                if crate::owner::apply(client, name, &fix)? {
+                    report(&format!("{name}: {action}"));
+                } else {
+                    report(&format!(
+                        "{name}: {path} came seeded from the image; owner left as is"
+                    ));
+                }
             }
             _ => unreachable!("batched above"),
         }
@@ -706,58 +735,6 @@ fn add_port_searching(
             .map(|e| format!(" (last error: {e})"))
             .unwrap_or_default()
     )))
-}
-
-const OWNER_SCRIPT: &str = r#"set -e
-owner="$1"; path="$2"
-user="${owner%%:*}"
-group=""
-case "$owner" in *:*) group="${owner#*:}" ;; esac
-home=""
-if ent="$(getent passwd "$user")"; then
-  uid="$(printf %s "$ent" | cut -d: -f3)"
-  gid="$(printf %s "$ent" | cut -d: -f4)"
-  home="$(printf %s "$ent" | cut -d: -f6)"
-else
-  case "$user" in ''|*[!0-9]*) echo "isb: no such user: $user" >&2; exit 1 ;; esac
-  uid="$user"; gid="$user"
-fi
-[ -n "$group" ] || group="$gid"
-chown "$uid:$group" "$path"
-# Parents the mount conjured are root-owned; fix those inside the user's home
-# only, and stop at the first one that is not root's.
-[ -n "$home" ] && [ "$home" != / ] || exit 0
-case "$path" in
-  "$home"/*)
-    d="$(dirname "$path")"
-    while [ "$d" != "$home" ] && [ "$d" != "/" ]; do
-      [ "$(stat -c %u "$d")" = 0 ] || break
-      chown "$uid:$group" "$d"
-      d="$(dirname "$d")"
-    done ;;
-esac
-"#;
-
-fn fix_owner(client: &Client, name: &str, path: &str, owner: &str) -> Result<()> {
-    let argv: Vec<String> = ["sh", "-c", OWNER_SCRIPT, "isb-owner", owner, path]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-    let out = exec::run_captured(
-        client,
-        name,
-        &argv,
-        &exec::Request::default(),
-        Stdin::Null,
-        Some(Duration::from_secs(60)),
-    )?;
-    if !out.success() {
-        return Err(Error::OperationFailed {
-            step: format!("chown {owner} {path} in {name}"),
-            message: out.stderr_text().trim().to_string(),
-        });
-    }
-    Ok(())
 }
 
 /// Parse `/proc/net/route` and `/proc/net/ipv6_route` for a default route.

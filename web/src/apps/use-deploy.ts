@@ -6,6 +6,7 @@ import { callTool } from "@/api/tools";
 import { errorMessage } from "@/lib/messages";
 import { type Deployment, keys } from "./api";
 import { markMine } from "./follow";
+import { invalidateOrg } from "@/lib/freshness";
 
 export type DeployTool = "app_deploy" | "app_rollback";
 
@@ -22,7 +23,7 @@ export function openDeployment(qc: QueryClient, navigate: NavigateFunction, org:
   markMine(org, d.app, d.id);
   qc.setQueryData(keys.deployment(org, d.app, d.id), d);
   navigate(deploymentPath(org, d.app, d.id, then));
-  void qc.invalidateQueries({ queryKey: keys.org(org) });
+  void invalidateOrg(qc, org);
 }
 
 /** Queue a deploy (or a rollback) of `app` and open it live. */

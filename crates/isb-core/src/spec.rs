@@ -11,7 +11,13 @@ use serde::{Deserialize, Serialize};
 use crate::flex;
 
 mod secret;
-pub use secret::{DEFAULT_SECRET_REFRESH, OnChange, SecretDef};
+pub use secret::{DEFAULT_SECRET_REFRESH, OnChange, SecretAs, SecretDef};
+
+mod env;
+pub use env::Environment;
+mod mount;
+pub(crate) use mount::is_host_path;
+pub use mount::{MountType, VolumeOptions, VolumeSpec};
 
 /// A compose file: named volumes plus any number of services, each one
 /// sandbox. Mirrors docker compose wherever incus allows.
@@ -41,120 +47,6 @@ pub struct ComposeFile {
     /// read when the file is deployed and never stored in instance config.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub secrets: BTreeMap<String, SecretDef>,
-}
-
-/// A service's environment: plain values, and variables whose value is a
-/// top-level secret (`KEY: {secret: NAME}`).
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Environment {
-    /// `KEY: VALUE`: instance config (`environment.KEY`).
-    pub vars: BTreeMap<String, String>,
-    /// `KEY: {secret: NAME}`: variable to top-level secret key.
-    pub secrets: BTreeMap<String, String>,
-    /// `KEY: {secret: NAME, on_change: ...}`: the variable's own setting.
-    pub on_change: BTreeMap<String, OnChange>,
-}
-
-impl Environment {
-    pub fn is_empty(&self) -> bool {
-        self.vars.is_empty() && self.secrets.is_empty()
-    }
-}
-
-/// The plain values, so `spec.env` reads as the map it mostly is.
-impl std::ops::Deref for Environment {
-    type Target = BTreeMap<String, String>;
-    fn deref(&self) -> &Self::Target {
-        &self.vars
-    }
-}
-
-impl std::ops::DerefMut for Environment {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.vars
-    }
-}
-
-impl<'a> IntoIterator for &'a Environment {
-    type Item = (&'a String, &'a String);
-    type IntoIter = std::collections::btree_map::Iter<'a, String, String>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.vars.iter()
-    }
-}
-
-impl From<BTreeMap<String, String>> for Environment {
-    fn from(vars: BTreeMap<String, String>) -> Self {
-        Environment {
-            vars,
-            secrets: BTreeMap::new(),
-            on_change: BTreeMap::new(),
-        }
-    }
-}
-
-impl Serialize for Environment {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeMap;
-        let mut m = s.serialize_map(None)?;
-        let mut keys: Vec<&String> = self.vars.keys().chain(self.secrets.keys()).collect();
-        keys.sort();
-        keys.dedup();
-        for k in keys {
-            match (self.vars.get(k), self.secrets.get(k)) {
-                (Some(v), _) => m.serialize_entry(k, v)?,
-                (None, Some(sec)) => {
-                    let mut v = BTreeMap::from([("secret", sec.as_str())]);
-                    if let Some(o) = self.on_change.get(k) {
-                        v.insert("on_change", o.as_str());
-                    }
-                    m.serialize_entry(k, &v)?
-                }
-                (None, None) => {}
-            }
-        }
-        m.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for Environment {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        use serde::de::Error as _;
-        let mut env = Environment::default();
-        match flex::EnvMapOrList::deserialize(d)? {
-            flex::EnvMapOrList::Map(m) => {
-                for (k, v) in m {
-                    match v {
-                        flex::EnvValue::Scalar(v) => {
-                            env.vars.insert(k, v.into_string());
-                        }
-                        flex::EnvValue::Secret { secret, .. } if secret.is_empty() => {
-                            return Err(D::Error::custom(format!(
-                                "environment {k}: secret needs a top-level secret's name"
-                            )));
-                        }
-                        flex::EnvValue::Secret { secret, on_change } => {
-                            if let Some(o) = on_change {
-                                env.on_change.insert(k.clone(), o);
-                            }
-                            env.secrets.insert(k, secret);
-                        }
-                    }
-                }
-            }
-            flex::EnvMapOrList::List(l) => {
-                for item in l {
-                    let Some((k, v)) = item.split_once('=') else {
-                        return Err(D::Error::custom(format!(
-                            "environment entry {item:?} has no value: write {item}=VALUE"
-                        )));
-                    };
-                    env.vars.insert(k.to_string(), v.to_string());
-                }
-            }
-        }
-        Ok(env)
-    }
 }
 
 /// A named custom storage volume.
@@ -624,185 +516,6 @@ pub struct IdmapRaw {
 
 fn default_id() -> u32 {
     1000
-}
-
-/// What a mount's `source` is.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum MountType {
-    /// A host path.
-    #[default]
-    Bind,
-    /// A named custom storage volume.
-    Volume,
-}
-
-/// A mount. Written as `SOURCE:TARGET[:OPTIONS]` or as the long form
-/// (`VolumeMount` in the schema); always serialized in the long form.
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
-pub struct VolumeSpec {
-    /// `bind` (a host path) or `volume` (a named volume).
-    #[serde(rename = "type")]
-    pub mount_type: MountType,
-    /// Host path (bind) or volume key (volume).
-    pub source: String,
-    /// Absolute path inside the guest.
-    pub target: String,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub read_only: bool,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub external: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pool: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub owner: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub device: Option<String>,
-    #[serde(skip_serializing_if = "VolumeOptions::is_default")]
-    pub volume: VolumeOptions,
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    pub options: BTreeMap<String, String>,
-}
-
-/// docker's `volume:` block of a long-form mount.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct VolumeOptions {
-    /// Named volumes only: do not seed an empty volume with what the image has
-    /// at `target`. Seeding is docker's default; isb does it in containers
-    /// (incus `initial.copy`) when the server supports it.
-    #[serde(
-        default,
-        deserialize_with = "flex::bool",
-        skip_serializing_if = "std::ops::Not::not"
-    )]
-    #[schemars(with = "flex::BoolOrString")]
-    pub nocopy: bool,
-}
-
-impl VolumeOptions {
-    fn is_default(&self) -> bool {
-        *self == Self::default()
-    }
-}
-
-/// The long form of a mount.
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[allow(dead_code)]
-pub(crate) struct VolumeMount {
-    /// `bind` (a host path) or `volume` (a named volume). Default: `bind` when
-    /// `source` starts with `/`, `.` or `~`, else `volume`.
-    #[serde(default, rename = "type")]
-    mount_type: Option<MountType>,
-
-    /// Host path to bind-mount (relative paths resolve against the compose
-    /// file's directory, `~` expands, symlinks are resolved), or the key of a
-    /// named volume.
-    source: String,
-
-    /// Absolute path inside the guest.
-    target: String,
-
-    /// Mount read-only.
-    #[serde(default, deserialize_with = "flex::bool")]
-    #[schemars(with = "flex::BoolOrString")]
-    read_only: bool,
-
-    /// Named volumes only: the volume must already exist; isb never creates it.
-    #[serde(default, deserialize_with = "flex::bool")]
-    #[schemars(with = "flex::BoolOrString")]
-    external: bool,
-
-    /// Named volumes only: the storage pool. Default: the top-level volume's
-    /// pool, else the sandbox's root pool.
-    #[serde(default)]
-    pool: Option<String>,
-
-    /// Named volumes only: chown the mount point to this guest user (`dev`,
-    /// `dev:dev` or `1000:1000`) after it is attached, plus any root-owned
-    /// parents inside that user's home that the mount conjured.
-    #[serde(default, deserialize_with = "flex::opt_string")]
-    #[schemars(with = "Option<flex::IntOrString>")]
-    owner: Option<String>,
-
-    /// incus device name. Default: derived from the target. Set it to adopt an
-    /// existing device under a known name.
-    #[serde(default)]
-    device: Option<String>,
-
-    /// docker's volume options (`nocopy`).
-    #[serde(default)]
-    volume: VolumeOptions,
-
-    /// Extra disk device properties (`shift`, `propagation`, ...), verbatim.
-    #[serde(default, deserialize_with = "flex::string_map")]
-    #[schemars(with = "BTreeMap<String, flex::Scalar>")]
-    options: BTreeMap<String, String>,
-}
-
-/// Whether a mount source names a host path rather than a volume.
-pub(crate) fn is_host_path(source: &str) -> bool {
-    source.starts_with('/') || source.starts_with('.') || source.starts_with('~')
-}
-
-impl From<VolumeMount> for VolumeSpec {
-    fn from(m: VolumeMount) -> Self {
-        let mount_type = m.mount_type.unwrap_or(if is_host_path(&m.source) {
-            MountType::Bind
-        } else {
-            MountType::Volume
-        });
-        VolumeSpec {
-            mount_type,
-            source: m.source,
-            target: m.target,
-            read_only: m.read_only,
-            external: m.external,
-            pool: m.pool,
-            owner: m.owner,
-            device: m.device,
-            volume: m.volume,
-            options: m.options,
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for VolumeSpec {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        use serde::de::Error as _;
-        match serde_json::Value::deserialize(d)? {
-            serde_json::Value::String(s) => {
-                crate::shorthand::volume(&s).map_err(|e| D::Error::custom(e.to_string()))
-            }
-            v @ serde_json::Value::Object(_) => serde_json::from_value::<VolumeMount>(v)
-                .map(Into::into)
-                .map_err(|e| D::Error::custom(format!("volume: {e}"))),
-            other => Err(D::Error::custom(format!(
-                "volume: expected SOURCE:TARGET[:OPTIONS] or {{type, source, target, ...}}, got {other}"
-            ))),
-        }
-    }
-}
-
-impl JsonSchema for VolumeSpec {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "VolumeSpec".into()
-    }
-
-    fn json_schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        let long = g.subschema_for::<VolumeMount>();
-        schemars::json_schema!({
-            "description": "A mount: `SOURCE:TARGET[:OPTIONS]` or the long form.",
-            "oneOf": [
-                {
-                    "type": "string",
-                    "description": "SOURCE:TARGET[:OPTIONS]. OPTIONS is a comma list of ro, rw, owner=USER, device=NAME, pool=POOL, external."
-                },
-                long
-            ]
-        })
-    }
 }
 
 /// Which side listens.
@@ -1306,7 +1019,9 @@ pub struct Healthcheck {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retries: Option<u32>,
 
-    /// Grace after a start during which failures do not count. Default `0s`.
+    /// Grace after a start during which failures do not count. Unset, a
+    /// replica that has not yet passed gets `interval * retries * 2`
+    /// (60s to 5m) before its failures count; one that has passed, none.
     #[serde(
         default,
         deserialize_with = "flex::opt_string",
@@ -1350,6 +1065,37 @@ pub struct HealthProbe {
     pub retries: u32,
     pub start_period: std::time::Duration,
     pub start_interval: std::time::Duration,
+    /// How long a replica that has not passed since it (re)started may fail
+    /// before its failures count: `start_period` when set, else
+    /// [`HealthProbe::default_grace`].
+    pub startup_grace: std::time::Duration,
+}
+
+impl HealthProbe {
+    /// The startup grace of a healthcheck without `start_period`: twice the
+    /// failure budget a running replica gets (`interval * retries`), so a
+    /// slow first start (OIDC discovery, migrations, a JVM) is not taken
+    /// for a hang; at least 60s, as a fast probe's budget (5s x 3) is
+    /// shorter than many starts; at most 5 minutes, so a replica that
+    /// never comes up still fails its rollout in bounded time.
+    pub fn default_grace(interval: std::time::Duration, retries: u32) -> std::time::Duration {
+        (interval * retries * 2).clamp(
+            std::time::Duration::from_secs(60),
+            std::time::Duration::from_secs(300),
+        )
+    }
+
+    /// Whether a failed probe counts toward `retries`. A replica that has
+    /// not passed since it (re)started is starting: it stays out of the
+    /// load balancer, and its failures count only once the startup grace
+    /// is over. After a pass, they count once `start_period` is over.
+    pub fn failure_counts(&self, passed: bool, since_start: std::time::Duration) -> bool {
+        if passed {
+            since_start >= self.start_period
+        } else {
+            since_start >= self.startup_grace
+        }
+    }
 }
 
 impl Healthcheck {
@@ -1383,13 +1129,20 @@ impl Healthcheck {
                 None => Ok(std::time::Duration::from_secs(default)),
             }
         };
+        let interval = dur(&self.interval, 30)?;
+        let retries = self.retries.unwrap_or(3).max(1);
+        let start_period = dur(&self.start_period, 0)?;
         Ok(Some(HealthProbe {
             argv,
-            interval: dur(&self.interval, 30)?,
+            interval,
             timeout: dur(&self.timeout, 30)?,
-            retries: self.retries.unwrap_or(3).max(1),
-            start_period: dur(&self.start_period, 0)?,
+            retries,
+            start_period,
             start_interval: dur(&self.start_interval, 5)?,
+            startup_grace: match &self.start_period {
+                Some(_) => start_period,
+                None => HealthProbe::default_grace(interval, retries),
+            },
         }))
     }
 }
@@ -1709,7 +1462,14 @@ impl SandboxSpec {
             .iter()
             .map(|r| r.source.as_str())
             .chain(self.env.secrets.values().map(String::as_str))
+            .chain(self.env.files.values().map(String::as_str))
             .collect()
+    }
+
+    /// The service has secret files to deliver: `secrets:`, or
+    /// `environment` secrets `as: file`.
+    pub fn has_secret_files(&self) -> bool {
+        !self.secrets.is_empty() || !self.env.files.is_empty()
     }
 
     /// The service's own `on_change` for a top-level secret it uses: the
@@ -1723,6 +1483,7 @@ impl SandboxSpec {
                 self.env
                     .secrets
                     .iter()
+                    .chain(&self.env.files)
                     .filter(|(_, k)| *k == key)
                     .filter_map(|(var, _)| self.env.on_change.get(var).copied()),
             )

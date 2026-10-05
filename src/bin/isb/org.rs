@@ -5,7 +5,8 @@ use super::*;
 #[derive(Subcommand)]
 #[allow(clippy::large_enum_variant)] // parsed once per run
 pub(crate) enum OrgCmd {
-    /// Create an org, or update an existing one's limits.
+    /// Create an org, or set limits and settings on an existing one (`isb
+    /// org update` also lifts them).
     Create {
         name: String,
         /// Total CPUs across the org.
@@ -76,6 +77,42 @@ pub(crate) enum OrgCmd {
         /// The dedicated VM's disk (default 40GiB, at least 10GiB).
         #[arg(long, requires = "vm", value_name = "SIZE")]
         vm_disk: Option<String>,
+    },
+    /// Change an existing org's limits, per-instance defaults, egress
+    /// exceptions or UDP ports, through the daemon (the org_update tool).
+    /// Flags left out keep their value; `none` lifts a limit.
+    Update {
+        name: String,
+        /// Total CPUs across the org (the sum of every instance's
+        /// limits.cpu, stopped ones included), or `none`.
+        #[arg(long, value_name = "N|none")]
+        cpus: Option<String>,
+        /// Total memory, e.g. 16GiB, or `none`.
+        #[arg(long, value_name = "SIZE|none")]
+        memory: Option<String>,
+        /// Total disk, e.g. 100GiB, or `none`. While set, an instance
+        /// without a root size gets 10GiB from the org's default profile.
+        #[arg(long, value_name = "SIZE|none")]
+        disk: Option<String>,
+        /// Most instances the org may have, or `none`.
+        #[arg(long, value_name = "N|none")]
+        instances: Option<String>,
+        /// CPUs an instance gets when its spec sets none.
+        #[arg(long)]
+        default_cpus: Option<u32>,
+        /// Memory an instance gets when its spec sets none.
+        #[arg(long)]
+        default_memory: Option<String>,
+        /// A private destination the org may reach, CIDR[:PORTS[/tcp|udp]]
+        /// (repeatable). Replaces the org's exceptions; `none` clears them.
+        #[arg(long, value_name = "DEST")]
+        allow_egress: Vec<String>,
+        /// A UDP port the org's stacks may publish, IP:PORT (repeatable).
+        /// Replaces the list; `none` clears it.
+        #[arg(long, value_name = "IP:PORT")]
+        allow_udp: Vec<String>,
+        #[arg(long)]
+        json: bool,
     },
     /// List orgs.
     #[command(alias = "list")]
@@ -260,6 +297,7 @@ pub(crate) fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
                     memory,
                     disk,
                     instances,
+                    lift: Vec::new(),
                     default_cpus,
                     default_memory,
                     bind_roots: roots,
@@ -285,6 +323,61 @@ pub(crate) fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
                 info.network.unwrap_or_default(),
                 info.subnet.unwrap_or_default()
             );
+            Ok(0)
+        }
+        OrgCmd::Update {
+            name,
+            cpus,
+            memory,
+            disk,
+            instances,
+            default_cpus,
+            default_memory,
+            allow_egress,
+            allow_udp,
+            json,
+        } => {
+            let mut a = serde_json::json!({"org": OrgId::new(name)?});
+            for (k, v) in [("cpus", cpus), ("instances", instances)] {
+                if let Some(v) = v {
+                    // A count goes as a number; `none` (or anything else, for
+                    // the tool to refuse) as text.
+                    a[k] = match v.trim().parse::<u64>() {
+                        Ok(n) => serde_json::json!(n),
+                        Err(_) => serde_json::json!(v),
+                    };
+                }
+            }
+            for (k, v) in [
+                ("memory", memory),
+                ("disk", disk),
+                ("default_memory", default_memory),
+            ] {
+                if let Some(v) = v {
+                    a[k] = serde_json::json!(v);
+                }
+            }
+            if let Some(n) = default_cpus {
+                a["default_cpus"] = serde_json::json!(n);
+            }
+            for (k, list) in [("egress", allow_egress), ("udp", allow_udp)] {
+                if !list.is_empty() {
+                    let e: Vec<String> = if list == ["none"] { vec![] } else { list };
+                    a[k] = serde_json::json!(e);
+                }
+            }
+            let v = call("org_update", a, Duration::from_secs(300))?;
+            if json {
+                print_json(&v);
+                return Ok(0);
+            }
+            for n in v["notes"].as_array().into_iter().flatten() {
+                eprintln!("{}", n.as_str().unwrap_or(""));
+            }
+            println!("org        {}", v["name"].as_str().unwrap_or(""));
+            for l in limit_lines(&v) {
+                println!("{l}");
+            }
             Ok(0)
         }
         OrgCmd::Ls { json } => {
@@ -339,16 +432,9 @@ pub(crate) fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
                     o.network.as_deref().unwrap_or("-"),
                     o.subnet.as_deref().unwrap_or("")
                 );
-                println!(
-                    "instances  {}{}",
-                    o.instances,
-                    o.instances_limit
-                        .map(|l| format!(" of {l}"))
-                        .unwrap_or_default()
-                );
-                println!("cpus       {}", o.cpus.as_deref().unwrap_or("unlimited"));
-                println!("memory     {}", o.memory.as_deref().unwrap_or("unlimited"));
-                println!("disk       {}", o.disk.as_deref().unwrap_or("unlimited"));
+                for l in limit_lines(&serde_json::to_value(&o).unwrap_or_default()) {
+                    println!("{l}");
+                }
                 println!(
                     "bind roots {}",
                     if o.bind_roots.is_empty() {
@@ -470,5 +556,96 @@ pub(crate) fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
             .map_err(|e| Error::Invalid(e.to_string()))?;
             Ok(0)
         }
+    }
+}
+
+/// An org's limits as `org show` prints them, from its JSON (`org_get` or
+/// [`isb::org::OrgInfo`]): each limit with what its instances are allocated
+/// against it, and the per-instance defaults.
+fn limit_lines(v: &serde_json::Value) -> Vec<String> {
+    let budget = |name: &str| {
+        let b = &v["allocation"][name];
+        Some(isb::org::Budget {
+            limit: b["limit"].as_i64()?,
+            allocated: b["allocated"].as_i64()?,
+            free: b["free"].as_i64()?,
+        })
+    };
+    let mut out = vec![format!(
+        "instances  {}{}",
+        v["instances"].as_u64().unwrap_or(0),
+        v["instances_limit"]
+            .as_str()
+            .map(|l| format!(" of {l}, stopped ones included"))
+            .unwrap_or_default()
+    )];
+    let mut any = false;
+    for (label, key, name, in_bytes) in [
+        ("cpus      ", "cpus", "cpu", false),
+        ("memory    ", "memory", "memory", true),
+        ("disk      ", "disk", "disk", true),
+    ] {
+        let line = match (budget(name), v[key].as_str()) {
+            (Some(b), _) => {
+                any = true;
+                b.text(in_bytes)
+            }
+            (None, Some(l)) => l.to_string(),
+            (None, None) => "unlimited".to_string(),
+        };
+        out.push(format!("{label} {line}"));
+    }
+    if any {
+        out.push(
+            "           (allocated: the sum of every instance's limit, stopped ones included)"
+                .into(),
+        );
+    }
+    let mut defaults = vec![
+        format!("{} CPU", v["default_cpus"].as_str().unwrap_or("1")),
+        format!(
+            "{} memory",
+            v["default_memory"].as_str().unwrap_or("512MiB")
+        ),
+    ];
+    if let Some(d) = v["default_disk"].as_str() {
+        defaults.push(format!("{d} root disk"));
+    }
+    out.push(format!(
+        "defaults   {} per instance whose spec sets none",
+        defaults.join(", ")
+    ));
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::limit_lines;
+    use serde_json::json;
+
+    #[test]
+    fn limits_show_their_allocation() {
+        let v = json!({
+            "instances": 3, "instances_limit": "5", "cpus": "4", "memory": "4GiB",
+            "default_cpus": "1", "default_memory": "512MiB", "default_disk": "10GiB",
+            "allocation": {
+                "cpu": {"limit": 4, "allocated": 3, "free": 1},
+                "memory": {"limit": 4i64 << 30, "allocated": 1536i64 << 20, "free": 2560i64 << 20},
+            },
+        });
+        let l = limit_lines(&v);
+        assert_eq!(l[0], "instances  3 of 5, stopped ones included");
+        assert_eq!(l[1], "cpus       3 of 4 allocated, 1 free");
+        assert_eq!(l[2], "memory     1.5GiB of 4GiB allocated, 2.5GiB free");
+        assert_eq!(l[3], "disk       unlimited");
+        assert!(l[4].contains("stopped ones included"));
+        assert_eq!(
+            l[5],
+            "defaults   1 CPU, 512MiB memory, 10GiB root disk per instance whose spec sets none"
+        );
+        // An org on a server whose daemon reports no allocation: the limit.
+        let l = limit_lines(&json!({"instances": 0, "cpus": "2"}));
+        assert_eq!(l[1], "cpus       2");
+        assert!(l[4].starts_with("defaults"));
     }
 }

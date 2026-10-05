@@ -433,18 +433,29 @@ pub fn push_secrets_detailed(
     spec: &SandboxSpec,
     values: &BTreeMap<String, Vec<u8>>,
 ) -> Result<Pushed> {
+    push_secret_files(sb.client(), sb.name(), spec, values)
+}
+
+/// [`push_secrets_detailed`] by instance name. The files API works on a
+/// stopped container too, so a new OCI instance gets its files before its
+/// first start (see `plan::Desired::before_start`).
+pub fn push_secret_files(
+    client: &Client,
+    name: &str,
+    spec: &SandboxSpec,
+    values: &BTreeMap<String, Vec<u8>>,
+) -> Result<Pushed> {
     let mut pushed = Pushed::default();
-    if spec.secrets.is_empty() {
+    if !spec.has_secret_files() {
         return Ok(pushed);
     }
-    let client = sb.client();
-    let name = sb.name();
     let (def_uid, def_gid) = numeric_user(spec.user.as_deref()).unwrap_or((0, 0));
+    let refs = file_refs(client, name, spec)?;
     make_dirs(client, name, "/var/lib/isb")?;
     client.make_dir(name, SECRETS_STORE, 0, 0, 0o700)?;
     let mut script =
         String::from("#!/bin/sh\n# Written by isb: puts the secrets back after a boot.\nset -e\n");
-    for (n, s) in spec.secrets.iter().enumerate() {
+    for (n, s) in refs.iter().enumerate() {
         let value = values
             .get(&s.source)
             .ok_or_else(|| Error::invalid(format!("{name}: no value for secret {:?}", s.source)))?;
@@ -471,6 +482,57 @@ pub fn push_secrets_detailed(
     }
     client.push_file(name, SECRETS_RESTORE, script.as_bytes(), 0, 0, 0o700)?;
     Ok(pushed)
+}
+
+/// The files to write: `secrets:` as given, then each `as: file` variable's
+/// secret at `/run/secrets/NAME`, 0400 and owned by the user the app starts
+/// as (the numeric `user:`, else an OCI image's own `oci.uid`/`oci.gid`), so
+/// an image that runs as non-root can read it. A path `secrets:` already
+/// writes is left to it.
+fn file_refs(
+    client: &Client,
+    name: &str,
+    spec: &SandboxSpec,
+) -> Result<Vec<crate::spec::SecretRef>> {
+    let mut refs = spec.secrets.clone();
+    if spec.env.files.is_empty() {
+        return Ok(refs);
+    }
+    let (uid, gid) = match numeric_user(spec.user.as_deref()) {
+        Some(ids) => ids,
+        None => oci_ids(client, name)?,
+    };
+    let taken: std::collections::BTreeSet<String> = refs.iter().map(|r| r.guest_path()).collect();
+    let keys: std::collections::BTreeSet<&String> = spec.env.files.values().collect();
+    for key in keys {
+        let r = crate::spec::SecretRef {
+            source: key.clone(),
+            uid: Some(uid),
+            gid: Some(gid),
+            mode: Some("0400".into()),
+            ..Default::default()
+        };
+        if !taken.contains(&r.guest_path()) {
+            refs.push(r);
+        }
+    }
+    Ok(refs)
+}
+
+/// An OCI instance's `oci.uid`/`oci.gid` (incus fills them from the image's
+/// `USER`); 0 when unset, as for a system image.
+fn oci_ids(client: &Client, name: &str) -> Result<(u32, u32)> {
+    let inst = client.get(&format!(
+        "/1.0/instances/{}",
+        crate::client::encode_segment(name)
+    ))?;
+    let id = |k: &str| {
+        inst.pointer(&format!("/config/{}", k.replace('/', "~1")))
+            .and_then(serde_json::Value::as_str)
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0)
+    };
+    Ok((id("oci.uid"), id("oci.gid")))
 }
 
 /// Set an OCI instance's secret variables in its config (`environment.KEY`),

@@ -848,7 +848,7 @@
   "info": {
     "description": "isb serve's HTTP surface: the tools (also MCP), the workspace resource, the identity endpoints, streams, websockets and webhooks. docs/reference/http-api.md.",
     "title": "isb",
-    "version": "1.2.0"
+    "version": "1.5.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -3745,8 +3745,35 @@
                     "type": "integer"
                   },
                   "resources": {
-                    "description": "{cpus, memory} per replica.",
+                    "additionalProperties": false,
+                    "properties": {
+                      "cpus": {
+                        "description": "CPUs per replica (limits.cpu), e.g. 2 or \"2\". null (app_update) removes the limit.",
+                        "type": [
+                          "string",
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "memory": {
+                        "description": "Memory per replica: 512m, 2g, 2GiB, or a number of bytes. null (app_update) removes the limit.",
+                        "type": [
+                          "string",
+                          "integer",
+                          "null"
+                        ]
+                      }
+                    },
                     "type": "object"
+                  },
+                  "secret_on_change": {
+                    "description": "What a new version of a secret the app uses (env or files) does to its replicas: roll (default; a rolling update), restart (each replica's app restarted in place with the new value, one at a time, waiting until healthy) or none (files updated, replicas reported stale until they next start).",
+                    "enum": [
+                      "roll",
+                      "restart",
+                      "none"
+                    ],
+                    "type": "string"
                   },
                   "source": {
                     "description": "Exactly one of {\"image\": IMAGE} or {\"git\": {\"url\", \"ref\" (branch, tag or SHA; default main), \"subdir\", \"auth\": {\"token_secret\": NAME, \"username\"} | {\"ssh_key_secret\": NAME}, \"submodules\": false}}. IMAGE always carries its registry's prefix: Docker Hub is docker:NAME[:TAG] or docker:OWNER/NAME[:TAG] (docker:nginx:1.27, docker:traefik/whoami; never docker:traefik:whoami, which is the tag whoami of the image traefik), then ghcr:OWNER/NAME[:TAG], quay:OWNER/NAME[:TAG], oci:HOST/PATH[:TAG], registry:APP[:TAG] for the org's own builds; a name with no prefix is an image already on the host. A registry image is looked up when saved: one the registry does not have is refused, one that cannot be checked (offline, private) is saved with a warning.",
@@ -3765,15 +3792,6 @@
                   },
                   "working_dir": {
                     "type": "string"
-                  },
-                  "secret_on_change": {
-                    "type": "string",
-                    "enum": [
-                      "roll",
-                      "restart",
-                      "none"
-                    ],
-                    "description": "What a new version of a secret the app uses (env or files) does to its replicas: roll (default; a rolling update), restart (each replica's app restarted in place with the new value, one at a time, waiting until healthy) or none (files updated, replicas reported stale until they next start)."
                   }
                 },
                 "required": [
@@ -4659,7 +4677,7 @@
     },
     "/api/v1/tools/app_logs": {
       "post": {
-        "description": "Recent output of an app's replicas, by app name (kubectl logs deploy/NAME): all replicas, or one with `replica`. `tail` lines (default 200, at most 5000); `since` keeps lines newer than a duration like 10m (for system images; an OCI image's console log has no timestamps). A replaced replica's logs go with it, so there is no `previous`, except that a replica that failed to come up (a crash loop) leaves its last output as `last_failed_attempt` while the app is not converged; app_events and history_query say what happened.",
+        "description": "Recent output of an app's replicas, by app name (kubectl logs deploy/NAME): all replicas, or one with `replica`. `tail` lines (default 200, at most 5000); `since` keeps lines newer than a duration like 10m or an RFC 3339 time (for system images; an OCI image's console log has no timestamps). A replaced replica's logs go with it, so there is no `previous`, except that a replica that failed to come up (a crash loop) leaves its last output as `last_failed_attempt` while the app is not converged; app_events and history_query say what happened.",
         "operationId": "app_logs",
         "requestBody": {
           "content": {
@@ -4681,7 +4699,7 @@
                     "type": "integer"
                   },
                   "since": {
-                    "description": "e.g. 10m, 2h.",
+                    "description": "A duration back from now (10m, 2h) or an RFC 3339 time.",
                     "type": "string"
                   },
                   "tail": {
@@ -5083,8 +5101,35 @@
                     "type": "integer"
                   },
                   "resources": {
-                    "description": "{cpus, memory} per replica.",
+                    "additionalProperties": false,
+                    "properties": {
+                      "cpus": {
+                        "description": "CPUs per replica (limits.cpu), e.g. 2 or \"2\". null (app_update) removes the limit.",
+                        "type": [
+                          "string",
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "memory": {
+                        "description": "Memory per replica: 512m, 2g, 2GiB, or a number of bytes. null (app_update) removes the limit.",
+                        "type": [
+                          "string",
+                          "integer",
+                          "null"
+                        ]
+                      }
+                    },
                     "type": "object"
+                  },
+                  "secret_on_change": {
+                    "description": "What a new version of a secret the app uses (env or files) does to its replicas: roll (default; a rolling update), restart (each replica's app restarted in place with the new value, one at a time, waiting until healthy) or none (files updated, replicas reported stale until they next start).",
+                    "enum": [
+                      "roll",
+                      "restart",
+                      "none"
+                    ],
+                    "type": "string"
                   },
                   "source": {
                     "description": "Exactly one of {\"image\": IMAGE} or {\"git\": {\"url\", \"ref\" (branch, tag or SHA; default main), \"subdir\", \"auth\": {\"token_secret\": NAME, \"username\"} | {\"ssh_key_secret\": NAME}, \"submodules\": false}}. IMAGE always carries its registry's prefix: Docker Hub is docker:NAME[:TAG] or docker:OWNER/NAME[:TAG] (docker:nginx:1.27, docker:traefik/whoami; never docker:traefik:whoami, which is the tag whoami of the image traefik), then ghcr:OWNER/NAME[:TAG], quay:OWNER/NAME[:TAG], oci:HOST/PATH[:TAG], registry:APP[:TAG] for the org's own builds; a name with no prefix is an image already on the host. A registry image is looked up when saved: one the registry does not have is refused, one that cannot be checked (offline, private) is saved with a warning.",
@@ -5103,15 +5148,6 @@
                   },
                   "working_dir": {
                     "type": "string"
-                  },
-                  "secret_on_change": {
-                    "type": "string",
-                    "enum": [
-                      "roll",
-                      "restart",
-                      "none"
-                    ],
-                    "description": "What a new version of a secret the app uses (env or files) does to its replicas: roll (default; a rolling update), restart (each replica's app restarted in place with the new value, one at a time, waiting until healthy) or none (files updated, replicas reported stale until they next start)."
                   }
                 },
                 "required": [
@@ -6588,19 +6624,37 @@
                     "type": "string"
                   },
                   "resources": {
-                    "description": "{cpus, memory}.",
+                    "additionalProperties": false,
+                    "properties": {
+                      "cpus": {
+                        "description": "CPUs per replica (limits.cpu), e.g. 2 or \"2\". null (app_update) removes the limit.",
+                        "type": [
+                          "string",
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "memory": {
+                        "description": "Memory per replica: 512m, 2g, 2GiB, or a number of bytes. null (app_update) removes the limit.",
+                        "type": [
+                          "string",
+                          "integer",
+                          "null"
+                        ]
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "urls": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "More secrets isb keeps holding the internal URL, each with a query string for a driver's options ({\"dsn.main-db.web\": \"sslmode=disable\"}, \"\" for none). Written at deploy and again whenever the password changes, so no app holds a stale copy of it.",
                     "type": "object"
                   },
                   "user": {
                     "description": "User created on first start (default: as database). Not Redis.",
                     "type": "string"
-                  },
-                  "urls": {
-                    "type": "object",
-                    "additionalProperties": {
-                      "type": "string"
-                    },
-                    "description": "More secrets isb keeps holding the internal URL, each with a query string for a driver's options ({\"dsn.main-db.web\": \"sslmode=disable\\"
                   },
                   "version": {
                     "description": "Image tag (default: 17, 8.4, 11.4, 8.0, 7.4).",
@@ -6978,7 +7032,7 @@
     },
     "/api/v1/tools/events": {
       "post": {
-        "description": "What happened, newest last: deploys, rollouts, health changes, restarts, failures. Pass the last `seq` you saw as `since` to get only newer ones; `wait` (seconds, at most 30) holds the call until one arrives.",
+        "description": "What happened, newest last: deploys, rollouts, health changes, restarts, failures. Pass the last `seq` you saw as `since` to get only newer ones; `wait` (seconds, at most 30) holds the call until one arrives. A `since` past the newest `seq` is from before the daemon restarted and starts over. Every org the caller sees, or only `org` when it is given.",
         "operationId": "events",
         "requestBody": {
           "content": {
@@ -7259,7 +7313,7 @@
     },
     "/api/v1/tools/ingress_status": {
       "post": {
-        "description": "The HTTP(S) edge: its listeners, CA and Caddy process; every routed domain with its URL, certificate state (issued, pending, failed, unsupported, cloudflare, none) and live upstreams; domain conflicts and refusals; and each Cloudflare-tunnel org's cloudflared and API sync. Shows the caller's orgs only.",
+        "description": "The HTTP(S) edge: its listeners, CA and Caddy process; every routed domain with its URL, certificate state (issued, pending, failed, unsupported, cloudflare, none) and live upstreams; domain conflicts and refusals; and each Cloudflare-tunnel org's cloudflared and API sync. Shows the caller's orgs only, or only `org` when it is given.",
         "operationId": "ingress_status",
         "requestBody": {
           "content": {
@@ -7991,7 +8045,7 @@
     },
     "/api/v1/tools/job_create": {
       "post": {
-        "description": "Run a command on a cron schedule against an app or a stack service: in a running replica (mode exec) or a fresh one-off instance from its image (mode run). Each run keeps its exit code, duration and output (bounded); job.succeeded / job.failed events.",
+        "description": "Run a command on a cron schedule against an app or a stack service: in a running replica (mode exec) or a fresh one-off instance from its image (mode run). Each run keeps its exit code, duration and output (bounded); job.succeeded / job.failed events. enabled: false creates it disabled. Answers the job as job_get does.",
         "operationId": "job_create",
         "requestBody": {
           "content": {
@@ -8014,6 +8068,7 @@
                     "type": "string"
                   },
                   "enabled": {
+                    "description": "Default true. false: the job is kept but never runs on its schedule (job_run still runs it) until enabled.",
                     "type": "boolean"
                   },
                   "env": {
@@ -8178,7 +8233,7 @@
     },
     "/api/v1/tools/job_get": {
       "post": {
-        "description": "A job's settings, next run and last run.",
+        "description": "A job's settings (name, schedule, target, command, enabled, ...) with created_at, updated_at, next_run (RFC 3339; null when disabled) and last_run, all at the top level.",
         "operationId": "job_get",
         "requestBody": {
           "content": {
@@ -8240,7 +8295,7 @@
     },
     "/api/v1/tools/job_list": {
       "post": {
-        "description": "An org's jobs with their next and last run.",
+        "description": "An org's jobs, each as job_get answers one.",
         "operationId": "job_list",
         "requestBody": {
           "content": {
@@ -8526,6 +8581,7 @@
                     "type": "string"
                   },
                   "enabled": {
+                    "description": "Default true. false: the job is kept but never runs on its schedule (job_run still runs it) until enabled.",
                     "type": "boolean"
                   },
                   "env": {
@@ -10241,9 +10297,22 @@
                 "additionalProperties": false,
                 "properties": {
                   "cpus": {
-                    "description": "CPUs across the org's instances.",
-                    "minimum": 1,
-                    "type": "integer"
+                    "anyOf": [
+                      {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      {
+                        "enum": [
+                          "none"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "CPUs across the org: the sum of every instance's limits.cpu, stopped ones included. \"none\" or null lifts the limit."
                   },
                   "default_cpus": {
                     "description": "CPUs an instance gets when its spec sets none.",
@@ -10255,8 +10324,15 @@
                     "type": "string"
                   },
                   "disk": {
-                    "description": "Disk across the org, e.g. 100GiB.",
-                    "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Disk across the org, e.g. 100GiB: the sum of every root disk's and volume's size. While set, an instance without a root size gets 10GiB from the org's default profile. \"none\" or null lifts the limit."
                   },
                   "egress": {
                     "description": "Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/concepts/orgs.md). Replaces the list; [] clears it.",
@@ -10266,13 +10342,33 @@
                     "type": "array"
                   },
                   "instances": {
-                    "description": "Instances in the org.",
-                    "minimum": 1,
-                    "type": "integer"
+                    "anyOf": [
+                      {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      {
+                        "enum": [
+                          "none"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Instances in the org, stopped ones included. \"none\" or null lifts the limit."
                   },
                   "memory": {
-                    "description": "Memory across the org, e.g. 16GiB.",
-                    "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Memory across the org, e.g. 16GiB: the sum of every instance's limits.memory, stopped ones included. \"none\" or null lifts the limit."
                   },
                   "org": {
                     "description": "The new org's name: [a-z0-9-], starts with a letter.",
@@ -10458,7 +10554,7 @@
     },
     "/api/v1/tools/org_get": {
       "post": {
-        "description": "An org's limits, per-instance defaults, network (bridge and subnet), egress exceptions, bind roots and service-name domain, with its instance, stack and member counts.",
+        "description": "An org's limits with what is allocated against each (`allocation`: limit, allocated, free; allocated is the sum of every instance's limit, stopped ones included, which is what incus enforces), per-instance defaults, network (bridge and subnet), egress exceptions, bind roots and service-name domain, with its instance, stack and member counts.",
         "operationId": "org_get",
         "requestBody": {
           "content": {
@@ -10635,7 +10731,7 @@
     },
     "/api/v1/tools/org_update": {
       "post": {
-        "description": "Platform admins: change an org's limits, per-instance defaults, egress exceptions or the UDP ports its stacks may publish. Fields left out keep their value; `egress` and `udp` replace their lists. A limit cannot be lifted once set (as with `isb org create`).",
+        "description": "Platform admins: change an org's limits, per-instance defaults, egress exceptions or the UDP ports its stacks may publish. Fields left out keep their value; a limit given as \"none\" (or null) is lifted; `egress` and `udp` replace their lists. The same as `isb org update`.",
         "operationId": "org_update",
         "requestBody": {
           "content": {
@@ -10644,9 +10740,22 @@
                 "additionalProperties": false,
                 "properties": {
                   "cpus": {
-                    "description": "CPUs across the org's instances.",
-                    "minimum": 1,
-                    "type": "integer"
+                    "anyOf": [
+                      {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      {
+                        "enum": [
+                          "none"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "CPUs across the org: the sum of every instance's limits.cpu, stopped ones included. \"none\" or null lifts the limit."
                   },
                   "default_cpus": {
                     "description": "CPUs an instance gets when its spec sets none.",
@@ -10658,8 +10767,15 @@
                     "type": "string"
                   },
                   "disk": {
-                    "description": "Disk across the org, e.g. 100GiB.",
-                    "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Disk across the org, e.g. 100GiB: the sum of every root disk's and volume's size. While set, an instance without a root size gets 10GiB from the org's default profile. \"none\" or null lifts the limit."
                   },
                   "egress": {
                     "description": "Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/concepts/orgs.md). Replaces the list; [] clears it.",
@@ -10669,13 +10785,33 @@
                     "type": "array"
                   },
                   "instances": {
-                    "description": "Instances in the org.",
-                    "minimum": 1,
-                    "type": "integer"
+                    "anyOf": [
+                      {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      {
+                        "enum": [
+                          "none"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Instances in the org, stopped ones included. \"none\" or null lifts the limit."
                   },
                   "memory": {
-                    "description": "Memory across the org, e.g. 16GiB.",
-                    "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Memory across the org, e.g. 16GiB: the sum of every instance's limits.memory, stopped ones included. \"none\" or null lifts the limit."
                   },
                   "org": {
                     "description": "The org.",
@@ -10794,7 +10930,7 @@
     },
     "/api/v1/tools/overview": {
       "post": {
-        "description": "Everything a dashboard shows in one call: the host's CPU and memory (with history), every stack in detail (as stack_status), the sandboxes (status, IP, CPU, memory), and the latest event number for the events tool.",
+        "description": "Everything a dashboard shows in one call: the host's CPU and memory (with history), every stack in detail (as stack_status), the sandboxes (status, IP, CPU, memory), and the latest event number for the events tool. Every org the caller sees, or only `org` when it is given.",
         "operationId": "overview",
         "requestBody": {
           "content": {
@@ -13591,7 +13727,7 @@
     },
     "/api/v1/tools/stack_deployment_get": {
       "post": {
-        "description": "One deployment of a compose stack: its record (as stack_deployments lists it), the compose text it deployed (`source`, as stack_export gave it), the stack's environment (`env`, secret references only) and managed domains (`domains`) at the time, and its log: the stack's events while it ran, as `events` [{at (unix ms), level, service, message}] and as `log` text. Poll until `finished`. stack_rollback with `to` deploys it again.",
+        "description": "One deployment of a compose stack: its record (as stack_deployments lists it), the compose text it deployed (`source`, as stack_export gave it), the stack's environment (`env`, secret references only) and managed domains (`domains`) at the time, and its log: the stack's events while it ran, as `events` [{at (unix ms), level, service, message}] and as `log` text, and `failed_attempts`: per service, the last replica that failed to come up while it ran, with its last output (at most 200 lines, 32 KiB). Poll until `finished`. stack_rollback with `to` deploys it again.",
         "operationId": "stack_deployment_get",
         "requestBody": {
           "content": {
@@ -13996,6 +14132,113 @@
         "x-isb-tool": "stack_env_set"
       }
     },
+    "/api/v1/tools/stack_exec": {
+      "post": {
+        "description": "Run argv in one of a compose stack service's replicas and return its exit code and output, as app_exec does for an app: by default a running replica, healthy and in rotation first; `replica` (slot) or `instance` choose one. 60s default timeout (at most 15m); stdout and stderr are each capped at 1 MiB (the end is kept; `truncated` says so). Members and up.",
+        "operationId": "stack_exec",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "argv": {
+                    "description": "The command and its arguments; no shell unless you run one: [\"sh\", \"-c\", \"...\"]. `command` is accepted as an alias (a string runs as `sh -c`).",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "cwd": {
+                    "type": "string"
+                  },
+                  "env": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "instance": {
+                    "description": "Or the replica's instance name.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "The stack's name.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "replica": {
+                    "description": "The replica's slot (default: a running one, preferring healthy replicas in rotation).",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "service": {
+                    "description": "The compose service.",
+                    "type": "string"
+                  },
+                  "stdin": {
+                    "description": "Text fed to the command's stdin (at most 1 MiB).",
+                    "type": "string"
+                  },
+                  "timeout": {
+                    "description": "Kill the command after this long, e.g. 30s (default 60s, at most 15m). A command that runs out answers timed_out with the output so far.",
+                    "type": "string"
+                  },
+                  "user": {
+                    "description": "A guest user name, uid or uid:gid (default: the instance's default, root).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "service",
+                  "argv"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Run a command in a stack service",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "stack_exec"
+      }
+    },
     "/api/v1/tools/stack_export": {
       "post": {
         "description": "The compose file a stack runs from, as YAML text ready for stack_deploy (the web UI's stack editor shows it). A file deployed as text that needed no `vars` from its caller comes back as written (`resolved: false`): comments kept and `${VAR}` unresolved, which the stack's environment fills at each deploy (stack_env_set). Otherwise (`resolved: true`) it is the file as it resolved, with secrets that came from a file or environment variable named as `external` store secrets, so it deploys again without their values. Either way the stack's managed domains (stack_domains_set) are not in it; stack_config shows the file with them. Also says whether the stack belongs to a project's apps (`managed_by: apps`), in which case change it through the apps, not this file, and which project environment a compose stack belongs to (`project`, `environment`).",
@@ -14060,7 +14303,7 @@
     },
     "/api/v1/tools/stack_list": {
       "post": {
-        "description": "List deployed stacks with each service's replica, health and rollout state, and the project environment each compose stack belongs to (`project`, `environment`).",
+        "description": "List deployed stacks with each service's replica, health and rollout state, and the project environment each compose stack belongs to (`project`, `environment`). Every org the caller sees, or only `org` when it is given; each row names its `org`.",
         "operationId": "stack_list",
         "requestBody": {
           "content": {
@@ -14117,7 +14360,7 @@
     },
     "/api/v1/tools/stack_logs": {
       "post": {
-        "description": "Recent output of a service's replicas: the journal of its supervised command, or an OCI image's console.",
+        "description": "Recent output of a service's replicas: the journal of its supervised command, or an OCI image's console. `tail` (or `lines`) per replica, default 200; `since` keeps lines newer than a duration like 10m or an RFC 3339 time (system images; an OCI console has no timestamps). A replica that failed to come up is deleted, so its last output (up to 200 lines, captured before the delete) is `last_failed_attempt`: while the service is not converged, when no live replica printed anything, or always with `failed: true` (then without the live logs). It outlives a daemon restart in the deployment that was rolling out (stack_deployment_get `failed_attempts`).",
         "operationId": "stack_logs",
         "requestBody": {
           "content": {
@@ -14125,8 +14368,12 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "failed": {
+                    "description": "Only the last failed replica's output.",
+                    "type": "boolean"
+                  },
                   "lines": {
-                    "description": "Default 200.",
+                    "description": "Same as tail.",
                     "maximum": 5000,
                     "minimum": 1,
                     "type": "integer"
@@ -14141,8 +14388,18 @@
                   "service": {
                     "type": "string"
                   },
+                  "since": {
+                    "description": "A duration back from now (10m, 2h) or an RFC 3339 time.",
+                    "type": "string"
+                  },
                   "slot": {
                     "description": "One replica only.",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "tail": {
+                    "description": "Lines per replica (default 200).",
+                    "maximum": 5000,
                     "minimum": 1,
                     "type": "integer"
                   }
@@ -17435,8 +17692,8 @@
                     "type": "string"
                   },
                   "secret_refresh": {
-                    "type": "string",
-                    "description": "e.g. 1h, 5m; at least 10s."
+                    "description": "e.g. 1h, 5m; at least 10s.",
+                    "type": "string"
                   }
                 },
                 "required": [],
@@ -18899,8 +19156,8 @@
                     "type": "string"
                   },
                   "secret_refresh": {
-                    "type": "string",
-                    "description": "e.g. 1h, 5m; at least 10s."
+                    "description": "e.g. 1h, 5m; at least 10s.",
+                    "type": "string"
                   }
                 },
                 "required": [],

@@ -707,6 +707,10 @@ pub enum JobCmd {
         /// KEY=VALUE (repeatable).
         #[arg(short, long = "env")]
         env: Vec<String>,
+        /// Create it disabled: kept, but not run on its schedule until
+        /// `isb job update NAME --enable`.
+        #[arg(long)]
+        disabled: bool,
         /// The command (argv; run `sh -c '...'` for a shell line).
         #[arg(last = true, required = true)]
         command: Vec<String>,
@@ -716,8 +720,15 @@ pub enum JobCmd {
         #[arg(long)]
         json: bool,
     },
+    /// One job, as JSON.
     #[command(alias = "get")]
-    Show { name: String },
+    Show {
+        name: String,
+        /// Accepted so scripts can pass --json everywhere; the output is
+        /// always JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Change a job's schedule, timeout or command; enable or disable it.
     Update {
         name: String,
@@ -776,6 +787,7 @@ pub fn job(org: &Option<String>, cmd: JobCmd) -> Result<u8> {
             timezone,
             user,
             env,
+            disabled,
             command,
         } => {
             let target = match (app, stack, service) {
@@ -803,6 +815,9 @@ pub fn job(org: &Option<String>, cmd: JobCmd) -> Result<u8> {
             if let Some(k) = keep {
                 a["keep"] = json!(k);
             }
+            if disabled {
+                a["enabled"] = json!(false);
+            }
             if !env.is_empty() {
                 let mut m = serde_json::Map::new();
                 for e in &env {
@@ -814,7 +829,11 @@ pub fn job(org: &Option<String>, cmd: JobCmd) -> Result<u8> {
                 a["env"] = Value::Object(m);
             }
             let r = call("job_create", a)?;
-            eprintln!("created job {name}; next run {}", s(&r["next_run"]));
+            if disabled {
+                eprintln!("created job {name}, disabled");
+            } else {
+                eprintln!("created job {name}; next run {}", s(&r["next_run"]));
+            }
         }
         JobCmd::Ls { json } => {
             let r = call("job_list", json!({}))?;
@@ -832,7 +851,7 @@ pub fn job(org: &Option<String>, cmd: JobCmd) -> Result<u8> {
                 "NEXT".into(),
             ]];
             for j in r["jobs"].as_array().into_iter().flatten() {
-                let spec = &j["job"];
+                let spec = j;
                 let t = &spec["target"];
                 let target = match t["app"].as_str() {
                     Some(a) => format!("app {a}"),
@@ -864,7 +883,7 @@ pub fn job(org: &Option<String>, cmd: JobCmd) -> Result<u8> {
             }
             table(rows);
         }
-        JobCmd::Show { name } => {
+        JobCmd::Show { name, .. } => {
             print_json(&call("job_get", json!({"name": name}))?);
         }
         JobCmd::Update {

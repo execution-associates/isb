@@ -7,7 +7,6 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
-import { keys } from "@/apps/api";
 import { Field, FormError } from "@/components/form";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -15,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { errorMessage } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 import { dbNameProblem, type Engine, ENGINES } from "./api";
+import { invalidateOrg } from "@/lib/freshness";
 
 export function NewDatabaseDialog({
   org,
@@ -77,7 +77,7 @@ export function NewDatabaseDialog({
       if (!redis && user.trim()) args.user = user.trim();
       if (publish.trim()) args.publish = publish.trim();
       await callTool<unknown, string>("database_create", args, org);
-      await qc.invalidateQueries({ queryKey: keys.org(org) });
+      await invalidateOrg(qc, org);
       toast.success(`Database ${name} created; it is starting`);
       const n = name;
       setPending(false);

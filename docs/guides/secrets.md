@@ -244,7 +244,21 @@ text (UTF-8, no NUL); mount anything else as a file.
   (`environment.KEY`). **That is plaintext in the incus database**, visible to
   anyone who can run `incus config show` on the instance (or read incusd's
   database, or a backup of it). isb shows it as `(secret)` in plans and
-  reports. Prefer a file mount (`secrets:`) when the image can read one.
+  reports, and a deploy warns about each one. Prefer `as: file` (below).
+
+`KEY: {secret: NAME, as: file}` writes the value to `/run/secrets/NAME`
+(0400, owned by the user the app starts as) and sets `KEY_FILE` to that path,
+the convention postgres, mariadb and many other images read. Only the path is
+instance config, and on an OCI image the file is there before the app first
+starts:
+
+```yaml
+services:
+  db:
+    image: docker:postgres:17
+    environment:
+      POSTGRES_PASSWORD: {secret: db_password, as: file}
+```
 
 ## Stacks
 

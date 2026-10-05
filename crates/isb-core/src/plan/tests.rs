@@ -13,6 +13,7 @@ fn host() -> HostFacts {
         pools: vec!["container-roots".into(), "default".into()],
         path_map: None,
         initial_copy: false,
+        initial_owner: false,
         incus_version: Some("7.5.1".into()),
         invoking_ids: (1000, 1000),
         shared_root: None,
@@ -382,6 +383,17 @@ fn secret_environment_is_set_but_never_shown() {
         a,
         Action::SetConfig { key, secret: true, .. } if key == "environment.TOKEN"
     )));
+}
+
+#[test]
+fn a_file_secret_variable_puts_only_its_path_in_config() {
+    let t = tmp();
+    let mut s = lasso_spec(t.path().to_str().unwrap());
+    s.env.files.insert("DB_PASSWORD".into(), "db".into());
+    let d = resolve(&s, &VolumeDefs::new(), &host(), Path::new("/")).unwrap();
+    assert_eq!(d.config["environment.DB_PASSWORD_FILE"], "/run/secrets/db");
+    assert!(!d.config.contains_key("environment.DB_PASSWORD"));
+    assert!(d.sensitive.is_empty());
 }
 
 #[test]
@@ -793,4 +805,101 @@ fn vm_bind_mounts_refuse_an_incus_that_may_not_translate() {
         resolve(&s, &VolumeDefs::new(), &h, Path::new("/")).unwrap();
         s.idmap = None;
     }
+}
+
+fn owner_plan(
+    vol: crate::spec::VolumeSpec,
+    user: Option<&str>,
+    h: &HostFacts,
+    missing: bool,
+) -> (Desired, Vec<Action>) {
+    let mut spec = SandboxSpec::new("svc", "dev-base").volume("/data", vol.device("data"));
+    spec.user = user.map(String::from);
+    let d = resolve(&spec, &VolumeDefs::new(), h, Path::new("/")).unwrap();
+    let missing = if missing {
+        vec![(d.volumes[0].pool.clone(), "v".to_string())]
+    } else {
+        vec![]
+    };
+    let p = diff(&d, None, &missing, DiffOptions::default()).unwrap();
+    let fixes = p
+        .actions
+        .into_iter()
+        .filter(|a| matches!(a, Action::FixOwner { .. }))
+        .collect();
+    (d, fixes)
+}
+
+fn fix(owner: Option<&str>, mode: Option<&str>, fresh_only: bool) -> Action {
+    Action::FixOwner {
+        path: "/data".into(),
+        owner: owner.map(String::from),
+        mode: mode.map(String::from),
+        fresh_only,
+    }
+}
+
+#[test]
+fn a_numeric_owner_and_mode_are_set_when_the_volume_is_created() {
+    let mut h = host();
+    h.initial_owner = true;
+    let v = Volume::named("v").owner("1000:50").mode("2770");
+    let (d, fixes) = owner_plan(v, None, &h, true);
+    let c = &d.volumes[0].config;
+    assert_eq!(c["initial.uid"], "1000");
+    assert_eq!(c["initial.gid"], "50");
+    assert_eq!(c["initial.mode"], "2770");
+    // Still applied after attach: the image may have seeded the volume.
+    assert_eq!(fixes, vec![fix(Some("1000:50"), Some("2770"), false)]);
+    assert_eq!(fixes[0].to_string(), "~ chown 1000:50 /data, chmod 2770");
+    // A name is only known to the image; an older incus sets nothing.
+    let (d, _) = owner_plan(Volume::named("v").owner("dev"), None, &h, true);
+    assert!(d.volumes[0].config.is_empty());
+    let (d, fixes) = owner_plan(Volume::named("v").owner("1000"), None, &host(), true);
+    assert!(d.volumes[0].config.is_empty());
+    assert_eq!(fixes, vec![fix(Some("1000"), None, false)]);
+    let bad = SandboxSpec::new("svc", "dev-base").volume("/data", Volume::named("v").mode("rwx"));
+    let e = resolve(&bad, &VolumeDefs::new(), &h, Path::new("/"))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("/data") && e.contains("octal"), "{e}");
+}
+
+#[test]
+fn a_new_volume_belongs_to_the_service_user() {
+    let mut h = host();
+    h.initial_owner = true;
+    // Numeric: at creation, before the app starts; nothing after.
+    let (d, fixes) = owner_plan(Volume::named("v"), Some("1000"), &h, true);
+    assert_eq!(d.volumes[0].config["initial.uid"], "1000");
+    assert_eq!(d.volumes[0].config["initial.gid"], "1000");
+    assert!(fixes.is_empty());
+    // A name (or an incus without initial.*): after attach, new and unseeded only.
+    let (d, fixes) = owner_plan(Volume::named("v"), Some("dev"), &h, true);
+    assert!(d.volumes[0].config.is_empty());
+    assert_eq!(fixes, vec![fix(Some("dev"), None, true)]);
+    assert!(
+        fixes[0]
+            .to_string()
+            .ends_with("(new volume the image did not seed)")
+    );
+    let (_, fixes) = owner_plan(Volume::named("v"), Some("1000"), &host(), true);
+    assert_eq!(fixes, vec![fix(Some("1000"), None, true)]);
+    // An existing volume keeps what it has.
+    let (_, fixes) = owner_plan(Volume::named("v"), Some("dev"), &h, false);
+    assert!(fixes.is_empty());
+    // A mode alone applies to whatever volume is attached.
+    let (_, fixes) = owner_plan(Volume::named("v").mode("0770"), Some("dev"), &h, false);
+    assert_eq!(fixes, vec![fix(None, Some("0770"), false)]);
+    // The definition's own initial.* wins; no user and no owner: nothing.
+    let mut defs = VolumeDefs::new();
+    let mut nv = NamedVolumeSpec::default();
+    nv.config.insert("initial.uid".into(), "7".into());
+    defs.insert("v".into(), nv);
+    let mut spec = SandboxSpec::new("svc", "dev-base").volume("/data", Volume::named("v"));
+    spec.user = Some("1000".into());
+    let d = resolve(&spec, &defs, &h, Path::new("/")).unwrap();
+    assert_eq!(d.volumes[0].config["initial.uid"], "7");
+    let (d, fixes) = owner_plan(Volume::named("v"), None, &h, true);
+    assert!(d.volumes[0].config.is_empty() && fixes.is_empty());
 }

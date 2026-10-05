@@ -21,10 +21,9 @@ import { canWrite } from "@/lib/admin";
 import { relativeTime } from "@/lib/format";
 import { errorMessage } from "@/lib/messages";
 import { useMe } from "@/lib/session";
-import { finished, isNotFound, keys, useProjects, useStack } from "@/apps/api";
+import { finished, isNotFound, useProjects, useStack } from "@/apps/api";
 import { ConfirmDialog, Crumbs, EmptyState, QueryError, ToneBadge } from "@/apps/components";
 import { HEALTH_LABEL, HEALTH_TONE, stackHealth } from "@/apps/health";
-import { useOrgLive } from "@/apps/live";
 import { DeploymentBanner, ServiceHeader, ServiceTabBar } from "@/apps/service-page";
 import { activeServiceTab, serviceTabs, stackTab } from "@/apps/service-tabs";
 import {
@@ -45,6 +44,7 @@ import { deployToast, StackDeploymentPage, StackDeploymentsTab } from "./stack-d
 import { StackAdvancedTab, StackGeneralTab } from "./stack-general";
 import { type StackServices, StackDomainsTab, StackEnvironmentTab, StackLogsTab, StackMonitoringTab } from "./stack-tabs";
 import { StackYamlTab } from "./stack-yaml";
+import { invalidateOrg } from "@/lib/freshness";
 
 // xterm.js is loaded only when the Terminal tab opens; the jobs tab too.
 const StackTerminalTab = lazy(() => import("./stack-terminal").then((m) => ({ default: m.StackTerminalTab })));
@@ -83,7 +83,6 @@ export function StackPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [deploying, setDeploying] = useState(false);
-  useOrgLive(org);
   const o = encodeURIComponent(org);
 
   // The page's old tab names: Compose is YAML, Services is General.
@@ -299,7 +298,7 @@ function StopStart({ org, name, yaml, names, services }: { org: string; name: st
   const [stopOpen, setStopOpen] = useState(false);
   const [starting, setStarting] = useState(false);
   if (!services?.length) return null;
-  const refresh = () => Promise.all([qc.invalidateQueries({ queryKey: stackKeys.org(org) }), qc.invalidateQueries({ queryKey: keys.org(org) })]);
+  const refresh = () => Promise.all([qc.invalidateQueries({ queryKey: stackKeys.org(org) }), invalidateOrg(qc, org)]);
   const stopped = services.every((s) => s.replicas === 0);
   const start = async () => {
     setStarting(true);

@@ -20,6 +20,7 @@ import { IMAGE_HINT, IMAGE_PLACEHOLDER, imageNote, imageProblem } from "./image-
 import { openDeployment } from "./use-deploy";
 import { nameProblem } from "./util";
 import { NewDatabaseDialog } from "@/data/new-database";
+import { invalidateOrg } from "@/lib/freshness";
 
 type Kind = "image" | "git";
 type AuthKind = "none" | "token" | "ssh-generate" | "ssh-secret";
@@ -152,7 +153,7 @@ export function NewAppDialog({
       // The app page renders from the cache at once, with no loading state.
       qc.setQueryData(keys.app(org, name), r.app);
       if (auth === "ssh-generate") {
-        void qc.invalidateQueries({ queryKey: keys.org(org) });
+        void invalidateOrg(qc, org);
         const k = await callTool<{ public_key: string }>("app_deploy_key", { name }, org);
         setKeyStep({ app: name, key: k.public_key });
         return;
@@ -164,7 +165,7 @@ export function NewAppDialog({
       } else {
         toast.success(`App ${name} created`);
         navigate(`${base}/${encodeURIComponent(name)}`);
-        void qc.invalidateQueries({ queryKey: keys.org(org) });
+        void invalidateOrg(qc, org);
       }
     } catch (err) {
       setError(errorMessage(err));

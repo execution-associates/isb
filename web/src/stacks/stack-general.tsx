@@ -16,11 +16,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { dateTime, relativeTime } from "@/lib/format";
 import { errorMessage } from "@/lib/messages";
 import type { Tone } from "@/lib/status";
-import { type InstanceDetail, keys } from "@/apps/api";
+import { type InstanceDetail } from "@/apps/api";
 import { EmptyState, Meta, Section, ToneBadge } from "@/apps/components";
 import { DeleteServiceSection } from "@/apps/service-page";
 import { type StackExport, stackKeys } from "./api";
 import type { StackServices } from "./stack-tabs";
+import { invalidateOrg } from "@/lib/freshness";
 
 type Service = StackServices[number];
 
@@ -43,7 +44,7 @@ function replicaTone(i: InstanceDetail): Tone {
 /** Refresh what shows the stack after an action on it. */
 function useRefresh(org: string) {
   const qc = useQueryClient();
-  return () => Promise.all([qc.invalidateQueries({ queryKey: keys.org(org) }), qc.invalidateQueries({ queryKey: stackKeys.org(org) })]);
+  return () => Promise.all([invalidateOrg(qc, org), qc.invalidateQueries({ queryKey: stackKeys.org(org) })]);
 }
 
 export function StackGeneralTab({

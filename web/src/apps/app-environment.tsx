@@ -18,6 +18,7 @@ import { QueryError, Section } from "./components";
 import { EnvEditor } from "./env-editor";
 import { analyzeEnv, missingSecrets } from "./envtext";
 import { openDeployment } from "./use-deploy";
+import { invalidateOrg } from "@/lib/freshness";
 
 const PLACEHOLDER = "# One variable per line\nPORT=8080\nDATABASE_URL=${{secret.database-url}}";
 
@@ -41,7 +42,7 @@ export function EnvironmentTab({ org, app }: { org: string; app: App }) {
         if (r.deployment) {
           openDeployment(qc, navigate, org, r.deployment);
         } else {
-          await qc.invalidateQueries({ queryKey: keys.org(org) });
+          await invalidateOrg(qc, org);
           toast.success("Environment saved. It takes effect at the next deploy.");
         }
       }}

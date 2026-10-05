@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Link, Navigate, Route, BrowserRouter, Routes, useParams } from "react-router";
-import { ApiError } from "@/api/client";
+import { queryDefaults } from "@/lib/freshness";
 import { appRoutes } from "@/apps/routes";
 import { day2Routes } from "@/day2-routes";
 import { Home, RequireAuth } from "@/components/app-shell";
@@ -25,15 +25,9 @@ import { SetupPage } from "@/pages/setup";
 import { SignupPage } from "@/pages/signup";
 import { workspaceRoutes } from "@/workspace/routes";
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      // A 4xx will not get better by asking again.
-      retry: (n, e) => !(e instanceof ApiError && e.status >= 400 && e.status < 500) && n < 2,
-      refetchOnWindowFocus: true,
-    },
-  },
-});
+// The freshness rules (lib/freshness.ts): stale at once, refetched on
+// mount, focus and reconnect; useLiveSync and LIVE_POLL do the rest.
+const queryClient = new QueryClient({ defaultOptions: queryDefaults });
 
 /** The Audit page became History, filtered to the audit log. */
 function AuditRedirect() {

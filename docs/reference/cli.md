@@ -154,11 +154,11 @@ they are still in use; with a service list it is ignored.
 ```text
 isb volume create NAME [--pool P] [-c KEY=VALUE]...   no-op if it exists
 isb volume ls [--pool P] [--json]
-isb volume inspect NAME [--pool P]
+isb volume inspect NAME [--pool P] [--json]       JSON either way
 isb volume rm NAME [--pool P]                          refused while in use
 
 isb port add NAME SPEC [--name DEV] [--search N]       prints the listen address in use
-isb port get NAME DEV [KEY]                            one property (default listen)
+isb port get NAME DEV [KEY] [--json]                   one property (default listen); --json: every property
 isb port rm NAME DEV...
 isb port ls NAME [--json]
 
@@ -190,9 +190,10 @@ is described in [isb tui](tui.md); without a daemon it shows sandboxes only.
 
 ```text
 isb stack deploy [NAME] [-f FILE]... [-d] [--timeout 10m] [--project P [--env E]] [--no-reuse-secrets]   waits for the rollout unless -d
-isb stack ls [--json]
+isb stack ls [--json]               every org you see (an ORG column), or --org ORG's
 isb stack ps NAME [--json]
-isb stack logs NAME SERVICE [--slot N] [-n 100]
+isb stack logs NAME SERVICE [--slot N] [-n|--tail 100] [--since 10m|TIME] [--failed]
+isb stack exec NAME SERVICE [--replica|--slot N] [-u USER] [-w DIR] [-e K=V]... [-i] [--timeout 60s] -- CMD...
 isb stack scale NAME SERVICE=N...
 isb stack redeploy NAME SERVICE
 isb stack rollback NAME [--to ID]   ID: a kept deployment (isb stack deployments)
@@ -226,13 +227,20 @@ isb org create NAME [--cpus N] [--memory SIZE] [--disk SIZE] [--instances N]
                     [--allow-egress DEST]... [--allow-domain SUFFIX]... [--allow-udp IP:PORT]...
                     [--ingress caddy|cloudflare-tunnel] [--cloudflare-account ID] [--cloudflare-zone ID]
                     [--server SERVER | --vm [--vm-cpus 2] [--vm-memory 4GiB] [--vm-disk 40GiB]]
+isb org update NAME [--cpus N|none] [--memory SIZE|none] [--disk SIZE|none] [--instances N|none]
+                    [--default-cpus N] [--default-memory SIZE]
+                    [--allow-egress DEST]... [--allow-udp IP:PORT]... [--json]
 isb org ls [--json]                                    alias list
 isb org show NAME [--json]
 isb org rm NAME [--force] [--delete-vm]
 sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run] [--public-ingress] [--sandbox-egress]
 ```
 
-`org create` on an existing org updates it to the flags given.
+`org create` on an existing org sets the flags given. `org update` changes
+an existing org through the daemon (the `org_update` tool): flags left out
+keep their value, and `none` lifts a limit. `org show` prints each limit with
+what the org's instances are allocated against it
+(`cpus       3 of 4 allocated, 1 free`), and `--json` has it as `allocation`.
 `--allow-egress`, `--allow-domain` and `--allow-udp` replace the org's lists
 (`none` clears them). `--server` and `--vm` place the org once, through the local
 daemon (`--vm` takes a few minutes; rerun to retry). `org rm` refuses an
@@ -247,7 +255,7 @@ isb server add NAME --ssh USER@HOST --key FILE [--port 22] [--address A] [--agen
                [--allow-from CIDR]... [--isb-binary FILE | --isb-version V | --self-binary]
                [--public-ingress]
 isb server ls [--json]                  alias list
-isb server show NAME
+isb server show NAME [--json]           JSON either way
 isb server rm NAME                      refused while orgs are placed on it; alias remove
 isb server rotate-cert NAME
 isb server upgrade NAME|--all [--isb-version V | --isb-binary FILE]
@@ -320,8 +328,9 @@ isb app create NAME --project P [--environment E]
                [-v NAME:/path[:ro]]... [--domain HOST[/PATH]]... [--command CMD]
                [--cpus N] [--memory M] [--deploy]
 isb app ls [--project P] [--json]
-isb app show NAME                       alias get
-isb app update NAME [-f PATCH|-] [--image REF] [--ref R] [--replicas N] [--port N] [--deploy]
+isb app show NAME [--json]              alias get; --json prints app_get's answer
+isb app update NAME [-f PATCH|-] [--image REF] [--ref R] [--replicas N] [--port N]
+               [--cpus N] [--memory M] [--deploy]
 isb app rm NAME                         named volumes are kept
 isb app deploy NAME [-d]                follows the deployment's log; exit 0 when done
 isb app rollback NAME [ID] [-d]         a previous deployment's image and settings, no build
@@ -338,13 +347,16 @@ isb app env-set NAME [FILE|-] [--deploy]
 isb app webhook NAME [--rotate]
 isb app deploy-key NAME
 isb app previews ls [NAME] [--json]
-isb app previews show NAME PR
+isb app previews show NAME PR [--json]
 isb app previews logs NAME PR [ID] [-f]
 isb app previews redeploy NAME PR [-d]
 isb app previews rm NAME PR
 ```
 
-`app update -f` takes a JSON or YAML merge patch (`-` for stdin). See
+`app update -f` takes a JSON or YAML merge patch (`-` for stdin); `--cpus`
+and `--memory` set `resources` per replica, keeping the one not given. In
+a patch or a tool call, `resources.cpus` and `resources.memory` may be numbers
+(`{"cpus": 2}`) or strings (`"2"`, `"512m"`); a bare number of memory is bytes. See
 [Deploy apps](../guides/deploy-apps.md) and
 [Preview deployments](../guides/previews.md).
 
@@ -377,7 +389,7 @@ isb template show REF [--json]          variables, apps, notes; a Dokploy or Coo
 isb template deploy REF --project P [--env E] [--name N] [-s KEY=VALUE]... [--dry-run] [-d] [--json]
 isb template instances [--json]
 isb template rm NAME                    its apps (volumes kept) and secrets
-isb template catalog ls
+isb template catalog ls [--json]
 isb template catalog add NAME [--format native|dokploy|coolify] LOCATION   platform admins
 isb template catalog rm NAME                                       platform admins
 ```
@@ -388,7 +400,8 @@ See [Templates](../guides/templates.md).
 
 ```text
 isb db create NAME --project P [--environment E] --engine ENGINE[:TAG] [--database D] [--user U]
-              [--publish [IP:]PORT] [--no-deploy]      postgres, mysql, mariadb, mongodb, redis
+              [--publish [IP:]PORT] [--url SECRET[?QUERY]]... [--cpus N] [--memory M]
+              [--no-deploy]      postgres, mysql, mariadb, mongodb, redis
 isb db ls [--project P] [--json]
 isb db show NAME [--show-password] [--json]
 isb db rm NAME                          its volume and credentials are kept
@@ -411,16 +424,20 @@ isb backup rm NAME                      its files stay in the bucket
 
 isb job create NAME --schedule CRON (--app A | --stack S --service SVC) [--mode exec|run]
               [--timeout 10m] [--concurrency skip|allow] [--keep 20] [--timezone +HH:MM]
-              [-u USER] [-e K=V]... -- COMMAND...
-isb job ls [--json] | show NAME | rm NAME
+              [-u USER] [-e K=V]... [--disabled] -- COMMAND...
+isb job ls [--json] | show NAME [--json] | rm NAME
 isb job update NAME [--schedule CRON] [--timeout D] [--enable|--disable] [-- COMMAND...]
 isb job run NAME [-d]
 isb job runs NAME [--json]
 isb job logs NAME [RUN] [-f]
 ```
 
-`backup restore --into` asks before replacing the database's data (`-y`
-skips the question). See [Databases](../guides/databases.md) and
+`job create --disabled` keeps the job without running it on its schedule
+until `job update NAME --enable`. `job ls --json` prints one object per
+job: its settings (`name`, `schedule`, `target`, `command`, `enabled`, ...)
+with `created_at`, `updated_at`, `next_run` and `last_run` beside them, as
+`job_get` answers. `backup restore --into` asks before replacing the
+database's data (`-y` skips the question). See [Databases](../guides/databases.md) and
 [Scheduled jobs](../guides/jobs.md).
 
 ## Volumes: snapshots and restores
@@ -428,17 +445,17 @@ skips the question). See [Databases](../guides/databases.md) and
 Through the daemon, for an org's named volumes:
 
 ```text
-isb volume show NAME                    snapshots, schedule, backups, staged restores (JSON)
+isb volume show NAME [--json]           snapshots, schedule, backups, staged restores (JSON either way)
 isb volume snapshot create NAME [--as SNAP] [-d]
 isb volume snapshot ls NAME [--json]
 isb volume snapshot rm NAME SNAP
 isb volume snapshot schedule NAME [--schedule CRON | --off] [--timezone TZ] [--keep 7]
                                   [--hook-timeout 5m] [--hook-required | --hook-optional]
-isb volume snapshot runs NAME
+isb volume snapshot runs NAME [--json]
 isb volume snapshot logs NAME [RUN]
 isb volume restore NAME (--snapshot S | --backup B [--key K] | --destination D --key K)
                    [--instance I] [-d]
-isb volume restores [NAME]
+isb volume restores [NAME] [--json]
 isb volume discard NAME STAMP
 ```
 
@@ -466,7 +483,7 @@ isb notify create NAME (--webhook URL_SECRET [--signing-secret S] | --slack URL_
                  [--smtp-user U --smtp-password-secret S] --from ADDR --to ADDR...)
                [--events deploy.*,health.*] [--app-project P]... [--app A]... [--stack S]...
                [--disabled]
-isb notify ls [--json] | show NAME | rm NAME
+isb notify ls [--json] | show NAME [--json] | rm NAME
 isb notify update NAME [--events ...] [--app-project P]... [--app A]... [--stack S]...
                [--enable|--disable]         any rule flag replaces the rules with one rule
 isb notify test NAME                        exit 1 if it failed

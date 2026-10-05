@@ -80,14 +80,30 @@ pub(crate) enum StackCmd {
     },
     /// Replace a service's replicas even though nothing changed (a moved tag).
     Redeploy { name: String, service: String },
-    /// Recent output of a service's replicas.
+    /// Recent output of a service's replicas, and of the last replica that
+    /// failed to come up (kept from before it was deleted).
     Logs {
         name: String,
         service: String,
         #[arg(long)]
         slot: Option<u32>,
-        #[arg(short = 'n', long, default_value = "100")]
+        /// Lines per replica.
+        #[arg(short = 'n', long, visible_alias = "tail", default_value = "100")]
         lines: usize,
+        /// Only lines newer than this: a duration (10m) or an RFC 3339 time.
+        #[arg(long)]
+        since: Option<String>,
+        /// Only the output of the last replica that failed to come up.
+        #[arg(long)]
+        failed: bool,
+    },
+    /// Run a command in one of a service's replicas (not interactive):
+    /// `isb stack exec shop web -- ls -l`; -i feeds stdin.
+    Exec {
+        name: String,
+        service: String,
+        #[command(flatten)]
+        a: super::kube::ExecArgs,
     },
     /// The compose file a stack runs, as deployed.
     Config { name: String },
@@ -189,23 +205,42 @@ pub(crate) fn stack(ctx: &Ctx, cmd: StackCmd) -> Result<u8> {
                 print_json(&r["stacks"]);
                 return Ok(0);
             }
-            let mut rows = vec![vec![
+            let stacks = r["stacks"].as_array().cloned().unwrap_or_default();
+            // Without --org the rows can come from any org the caller sees.
+            let orgs: std::collections::BTreeSet<&str> =
+                stacks.iter().filter_map(|s| s["org"].as_str()).collect();
+            let show_org = org.is_none() || orgs.len() > 1;
+            let mut header: Vec<String> = vec![
                 "NAME".into(),
                 "SERVICES".into(),
                 "CONVERGED".into(),
                 "DEPLOYED BY".into(),
-            ]];
-            for s in r["stacks"].as_array().into_iter().flatten() {
-                rows.push(vec![
-                    s["name"].as_str().unwrap_or("").into(),
-                    s["services"]
-                        .as_array()
-                        .map(|a| a.len())
-                        .unwrap_or(0)
-                        .to_string(),
-                    s["converged"].to_string(),
-                    s["deployed_by"].as_str().unwrap_or("").into(),
-                ]);
+            ];
+            if show_org {
+                header.insert(0, "ORG".into());
+            }
+            let mut rows = vec![header];
+            for s in &stacks {
+                let mut row: Vec<String> = Vec::new();
+                if show_org {
+                    row.push(s["org"].as_str().unwrap_or("").into());
+                }
+                rows.push(
+                    [
+                        row,
+                        vec![
+                            s["name"].as_str().unwrap_or("").into(),
+                            s["services"]
+                                .as_array()
+                                .map(|a| a.len())
+                                .unwrap_or(0)
+                                .to_string(),
+                            s["converged"].to_string(),
+                            s["deployed_by"].as_str().unwrap_or("").into(),
+                        ],
+                    ]
+                    .concat(),
+                );
             }
             table(rows);
             Ok(0)
@@ -343,19 +378,20 @@ pub(crate) fn stack(ctx: &Ctx, cmd: StackCmd) -> Result<u8> {
             service,
             slot,
             lines,
+            since,
+            failed,
         } => {
-            let mut a = json!({"name": name, "service": service, "lines": lines});
+            let mut a = json!({"name": name, "service": service, "tail": lines, "failed": failed});
             if let Some(s) = slot {
                 a["slot"] = json!(s);
             }
-            let r = call("stack_logs", a, Duration::from_secs(120))?;
-            for (inst, text) in r["logs"].as_object().into_iter().flatten() {
-                println!("==> {inst} <==");
-                println!("{}", text.as_str().unwrap_or("").trim_end());
+            if let Some(s) = since {
+                a["since"] = json!(s);
             }
-            super::kube::print_failed_attempt(&r["last_failed_attempt"]);
+            print_logs(&call("stack_logs", a, Duration::from_secs(120))?, failed);
             Ok(0)
         }
+        StackCmd::Exec { name, service, a } => super::kube::stack_exec(&org, &name, &service, &a),
         StackCmd::Config { name } => {
             let r = call("stack_config", json!({"name": name}), SHORT)?;
             let yaml =
@@ -549,6 +585,15 @@ pub(crate) fn print_stack(st: &serde_json::Value) {
         if let Some(m) = s["message"].as_str() {
             eprintln!("{}: {m}", s["service"].as_str().unwrap_or(""));
         }
+        let f = &s["last_failed_attempt"];
+        if let Some(i) = f["instance"].as_str() {
+            eprintln!(
+                "{svc}: the last replica that failed to come up, {i}, left {} line(s) of output: isb stack logs {} {svc} --failed",
+                f["output_lines"],
+                st["name"].as_str().unwrap_or("STACK"),
+                svc = s["service"].as_str().unwrap_or(""),
+            );
+        }
         for p in s["ports"].as_array().into_iter().flatten() {
             eprintln!(
                 "{}: {} -> :{} ({} backends){}",
@@ -582,6 +627,33 @@ pub(crate) fn print_stack(st: &serde_json::Value) {
                     .unwrap_or_default()
             );
         }
+    }
+}
+
+/// `isb stack logs`' answer: the live replicas' output, then the last failed
+/// replica's (only that with `failed`, on stdout).
+fn print_logs(r: &serde_json::Value, failed: bool) {
+    for (inst, text) in r["logs"].as_object().into_iter().flatten() {
+        println!("==> {inst} <==");
+        println!("{}", text.as_str().unwrap_or("").trim_end());
+    }
+    if let Some(n) = r["note"].as_str() {
+        eprintln!("isb: {n}");
+    }
+    if failed {
+        // Asked for: the output itself is the answer, on stdout.
+        let f = &r["last_failed_attempt"];
+        eprintln!(
+            "isb: {} failed to come up ({})",
+            f["instance"].as_str().unwrap_or("?"),
+            f["reason"].as_str().unwrap_or("")
+        );
+        match f["output_note"].as_str() {
+            Some(n) => eprintln!("isb: no output: {n}"),
+            None => println!("{}", f["output"].as_str().unwrap_or("").trim_end()),
+        }
+    } else {
+        super::kube::print_failed_attempt(&r["last_failed_attempt"]);
     }
 }
 

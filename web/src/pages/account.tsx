@@ -623,7 +623,8 @@ function Tokens({ me }: { me: Me }) {
     },
     onSuccess: (r) => {
       setCreated(r);
-      qc.invalidateQueries({ queryKey: ["tokens"] });
+      void qc.invalidateQueries({ queryKey: ["tokens"] });
+      void qc.invalidateQueries({ queryKey: ["org-tokens"] });
     },
     onError: (e) => setError(errorMessage(e)),
   });
@@ -681,6 +682,7 @@ function Tokens({ me }: { me: Me }) {
                 onConfirm={async () => {
                   await auth.revokeToken(t.id);
                   await qc.invalidateQueries({ queryKey: ["tokens"] });
+                  await qc.invalidateQueries({ queryKey: ["org-tokens"] });
                   toast.success(`Token “${t.name}” revoked`);
                 }}
               />

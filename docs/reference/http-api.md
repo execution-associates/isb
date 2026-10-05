@@ -148,6 +148,8 @@ health changes, restarts, failures, backups, jobs, certificates, and each
 deployment log line (level `log`), in the caller's orgs only. Each event has
 `id: <seq>`, `event: <level>` and the event as JSON `data`. It resumes from
 `Last-Event-ID` or `?since=SEQ`, and sends a keepalive comment when quiet.
+Numbering restarts with the daemon, so a cursor past the newest event (one
+from before a restart) starts over from the events still kept.
 The `events` tool is the same feed for clients that poll.
 
 `GET /api/v1/audit/stream[?org=ORG][&after=ID]` streams new audit entries

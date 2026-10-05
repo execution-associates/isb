@@ -142,3 +142,37 @@ pub(super) fn authorize_class(
         }
     }
 }
+
+/// The orgs a caller may see, or `None` for all of them.
+pub(super) fn visible_orgs(c: &Caller) -> Option<Vec<crate::org::OrgId>> {
+    match c.principal() {
+        Some(p) if !p.platform_admin => Some(p.orgs.iter().map(|(o, _)| o.clone()).collect()),
+        _ => None,
+    }
+}
+
+/// What a cross-org read shows: the caller's visible orgs, narrowed to the
+/// call's `org` when it names one (`--org`, or an org-bound endpoint's pin).
+/// A bad org name is the call's error, not an empty answer.
+pub(super) fn read_orgs(c: &Caller, a: &Value) -> Result<Option<Vec<crate::org::OrgId>>> {
+    let visible = visible_orgs(c);
+    let Some(o) = a.get("org").and_then(Value::as_str) else {
+        return Ok(visible);
+    };
+    let o = crate::org::OrgId::new(o)?;
+    Ok(Some(if visible.as_ref().is_none_or(|v| v.contains(&o)) {
+        vec![o]
+    } else {
+        Vec::new()
+    }))
+}
+
+/// Events name their stack `org/stack` (or just `stack` in the default org).
+pub(super) fn event_visible(orgs: &Option<Vec<crate::org::OrgId>>, stack: &str) -> bool {
+    let Some(orgs) = orgs else { return true };
+    let org = stack
+        .split_once('/')
+        .map(|(o, _)| o)
+        .unwrap_or(crate::org::DEFAULT_ORG);
+    orgs.iter().any(|o| o.as_str() == org)
+}

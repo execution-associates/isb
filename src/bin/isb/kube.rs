@@ -24,7 +24,7 @@ fn with_org(org: &Option<String>, mut args: Value) -> Value {
 #[derive(Args)]
 pub struct ExecArgs {
     /// Run in this replica (its slot); default: a healthy one.
-    #[arg(long, conflicts_with = "instance")]
+    #[arg(long, visible_alias = "slot", conflicts_with = "instance")]
     pub replica: Option<u32>,
     /// Run in this instance of the app (by name).
     #[arg(long, hide = true)]
@@ -153,7 +153,11 @@ fn exec_args(org: &Option<String>, name: &str, a: &ExecArgs) -> Result<Value> {
 pub fn exec(org: &Option<String>, tool: &str, name: &str, a: &ExecArgs) -> Result<u8> {
     let args = exec_args(org, name, a)?;
     let timeout = dur_s(&a.timeout) + SHORT;
-    let r = call(tool, args, timeout)?;
+    relay(call(tool, args, timeout)?)
+}
+
+/// An exec tool's answer: its output relayed, its exit code returned.
+fn relay(r: Value) -> Result<u8> {
     print!("{}", r["stdout"].as_str().unwrap_or(""));
     eprint!("{}", r["stderr"].as_str().unwrap_or(""));
     let _ = std::io::stdout().flush();
@@ -165,6 +169,13 @@ pub fn exec(org: &Option<String>, tool: &str, name: &str, a: &ExecArgs) -> Resul
         return Ok(124);
     }
     Ok(r["exit_code"].as_i64().unwrap_or(1).clamp(0, 255) as u8)
+}
+
+/// `isb stack exec`: run argv in one of a stack service's replicas.
+pub fn stack_exec(org: &Option<String>, stack: &str, service: &str, a: &ExecArgs) -> Result<u8> {
+    let mut args = exec_args(org, stack, a)?;
+    args["service"] = json!(service);
+    relay(call("stack_exec", args, dur_s(&a.timeout) + SHORT)?)
 }
 
 pub fn logs(org: &Option<String>, a: AppLogs) -> Result<u8> {
@@ -203,6 +214,14 @@ pub(crate) fn print_failed_attempt(f: &Value) {
     let Some(out) = f["output"].as_str() else {
         return;
     };
+    if let Some(n) = f["output_note"].as_str() {
+        eprintln!(
+            "isb: the last replica that failed to start, {}, was deleted ({}); {n}",
+            f["instance"].as_str().unwrap_or("?"),
+            f["reason"].as_str().unwrap_or("it failed")
+        );
+        return;
+    }
     eprintln!(
         "isb: the last replica that failed to start, {}, was deleted ({}); its last output:",
         f["instance"].as_str().unwrap_or("?"),

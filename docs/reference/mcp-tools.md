@@ -66,7 +66,8 @@ fills it in and refuses any other value. Then, in order:
   `user_list` and `user_update`. `secret_reencrypt` with `all: true` too.
 - **Cross-org reads** (`overview`, `events`, `stack_list`,
   `ingress_status`) are open to anyone signed in and show only the caller's
-  orgs. `audit_list` and `history_query` filter themselves the same way.
+  orgs, or only the one their `org` names (an org-bound endpoint names its
+  own). `audit_list` and `history_query` filter themselves the same way.
 - **Superadmin tools** (`host_inventory`, `host_policy`,
   `superadmin_token_list`, `superadmin_token_revoke`, `org_nesting`) are
   refused to everyone else, platform admins included.
@@ -91,12 +92,13 @@ means every member of the org, *member* means members, admins and owners.
 | Tool | Who | Does |
 |---|---|---|
 | `stack_deploy` | member | Deploy or update a stack from compose YAML (`name`, `compose`, `vars`, `secrets`, `base_dir`, `wait`, `timeout`, `dry_run`, `reuse_secrets`, `project`, `environment`). The stack belongs to one project environment: a new one goes where `project`/`environment` say (the project is made if missing; the environment defaults to `production`, else the project's first), or to the project named like the stack; an existing one keeps its owner, and naming another is refused. A service name the environment already gives an app or another stack's service is refused, and so is the name `new` for a new stack. `${VAR}` in `compose` resolves from `vars`, then the stack's environment (`stack_env_set`); an undefined one fails the deploy, naming it. The stack's managed domains (`stack_domains_set`) are merged into its services. A `file:`/`environment:` secret given no value (in `secrets`, `vars` or the stack's environment) reuses the value an earlier deploy stored as `<stack>_<key>`, and is named in `reused_secrets` and in a `warn` event with that value's date and version; `reuse_secrets: false` (default true) fails the deploy instead. Returns the change per service, `owner: {project, environment}`, the `deployment` it recorded (`stack_deployments`) and `reused_secrets` (omitted when none); `wait` blocks until it settles; `dry_run` returns the changes, owner and `reused_secrets` without deploying or recording anything. A new or changed registry image its registry does not have is refused; one that cannot be checked is listed in `warnings`. A `deploy` token may create the project this way. |
-| `stack_list` | anyone signed in | Every stack in the caller's orgs with its services' replica, health and rollout state, and `project`/`environment` (the owner, null for stacks the apps run). |
-| `stack_status` | viewer | One stack in detail: per service its revision, state, message, every replica (status, health, IP, in rotation, restarts, last probe output, the `stale_secrets` it runs an older version of), published ports with their backends, and each domain with its URL and certificate state. |
+| `stack_list` | anyone signed in | Every stack in the caller's orgs (`org`: that one only), each row naming its `org`, with its services' replica, health and rollout state, and `project`/`environment` (the owner, null for stacks the apps run). |
+| `stack_status` | viewer | One stack in detail: per service its revision, state, message, every replica (status, health, IP, in rotation, restarts, last probe output, the `stale_secrets` it runs an older version of), while a service is not converged its `last_failed_attempt` (`instance`, `at_ms`, `reason`, `output_lines`; `stack_logs` has the output), published ports with their backends, and each domain with its URL and certificate state. |
 | `stack_config` | viewer | The compose file as it resolved at the last deploy (the effective file: variables filled, secret variables as `{secret}` references, managed domains merged in; `domains` lists those per service), `source` (the text it was deployed from when kept as written, else null), and its secrets as references (store name, driver, version), never values. |
 | `stack_export` | viewer | The compose file a stack runs from as YAML text for `stack_deploy` (what the web UI's stack editor shows). A file deployed as text that needed no `vars` comes back as written (`resolved: false`: comments kept, `${VAR}` for the stack's environment to fill); otherwise as it resolved (`resolved: true`), with file/environment secrets named as `external` store secrets so no value is needed. Managed domains are never in it. Also `managed_by` (`apps` for a project environment's stack), `project` and `environment` (a compose stack's owner, null when it has none) and the services. |
 | `stack_validate` | viewer | A dry run of `stack_deploy` for an editor (takes `project` and `environment` as it does): `{valid, errors: [{line, column, message}], changes, exists, managed_by, project, environment, diff}`, where `project`/`environment` say where the stack belongs (or would) and `diff` is a unified diff from `stack_export`'s text. A refused owner or a service name taken in the environment is an error in the answer. A bad file is an answer, not an error. Writes nothing. |
-| `stack_logs` | viewer | Recent output of a service's replicas (`slot`, `lines`): the supervised command's journal, or an OCI image's console; `last_failed_attempt` as for `app_logs`. |
+| `stack_logs` | viewer | Recent output of a service's replicas (`slot`, `tail` or `lines` default 200, `since` a duration such as `10m` or an RFC 3339 time): the supervised command's journal, or an OCI image's console. `last_failed_attempt` (`instance`, `at_ms`, `reason`, `output`: its last 200 lines, at most 32 KiB, read before it was deleted; `output_note` when there is none) while the service is not converged, when no live replica printed anything, or always with `failed: true` (then without `logs`). After a daemon restart it comes from the deployment that rolled it out. |
+| `stack_exec` | member | Run argv in one of a compose service's replicas (`name`, `service`, `argv`; `replica` is the slot, or `instance` its name; default a running one, healthy and in rotation first), as `app_exec`: exit code, stdout, stderr, `stdin`, `cwd`, `user`, `env`, `timeout`, the same caps and audit row. |
 | `stack_scale` | member | Set a service's replicas (0 stops it without removing it). |
 | `stack_redeploy` | member | Replace a service's replicas though nothing changed: a moved tag, changed bind-mounted files. |
 | `stack_rollback` | member | Back to the previous deployment (a second rollback undoes the first), or with `to: <deployment id>`, a kept deployment's compose text and managed domains, resolved with the stack's environment as it is now. Returns `changes` and the `deployment` it recorded, and with `to`, `reused_secrets` as `stack_deploy` does (the redeploy gives no secret values). |
@@ -105,7 +107,7 @@ means every member of the org, *member* means members, admins and owners.
 | `stack_domains_get` | viewer | `{services: {SERVICE: {managed, file}}}`: per service the stack's managed domain records and the domains its compose file gives (`domains:`), each `[{host, path?, port?, https?, redirect?, strip_prefix?, www_redirect?}]`. |
 | `stack_domains_set` | member | Replace one service's managed domains (`name`, `service`, `domains` in an app's domain shape, `deploy`). They are kept beside the file, which is not changed, and merged in at each deploy; a hostname the file gives or that is given twice is refused. Returns `services` as `stack_domains_get`, and `changes`, `deployment` and `reused_secrets` (as `stack_deploy`) when it deployed. |
 | `stack_deployments` | viewer | A compose stack's deployments, newest first (`limit`, default 20; the last 30 are kept): `{current, deployments: [{id, stack, trigger (manual, api), action (deploy, rollback, env, domains), actor, status (deploying, done, failed, superseded), rollback_of, services, reused_secrets (omitted when none), error, created_at, started_at, finished_at}]}`, times in unix seconds; `current` is the newest that finished `done`. |
-| `stack_deployment_get` | viewer | One deployment (`name`, `id`): its record, `finished`, the compose text it deployed (`source`), the environment (`env`) and managed domains (`domains`) of the moment, and its log: the stack's events while it ran as `events` `[{at (unix ms), level, service, message}]` and `log` text. |
+| `stack_deployment_get` | viewer | One deployment (`name`, `id`): its record, `finished`, the compose text it deployed (`source`), the environment (`env`) and managed domains (`domains`) of the moment, and its log: the stack's events while it ran as `events` `[{at (unix ms), level, service, message}]` and `log` text, and `failed_attempts`: per service, the last replica that failed to come up while it ran, with its output (as `stack_logs` gives it). |
 | `stack_remove` | member | Delete a stack's instances and ports (volumes with `volumes: true`), and the `<stack>_<key>` secrets it stored that no other stack uses. |
 
 ## Instances
@@ -269,8 +271,8 @@ and owners.
 
 | Tool | Who | Does |
 |---|---|---|
-| `job_create` | member | `name`, `schedule`, `timezone`, `target` (`{app}` or `{stack, service}`), `mode` (`exec`, `run`), `command`, `timeout`, `concurrency`, `keep`, `enabled`, `user`, `cwd`, `env`, `missed_grace`. |
-| `job_list`, `job_get` | viewer | Jobs with their next and last run. |
+| `job_create` | member | `name`, `schedule`, `timezone`, `target` (`{app}` or `{stack, service}`), `mode` (`exec`, `run`), `command`, `timeout`, `concurrency`, `keep`, `enabled` (default true; `false` creates it disabled), `user`, `cwd`, `env`, `missed_grace`. Answers as `job_get`. |
+| `job_list`, `job_get` | viewer | Each job is one object: its settings with `created_at`, `updated_at`, `next_run` (RFC 3339, null when disabled) and `last_run` at the top level. |
 | `job_update` | member | A merge patch; the name is fixed. |
 | `job_delete` | member | The job and its run records (refused while it runs). |
 | `job_run` | member | Run now (`wait`, `timeout`). |
@@ -314,14 +316,14 @@ and owners.
 
 | Tool | Who | Does |
 |---|---|---|
-| `org_get` | viewer | Limits and per-instance defaults, bridge and subnet, egress exceptions, bind roots, service-name domain, counts, and `placement` (`kind`, `server`, `isolation`). |
+| `org_get` | viewer | Limits with `allocation` (per limited `cpu`, `memory`, `disk`, `instances`: `limit`, `allocated`, `free`; allocated is the sum of every instance's limit, stopped ones included; bytes for memory and disk), per-instance defaults (`default_disk` while the org has a disk limit), bridge and subnet, egress exceptions, bind roots, service-name domain, counts, and `placement` (`kind`, `server`, `isolation`). |
 | `org_list` | platform admin | Every org, as `org_get` shows one, with the server it runs on. |
 | `org_create` | platform admin | `org`, `cpus`, `memory`, `disk`, `instances`, `default_cpus`, `default_memory`, `egress`, `udp`, `placement` (`"local"`, `{"server": NAME}`, `{"vm": {cpus, memory, disk}}`), `wait`. Bind roots are set on the host only. |
-| `org_update` | platform admin | Limits, defaults, `egress` or `udp` (UDP ports its stacks may publish, `IP:PORT`; each replaces its list, `[]` clears it); a different placement is refused. |
+| `org_update` | platform admin | Limits (`"none"` or `null` lifts one: `cpus`, `memory`, `disk`, `instances`), defaults, `egress` or `udp` (UDP ports its stacks may publish, `IP:PORT`; each replaces its list, `[]` clears it); a different placement is refused. |
 | `org_delete` | platform admin | Refused while stacks are deployed; `force` deletes remaining sandboxes; `delete_vm` deletes a dedicated VM. |
 | `ingress_status` | anyone signed in | Listeners, CA, the Caddy process, every routed domain (URL, certificate state, upstreams), conflicts and refusals, each tunnel org's cloudflared. The caller's orgs only. |
 | `overview` | anyone signed in | Everything a dashboard shows in one call: host CPU and memory with history, every stack in detail, sandboxes with CPU and memory, the latest event number. |
-| `events` | anyone signed in | The event feed after a `since` cursor (`limit`), waiting up to 30 s (`wait`) for one. |
+| `events` | anyone signed in | The event feed after a `since` cursor (`limit`), waiting up to 30 s (`wait`) for one. Numbering restarts with the daemon: a `since` past the newest `seq` starts over from the kept events. |
 | `server_status` | platform admin | isb's and incus' versions, and the balancer's routes with live counters. |
 
 ## Audit and history

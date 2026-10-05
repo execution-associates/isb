@@ -152,6 +152,7 @@ fn token_scopes_narrow_exec_files_and_restarts() {
     }
     for t in [
         "app_exec",
+        "stack_exec",
         "instance_exec",
         "instance_file_write",
         "instance_file_read",
@@ -358,6 +359,33 @@ fn since_keeps_the_lines_from_then_on() {
     let (kept, seen) = since_lines("a\nb", cut);
     assert_eq!(kept, "a\nb");
     assert!(!seen);
+}
+
+#[test]
+fn since_is_a_duration_or_a_time_and_the_tail_follows_it() {
+    assert_eq!(
+        since_cutoff("2026-10-04T10:30:00Z").unwrap(),
+        crate::history::rfc3339_ms("2026-10-04T10:30:00Z").unwrap()
+    );
+    let ten = since_cutoff("10m").unwrap();
+    let now = crate::stack::controller::now_ms() as i64;
+    assert!((now - 600_000 - ten).abs() < 5_000, "{ten}");
+    assert!(since_cutoff("yesterday").is_err());
+    assert_eq!(read_lines(None, 50), 50);
+    assert_eq!(read_lines(Some(0), 50), 5000);
+    // Since first, then the last `lines` of what is left.
+    let cut = crate::history::rfc3339_ms("2026-10-04T10:30:00Z").unwrap();
+    let mut logs = BTreeMap::from([
+        (
+            "web-1".to_string(),
+            "2026-10-04T10:00:00+0000 h a: old\n2026-10-04T10:40:00+0000 h a: one\n2026-10-04T10:50:00+0000 h a: two"
+                .to_string(),
+        ),
+        ("web-2".to_string(), "x\ny\nz".to_string()),
+    ]);
+    assert!(!window_logs(&mut logs, Some(cut), 1));
+    assert_eq!(logs["web-1"], "2026-10-04T10:50:00+0000 h a: two");
+    assert_eq!(logs["web-2"], "z");
 }
 
 #[test]

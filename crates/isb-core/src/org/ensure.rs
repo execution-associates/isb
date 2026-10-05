@@ -394,7 +394,39 @@ fn project_config(org: &OrgId, k: &Kept, opts: &OrgOptions, existing: Option<&Va
             config[key] = json!(v);
         }
     }
+    // Null: removed from the project by `put_project`.
+    for l in &opts.lift {
+        config[l.key()] = Value::Null;
+    }
     config
+}
+
+/// Whether the project has `limits.disk` once `config` is written over
+/// `existing`.
+fn disk_limited(config: &Value, existing: Option<&Value>) -> bool {
+    match config.get("limits.disk") {
+        Some(v) => v.is_string(),
+        None => existing.is_some_and(|p| p["config"]["limits.disk"].is_string()),
+    }
+}
+
+/// `config` written over the project's current one: a null removes the key
+/// (a lifted limit), and bind paths not given are dropped.
+fn merged_config(current: &Value, config: &Value) -> Value {
+    let mut merged = current.clone();
+    if let (Some(m), Some(c)) = (merged.as_object_mut(), config.as_object()) {
+        for (k, v) in c {
+            if v.is_null() {
+                m.remove(k);
+            } else {
+                m.insert(k.clone(), v.clone());
+            }
+        }
+        if !c.contains_key("restricted.devices.disk.paths") {
+            m.remove("restricted.devices.disk.paths");
+        }
+    }
+    merged
 }
 
 /// Create the project, or write `config` over what it has.
@@ -408,6 +440,7 @@ fn put_project(
     let project = org.incus_project();
     let Some(p) = existing else {
         report(&format!("{org}: creating project {project}"));
+        let config = merged_config(&json!({}), config);
         h.mutate(
             "POST",
             "/1.0/projects",
@@ -417,15 +450,7 @@ fn put_project(
         )?;
         return Ok(());
     };
-    let mut merged = p["config"].clone();
-    if let (Some(m), Some(c)) = (merged.as_object_mut(), config.as_object()) {
-        for (k, v) in c {
-            m.insert(k.clone(), v.clone());
-        }
-        if !c.contains_key("restricted.devices.disk.paths") {
-            m.remove("restricted.devices.disk.paths");
-        }
-    }
+    let merged = merged_config(&p["config"], config);
     h.mutate(
         "PUT",
         &format!("/1.0/projects/{}", encode_segment(&project)),
@@ -436,12 +461,15 @@ fn put_project(
     Ok(())
 }
 
-/// The default profile: root disk, the org NIC, per-instance defaults and
-/// an isolated uid range per instance.
-fn set_default_profile(base: &Client, h: &Client, org: &OrgId, opts: &OrgOptions) -> Result<()> {
-    let oc = client(base, org);
-    let pool = crate::sandbox::host_facts(h)?.pick_pool(None)?;
-    let profile = json!({
+/// The default profile: root disk (with `root_size`, while the org has a
+/// disk limit), the org NIC, per-instance defaults and an isolated uid range
+/// per instance.
+fn default_profile(org: &OrgId, pool: &str, opts: &OrgOptions, root_size: Option<&str>) -> Value {
+    let mut root = json!({"type": "disk", "path": "/", "pool": pool});
+    if let Some(size) = root_size {
+        root["size"] = json!(size);
+    }
+    json!({
         "description": format!("isb org {org}"),
         "config": {
             "limits.cpu": opts.default_cpus.unwrap_or(1).to_string(),
@@ -449,10 +477,39 @@ fn set_default_profile(base: &Client, h: &Client, org: &OrgId, opts: &OrgOptions
             "security.idmap.isolated": "true",
         },
         "devices": {
-            "root": {"type": "disk", "path": "/", "pool": pool},
+            "root": root,
             "eth0": {"type": "nic", "name": "eth0", "network": bridge_name(org)},
         },
-    });
+    })
+}
+
+/// Write the default profile. Under a disk limit incus refuses an instance
+/// whose root disk has no size, so the profile gives one to every instance
+/// whose spec sets none (stack replicas, job runs, apps): the size the
+/// profile has, else [`limits::DEFAULT_ROOT_SIZE`]. incus applies a change to
+/// the instances that take their root from the profile, resizing their root
+/// volumes. Without a disk limit the profile has no size.
+fn set_default_profile(
+    base: &Client,
+    h: &Client,
+    org: &OrgId,
+    opts: &OrgOptions,
+    disk_limited: bool,
+) -> Result<()> {
+    let oc = client(base, org);
+    let pool = crate::sandbox::host_facts(h)?.pick_pool(None)?;
+    let root_size = if disk_limited {
+        let current = oc.get_opt("/1.0/profiles/default")?.unwrap_or_default();
+        Some(
+            current["devices"]["root"]["size"]
+                .as_str()
+                .unwrap_or(limits::DEFAULT_ROOT_SIZE)
+                .to_string(),
+        )
+    } else {
+        None
+    };
+    let profile = default_profile(org, &pool, opts, root_size.as_deref());
     oc.mutate(
         "PUT",
         "/1.0/profiles/default",
@@ -483,14 +540,38 @@ pub fn ensure(
             )));
         }
     }
+    for l in &opts.lift {
+        let given = match l {
+            Limit::Cpus => opts.cpus.is_some(),
+            Limit::Memory => opts.memory.is_some(),
+            Limit::Disk => opts.disk.is_some(),
+            Limit::Instances => opts.instances.is_some(),
+        };
+        if given {
+            return Err(Error::invalid(format!(
+                "{}: set and lifted at once; give a value or none",
+                l.key()
+            )));
+        }
+    }
     let k = kept(opts, existing.as_ref())?;
     let raw_dnsmasq = raw_dnsmasq(org, report)?;
     let net = ensure_network(&h, org, &raw_dnsmasq, report)?;
     ensure_acl(&h, org, &net, &k.egress, report)?;
     attach(&h, org, &net, &raw_dnsmasq, report)?;
     let config = project_config(org, &k, opts, existing.as_ref());
-    put_project(&h, org, existing.as_ref(), &config, report)?;
-    set_default_profile(base, &h, org, opts)?;
+    let disk = disk_limited(&config, existing.as_ref());
+    if existing.is_some() && disk {
+        // incus refuses a disk limit while an instance has no root size, so
+        // the profile gives them one first.
+        set_default_profile(base, &h, org, opts, disk)?;
+        put_project(&h, org, existing.as_ref(), &config, report)?;
+    } else {
+        // A lifted disk limit goes before the profile loses its size: incus
+        // refuses a sizeless root while the limit stands.
+        put_project(&h, org, existing.as_ref(), &config, report)?;
+        set_default_profile(base, &h, org, opts, disk)?;
+    }
     get(base, org)
 }
 
@@ -600,5 +681,51 @@ mod tests {
         let c = project_config(&org, &kept_default(), &OrgOptions::default(), None);
         assert_eq!(c["restricted.devices.disk"], "managed");
         assert!(c.get("restricted.devices.disk.paths").is_none());
+    }
+
+    #[test]
+    fn a_lifted_limit_is_removed_and_others_are_kept() {
+        let org = OrgId::new("lab").unwrap();
+        let existing = json!({"config": {
+            "limits.cpu": "4", "limits.memory": "8GiB", "limits.disk": "50GiB",
+        }});
+        let opts = OrgOptions {
+            lift: vec![Limit::Disk, Limit::Cpus],
+            instances: Some(5),
+            ..Default::default()
+        };
+        let c = project_config(&org, &kept_default(), &opts, Some(&existing));
+        assert!(!disk_limited(&c, Some(&existing)));
+        let m = merged_config(&existing["config"], &c);
+        assert!(m.get("limits.disk").is_none(), "{m}");
+        assert!(m.get("limits.cpu").is_none(), "{m}");
+        assert_eq!(m["limits.memory"], "8GiB");
+        assert_eq!(m["limits.instances"], "5");
+        // A new project gets no null keys either.
+        let m = merged_config(&json!({}), &c);
+        assert!(m.as_object().unwrap().values().all(|v| !v.is_null()));
+
+        // Kept, set, or never there.
+        let none = project_config(&org, &kept_default(), &OrgOptions::default(), None);
+        assert!(disk_limited(&none, Some(&existing)));
+        assert!(!disk_limited(&none, None));
+        let set = OrgOptions {
+            disk: Some("10GiB".into()),
+            ..Default::default()
+        };
+        let c = project_config(&org, &kept_default(), &set, None);
+        assert!(disk_limited(&c, None));
+    }
+
+    #[test]
+    fn the_default_profile_sizes_the_root_disk_only_under_a_disk_limit() {
+        let org = OrgId::new("lab").unwrap();
+        let opts = OrgOptions::default();
+        let p = default_profile(&org, "default", &opts, None);
+        assert!(p["devices"]["root"].get("size").is_none(), "{p}");
+        assert_eq!(p["config"]["limits.cpu"], "1");
+        let p = default_profile(&org, "default", &opts, Some(limits::DEFAULT_ROOT_SIZE));
+        assert_eq!(p["devices"]["root"]["size"], "10GiB");
+        assert_eq!(p["devices"]["root"]["pool"], "default");
     }
 }

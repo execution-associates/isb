@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
-import { keys, useSecretNames } from "@/apps/api";
+import { useSecretNames } from "@/apps/api";
 import { EmptyState } from "@/apps/components";
 import { CronField } from "@/components/cron-field";
 import { Field, FormError, PasswordInput } from "@/components/form";
@@ -22,8 +22,9 @@ import { errorMessage } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 import { bytes } from "@/apps/util";
 import { type BackupFile, type BackupSpec, type Compression, type Database, dbNameProblem, type Run, scheduleNameProblem, useDestinations } from "./api";
+import { invalidateOrg } from "@/lib/freshness";
 
-const invalidate = (qc: ReturnType<typeof useQueryClient>, org: string) => qc.invalidateQueries({ queryKey: keys.org(org) });
+const invalidate = (qc: ReturnType<typeof useQueryClient>, org: string) => invalidateOrg(qc, org);
 
 /** A backup name from what it backs up: `web_data` → `web-data-daily`. */
 export const defaultBackupName = (source: string) =>

@@ -7,7 +7,6 @@ import { ArchiveRestore, Camera, CalendarClock, Plus, Trash2 } from "lucide-reac
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
-import { keys } from "@/apps/api";
 import { ConfirmDialog, EmptyState, QueryError, Section } from "@/apps/components";
 import { ScheduleText } from "@/components/cron-field";
 import { StatusBadge } from "@/components/status";
@@ -22,6 +21,7 @@ import { type Snapshot, useSnapshotRuns, useVolume, type VolumeDetail } from "./
 import { VolumeBackups } from "./backups";
 import { type RestoreFrom, ScheduleDialog, SnapshotNowDialog, StagedRestoreDialog } from "./dialogs";
 import { StagedRestores } from "./restores";
+import { invalidateOrg } from "@/lib/freshness";
 
 export type VolumeLog = { kind: "snapshot"; run: Run } | { kind: "backup"; backup: string; run: Run } | { kind: "restore"; run: Run };
 
@@ -192,7 +192,7 @@ function Snapshots({
         confirmLabel="Delete snapshot"
         onConfirm={async () => {
           await callTool("volume_snapshot_delete", { name, snapshot: del?.name ?? "" }, org);
-          await qc.invalidateQueries({ queryKey: keys.org(org) });
+          await invalidateOrg(qc, org);
           toast.success(`Snapshot ${del?.name} deleted`);
         }}
       />

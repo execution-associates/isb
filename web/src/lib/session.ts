@@ -17,6 +17,9 @@ export function useMe() {
       }
     },
     staleTime: 30_000,
+    // Org memberships and roles change from elsewhere (an invite accepted,
+    // an org made or removed by the CLI): the sidebar's org list follows.
+    refetchInterval: 60_000,
   });
 }
 

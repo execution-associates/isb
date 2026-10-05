@@ -16,13 +16,31 @@ pub fn image() -> String {
     std::env::var("ISB_TEST_IMAGE").unwrap_or_else(|_| "dev-base".into())
 }
 
-/// The client for the default org's incus project (`isb-default`), where the
-/// default org's stacks and apps live; plain sandboxes stay in incus'
-/// `default` project. Creates the org the way `isb serve` does when it is
-/// missing, and leaves an existing one alone.
-pub fn default_org_client(base: &Client) -> Client {
-    isb::org::ensure_default(base, &mut |l| eprintln!("{l}")).unwrap();
-    isb::org::client(base, &isb::org::OrgId::default_org())
+/// The org the stack and app tests deploy into: `isb-test` (incus project
+/// `isb-isb-test`), never the default org, which holds a host's own apps.
+pub fn test_org() -> isb::org::OrgId {
+    isb::org::OrgId::new(TEST_ORG).unwrap()
+}
+
+pub const TEST_ORG: &str = "isb-test";
+
+/// A test stack's controller key: `isb-test/NAME`.
+pub fn q(stack: &str) -> String {
+    isb::stack::qualified(&test_org(), stack)
+}
+
+/// The client for [`test_org`]'s incus project. Creates the org with default
+/// settings when it is missing and leaves an existing one alone; plain
+/// sandboxes stay in incus' `default` project.
+pub fn test_org_client(base: &Client) -> Client {
+    let org = test_org();
+    if isb::org::get(base, &org).is_err() {
+        isb::org::ensure(base, &org, &isb::org::OrgOptions::default(), &mut |l| {
+            eprintln!("{l}")
+        })
+        .unwrap();
+    }
+    isb::org::client(base, &org)
 }
 
 /// A VM's host bind mount at `/mnt/share` is translated by virtiofsd: guest root
@@ -61,4 +79,27 @@ pub fn vm_share_is_translated(sb: &Sandbox, share: &std::path::Path) {
     }
     assert!(!share.join("dev").exists());
     assert!(!share.join("other").exists());
+}
+
+/// A stack as the tests deploy it: `file` with no secrets, by `test`.
+pub fn test_def(
+    name: &str,
+    org: isb::org::OrgId,
+    file: isb::spec::ComposeFile,
+    base_dir: &std::path::Path,
+) -> isb::stack::StackDef {
+    isb::stack::StackDef {
+        source: None,
+        domains: Default::default(),
+        name: name.to_string(),
+        org,
+        file,
+        base_dir: base_dir.to_path_buf(),
+        secrets: Default::default(),
+        force: Default::default(),
+        images: Default::default(),
+        deployed_at: 0,
+        deployed_by: "test".into(),
+        previous: None,
+    }
 }

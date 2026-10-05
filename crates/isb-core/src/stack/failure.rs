@@ -5,14 +5,16 @@
 //! gone (or dying, and incus answers the console request with an error).
 //! The controller therefore reads the failed instance's output before it
 //! deletes it, puts the last lines in the failure message (the deployment
-//! log, the service's status) and keeps them here for `app_logs`, which
-//! shows them beside the live replicas' logs.
+//! log, the service's status) and keeps them here for `app_logs` and
+//! `stack_logs`, which show them beside the live replicas' logs. The
+//! deployment that was rolling out keeps them too, so they outlive a restart
+//! of the daemon.
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::controller::{Inst, list_instances};
 use crate::client::Client;
@@ -21,7 +23,10 @@ use crate::sandbox::Sandbox;
 use crate::supervise;
 
 /// How many lines of a failed replica's output are read.
-const READ_LINES: usize = 60;
+const READ_LINES: usize = 200;
+/// The most of them kept (the end): a few of these sit in every deployment
+/// record.
+pub const OUTPUT_BYTES: usize = 32 * 1024;
 /// How many of them go into the failure message.
 const MESSAGE_LINES: usize = 8;
 /// The most characters the message takes from them.
@@ -74,7 +79,7 @@ pub fn retry(prev: Option<Duration>, image: &str, msg: &str, e: &Error) -> (Dura
 }
 
 /// The output of the last replica of a service that failed to come up.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FailedAttempt {
     /// The instance that was deleted.
     pub instance: String,
@@ -82,8 +87,24 @@ pub struct FailedAttempt {
     pub at_ms: u64,
     /// Why (the failure message without the output).
     pub reason: String,
-    /// The last lines it printed.
+    /// The last lines it printed (at most `READ_LINES` and
+    /// [`OUTPUT_BYTES`]).
     pub output: String,
+    /// Why `output` is empty: it printed nothing, or it could not be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_note: Option<String>,
+}
+
+impl FailedAttempt {
+    /// The attempt without its output, for a status: where to read it.
+    pub fn summary(&self) -> serde_json::Value {
+        serde_json::json!({
+            "instance": self.instance,
+            "at_ms": self.at_ms,
+            "reason": self.reason,
+            "output_lines": self.output.lines().count(),
+        })
+    }
 }
 
 /// The last failed attempt of each (stack, service).
@@ -104,6 +125,17 @@ impl Failures {
             .unwrap_or_else(|e| e.into_inner())
             .get(&(stack.to_string(), service.to_string()))
             .cloned()
+    }
+
+    /// Every service's of `stack`.
+    pub fn of_stack(&self, stack: &str) -> BTreeMap<String, FailedAttempt> {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .filter(|((s, _), _)| s == stack)
+            .map(|((_, svc), a)| (svc.clone(), a.clone()))
+            .collect()
     }
 
     /// A service that came up again has nothing to explain.
@@ -141,30 +173,49 @@ const OUTPUT_WAIT: Duration = if cfg!(test) {
     Duration::from_secs(8)
 };
 
-/// Poll `read` until it yields text, for at most `within`. An empty string
-/// when the instance printed nothing or cannot be read: the failure is
-/// explained without it.
+/// Poll `read` until it yields text, for at most `within`. Empty when the
+/// instance printed nothing or cannot be read (then with the last error):
+/// the failure is explained without it.
 fn poll_output(
     read: &mut dyn FnMut() -> Result<String>,
     within: Duration,
     poll: Duration,
-) -> String {
+) -> (String, Option<String>) {
     let until = std::time::Instant::now() + within;
+    let mut last_err: Option<String>;
     loop {
-        if let Ok(t) = read() {
-            if !t.trim().is_empty() {
-                return t;
-            }
+        match read() {
+            Ok(t) if !t.trim().is_empty() => return (t, None),
+            Ok(_) => last_err = None,
+            Err(e) => last_err = Some(e.to_string()),
         }
         if std::time::Instant::now() >= until {
-            return String::new();
+            return (String::new(), last_err);
         }
         std::thread::sleep(poll);
     }
 }
 
-/// The failed instance's output, read before it is deleted.
-fn read_output(client: &Client, name: &str, service: &str, oci: bool) -> String {
+/// The end of `text`: at most `max` bytes, cut at a line (or character)
+/// boundary.
+fn keep_end(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_string();
+    }
+    let mut start = text.len() - max;
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    let tail = &text[start..];
+    match tail.find('\n') {
+        Some(i) if i + 1 < tail.len() => tail[i + 1..].to_string(),
+        _ => tail.to_string(),
+    }
+}
+
+/// The failed instance's output, read before it is deleted, and why there
+/// is none.
+fn read_output(client: &Client, name: &str, service: &str, oci: bool) -> (String, Option<String>) {
     poll_output(
         &mut || {
             let sb = Sandbox::get(client, name)?;
@@ -185,7 +236,15 @@ pub fn explain(
     e: Error,
     now_ms: u64,
 ) -> (Error, FailedAttempt) {
-    let output = read_output(client, name, service, oci);
+    let (output, err) = read_output(client, name, service, oci);
+    let output = keep_end(&output, OUTPUT_BYTES);
+    let output_note = output.trim().is_empty().then(|| match err {
+        Some(e) => format!("its output could not be read: {e}"),
+        None => format!(
+            "it printed nothing in the {}s its output was waited for",
+            OUTPUT_WAIT.as_secs()
+        ),
+    });
     let reason = e.to_string();
     let tail = one_line(&output, MESSAGE_LINES, MESSAGE_CHARS);
     let err = if tail.is_empty() {
@@ -198,6 +257,7 @@ pub fn explain(
         at_ms: now_ms,
         reason,
         output,
+        output_note,
     };
     (err, attempt)
 }
@@ -309,11 +369,14 @@ mod tests {
             at_ms: 7,
             reason: "failed within the 5s monitor period".into(),
             output: "boom".into(),
+            output_note: None,
         };
         assert_eq!(f.last("shop", "web"), None);
         f.record("shop", "web", a.clone());
-        assert_eq!(f.last("shop", "web"), Some(a));
+        assert_eq!(f.last("shop", "web"), Some(a.clone()));
         assert_eq!(f.last("shop", "db"), None);
+        f.record("other", "web", a.clone());
+        assert_eq!(f.of_stack("shop").into_keys().collect::<Vec<_>>(), ["web"]);
         f.clear("shop", "web");
         assert_eq!(f.last("shop", "web"), None);
     }
@@ -334,6 +397,14 @@ mod tests {
         assert_eq!(e.to_string(), "failed within the 5s monitor period");
         assert_eq!(a.reason, "failed within the 5s monitor period");
         assert!(a.output.is_empty());
+        // Said why, instead of an empty "last output".
+        assert!(
+            a.output_note
+                .as_deref()
+                .is_some_and(|n| n.starts_with("its output could not be read: ")),
+            "{:?}",
+            a.output_note
+        );
         assert_eq!((a.instance.as_str(), a.at_ms), ("gone", 9));
     }
 
@@ -381,7 +452,7 @@ mod tests {
             Duration::from_secs(5),
             Duration::from_millis(1),
         );
-        assert_eq!(got, "Error: getaddrinfo ENOTFOUND db\n");
+        assert_eq!(got, ("Error: getaddrinfo ENOTFOUND db\n".to_string(), None));
         assert_eq!(n, 3);
         // An instance that prints nothing is not waited on for long.
         let t = std::time::Instant::now();
@@ -390,7 +461,18 @@ mod tests {
             Duration::from_millis(30),
             Duration::from_millis(10),
         );
-        assert_eq!(none, "");
+        assert_eq!(none, (String::new(), None));
         assert!(t.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn the_output_kept_is_its_end_within_the_cap() {
+        let text: String = (0..5000).map(|i| format!("line {i}\n")).collect();
+        let kept = keep_end(&text, OUTPUT_BYTES);
+        assert!(kept.len() <= OUTPUT_BYTES);
+        assert!(kept.starts_with("line ") && kept.ends_with("line 4999\n"));
+        assert_eq!(keep_end("short", 10), "short");
+        // Never splits a character.
+        assert_eq!(keep_end("ééé", 3), "é");
     }
 }

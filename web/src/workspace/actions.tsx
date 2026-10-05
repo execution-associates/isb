@@ -66,6 +66,7 @@ export function GuardedDialog({
       if (gone) return;
       toast.success(done);
       await qc.invalidateQueries({ queryKey: wsKeys.workspace(org) });
+      await qc.invalidateQueries({ queryKey: wsKeys.sandboxes(org) });
       onDone?.(result);
       onOpenChange(false);
     };

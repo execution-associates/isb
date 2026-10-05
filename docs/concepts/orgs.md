@@ -21,6 +21,9 @@ isb org create NAME [--cpus N] [--memory 16GiB] [--disk 100GiB] [--instances N]
                     [--allow-domain SUFFIX]... [--ingress caddy|cloudflare-tunnel]
                     [--cloudflare-account ID] [--cloudflare-zone ID]
                     [--server SERVER | --vm [--vm-cpus N] [--vm-memory 4GiB] [--vm-disk 40GiB]]
+isb org update NAME [--cpus N|none] [--memory SIZE|none] [--disk SIZE|none] [--instances N|none]
+                    [--default-cpus N] [--default-memory SIZE]
+                    [--allow-egress DEST]... [--allow-udp IP:PORT]...
 isb org ls [--json]
 isb org show NAME [--json]
 isb org rm NAME [--force] [--delete-vm]
@@ -28,7 +31,9 @@ isb org nesting NAME [on|off]
 sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run] [--public-ingress]
 ```
 
-`isb org create` on an existing org updates it to the flags given. `system`
+`isb org create` on an existing org sets the flags given. `isb org update`
+changes an existing org through the daemon: flags left out keep their value,
+and `none` lifts a limit (`isb org update lab --disk none`). `system`
 is not an org name: the incus project `isb-system` holds isb's own services
 (the local registry, dedicated VMs).
 
@@ -62,10 +67,10 @@ and the web UI's org Settings and Platform pages use them:
 
 | Tool | Who | Does |
 |---|---|---|
-| `org_get` | the org's members | limits, defaults, network, egress, bind roots, service-name domain (`<org>.isb`), counts, `placement` |
+| `org_get` | the org's members | limits with what is allocated against each (`allocation`), defaults, network, egress, bind roots, service-name domain (`<org>.isb`), counts, `placement` |
 | `org_list` | platform admins | every org, each with the `server` it runs on (`local` for this daemon) and its `placement` |
 | `org_create` | platform admins | `isb org create` without `--bind-root`; `placement` puts it on a server or in a dedicated VM |
-| `org_update` | platform admins | limits, per-instance defaults, egress exceptions (a different `server` or `placement` is refused) |
+| `org_update` | platform admins | `isb org update`: limits (`"none"` or `null` lifts one), per-instance defaults, egress exceptions (a different `server` or `placement` is refused) |
 | `org_delete` | platform admins | `isb org rm`, refused while stacks are deployed in the org, and while it has sandboxes unless `force`; `delete_vm` also deletes a dedicated VM |
 | `org_nesting` | superadmins | whether the org's workspace may run Docker (`isb org nesting ORG on\|off`); `org_get` shows it as `allow_nesting` |
 
@@ -73,8 +78,7 @@ Limits and egress exceptions are what keep one org from the others and from
 the host's networks, so changing them is for platform admins, not the org's
 own owners and admins, who see them read-only. Bind roots are host paths and
 are set only on the host (`isb org create --bind-root`): an update through
-the API keeps them, as it keeps any field it is not given. A limit, once
-set, can be changed but not lifted, as with the CLI. Creating an org through
+the API keeps them, as it keeps any field it is not given. Creating an org through
 the API also adds it to the identity store, and deleting one removes its
 memberships, invitations and tokens; its secrets stay under the state
 directory.
@@ -130,9 +134,58 @@ host:
 Once a project has limits, incus wants limits on every instance, so the
 org's default profile carries `--default-cpus` (1) and `--default-memory`
 (512MiB) for instances whose spec sets none. The host's images are shared
-with every org. When an instance or volume would pass a limit, isb says
-which (`org lab is at its CPU quota (limits.cpu 2, 2 in use)`) and how to
-raise it: `isb org create lab --cpus N` on the host, or `org_update`.
+with every org.
+
+### Limits are budgets
+
+incus enforces an org's limits as budgets of what is **allocated**, not of
+what is used: `limits.cpu` caps the sum of every instance's `limits.cpu`,
+`limits.memory` the sum of their `limits.memory`, and `limits.disk` the sum
+of their root disks' `size` and the org's volumes' sizes. Every instance in
+the org counts, stopped ones included, so stopping an instance frees
+nothing; deleting it or lowering its limits does. `--instances` counts
+instances the same way. Nothing caps what the org's instances use together
+at any moment: that would need a parent cgroup per project, which incus does
+not offer, so isb has no shared-ceiling mode.
+
+For example, an org with `--cpus 4 --memory 4GiB` and the defaults (1 CPU,
+512MiB) fits four instances that set no limits, running or stopped, and a
+fifth is refused even if the four are idle. Instead of those four, one stack
+service with `cpus: 2` and two replicas takes all four CPUs, and 2 x 512MiB
+of the memory (or two of what the service sets).
+
+`isb org show` prints each limit with its allocation:
+
+```text
+instances  3 of 5, stopped ones included
+cpus       3 of 4 allocated, 1 free
+memory     1.5GiB of 4GiB allocated, 2.5GiB free
+disk       unlimited
+           (allocated: the sum of every instance's limit, stopped ones included)
+defaults   1 CPU, 512MiB memory per instance whose spec sets none
+```
+
+`org_get` and `isb org show --json` have the same as `allocation`
+(`{"cpu": {"limit": 4, "allocated": 3, "free": 1}, ...}`, bytes for memory
+and disk; a limit that is not set is left out). When an instance or volume
+would pass a limit, isb says which, what is allocated, and what the request
+needed (`org lab is at its CPU quota (limits.cpu: allocated 4 of 4, the sum
+of every instance's limit, stopped ones included; web-3 needs 1 (the org's
+default))`), and how to raise or lift it: `isb org update lab --cpus N` (or
+`--cpus none`) on the host, or `org_update`.
+
+**Disk.** Under `limits.disk` incus refuses an instance whose root disk has
+no `size`. While an org has a disk limit, its default profile's root disk
+gets a size of 10GiB (the same as a sandbox's; a size an operator set on the
+profile is kept), so stack replicas, job runs and anything else whose spec
+sets none fit. A compose service sets its own with
+`raw_devices: {root: {size: 20GiB}}` (allowed for remote callers without
+`--allow-raw`, since it is only a quota); sandboxes get 10GiB and workspaces
+20GiB on their own. Setting the profile's size applies to the instances that
+take their root disk from it: incus resizes their root volumes to 10GiB,
+and refuses the change for a root that holds more than that, until that
+instance is given its own size or removed. `isb org update ORG --disk none`
+lifts the limit and takes the size off the profile again.
 
 The project's bind paths are the `--bind-root` directories plus the host
 folders of the org's workspace homes, which are recorded on the project, so

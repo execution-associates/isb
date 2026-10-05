@@ -360,6 +360,7 @@ function TokenPanel({ me, org, created, onCreated }: { me: Me; org: string; crea
       onCreated(r);
       setError(null);
       void qc.invalidateQueries({ queryKey: ["tokens"] });
+      void qc.invalidateQueries({ queryKey: ["org-tokens"] });
     },
     onError: (e) => setError(errorMessage(e)),
   });
