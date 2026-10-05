@@ -119,7 +119,8 @@ Platform admins also:
 - manage users from the web UI's Platform page or the `admin/users`
   endpoints: disable and enable them, and make or unmake platform admins.
   Nobody does either to themselves, and an enabled platform admin always
-  remains;
+  remains (creating users, setting passwords, and minting tokens or adding
+  SSH keys for someone are on the host only, `isb user` and `isb token`);
 - are the only callers of `server_status`, `org_list`, `org_create`,
   `org_update`, `org_delete`, the `server_*` tools, `audit_verify`,
   `registry_gc`, `notification_settings`, adding and removing template
@@ -317,7 +318,8 @@ an API token, a workspace token and a superadmin token are all refused
 (`POST tokens` and the `token_create` tool alike). A token that could mint
 another would survive its own revocation through the copy, and bounding the
 copy's scopes or expiry would not change that: revoking a leaked token must
-end what it can do.
+end what it can do. For the same reason no token creates a user, sets a
+user's password or adds an SSH key to someone else's account.
 
 ### Scopes
 
@@ -329,7 +331,7 @@ narrowing, checked in the same authorizer as roles, and never widen a role
 | Scope | Allows |
 |---|---|
 | `read` | read-only tools, never secret material (as a viewer) |
-| `deploy` | `read`, plus `stack_deploy`, `stack_redeploy`, `stack_rollback`, `stack_scale`, `app_deploy`, `app_rollback`, `build_run` |
+| `deploy` | `read`, plus `stack_deploy`, `stack_redeploy`, `stack_rollback`, `stack_scale`, `app_scale`, `app_restart`, `instance_restart`, `sandbox_start`, `sandbox_stop`, `app_deploy`, `app_rollback`, `build_run` |
 | `admin` | everything the role allows (the same as no scopes) |
 | `tool:GLOB` | tools whose name matches, e.g. `tool:app_*`, `tool:stack_status` |
 

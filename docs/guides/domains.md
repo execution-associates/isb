@@ -148,7 +148,8 @@ on the service (the `events` tool, `/api/v1/events`), and `cert.issued` /
 ## Who may serve a name
 
 - **Allowlist.** A platform admin limits an org's names with `isb org create
-  ORG --allow-domain example.com` ([Orgs](../concepts/orgs.md#domains)).
+  ORG --allow-domain example.com`, or `org_update`'s `domains`
+  ([Orgs](../concepts/orgs.md#domains)).
   Without a list any concrete name is allowed and no wildcard; a wildcard host
   needs a `*.suffix` entry.
 - **First claim wins.** A name one org serves is refused to every other org,

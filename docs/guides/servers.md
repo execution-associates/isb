@@ -133,8 +133,9 @@ isb org create beta --vm [--vm-cpus 4 --vm-memory 8GiB --vm-disk 100GiB]
 platform admins.) The control plane tells the agent the org is placed on it,
 creates it there (its incus project, bridge and ACL), and adds it to its own
 identity store for members, invitations and tokens. The default org is always
-local. Bind roots, the domain allowlist and the ingress provider of an org on
-a server cannot be set through the control plane. An org does not move once
+local. Bind roots of an org on a server cannot be set through the control
+plane; its domain allowlist and ingress provider are `org_create`'s and
+`org_update`'s, passed on to its server. An org does not move once
 placed ([Moving an org](../concepts/placement.md#moving-an-org)).
 
 From then on every org-scoped call for that org goes to its server, on every

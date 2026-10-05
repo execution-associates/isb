@@ -2,8 +2,9 @@
 //! admin pages. Reading an org is for its members; creating, changing and
 //! deleting one is for platform admins (`PLATFORM_TOOLS`), since limits and
 //! egress exceptions are what keep one org from another and from the host.
-//! Bind roots are host paths and stay with the CLI (`isb org create
-//! --bind-root`).
+//! The domain allowlist and ingress provider are a platform admin's too: they
+//! decide which public names an org may claim. Bind roots are host paths and
+//! stay with the CLI (`isb org create --bind-root`).
 
 use std::sync::Arc;
 
@@ -64,6 +65,18 @@ pub(super) struct Settings {
     /// list; `[]` clears it.
     #[serde(default)]
     pub udp: Option<Vec<String>>,
+    /// Domain suffixes the org's services may serve. Replaces the list;
+    /// `[]` clears it (any concrete name).
+    #[serde(default)]
+    pub domains: Option<Vec<String>>,
+    /// `caddy` or `cloudflare-tunnel`.
+    #[serde(default)]
+    pub ingress: Option<String>,
+    /// The tunnel provider's Cloudflare ids; `""` clears one.
+    #[serde(default)]
+    pub cloudflare_account: Option<String>,
+    #[serde(default)]
+    pub cloudflare_zone: Option<String>,
     /// Where the org runs: `local` (this daemon) or a server's name. A
     /// control plane routes a server placement before the tool runs.
     #[serde(default)]
@@ -126,16 +139,8 @@ impl Settings {
             }
             None => None,
         };
-        let udp = match &self.udp {
-            Some(list) => Some(
-                list.iter()
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                    .map(org::check_udp_port)
-                    .collect::<Result<Vec<_>>>()?,
-            ),
-            None => None,
-        };
+        let udp = list(self.udp.as_deref(), org::check_udp_port)?;
+        let domains = list(self.domains.as_deref(), org::check_domain_suffix)?;
         let parse_u32 = |v: Option<&String>| v.and_then(|s| s.parse::<u32>().ok());
         let set = |v: &Option<LimitArg<String>>| match v {
             Some(LimitArg::Set(s)) => Some(s.clone()),
@@ -200,11 +205,28 @@ impl Settings {
                 .unwrap_or_default(),
             egress,
             udp,
-            // Domain allowlist and ingress provider stay as they are: they
-            // are set with `isb org create`, not through this tool.
-            ..Default::default()
+            domains,
+            ingress: self.ingress.as_ref().map(|s| s.trim().to_string()),
+            cloudflare_account: self
+                .cloudflare_account
+                .as_ref()
+                .map(|s| s.trim().to_string()),
+            cloudflare_zone: self.cloudflare_zone.as_ref().map(|s| s.trim().to_string()),
         })
     }
+}
+
+/// A list argument, each entry trimmed and checked; blanks dropped. `None`
+/// keeps what the org has.
+fn list<T>(v: Option<&[String]>, check: impl Fn(&str) -> Result<T>) -> Result<Option<Vec<T>>> {
+    v.map(|l| {
+        l.iter()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(&check)
+            .collect()
+    })
+    .transpose()
 }
 
 /// A size incus takes: digits, then an optional unit (`512MiB`, `16GiB`,
@@ -283,6 +305,10 @@ fn settings_props() -> Value {
         "default_memory": {"type": "string", "description": "Memory an instance gets when its spec sets none, e.g. 512MiB."},
         "egress": {"type": "array", "items": {"type": "string"}, "description": "Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/concepts/orgs.md). Replaces the list; [] clears it."},
         "udp": {"type": "array", "items": {"type": "string"}, "description": "UDP ports the org's stacks may publish on the host, IP:PORT each (a specific host address, e.g. 203.0.113.7:10000), forwarded by incus to the service's one replica with the client's address kept (docs/concepts/stacks.md). Replaces the list; [] clears it."},
+        "domains": {"type": "array", "items": {"type": "string"}, "description": "Domain suffixes the org's services may serve: example.com allows it and every name under it, *.example.com wildcard hosts too. Replaces the list; [] clears it (any concrete name, no wildcards). The same as `isb org create --allow-domain`."},
+        "ingress": {"type": "string", "enum": ["caddy", "cloudflare-tunnel"], "description": "How the org's domains are reached: caddy (the server's public listeners) or cloudflare-tunnel (the org's own tunnel, token in its secret cloudflare-tunnel-token)."},
+        "cloudflare_account": {"type": "string", "description": "Cloudflare account id for the tunnel's API calls (default: the tunnel token's); \"\" clears it."},
+        "cloudflare_zone": {"type": "string", "description": "Cloudflare zone id the org's hostnames are in (default: looked up per hostname); \"\" clears it."},
         "server": {"type": "string", "description": "Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. Same as placement {\"server\": NAME}."},
         "placement": {
             "description": "Where the org runs, set at creation: \"local\" (this host: an incus project sharing its kernel), {\"server\": NAME} (another host, server_list), or {\"vm\": {\"cpus\", \"memory\", \"disk\"}} (a dedicated VM this control plane makes on its own host: the org's own kernel; defaults 2 CPUs, 4GiB, 40GiB). An org is not moved afterwards.",
@@ -356,7 +382,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
     tool!(
         "org_create",
         "Create an org",
-        "Platform admins: create an org (an incus project with its own bridge and network ACL), with optional limits and egress exceptions. Fails if it exists. Bind roots are set from the host's CLI only.",
+        "Platform admins: create an org (an incus project with its own bridge and network ACL), with optional limits, egress exceptions, domain allowlist and ingress provider. Fails if it exists. Bind roots are set from the host's CLI only.",
         schema(
             settings_props(),
             &["org"],
@@ -392,7 +418,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
     tool!(
         "org_update",
         "Change an org",
-        "Platform admins: change an org's limits, per-instance defaults, egress exceptions or the UDP ports its stacks may publish. Fields left out keep their value; a limit given as \"none\" (or null) is lifted; `egress` and `udp` replace their lists. The same as `isb org update`.",
+        "Platform admins: change an org's limits, per-instance defaults, egress exceptions, the UDP ports its stacks may publish, its domain allowlist or its ingress provider. Fields left out keep their value; a limit given as \"none\" (or null) is lifted; `egress`, `udp` and `domains` replace their lists. The same as `isb org update` (and `isb org create`'s --allow-domain, --ingress and --cloudflare-* on an existing org).",
         schema(settings_props(), &["org"], "The org."),
         write,
         |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
