@@ -52,7 +52,7 @@ const RESTARTS_BEFORE_REPLACE: u32 = 3;
 const HEALTH_DEBOUNCE: Duration = Duration::from_secs(20);
 
 /// One replica, as `stack_status` reports it.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct InstanceStatus {
     pub name: String,
     pub slot: u32,

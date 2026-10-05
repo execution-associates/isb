@@ -581,45 +581,194 @@ fn compose_stack_services_with_a_domain_get_their_own_monitor() {
     svc.create(&org, h).unwrap();
 }
 
-#[test]
-fn a_service_behind_access_is_checked_at_its_own_endpoint() {
+/// An HTTP server answering `status` to every request, keeping each
+/// request's head.
+fn recording(status: &'static str) -> (u16, Arc<Mutex<Vec<String>>>) {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let keep = seen.clone();
+    std::thread::spawn(move || {
+        for s in l.incoming() {
+            let Ok(mut s) = s else { continue };
+            let mut b = [0u8; 4096];
+            let n = s.read(&mut b).unwrap_or(0);
+            keep.lock()
+                .unwrap()
+                .push(String::from_utf8_lossy(&b[..n]).to_string());
+            let _ = write!(s, "HTTP/1.1 {status}\r\nContent-Length: 2\r\n\r\nok");
+        }
+    });
+    (port, seen)
+}
+
+const ACCESS: &str =
+    "HTTP/1.1 302 Found\r\nLocation: https://team.cloudflareaccess.com/cdn-cgi/access/login/x";
+
+/// Check `m` once against wiki's web served at `d`, the monitor up before.
+fn check_once(
+    stacks: &[(&str, &str)],
+    allow_private: bool,
+    d: crate::ingress::DomainStatus,
+    m: &Monitor,
+) -> Outcome {
     let org = OrgId::new("acme").unwrap();
-    let access = answering(
-        "HTTP/1.1 302 Found\r\nLocation: https://team.cloudflareaccess.com/cdn-cgi/access/login/x",
-    );
-    let origin = answering("HTTP/1.1 200 OK");
+    let dir = tempfile::tempdir().unwrap();
+    let (svc, ing) = service_with(dir.path(), stacks, allow_private);
+    let stack = format!("acme/{}", m.stack.as_deref().unwrap_or_default());
+    ing.set(&stack, "web", vec![d]);
+    svc.create(&org, m.clone()).unwrap();
+    svc.edit_state(&org, &m.name, |s| s.status = Status::Up)
+        .unwrap();
+    svc.check(&org, m)
+}
+
+fn wiki_monitor() -> Monitor {
     let mut m = Monitor::new("stack-wiki-web", Kind::Service);
     (m.stack, m.service) = (Some("wiki".into()), Some("web".into()));
-    let upstream = format!("127.0.0.1:{origin}");
-    for (allow_private, public, why) in [
-        (true, access, "behind Cloudflare Access"),
-        (false, origin, "private address"),
-    ] {
-        let dir = tempfile::tempdir().unwrap();
-        let (svc, ing) = service_with(dir.path(), &[("wiki", WIKI)], allow_private);
-        let url = format!("http://127.0.0.1:{public}/");
-        ing.set("acme/wiki", "web", vec![serving(&url, &upstream)]);
-        svc.create(&org, m.clone()).unwrap();
-        // Up before: checked without waiting for a live deployment.
-        svc.edit_state(&org, &m.name, |s| s.status = Status::Up)
-            .unwrap();
-        let o = svc.check(&org, &m);
-        assert!(o.ok, "{o:?}");
-        assert_eq!(
-            o.via.as_deref(),
-            Some(format!("internal: upstream {upstream}").as_str())
-        );
-        let note = o.note.unwrap_or_default();
-        assert!(
-            note.contains(why) && note.contains("checked the service's own endpoint"),
-            "{note}"
-        );
-        // Events are about the stack's service.
-        assert_eq!(
-            svc.subject(&org, &m),
-            ("acme/wiki".to_string(), "web".to_string())
-        );
-    }
+    m
+}
+
+fn hop_names(o: &Outcome) -> Vec<(&str, bool)> {
+    o.hops.iter().map(|h| (h.hop.as_str(), h.ok)).collect()
+}
+
+#[test]
+fn a_service_behind_access_is_checked_hop_by_hop() {
+    let access = answering(ACCESS);
+    let public = format!("http://127.0.0.1:{access}/");
+    let (ingress, seen) = recording("200 OK");
+    let origin = format!("http://127.0.0.1:{ingress}");
+    let replica = answering("HTTP/1.1 200 OK");
+    let upstream = format!("127.0.0.1:{replica}");
+    let m = wiki_monitor();
+    let mut d = serving(&public, &upstream);
+    d.origin = Some(origin.clone());
+
+    // Edge and ingress pass: up, the ingress asked as cloudflared would.
+    let o = check_once(&[("wiki", WIKI)], true, d.clone(), &m);
+    assert!(o.ok, "{o:?}");
+    assert_eq!(hop_names(&o), [("edge", true), ("ingress", true)]);
+    assert_eq!(o.via, Some(format!("ingress {origin}")));
+    assert_eq!(o.url.as_deref(), Some("http://wiki.acme.dev/"));
+    let note = o.note.unwrap_or_default();
+    assert!(
+        note.contains("checked hop by hop (Cloudflare edge, ingress); the Access policy is not verified: add CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET secrets"),
+        "{note}"
+    );
+    let head = seen.lock().unwrap().pop().unwrap_or_default();
+    assert!(head.starts_with("GET / HTTP/1.1\r\n"), "{head}");
+    assert!(head.contains("\r\nHost: wiki.acme.dev\r\n"), "{head}");
+
+    // The ingress answering 502: down, naming it.
+    let (bad, _) = recording("502 Bad Gateway");
+    let mut d502 = d.clone();
+    d502.origin = Some(format!("http://127.0.0.1:{bad}"));
+    let o = check_once(&[("wiki", WIKI)], true, d502, &m);
+    assert!(!o.ok);
+    assert_eq!(
+        o.error.as_deref(),
+        Some("ingress: HTTP 502 (expected 200-399)")
+    );
+
+    // Through a tunnel whose cloudflared is not running: down, naming the
+    // tunnel; the ingress is still asked, with the visitor's HTTPS.
+    let mut dt = d.clone();
+    (dt.provider, dt.https) = ("cloudflare-tunnel".into(), true);
+    let tunnel = ("isb-tunnel", "services:\n  cloudflared: {image: x}\n");
+    let o = check_once(&[("wiki", WIKI), tunnel], true, dt, &m);
+    assert!(!o.ok);
+    assert_eq!(
+        o.error.as_deref(),
+        Some("tunnel: the org's Cloudflare tunnel is not running")
+    );
+    assert_eq!(
+        hop_names(&o),
+        [("edge", true), ("tunnel", false), ("ingress", true)]
+    );
+    assert!(
+        o.note
+            .unwrap_or_default()
+            .contains("(Cloudflare edge, tunnel, ingress)")
+    );
+    let head = seen.lock().unwrap().pop().unwrap_or_default();
+    assert!(head.contains("\r\nX-Forwarded-Proto: https\r\n"), "{head}");
+
+    // No ingress listener for the domain: its own endpoint stands in.
+    let o = check_once(&[("wiki", WIKI)], true, serving(&public, &upstream), &m);
+    assert!(o.ok, "{o:?}");
+    assert_eq!(hop_names(&o), [("edge", true), ("replica", true)]);
+    assert_eq!(o.via, Some(format!("internal: upstream {upstream}")));
+    assert!(o.note.unwrap_or_default().contains("stands in"));
+
+    // With a service token, the public URL is the whole check.
+    let mut mt = m.clone();
+    mt.headers = vec![
+        super::super::Header {
+            name: "CF-Access-Client-Id".into(),
+            value: Some("id".into()),
+            secret: None,
+        },
+        super::super::Header {
+            name: "CF-Access-Client-Secret".into(),
+            value: Some("s".into()),
+            secret: None,
+        },
+    ];
+    let o = check_once(&[("wiki", WIKI)], true, d, &mt);
+    assert!(!o.ok);
+    assert!(o.hops.is_empty(), "{o:?}");
+    assert_eq!(o.via.as_deref(), Some("public"));
+    assert_eq!(
+        o.error.as_deref(),
+        Some(
+            "HTTP 302: redirected to Cloudflare Access sign-in with the service token: allow it in the Access application's policy"
+        )
+    );
+}
+
+#[test]
+fn a_domain_at_a_private_address_is_checked_through_the_ingress() {
+    let (ingress, seen) = recording("200 OK");
+    let replica = answering("HTTP/1.1 200 OK");
+    // The public URL is the ingress itself, at an address the policy refuses.
+    let mut d = serving(
+        &format!("http://127.0.0.1:{ingress}/"),
+        &format!("127.0.0.1:{replica}"),
+    );
+    d.origin = Some(format!("http://127.0.0.1:{ingress}"));
+    let o = check_once(&[("wiki", WIKI)], false, d, &wiki_monitor());
+    assert!(o.ok, "{o:?}");
+    assert_eq!(hop_names(&o), [("ingress", true)]);
+    let note = o.note.unwrap_or_default();
+    assert!(
+        note.contains("private address: checked hop by hop (ingress)"),
+        "{note}"
+    );
+    let head = seen.lock().unwrap().pop().unwrap_or_default();
+    assert!(head.contains("\r\nHost: wiki.acme.dev\r\n"), "{head}");
+}
+
+#[test]
+fn the_ingress_is_asked_for_the_public_path_of_a_stripped_route() {
+    let access = answering(ACCESS);
+    // The ingress strips /api itself: it must be asked for /api/status.
+    let ingress = answering_only("/api/status");
+    let replica = answering_only("/status");
+    let y = format!(
+        "services:\n  web: {{image: x, domains: [{{host: wiki.acme.dev, path: /api, port: {replica}, strip_prefix: true}}]}}\n"
+    );
+    let mut d = serving(
+        &format!("http://127.0.0.1:{access}/api"),
+        &format!("127.0.0.1:{replica}"),
+    );
+    d.path = "/api".into();
+    d.origin = Some(format!("http://127.0.0.1:{ingress}"));
+    let mut m = wiki_monitor();
+    m.path = Some("/api/status".into());
+    let o = check_once(&[("wiki", &y)], true, d, &m);
+    assert!(o.ok, "{o:?}");
+    assert_eq!(o.url.as_deref(), Some("http://wiki.acme.dev/api/status"));
 }
 
 /// A server that answers 200 for requests of `path` and 404 for any other.
