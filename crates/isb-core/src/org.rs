@@ -108,7 +108,7 @@ mod ensure;
 mod homes;
 mod names;
 pub use ensure::{Names, ensure_service_names};
-pub use names::{ensure_all_service_names, ensure_default};
+pub use names::{ensure_all_service_names, ensure_default, names, of_project};
 pub(crate) mod limits;
 pub use limits::{Budget, DEFAULT_ROOT_SIZE, Limit, bytes as format_bytes};
 pub mod nesting;
@@ -688,13 +688,9 @@ pub fn list(base: &Client) -> Result<Vec<OrgInfo>> {
     let v = h.get("/1.0/projects?recursion=1")?;
     let mut out = Vec::new();
     for p in v.as_array().into_iter().flatten() {
-        let name = p["name"].as_str().unwrap_or_default();
-        let Some(org) = OrgId::from_incus_project(name) else {
+        let Some(org) = of_project(p) else {
             continue;
         };
-        if p["config"][KEY_ORG].as_str() != Some(org.as_str()) {
-            continue;
-        }
         out.push(info(base, org, p)?);
     }
     out.sort_by(|a, b| (!a.name.is_default(), &a.name).cmp(&(!b.name.is_default(), &b.name)));

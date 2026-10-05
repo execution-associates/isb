@@ -80,8 +80,17 @@ own owners and admins, who see them read-only. Bind roots are host paths and
 are set only on the host (`isb org create --bind-root`): an update through
 the API keeps them, as it keeps any field it is not given. Creating an org through
 the API also adds it to the identity store, and deleting one removes its
-memberships, invitations and tokens; its secrets stay under the state
-directory.
+memberships, invitations and tokens, its metrics history and its
+service-name hosts directory; its secrets stay under the state directory
+(`<state>/orgs/<org>/`, which goes too when nothing else is left in it).
+
+The orgs that exist are the incus projects below, not the identity store's
+rows: `whoami` (and the web UI's org switcher) lists every one of them to a
+platform admin or superadmin, and to anyone else their memberships among
+them, so an org made or removed past the daemon (`isb org` against another
+state directory, a test) shows or goes as it should. A daemon notices an org
+removed by another process within a minute and drops its metrics history
+and hosts directory then.
 
 ## What an org is in incus
 
@@ -92,7 +101,9 @@ all trust. `org_get` says so as `placement.isolation`: `shared-kernel` here,
 ([Placement](placement.md)).
 
 Org `acme` is the incus project `isb-acme` (config `user.isb.org=acme`), its
-bridge `isbbr<hash>` and its network ACL `isb-acme`.
+bridge `isbbr<hash>` and its network ACL `isb-acme`. A project named `isb-*`
+without that key is no org: it is not listed, and its instances get no
+metrics history.
 
 The `default` org is an org like any other: the incus project
 `isb-default`, with its own bridge, ACL and service names, settings, limits,

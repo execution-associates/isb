@@ -7,6 +7,29 @@
 use super::ensure::{PrepareDir, ensure_service_names_in};
 use super::*;
 
+/// The org an incus project (as `/1.0/projects?recursion=1` lists it) is,
+/// if it is one: an `isb-` name AND isb's marker naming the same org. A
+/// project that only looks like one (a test's `isb-test-own-1`, another
+/// tool's) is not.
+pub fn of_project(p: &Value) -> Option<OrgId> {
+    let org = OrgId::from_incus_project(p["name"].as_str()?)?;
+    (p["config"][KEY_ORG].as_str() == Some(org.as_str())).then_some(org)
+}
+
+/// The names of every org, by name, from one read: what exists, for
+/// callers that need no more (whoami, the metrics history).
+pub fn names(base: &Client) -> Result<Vec<OrgId>> {
+    let v = host(base).get("/1.0/projects?recursion=1")?;
+    let mut out: Vec<OrgId> = v
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(of_project)
+        .collect();
+    out.sort();
+    Ok(out)
+}
+
 /// Make sure the default org exists: create `isb-default` with default
 /// settings when it is missing. An existing one keeps its settings, except
 /// that its service names are turned on when the host can have them now,
@@ -42,12 +65,9 @@ pub fn ensure_all_service_names(base: &Client, report: &mut dyn FnMut(&str)) -> 
     let v = host(base).get("/1.0/projects?recursion=1")?;
     let mut off = 0;
     for p in v.as_array().into_iter().flatten() {
-        let Some(org) = p["name"].as_str().and_then(OrgId::from_incus_project) else {
+        let Some(org) = of_project(p) else {
             continue;
         };
-        if p["config"][KEY_ORG].as_str() != Some(org.as_str()) {
-            continue;
-        }
         match ensure_service_names(base, &org, report) {
             Ok(Names::Unavailable) => off += 1,
             Ok(_) => {}
@@ -55,6 +75,15 @@ pub fn ensure_all_service_names(base: &Client, report: &mut dyn FnMut(&str)) -> 
                 report(&format!("{org}: service names: {e}"));
                 off += 1;
             }
+        }
+    }
+    // Read again: an org removed during the pass (by another process) had
+    // its directory made again above.
+    if let Ok(orgs) = names(base) {
+        for o in crate::discovery::prune_orgs(&orgs, crate::discovery::STALE_ORG_DIR) {
+            report(&format!(
+                "{o}: removed the hosts directory of an org that no longer exists"
+            ));
         }
     }
     Ok(off)
@@ -153,5 +182,24 @@ mod tests {
         let mut lines = Vec::new();
         let off = ensure_all_service_names(&c, &mut |l| lines.push(l.to_string())).unwrap();
         assert_eq!(off, 0, "{lines:?}");
+    }
+
+    #[test]
+    fn only_marked_isb_projects_are_orgs() {
+        let (_d, c) = serve(vec![Route {
+            prefix: "GET /1.0/projects?recursion=1",
+            status: 200,
+            body: json!([
+                {"name": "isb-ocai", "config": {KEY_ORG: "ocai"}},
+                {"name": "isb-default", "config": {KEY_ORG: "default"}},
+                // A test's throwaway project: looks like one, no marker.
+                {"name": "isb-test-own-1", "config": {}},
+                // Marked for another org: not this one.
+                {"name": "isb-lab", "config": {KEY_ORG: "other"}},
+                {"name": "default", "config": {}},
+            ]),
+        }]);
+        let n: Vec<String> = names(&c).unwrap().iter().map(|o| o.to_string()).collect();
+        assert_eq!(n, ["default", "ocai"]);
     }
 }

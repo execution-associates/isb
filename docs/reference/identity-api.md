@@ -242,7 +242,7 @@ router's own route table.
 | `POST edge` | an edge identity | | session, cookie set; refused with the sign-in codes above, or `no_edge_identity` |
 | `POST login` | anyone | `{email, password}` | session, cookie set |
 | `POST logout` | anyone | | `204`, cookie cleared |
-| `GET me` | signed in | | `{user, platform_admin, memberships: [{org, role}], orgs: [ORG], auth: {kind: "session", id} \| {kind: "api_token", id, org, name, scopes?} \| {kind: "superadmin", source}, superadmin}`; `orgs` is every org the caller can open (all of them for a platform admin); `superadmin` is `null`, or `{source: "tailnet:...", via: {kind: "token" \| "tailnet" \| "access", ...}, account: bool}` |
+| `GET me` | signed in | | `{user, platform_admin, memberships: [{org, role}], orgs: [ORG], auth: {kind: "session", id} \| {kind: "api_token", id, org, name, scopes?} \| {kind: "superadmin", source}, superadmin}`; `orgs` is every org that exists and the caller can open (all of them for a platform admin), and `memberships` leaves out orgs that no longer exist; `superadmin` is `null`, or `{source: "tailnet:...", via: {kind: "token" \| "tailnet" \| "access", ...}, account: bool}` |
 | `GET sessions` | signed in | | `{sessions: [{id, created_at, last_seen, expires_at, idle_expires_at, user_agent, ip, current}]}` |
 | `DELETE sessions/ID` | signed in | | `204` |
 | `POST invitations` | org owner/admin | `{org, email, role?}` (default member) | `201 {invitation, token, link}` |

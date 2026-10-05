@@ -407,11 +407,18 @@ impl Controller {
             .name("isb-metrics".into())
             .spawn(move || {
                 let mut sampler = crate::metrics::Sampler::new();
+                let mut orgs = crate::metrics_history::OrgSet::default();
                 while let Some(inner) = weak.upgrade() {
                     match sampler.sample(&inner.client) {
                         Ok((host, insts)) => {
                             if let Some(tx) = &*inner.metrics_sink.lock().unwrap() {
-                                crate::metrics_history::offer(tx, (now_ms(), insts.clone()));
+                                let s = crate::metrics_history::Sample {
+                                    at: now_ms(),
+                                    orgs: orgs.current(&inner.client, &insts),
+                                    orgs_at: orgs.read_at(),
+                                    instances: insts.clone(),
+                                };
+                                crate::metrics_history::offer(tx, s);
                             }
                             *inner.snapshot.lock().unwrap() = Snapshot {
                                 host,
