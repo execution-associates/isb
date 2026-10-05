@@ -59,7 +59,10 @@ directly either way, so they need the same incus access as `isb exec`.
 | `○` | stopped, retired |
 
 Colour adds to the glyphs and never replaces them, so `NO_COLOR=1` loses
-nothing. Sparklines show the last minute or so: CPU as a percentage of one
+nothing. The colours are the terminal's own: its default foreground and its
+sixteen ANSI colours, with dim text drawn in the terminal's dim attribute and
+the selection in reverse video, so the dashboard follows a light or dark
+terminal theme without configuration. Sparklines show the last minute or so: CPU as a percentage of one
 core (four busy cores read 400%), traffic as new connections per second
 through the balancer. `LB ⇄` marks a replica the balancer sends traffic to.
 
