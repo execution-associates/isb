@@ -12,6 +12,11 @@
 //! deploys. Deploying an app replaces only its own service in that stack
 //! (revisions are per service), so only that app rolls.
 //!
+//! An environment also holds compose stacks (`stack_deploy`): each belongs
+//! to exactly one project environment ([`compose`]). That is a record on
+//! the project, nothing more: the stack keeps its name and its services
+//! their names, and gain the environment's (`<service>.<project>-<env>`).
+//!
 //! Everything lives under the daemon's state directory, next to the org's
 //! stacks: `apps/` in the default org, `orgs/<org>/apps/` in the others.
 //!
@@ -23,6 +28,7 @@
 //! ```
 
 mod close;
+pub mod compose;
 pub mod database;
 pub mod deploy;
 pub mod env;
@@ -31,6 +37,7 @@ pub mod git;
 mod image;
 pub mod manifest;
 pub mod preview;
+mod projects;
 mod removals;
 pub mod webhook;
 
@@ -45,6 +52,7 @@ use crate::error::{Error, Result};
 use crate::org::OrgId;
 use crate::spec::{NamedVolumeSpec, SandboxSpec, SecretDef};
 
+pub use compose::ComposeOwner;
 pub use database::{DatabaseSource, Engine};
 pub use deploy::{Apps, BuildFn, ImageProbe, SecretHook};
 pub use env::{EnvFile, EnvValue};
@@ -74,6 +82,18 @@ pub struct Project {
     pub description: String,
     pub environments: Vec<String>,
     pub created_at: u64,
+    /// The compose stacks that belong to its environments.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compose: Vec<ComposeRef>,
+}
+
+/// A compose stack's place in a project: which environment it belongs to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComposeRef {
+    pub stack: String,
+    pub environment: String,
+    /// Unix seconds: the older of two stacks keeps a contested name.
+    pub added_at: u64,
 }
 
 /// A project or environment name: `<project>-<env>` must be a stack name.
@@ -794,6 +814,8 @@ mod tests {
         );
         // The revision of the app not deployed stays the same.
         let def = |f: &crate::spec::ComposeFile| crate::stack::StackDef {
+            source: None,
+            domains: Default::default(),
             name: "shop-production".into(),
             org: OrgId::default_org(),
             file: f.clone(),

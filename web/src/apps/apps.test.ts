@@ -5,7 +5,10 @@ import { concernsDeployment, deploymentLine, LogBuffer, LogFollower, parseAnsi, 
 import { applyPatch, duration, mergePatch, nameProblem, parseKv, portProblem, shortDigest, terminalUrl, volumeProblem } from "./util";
 import { gitUrlProblem } from "./new-app-dialog";
 import { parseMemory } from "./app-monitoring";
-import { appState } from "./api";
+import { appState, type Project } from "./api";
+import { activeServiceTab, SERVICE_TABS, serviceTabs } from "./service-tabs";
+import { envHealth, projectHealth } from "./health";
+import { lastDeploy, projectCounts } from "./projects-page";
 import { imageNote, imageProblem } from "./image-ref";
 
 describe("env text analysis (src/app/env.rs rules)", () => {
@@ -311,5 +314,67 @@ describe("image references (crates/isb-core/src/plan.rs)", () => {
     expect(imageNote("traefik/whoami")).toMatch(/docker:traefik\/whoami/);
     expect(imageNote("docker:traefik/whoami")).toBeNull();
     expect(imageNote("dev-base")).toBeNull();
+  });
+});
+
+describe("project cards", () => {
+  const shop: Project = {
+    name: "shop",
+    created_at: 0,
+    environments: [
+      { name: "production", stack: "shop-production", apps: ["web", "db"], compose: [{ name: "monitoring", services: ["prometheus", "grafana"] }] },
+      { name: "staging", stack: "shop-staging", apps: ["web-staging"], compose: [{ name: "search", services: ["meili"] }] },
+    ],
+  };
+  const svc = (healthy: number) => ({ service: "x", image: "", rev: "", replicas: 1, running: 1, healthy, state: "converged", instances: [], ports: [], checked_at: 0 });
+  const stack = (name: string, healthy: number, deployed_at = 0) => ({ name, org: "acme", deployed_at, services: [svc(healthy)] });
+
+  it("counts apps, databases and compose stacks", () => {
+    expect(projectCounts(shop, new Set(["db"]))).toEqual({ apps: 2, dbs: 1, compose: 2 });
+  });
+
+  it("takes health from compose stacks too", () => {
+    const stacks = [stack("shop-production", 1), stack("monitoring", 0), stack("shop-staging", 1)];
+    expect(envHealth(shop.environments[0], stacks, "acme")).toBe("failing");
+    expect(envHealth(shop.environments[1], stacks, "acme")).toBe("healthy");
+    expect(projectHealth(shop, stacks, "acme")).toBe("failing");
+    // Another org's stack of the same name is not this one.
+    expect(envHealth(shop.environments[0], [{ ...stack("monitoring", 0), org: "other" }], "acme")).toBe("idle");
+  });
+
+  it("dates the last deploy from apps' deployments and compose stacks' deploys", () => {
+    const latest = new Map([["web", [{ created_at: 5_000 } as never]]]);
+    expect(lastDeploy(shop, latest, [], "acme")).toBe(5_000);
+    expect(lastDeploy(shop, latest, [stack("search", 1, 9)], "acme")).toBe(9_000);
+    expect(lastDeploy(shop, new Map(), [], "acme")).toBeUndefined();
+  });
+});
+
+describe("service tabs", () => {
+  const ids = (k: Parameters<typeof serviceTabs>[0]) => serviceTabs(k).map((t) => t.id);
+
+  it("come in one order for every kind, settings first and Advanced last", () => {
+    expect(SERVICE_TABS.at(-1)?.id).toBe("advanced");
+    expect(ids({ writer: true })).toEqual(["general", "domains", "environment", "deployments", "logs", "monitoring", "terminal", "jobs", "yaml", "advanced"]);
+  });
+
+  it("put a git app's Previews right after Deployments", () => {
+    expect(ids({ writer: true, git: true })).toEqual(["general", "domains", "environment", "deployments", "previews", "logs", "monitoring", "terminal", "jobs", "yaml", "advanced"]);
+  });
+
+  it("give a database Database and Backups first, in place of General and Domains", () => {
+    expect(ids({ writer: true, database: true })).toEqual(["database", "backups", "environment", "deployments", "logs", "monitoring", "terminal", "jobs", "yaml", "advanced"]);
+  });
+
+  it("leave the terminal out for viewers", () => {
+    expect(ids({ writer: false })).not.toContain("terminal");
+  });
+
+  it("open on General without a tab, or Database for a database", () => {
+    expect(activeServiceTab(undefined, serviceTabs({ writer: true }))).toBe("general");
+    expect(activeServiceTab("nope", serviceTabs({ writer: true, git: true }))).toBe("general");
+    expect(activeServiceTab(undefined, serviceTabs({ writer: true, database: true }))).toBe("database");
+    expect(activeServiceTab("yaml", serviceTabs({ writer: true, database: true }))).toBe("yaml");
+    expect(activeServiceTab("previews", serviceTabs({ writer: true }))).toBe("general");
   });
 });

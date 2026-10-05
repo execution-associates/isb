@@ -8,7 +8,12 @@ import { defineConfig } from "vite";
 // running `isb serve` (ISB_URL, default http://127.0.0.1:8092). For
 // passkeys, start that daemon with ISB_PUBLIC_URL=http://localhost:5173 so
 // the relying party matches the page's origin.
+//
+// The preview VM (isb.yaml) listens on every address, names the host its
+// tailnet URL arrives under, and polls: host edits reach a VM over virtiofs,
+// which raises no file events.
 const target = process.env.ISB_URL ?? "http://127.0.0.1:8092";
+const preview = process.env.ISB_PREVIEW_HOST;
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -21,9 +26,11 @@ export default defineConfig({
     chunkSizeWarningLimit: 800,
   },
   server: {
-    host: "127.0.0.1",
+    host: preview ? "0.0.0.0" : "127.0.0.1",
     port: 5173,
     strictPort: true,
+    allowedHosts: preview ? [preview] : undefined,
+    watch: preview ? { usePolling: true, interval: 300 } : undefined,
     proxy: {
       "/api": { target },
       "/healthz": { target },

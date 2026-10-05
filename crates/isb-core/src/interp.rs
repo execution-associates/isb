@@ -55,6 +55,54 @@ pub fn interpolate(s: &str, lookup: &dyn Fn(&str) -> Option<String>) -> Result<S
     Ok(out)
 }
 
+/// The variables `s` refers to, in order of appearance (with repeats), the
+/// ones inside a default or alternate included: what [`interpolate`] may
+/// look up. Malformed references are skipped (interpolating reports them).
+pub fn references(s: &str) -> Vec<String> {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = Vec::new();
+    refs_in(&chars, &mut out);
+    out
+}
+
+fn refs_in(chars: &[char], out: &mut Vec<String>) {
+    let name_at = |from: usize| {
+        let mut j = from;
+        while j < chars.len() && (chars[j] == '_' || chars[j].is_ascii_alphanumeric()) {
+            j += 1;
+        }
+        j
+    };
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] != '$' {
+            i += 1;
+            continue;
+        }
+        match chars.get(i + 1) {
+            Some('$') => i += 2,
+            Some('{') => {
+                let Some(end) = find_close(chars, i + 2) else {
+                    return;
+                };
+                let j = name_at(i + 2);
+                if j > i + 2 && !chars[i + 2].is_ascii_digit() {
+                    out.push(chars[i + 2..j].iter().collect());
+                }
+                // A default or alternate may refer to more.
+                refs_in(&chars[j..end], out);
+                i = end + 1;
+            }
+            Some(&n) if n == '_' || n.is_ascii_alphabetic() => {
+                let j = name_at(i + 1);
+                out.push(chars[i + 1..j].iter().collect());
+                i = j;
+            }
+            _ => i += 1,
+        }
+    }
+}
+
 fn unset(name: &str) -> Error {
     Error::Interpolation(format!(
         "variable {name} is not set (use ${{{name}:-default}} to allow that)"
@@ -246,6 +294,15 @@ mod tests {
         assert!(run("${NAME").is_err());
         assert!(run("${1BAD}").is_err());
         assert!(run("${NAME/x/y}").is_err());
+    }
+
+    #[test]
+    fn references_name_every_variable_once_per_use() {
+        assert_eq!(
+            references("${A}-$B ${C:-x${D}} $$E ${F?m} $ {G}"),
+            ["A", "B", "C", "D", "F"]
+        );
+        assert!(references("no vars, 5$").is_empty());
     }
 
     #[test]

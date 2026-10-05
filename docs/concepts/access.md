@@ -153,6 +153,11 @@ Four sources grant it, and nothing else:
 | a tailnet identity | a peer on a tailnet `--listen` address whose login or node tag is on `--superadmin-tailnet` | `tailnet:<login>` (a tagged node: `tailnet:<node>`) |
 | a Cloudflare Access identity | a verified `Cf-Access-Jwt-Assertion` whose email or service token client id is on `--superadmin-access` | `access:<name>` |
 
+A debug build has one more, for developing isb: `ISB_DEV_SUPERADMIN`, which
+makes every loopback request with no credential a superadmin, `dev:<email>`
+([Developing isb](../reference/configuration.md#developing-isb)). A release
+build refuses to start with it set.
+
 `isb serve` logs at start-up which superadmin sources are on, and the web
 UI's **Host** pages show them ([The web UI](../getting-started/web-ui.md)).
 Turning on the tailnet and Access sources is in

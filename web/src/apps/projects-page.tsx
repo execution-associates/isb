@@ -1,5 +1,5 @@
 // /orgs/:org/projects: the org's projects as cards.
-import { Boxes, Clock, Database, FolderKanban, LayoutTemplate, Plus } from "lucide-react";
+import { Boxes, Clock, Database, FolderKanban, Layers, LayoutTemplate, Plus } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { PageHeader } from "@/components/app-shell";
@@ -9,21 +9,31 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { canWrite } from "@/lib/admin";
 import { relativeTime } from "@/lib/format";
 import { useMe } from "@/lib/session";
+import type { StackStatus } from "@/api/tools";
 import { type Deployment, type Project, useApps, useLatestDeployments, useProjects } from "./api";
 import { Dot, EmptyState, QueryError, ToneBadge } from "./components";
-import { HEALTH_LABEL, HEALTH_TONE, projectHealth, stackHealth, useStackList } from "./health";
+import { envHealth, HEALTH_LABEL, HEALTH_TONE, projectHealth, useStackList } from "./health";
 import { useOrgLive } from "./live";
 import { NewProjectDialog } from "./project-dialogs";
-import { ComposeStacksSection } from "@/stacks/stack-list";
 
-function lastDeploy(p: Project, latest: Map<string, Deployment[]>): Deployment | undefined {
-  let best: Deployment | undefined;
-  for (const e of p.environments)
-    for (const a of e.apps) {
-      const d = latest.get(a)?.[0];
-      if (d && (!best || d.created_at > best.created_at)) best = d;
-    }
+/** When anything in the project last deployed (Unix ms): an app's deployment or a compose stack's deploy. */
+export function lastDeploy(p: Project, latest: Map<string, Deployment[]>, stacks: Pick<StackStatus, "name" | "org" | "deployed_at">[], org: string): number | undefined {
+  let best: number | undefined;
+  const seen = (t: number | undefined) => {
+    if (t && (best === undefined || t > best)) best = t;
+  };
+  for (const e of p.environments) {
+    for (const a of e.apps) seen(latest.get(a)?.[0]?.created_at);
+    for (const c of e.compose) seen((stacks.find((s) => s.org === org && s.name === c.name)?.deployed_at ?? 0) * 1000);
+  }
   return best;
+}
+
+/** A project card's counts: apps, databases and compose stacks across its environments. */
+export function projectCounts(p: Project, dbs: Set<string>): { apps: number; dbs: number; compose: number } {
+  const names = p.environments.flatMap((e) => e.apps);
+  const nDb = names.filter((a) => dbs.has(a)).length;
+  return { apps: names.length - nDb, dbs: nDb, compose: p.environments.reduce((n, e) => n + e.compose.length, 0) };
 }
 
 export function ProjectsPage() {
@@ -47,7 +57,7 @@ export function ProjectsPage() {
     <>
       <PageHeader
         title="Projects"
-        description="Each project holds environments, and each environment runs its apps side by side."
+        description="Each project holds environments, and each environment runs its apps, databases and compose stacks side by side."
         actions={
           writer && (
             <Button onClick={() => setOpen(true)}>
@@ -104,11 +114,9 @@ export function ProjectsPage() {
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {list.map((p) => {
-            const names = p.environments.flatMap((e) => e.apps);
-            const nDb = names.filter((a) => dbs.has(a)).length;
-            const nApps = names.length - nDb;
+            const n = projectCounts(p, dbs);
             const h = projectHealth(p, all, org);
-            const last = lastDeploy(p, latest);
+            const last = lastDeploy(p, latest, all, org);
             return (
               <Link
                 key={p.name}
@@ -130,33 +138,41 @@ export function ProjectsPage() {
                   </div>
                   <div className="mt-4 flex flex-wrap gap-1.5">
                     {p.environments.map((e) => {
-                      const eh = stackHealth(all.find((s) => s.org === org && s.name === e.stack));
+                      const eh = envHealth(e, all, org);
                       return (
                         <span key={e.name} className="inline-flex h-6 items-center gap-1.5 rounded-md border bg-muted/40 px-2 text-xs font-medium">
                           <Dot tone={HEALTH_TONE[eh]} title={HEALTH_LABEL[eh]} />
                           {e.name}
-                          <span className="font-normal text-muted-foreground tabular-nums">{e.apps.length}</span>
+                          <span className="font-normal text-muted-foreground tabular-nums">{e.apps.length + e.compose.length}</span>
                         </span>
                       );
                     })}
                   </div>
                   <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 border-t pt-3 text-xs text-muted-foreground">
-                    <span className="inline-flex items-center gap-1.5 tabular-nums">
-                      <Boxes className="size-3.5" />
-                      {nApps} app{nApps === 1 ? "" : "s"}
-                    </span>
-                    {nDb > 0 && (
+                    {(n.apps > 0 || n.dbs + n.compose === 0) && (
+                      <span className="inline-flex items-center gap-1.5 tabular-nums">
+                        <Boxes className="size-3.5" />
+                        {n.apps} app{n.apps === 1 ? "" : "s"}
+                      </span>
+                    )}
+                    {n.dbs > 0 && (
                       <span className="inline-flex items-center gap-1.5 tabular-nums">
                         <Database className="size-3.5" />
-                        {nDb} database{nDb === 1 ? "" : "s"}
+                        {n.dbs} database{n.dbs === 1 ? "" : "s"}
+                      </span>
+                    )}
+                    {n.compose > 0 && (
+                      <span className="inline-flex items-center gap-1.5 tabular-nums">
+                        <Layers className="size-3.5" />
+                        {n.compose} compose
                       </span>
                     )}
                     <span
                       className="ml-auto inline-flex items-center gap-1.5 tabular-nums"
-                      title={last ? `Last deployed ${new Date(last.created_at).toLocaleString()}` : "Never deployed"}
+                      title={last ? `Last deployed ${new Date(last).toLocaleString()}` : "Never deployed"}
                     >
                       <Clock className="size-3.5" />
-                      {last ? relativeTime(last.created_at / 1000) : "Never deployed"}
+                      {last ? relativeTime(last / 1000) : "Never deployed"}
                     </span>
                   </div>
                 </Card>
@@ -177,7 +193,6 @@ export function ProjectsPage() {
           )}
         </div>
       )}
-      <ComposeStacksSection org={org} writer={writer} projects={list} />
       <NewProjectDialog org={org} open={open} onOpenChange={setOpen} />
     </>
   );

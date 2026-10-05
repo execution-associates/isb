@@ -332,7 +332,7 @@ fn project_list_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
         apps,
         "project_list",
         "List projects",
-        "An org's projects, each with its environments and the apps in each.",
+        "An org's projects, each with its environments and, in each, its apps and its compose stacks (`compose`: name, services and `deployed_at`, unix seconds) and `conflicts`: a compose service that does not get the environment's name `<service>.<project>-<env>` because `winner` (a stack; `<project>-<env>` for an app) holds it.",
         obj(json!({}), &[]),
         ann.ro,
         |ap: &Apps, a: Value, _c: &Caller| -> Result<Value> {
@@ -351,7 +351,26 @@ fn project_list_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
                                 .filter(|x| x.spec.project == p.name && &x.spec.environment == e)
                                 .map(|x| x.spec.name.as_str())
                                 .collect();
-                            json!({"name": e, "stack": format!("{}-{e}", p.name), "apps": names})
+                            let ec = ap.environment_compose(&org, &p.name, e);
+                            let compose: Vec<Value> = ec
+                                .stacks
+                                .iter()
+                                .map(|(s, svcs)| {
+                                    let at = ap
+                                        .controller()
+                                        .definition(&crate::stack::qualified(&org, s))
+                                        .ok()
+                                        .map(|d| d.deployed_at);
+                                    json!({"name": s, "services": svcs, "deployed_at": at})
+                                })
+                                .collect();
+                            json!({
+                                "name": e,
+                                "stack": format!("{}-{e}", p.name),
+                                "apps": names,
+                                "compose": compose,
+                                "conflicts": ec.conflicts,
+                            })
                         })
                         .collect();
                     json!({"name": p.name, "description": p.description, "created_at": p.created_at, "environments": envs})
@@ -369,7 +388,7 @@ fn project_delete_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
         apps,
         "project_delete",
         "Delete a project",
-        "Delete a project that has no apps left.",
+        "Delete a project that has no apps and no compose stacks left.",
         obj(json!({"name": {"type": "string"}}), &["name"]),
         ann.destructive,
         |ap: &Apps, a: Value, _c: &Caller| -> Result<Value> {
@@ -429,7 +448,7 @@ fn environment_delete_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<(
         apps,
         "environment_delete",
         "Delete an environment",
-        "Remove an environment that has no apps left from a project.",
+        "Remove an environment that has no apps and no compose stacks left from a project.",
         obj(
             json!({"project": {"type": "string"}, "name": {"type": "string"}}),
             &["project", "name"]

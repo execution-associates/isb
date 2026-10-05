@@ -1,9 +1,9 @@
-// /orgs/:org/stacks/new: a compose stack from pasted YAML.
+// /orgs/:org/projects/:project/:env/compose/new: a compose stack from pasted
+// YAML, deployed into a project environment beside its apps.
 import { useQueryClient } from "@tanstack/react-query";
 import { Layers } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { toast } from "sonner";
 import { callTool } from "@/api/tools";
 import { PageHeader } from "@/components/app-shell";
 import { Card } from "@/components/ui/card";
@@ -14,27 +14,29 @@ import { canWrite } from "@/lib/admin";
 import { useMe } from "@/lib/session";
 import { type DryRun, stackVerdict } from "@/lib/yaml-edit";
 import { Crumbs, EmptyState, Section } from "@/apps/components";
-import { NEW_STACK_TEMPLATE } from "./api";
-import { afterDeploy } from "./stack-page";
+import { afterDeploy, composePath, type DeployResult, NEW_STACK_TEMPLATE, ownerArgs, type StackOwner } from "./api";
+import { deployToast } from "./stack-deployments";
 
 /** A stack name: [a-z0-9-], a letter first, at most 30 characters. */
 const NAME = /^[a-z][a-z0-9-]{0,29}$/;
 
 export function NewStackPage() {
-  const { org = "" } = useParams();
+  const { org = "", project = "", env = "" } = useParams();
   const writer = canWrite(useMe().data!, org);
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const o = encodeURIComponent(org);
   const nameOk = NAME.test(name) && !name.endsWith("-");
+  const owner: StackOwner = { project, environment: env };
+  const envPath = `/orgs/${o}/projects/${encodeURIComponent(project)}/${encodeURIComponent(env)}`;
 
   if (!writer) {
     return (
       <Card className="py-0">
         <EmptyState icon={Layers} title="Viewers cannot create stacks">
           Ask an org admin or member to deploy it, or{" "}
-          <Link to={`/orgs/${o}/projects`} className="underline underline-offset-4">
+          <Link to={envPath} className="underline underline-offset-4">
             go back
           </Link>
           .
@@ -45,10 +47,17 @@ export function NewStackPage() {
 
   return (
     <>
-      <Crumbs items={[{ label: "Projects", to: `/orgs/${o}/projects` }, { label: "Compose stacks", to: `/orgs/${o}/projects#compose-stacks` }, { label: "New" }]} />
+      <Crumbs
+        items={[
+          { label: "Projects", to: `/orgs/${o}/projects` },
+          { label: project, to: `/orgs/${o}/projects/${encodeURIComponent(project)}` },
+          { label: env, to: envPath },
+          { label: "New compose" },
+        ]}
+      />
       <PageHeader
         title="New compose stack"
-        description="Paste a compose file in isb's format. A stack is deployed as a whole: its services, their replicas, health checks and rolling updates are kept running by the daemon."
+        description={`Paste a compose file in isb's format. It deploys into ${project} / ${env} as a whole: its services, their replicas, health checks and rolling updates are kept running by the daemon.`}
       />
       <Section title="Stack">
         <div className="grid gap-5">
@@ -75,13 +84,13 @@ export function NewStackPage() {
             note="Deploying creates the stack."
             checkKey={name}
             validate={async (text) =>
-              stackVerdict(await callTool<DryRun>("stack_validate", { name: nameOk ? name : "new-stack", compose: text }, org), { name, creating: true })
+              stackVerdict(await callTool<DryRun>("stack_validate", { name: nameOk ? name : "new-stack", compose: text, ...ownerArgs(owner) }, org), { name, creating: true })
             }
             save={async (text) => {
-              await callTool("stack_deploy", { name, compose: text }, org);
+              const r = await callTool<{ owner?: StackOwner | null } & DeployResult>("stack_deploy", { name, compose: text, ...ownerArgs(owner) }, org);
               await afterDeploy(qc, org, name);
-              toast.success(`Deploying ${name}`);
-              navigate(`/orgs/${o}/stacks/${encodeURIComponent(name)}/services`);
+              deployToast(name, r);
+              navigate(composePath(org, r.owner ?? owner, name, "general"));
             }}
           />
         </div>

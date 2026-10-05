@@ -444,7 +444,7 @@ pub fn schemas() -> Value {
 /// The schemas of the sign-in answers: sessions, identities, passkeys,
 /// providers and `me`.
 fn sign_in_schemas() -> Value {
-    let superadmin_via = json!({"type": "object", "properties": {"kind": {"type": "string", "enum": ["token", "tailnet", "access"]}}, "required": ["kind"], "additionalProperties": true});
+    let superadmin_via = json!({"type": "object", "properties": {"kind": {"type": "string", "enum": ["token", "tailnet", "access", "dev"]}}, "required": ["kind"], "additionalProperties": true});
     json!({
         "SessionAnswer": obj(json!({
             "user": r("User"),

@@ -192,7 +192,9 @@ cannot exec or read secrets.
   secrets), `app_deploy` (`wait: true`), `app_deployment_log`,
   `app_rollback`, `app_get`, `app_list`.
 - **Stacks:** `stack_deploy` (compose YAML; `dry_run: true` first),
-  `stack_status`, `stack_logs`, `stack_scale`, `stack_rollback`.
+  `stack_status`, `stack_logs`, `stack_scale`, `stack_rollback` (`to`: a
+  kept deployment), `stack_env_set` (`.env` text the file's `${VAR}`
+  resolves against at deploy), `stack_domains_set`, `stack_deployments`.
 - **Look inside and act on what runs (`kubectl` for the org;
   docs/guides/kubectl.md):** `instance_list` (every instance: kind, app,
   slot, health, in rotation, IP, restarts, CPU, memory; filter `app`,

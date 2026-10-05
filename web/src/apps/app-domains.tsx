@@ -2,7 +2,7 @@
 // certificate state from the ingress.
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight, CornerDownRight, Globe, Loader2, Lock, LockOpen, MoreHorizontal, Pencil, Plus, Rocket, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useNavigate } from "react-router";
 import { Field, FormError } from "@/components/form";
 import { StatusBadge } from "@/components/status";
@@ -24,6 +24,7 @@ import { NoIngressNotice } from "./ingress-notice";
 import {
   type DomainErrors,
   type DomainForm,
+  type DomainSpec,
   type DomainStatus,
   domainFromSpec,
   domainToSpec,
@@ -58,27 +59,90 @@ const CERT: Record<string, [Tone, string]> = {
 
 export function DomainsTab({ org, app }: { org: string; app: App }) {
   const stack = useStack(org, app.stack);
-  const ingress = useIngress(org);
-  const off = ingressOff(ingress.data);
-  const writer = canWrite(useMe().data!, org);
   const { save, pending, error } = useAppUpdate(org, app.name);
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const forms = (app.domains ?? []).map(domainFromSpec);
-  const statuses = serviceOf(stack.data, app.name)?.domains ?? [];
-  const matched = matchStatuses(forms, statuses);
+  return (
+    <DomainsEditor
+      org={org}
+      domains={app.domains ?? []}
+      statuses={serviceOf(stack.data, app.name)?.domains ?? []}
+      loading={stack.isLoading}
+      port={app.port}
+      deployed={!!app.current_deployment}
+      pending={pending}
+      error={error}
+      description="Hostnames the ingress serves this app on, with the HTTPS certificates it obtains."
+      savedNote="Domains are saved with the app and routed at its next deploy."
+      store={async (next, deploy) => {
+        const r = await save({ domains: next }, { deploy, quiet: !deploy });
+        if (r.ok && r.deployment) openDeployment(qc, navigate, org, r.deployment);
+        return r.ok;
+      }}
+    />
+  );
+}
+
+/**
+ * A service's domains with each one's live route and certificate, added,
+ * edited and removed in a dialog. `store` saves the whole list (and deploys
+ * when asked), resolving to whether it saved. The app's Domains tab and a
+ * compose stack service's both use it.
+ */
+export function DomainsEditor({
+  org,
+  domains,
+  statuses,
+  loading,
+  port,
+  deployed,
+  store: save,
+  pending,
+  error,
+  description,
+  savedNote,
+  fixed = [],
+  fixedBadge,
+}: {
+  org: string;
+  domains: DomainSpec[];
+  /** The live routes, from stack_status. */
+  statuses: DomainStatus[];
+  loading: boolean;
+  /** The port a domain without one goes to; unset, each domain names its port. */
+  port?: number;
+  /** Something runs: saving alone leaves the routes as they are until a deploy. */
+  deployed: boolean;
+  store: (next: DomainSpec[], deploy: boolean) => Promise<boolean>;
+  pending: boolean;
+  error: string | null;
+  description: ReactNode;
+  savedNote: string;
+  /** Domains set elsewhere (a compose file's own `domains:`): listed, matched to their routes, never edited here. */
+  fixed?: DomainSpec[];
+  /** Marks each fixed domain's row (where it is changed instead). */
+  fixedBadge?: ReactNode;
+}) {
+  const ingress = useIngress(org);
+  const off = ingressOff(ingress.data);
+  const writer = canWrite(useMe().data!, org);
+  const forms = domains.map(domainFromSpec);
+  const fixedForms = fixed.map(domainFromSpec);
+  // The fixed ones take their routes first; a host and path may be listed once across both.
+  const both = matchStatuses([...fixedForms, ...forms], statuses);
+  const fixedMatched = both.slice(0, fixedForms.length);
+  const matched = both.slice(fixedForms.length);
   const [editing, setEditing] = useState<{ index: number | null; form: DomainForm } | null>(null);
   const [removing, setRemoving] = useState<number | null>(null);
   const [dirty, setDirty] = useState(false);
   // Saved but not in the running deployment (added since, or dropped by a rollback).
-  const unrouted = !!app.current_deployment && !!ingress.data?.enabled && !stack.isLoading && matched.some((m) => !m);
-  const add = () => setEditing({ index: null, form: { ...emptyDomain(), port: app.port ? "" : "80" } });
+  const unrouted = deployed && !!ingress.data?.enabled && !loading && both.some((m) => !m);
+  const add = () => setEditing({ index: null, form: { ...emptyDomain(), port: port ? "" : "80" } });
 
   const store = async (next: DomainForm[], deploy: boolean) => {
-    const r = await save({ domains: next.map(domainToSpec) }, { deploy, quiet: !deploy });
-    if (r.ok) setDirty(!deploy && !!app.current_deployment);
-    if (r.ok && r.deployment) openDeployment(qc, navigate, org, r.deployment);
-    return r.ok;
+    const ok = await save(next.map(domainToSpec), deploy);
+    if (ok) setDirty(!deploy && deployed);
+    return ok;
   };
 
   return (
@@ -89,7 +153,7 @@ export function DomainsTab({ org, app }: { org: string; app: App }) {
           <Rocket className="hidden size-4 shrink-0 text-info sm:block" />
           <div className="min-w-0 flex-1 text-sm">
             <p className="font-medium">{dirty ? "Deploy to apply domain changes" : "Some domains are not routed yet"}</p>
-            <p className="text-[13px] text-muted-foreground">Domains are saved with the app and routed at its next deploy.</p>
+            <p className="text-[13px] text-muted-foreground">{savedNote}</p>
           </div>
           <Button size="sm" className="self-start sm:self-auto" onClick={() => store(forms, true)} disabled={pending}>
             {pending ? <Loader2 className="animate-spin" /> : <Rocket />}
@@ -102,7 +166,7 @@ export function DomainsTab({ org, app }: { org: string; app: App }) {
         <div className="flex flex-col gap-3 border-b px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0 space-y-1">
             <h2 className="text-[15px] font-semibold tracking-tight">Domains</h2>
-            <p className="text-[13px] text-muted-foreground">Hostnames the ingress serves this app on, with the HTTPS certificates it obtains.</p>
+            <p className="text-[13px] text-muted-foreground">{description}</p>
           </div>
           {writer && forms.length > 0 && (
             <Button className="shrink-0 self-start sm:self-auto" onClick={add}>
@@ -111,10 +175,17 @@ export function DomainsTab({ org, app }: { org: string; app: App }) {
             </Button>
           )}
         </div>
+        {fixedForms.length > 0 && (
+          <ul className="divide-y border-b">
+            {fixedForms.map((f, i) => (
+              <DomainRow key={`fixed-${f.host}${f.path}`} form={f} status={fixedMatched[i]} loading={loading} off={off} appPort={port} badge={fixedBadge} />
+            ))}
+          </ul>
+        )}
         {forms.length === 0 ? (
           <EmptyState
             icon={Globe}
-            title="No domains yet"
+            title={fixedForms.length ? "No domains added here" : "No domains yet"}
             action={
               writer && (
                 <Button onClick={add}>
@@ -134,9 +205,9 @@ export function DomainsTab({ org, app }: { org: string; app: App }) {
                 key={`${f.host}${f.path}`}
                 form={f}
                 status={matched[i]}
-                loading={stack.isLoading}
+                loading={loading}
                 off={off}
-                appPort={app.port}
+                appPort={port}
                 onEdit={writer ? () => setEditing({ index: i, form: f }) : undefined}
                 onRemove={writer ? () => setRemoving(i) : undefined}
               />
@@ -148,9 +219,9 @@ export function DomainsTab({ org, app }: { org: string; app: App }) {
         <DomainDialog
           initial={editing.form}
           isNew={editing.index === null}
-          appPort={app.port}
-          others={forms.filter((_, i) => i !== editing.index)}
-          deployed={!!app.current_deployment}
+          appPort={port}
+          others={[...fixedForms, ...forms.filter((_, i) => i !== editing.index)]}
+          deployed={deployed}
           off={off}
           onClose={() => setEditing(null)}
           onSave={async (f, deploy) => {
@@ -190,6 +261,7 @@ function DomainRow({
   appPort,
   onEdit,
   onRemove,
+  badge,
 }: {
   form: DomainForm;
   status: DomainStatus | undefined;
@@ -198,6 +270,8 @@ function DomainRow({
   appPort?: number;
   onEdit?: () => void;
   onRemove?: () => void;
+  /** Beside the route's state (where a read-only domain is defined). */
+  badge?: ReactNode;
 }) {
   const target = form.redirect ? (
     <>
@@ -261,6 +335,7 @@ function DomainRow({
             <>
               <StatusBadge tone={routeTone}>{routeLabel}</StatusBadge>
               {status && form.https && <StatusBadge tone={certTone} pulse={status.cert === "pending"}>{certLabel}</StatusBadge>}
+              {badge}
             </>
           )}
         </div>

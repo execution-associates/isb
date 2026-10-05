@@ -2,7 +2,7 @@
 // month: docs/operations/metrics.md) for CPU, memory, network and disk, per replica or
 // summed, over 1 hour to 30 days; and each replica's state now.
 import { Activity, ArrowDownToLine, ArrowUpFromLine, Cpu, HardDriveDownload, HardDriveUpload, HeartPulse, MemoryStick, RotateCw } from "lucide-react";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useMemo, useState } from "react";
 import { StatusBadge, StatusDot } from "@/components/status";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -10,10 +10,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { TONE_TEXT, type Tone } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { AppUptimeCard } from "@/uptime/cards";
-import { type App, type InstanceDetail, serviceOf, useStack } from "./api";
+import { type App, type InstanceDetail, serviceOf, type StackDetail, useStack } from "./api";
 import { EmptyState, QueryError } from "./components";
 import { MetricChart, SERIES } from "./metric-chart";
-import { bridge, latest, type Line, type Metric, RANGES, type RangeId, rate, replicaLabel, toGrid, useMetric } from "./metrics";
+import { bridge, latest, type Line, type Metric, type MetricTarget, RANGES, type RangeId, rate, replicaLabel, targetLabel, toGrid, useMetric } from "./metrics";
 import { Segmented } from "./segmented";
 import { bytes, percent } from "./util";
 
@@ -30,21 +30,55 @@ const REFRESH: Record<RangeId, number> = { "1h": 10_000, "24h": 60_000, "7d": 30
 
 export function MonitoringTab({ org, app }: { org: string; app: App }) {
   const stack = useStack(org, app.stack, 5000);
-  const svc = serviceOf(stack.data, app.name);
+  return (
+    <ServiceMonitoring
+      org={org}
+      target={{ app: app.name }}
+      svc={serviceOf(stack.data, app.name)}
+      loading={stack.isLoading}
+      error={stack.error}
+      memLimit={parseMemory(app.resources?.memory)}
+      top={<AppUptimeCard org={org} app={app} />}
+    />
+  );
+}
+
+/**
+ * A service's numbers now, its metrics history, and its replicas: an app's
+ * Monitoring tab and a compose stack service's. `svc` is its stack_status
+ * entry (undefined when not running).
+ */
+export function ServiceMonitoring({
+  org,
+  target,
+  svc,
+  loading,
+  error,
+  memLimit,
+  top,
+}: {
+  org: string;
+  target: MetricTarget;
+  svc: StackDetail["services"][number] | undefined;
+  loading: boolean;
+  error: unknown;
+  /** Each replica's memory limit, in bytes. */
+  memLimit: number | null;
+  /** Above the numbers (the app's uptime monitors). */
+  top?: ReactNode;
+}) {
   const [range, setRange] = useState<RangeId>("1h");
   const [split, setSplit] = useState<"sum" | "split">("sum");
   const instances = [...(svc?.instances ?? [])].toSorted((a, b) => a.slot - b.slot) as InstanceDetail[];
 
-  if (stack.error) return <QueryError error={stack.error} />;
+  if (error) return <QueryError error={error} />;
   const cpuNow = instances.reduce((n, i) => n + (i.cpu_pct ?? 0), 0);
   const memNow = instances.reduce((n, i) => n + (i.mem_bytes ?? 0), 0);
   const restarts = instances.reduce((n, i) => n + i.restarts, 0);
-  const memLimit = parseMemory(app.resources?.memory);
-  const loading = stack.isLoading;
 
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
-      <AppUptimeCard org={org} app={app} />
+      {top}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <Stat loading={loading} icon={Cpu} label="CPU now" value={svc ? percent(cpuNow) : "–"} hint="All replicas; 100% is one core" />
         <Stat loading={loading} icon={MemoryStick} label="Memory now" value={svc ? bytes(memNow) : "–"} hint={memLimit ? `Limit ${bytes(memLimit)} each` : "No limit set"} />
@@ -78,7 +112,7 @@ export function MonitoringTab({ org, app }: { org: string; app: App }) {
           <ChartCard
             key={c.metric}
             org={org}
-            app={app.name}
+            target={target}
             chart={c}
             range={range}
             split={split === "split"}
@@ -199,20 +233,21 @@ function Probe({ text }: { text: string }) {
 
 function ChartCard({
   org,
-  app,
+  target,
   chart,
   range,
   split,
   max,
 }: {
   org: string;
-  app: string;
+  target: MetricTarget;
   chart: (typeof CHARTS)[number];
   range: RangeId;
   split: boolean;
   max?: number;
 }) {
-  const q = useMetric(org, app, chart.metric, range, REFRESH[range]);
+  const q = useMetric(org, target, chart.metric, range, REFRESH[range]);
+  const app = targetLabel(target);
   const shaped = useMemo(() => {
     if (!q.data) return null;
     const g = toGrid(q.data.series, q.data.from, q.data.to, q.data.step);

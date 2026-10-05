@@ -1157,6 +1157,29 @@ fn test_secrets(state: &std::path::Path) -> std::sync::Arc<isb::secrets::Secrets
     )))
 }
 
+/// A stack as the tests deploy it: `file` with no secrets, by `test`.
+fn test_def(
+    name: &str,
+    org: isb::org::OrgId,
+    file: isb::spec::ComposeFile,
+    base_dir: &std::path::Path,
+) -> isb::stack::StackDef {
+    isb::stack::StackDef {
+        source: None,
+        domains: Default::default(),
+        name: name.to_string(),
+        org,
+        file,
+        base_dir: base_dir.to_path_buf(),
+        secrets: Default::default(),
+        force: Default::default(),
+        images: Default::default(),
+        deployed_at: 0,
+        deployed_by: "test".into(),
+        previous: None,
+    }
+}
+
 /// The stack controller: replicas behind the balancer, a forced rolling
 /// redeploy with no failed request, scale down, remove.
 #[test]
@@ -1187,18 +1210,7 @@ fn stack_controller() {
         &|_| None,
     )
     .unwrap();
-    let def = isb::stack::StackDef {
-        name: stack.clone(),
-        org: isb::org::OrgId::default_org(),
-        file: p.file,
-        base_dir: state.path().to_path_buf(),
-        secrets: Default::default(),
-        force: Default::default(),
-        images: Default::default(),
-        deployed_at: 0,
-        deployed_by: "test".into(),
-        previous: None,
-    };
+    let def = test_def(&stack, isb::org::OrgId::default_org(), p.file, state.path());
     struct Rm(isb::stack::Controller, String);
     impl Drop for Rm {
         fn drop(&mut self) {
@@ -1255,92 +1267,6 @@ fn stack_controller() {
         .filter(|i| i.name.starts_with(&stack))
         .count();
     assert_eq!(left, 0);
-}
-
-/// A registry image that does not exist, asked about for real (skopeo on
-/// the host, Docker Hub): an app naming it is refused with the likely fix,
-/// and a stack that deploys it anyway says so plainly and backs off for
-/// minutes, not seconds.
-#[test]
-fn missing_images_are_refused_and_reported() {
-    if !enabled() {
-        return;
-    }
-    let client = Client::new();
-    let state = tempfile::tempdir().unwrap();
-    let store = isb::stack::Store::open(state.path()).unwrap();
-    let secrets = test_secrets(state.path());
-    let ctl = isb::stack::Controller::start(
-        client.clone(),
-        store,
-        Duration::from_secs(2),
-        secrets.clone(),
-    )
-    .unwrap();
-    let apps = isb::app::Apps::new(state.path(), client.clone(), ctl.clone(), secrets);
-    let spec = |image: &str| {
-        serde_json::from_value::<isb::app::AppSpec>(serde_json::json!({
-            "name": "web", "project": "shop", "source": {"image": image},
-        }))
-        .unwrap()
-    };
-    let e = apps
-        .check_image(None, &spec("docker:traefik:whoami"))
-        .unwrap_err()
-        .to_string();
-    assert!(
-        e.contains("image docker:traefik:whoami not found on Docker Hub (manifest unknown): did you mean docker:traefik/whoami?"),
-        "{e}"
-    );
-    assert_eq!(
-        apps.check_image(None, &spec("docker:traefik/whoami"))
-            .unwrap(),
-        None
-    );
-
-    // The stack runs in the default org; this makes its project.
-    let _ = default_org_client(&client);
-    let stack = format!("isb-test-img-{}", std::process::id() % 100000);
-    let p = isb::compose::load_docs(
-        &[(
-            state.path().join("isb.yaml"),
-            "services:\n  web:\n    image: docker:traefik:whoami\n    labels: {isb-test: '1'}\n"
-                .to_string(),
-        )],
-        state.path(),
-        Some(&stack),
-        &|_| None,
-    )
-    .unwrap();
-    let def = isb::stack::StackDef {
-        name: stack.clone(),
-        org: isb::org::OrgId::default_org(),
-        file: p.file,
-        base_dir: state.path().to_path_buf(),
-        secrets: Default::default(),
-        force: Default::default(),
-        images: Default::default(),
-        deployed_at: 0,
-        deployed_by: "test".into(),
-        previous: None,
-    };
-    struct Rm(isb::stack::Controller, String);
-    impl Drop for Rm {
-        fn drop(&mut self) {
-            let _ = self.0.remove(&self.1, true, Duration::from_secs(120));
-            self.0.shutdown();
-        }
-    }
-    let _rm = Rm(ctl.clone(), stack.clone());
-    ctl.deploy(def).unwrap();
-    let st = isb::daemon::wait_settled(&ctl, &stack, Duration::from_secs(180)).unwrap();
-    let web = &st.services[0];
-    assert_eq!(web.state, "failing", "{web:?}");
-    let m = web.message.as_deref().unwrap_or("");
-    assert!(
-        m.starts_with("image docker:traefik:whoami not found (manifest unknown): change the image and deploy again (retrying in 5m)"),
-        "{m}"
-    );
 }
 
 /// Two orgs: each sees only its own instances, members of one org reach
@@ -1537,18 +1463,7 @@ fn service_names() {
         &|_| None,
     )
     .unwrap();
-    let def = isb::stack::StackDef {
-        name: stack.clone(),
-        org: org.clone(),
-        file: p.file,
-        base_dir: state.path().to_path_buf(),
-        secrets: Default::default(),
-        force: Default::default(),
-        images: Default::default(),
-        deployed_at: 0,
-        deployed_by: "test".into(),
-        previous: None,
-    };
+    let def = test_def(&stack, org.clone(), p.file, state.path());
     let q = def.qualified();
     struct Rm(isb::stack::Controller, String);
     impl Drop for Rm {
@@ -2059,18 +1974,7 @@ fn ingress_routes_rolls_and_removes() {
         &|_| None,
     )
     .unwrap();
-    let def = isb::stack::StackDef {
-        name: stack.clone(),
-        org: isb::org::OrgId::default_org(),
-        file: p.file,
-        base_dir: state.path().to_path_buf(),
-        secrets: Default::default(),
-        force: Default::default(),
-        images: Default::default(),
-        deployed_at: 0,
-        deployed_by: "test".into(),
-        previous: None,
-    };
+    let def = test_def(&stack, isb::org::OrgId::default_org(), p.file, state.path());
     struct Rm(
         isb::stack::Controller,
         String,

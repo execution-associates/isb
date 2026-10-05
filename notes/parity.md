@@ -15,9 +15,9 @@ endpoint has neither a tool nor a documented reason in the
 
 | Category | Count |
 |---|---|
-| Tools in the web UI and MCP | 149 |
+| Tools in the web UI and MCP | 158 |
 | Account tools, the web UI through the identity endpoints | 20 |
-| Tools for MCP and the CLI only | 27 |
+| Tools for MCP and the CLI only | 24 |
 | Identity endpoints with a tool | 21 |
 | Identity endpoints for the browser only | 23 |
 | Other routes with no tool | 4 |
@@ -39,10 +39,12 @@ a person on the web does not need it.
 |---|---|---|
 | List stacks, their health and replicas | App health on every app page; the dashboard | `stack_list` |
 | One stack in detail | App page (domains, replicas) | `stack_status` |
-| Scale a service | App page, General: Replicas; Stop/Start | `stack_scale` |
+| Scale a service | App page, General: Replicas; Stop/Start (an app's header, and a compose stack's for all its services) | `stack_scale` |
 | Logs | App page, Logs | `stack_logs` |
-| Compose stacks: list, show the file, check it, deploy it, remove it | Projects, Compose stacks; New compose stack (paste YAML); a stack's page: Compose (editor, Changes, review, Deploy), Services, Logs, Remove | `stack_export`, `stack_validate`, `stack_deploy`, `stack_remove` |
-| Redeploy one service, roll a stack back, the raw stored definition | *MCP/CLI only*: a service is rolled by changing its file (the stack's Compose tab), and the stored definition is what `stack_export` shows as YAML; the web UI manages apps, which are stacks underneath, with `app_deploy`, `app_rollback` and `app_delete` | `stack_redeploy`, `stack_rollback`, `stack_config` |
+| Compose stacks: list, show the file, check it, deploy it, remove it | A project's environment: Compose (its stacks, with name conflicts); New compose (paste YAML, deployed into that environment); a stack's page, with the app page's tabs: General (services, replicas, scale, Delete), YAML (Source: editor, Changes, review, Deploy), Logs | `stack_export`, `stack_validate`, `stack_deploy`, `stack_remove` |
+| Redeploy one service, roll a stack back | A stack's page: General and Advanced (Redeploy), Deployments (Roll back to any kept deployment) | `stack_redeploy`, `stack_rollback` |
+| The effective stored definition (managed domains merged in) | A stack's page, YAML: Deployed (read-only, beside Source) | `stack_config` |
+| A stack's environment, domains and deployments | A stack's page: Environment (the `${VAR}` values), Domains (managed per service; the file's own shown read-only), Deployments (history, and each deployment on the page an app deployment has: stages, log from its events, the file it deployed) | `stack_env_get`, `stack_env_set`, `stack_domains_get`, `stack_domains_set`, `stack_deployments`, `stack_deployment_get` |
 | List sandboxes | Workspace, Sandboxes | `sandbox_list` |
 | Extend or remove a sandbox | Workspace, Sandboxes: Extend by, Delete | `sandbox_extend`, `sandbox_remove` |
 | Create a sandbox, run a command in it | *MCP/CLI only*: sandboxes are agents' scratch machines; a person opens a shell in one from Workspace, Sandboxes, Shell (the terminal websocket) | `sandbox_create`, `sandbox_exec` |

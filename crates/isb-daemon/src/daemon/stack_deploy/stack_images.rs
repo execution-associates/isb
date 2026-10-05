@@ -82,6 +82,8 @@ mod tests {
             images: BTreeMap::new(),
             deployed_at: 0,
             deployed_by: "t".into(),
+            source: None,
+            domains: BTreeMap::new(),
             previous: None,
         }
     }

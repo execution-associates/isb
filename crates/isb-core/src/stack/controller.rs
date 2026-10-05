@@ -36,6 +36,9 @@ use crate::spec::{
 };
 use crate::supervise;
 
+mod dns;
+pub use dns::{DnsScope, DnsScopeFn};
+
 /// How long a replaced instance's connections may drain before it is stopped.
 const DRAIN: Duration = Duration::from_secs(10);
 /// How often an unhealthy app is restarted before its instance is replaced.
@@ -277,6 +280,8 @@ struct Inner {
     event_sink: Mutex<Option<EventSink>>,
     /// Where each sample also goes: the metrics history.
     metrics_sink: Mutex<Option<std::sync::mpsc::SyncSender<crate::metrics_history::Sample>>>,
+    /// Which project environment a stack's services are also named in.
+    dns_scope: Mutex<Option<DnsScopeFn>>,
 }
 
 impl Inner {
@@ -373,6 +378,7 @@ impl Controller {
                 observer,
                 event_sink: Mutex::new(None),
                 metrics_sink: Mutex::new(None),
+                dns_scope: Mutex::new(None),
             }),
         };
         // Driver-backed secrets are polled on their refresh intervals; the
@@ -416,15 +422,7 @@ impl Controller {
             });
         let defs = c.inner.store.load_all()?;
         // Service names of stacks removed while no daemon ran.
-        for def in &defs {
-            let dir = crate::discovery::org_dir(&def.org);
-            let keep: Vec<(String, String)> = defs
-                .iter()
-                .filter(|d| d.org == def.org)
-                .flat_map(|d| d.file.services.keys().map(|s| (d.name.clone(), s.clone())))
-                .collect();
-            crate::discovery::prune(&dir, &keep);
-        }
+        dns::prune(&defs);
         for def in defs {
             eprintln!("isb serve: resuming stack {}", def.name);
             c.apply(Arc::new(def));
@@ -1123,8 +1121,9 @@ struct Worker {
     /// whatever its dependencies do.
     deps_met: bool,
     org: OrgId,
-    /// The addresses last published as the service's name.
-    dns_last: Option<Vec<IpAddr>>,
+    /// The addresses last published as the service's name, and the
+    /// project environment it was also named in.
+    dns_last: Option<(Vec<IpAddr>, Option<String>)>,
     dns_error: Option<String>,
     /// The addresses last told to the observer.
     observed: Option<Vec<IpAddr>>,
@@ -1194,32 +1193,6 @@ impl Worker {
             seen: None,
             restart_failed: None,
         }
-    }
-
-    /// A replica could not be created: wait before the next attempt, longer
-    /// each time. An image its registry does not have will not appear by
-    /// itself (until someone pushes it), so that waits longest, and says
-    /// so plainly instead of in incus' words.
-    fn back_off(&mut self, def: &StackDef, image: &str, msg: &str, e: &Error) {
-        let missing = super::failure::image_missing(image, &e.to_string());
-        let (first, cap) = match missing {
-            Some(_) => (super::failure::IMAGE_RETRY, super::failure::IMAGE_RETRY_MAX),
-            None => (Duration::from_secs(10), Duration::from_secs(300)),
-        };
-        let wait = self
-            .create_backoff
-            .map(|(_, w)| (w * 2).clamp(first, cap))
-            .unwrap_or(first);
-        self.create_backoff = Some((Instant::now(), wait));
-        self.state = "failing".into();
-        self.message = Some(match missing {
-            Some(m) => format!(
-                "{m}: change the image and deploy again (retrying in {}m)",
-                wait.as_secs() / 60
-            ),
-            None => format!("{msg}; retrying in {wait:?}"),
-        });
-        self.publish_status(def);
     }
 
     /// Drop the retry backoff when the instructions changed (a new
@@ -1362,14 +1335,7 @@ impl Worker {
     /// Delete this service's instances and routes, then leave.
     fn teardown(&mut self, def: &StackDef, volumes: bool) {
         // The name goes first, whoever published it.
-        if let Some(dir) = Some(crate::discovery::org_dir(&self.org)).filter(|d| d.is_dir()) {
-            if let Err(e) =
-                crate::discovery::publish(&dir, &self.org, &self.stack, &self.service, &[])
-            {
-                self.log(&format!("cannot remove the service name: {e}"));
-            }
-        }
-        self.dns_last = Some(Vec::new());
+        self.unpublish_dns();
         if let Some(o) = &self.inner.observer {
             o.rotation(&self.q, &self.service, &[]);
         }
@@ -1684,7 +1650,12 @@ impl Worker {
                     self.event("error", None, &msg);
                     if old.is_none() {
                         // Nothing to protect: keep trying, slower each time.
-                        self.back_off(def, &spec.image, &msg, &e);
+                        let prev = self.create_backoff.map(|(_, w)| w);
+                        let (wait, m) = super::failure::retry(prev, &spec.image, &msg, &e);
+                        self.create_backoff = Some((Instant::now(), wait));
+                        self.state = "failing".into();
+                        self.message = Some(m);
+                        self.publish_status(def);
                         return Ok(false);
                     }
                     match uc.failure_action.unwrap_or_default() {
@@ -2274,44 +2245,6 @@ impl Worker {
         if self.observed.as_ref() != Some(&ips) {
             o.rotation(&self.q, &self.service, &ips);
             self.observed = Some(ips);
-        }
-    }
-
-    /// Publish the in-rotation replicas' addresses as the service's name
-    /// (see [`crate::discovery`]). Nothing to do in an org created without
-    /// service names.
-    fn sync_dns(&mut self) {
-        let dir = crate::discovery::org_dir(&self.org);
-        let mut ips: Vec<IpAddr> = self
-            .rt
-            .values()
-            .filter(|r| r.in_rotation)
-            .filter_map(|r| r.ip)
-            .collect();
-        ips.sort();
-        // A worker that has published nothing yet (a daemon restart) leaves
-        // the last records alone until a replica is back in rotation, rather
-        // than blanking the name while health is being re-established.
-        let fresh = self.dns_last.is_none() && ips.is_empty();
-        if fresh || self.dns_last.as_ref() == Some(&ips) || !dir.is_dir() {
-            return;
-        }
-        match crate::discovery::publish(&dir, &self.org, &self.stack, &self.service, &ips) {
-            Ok(()) => {
-                self.dns_last = Some(ips);
-                self.dns_error = None;
-            }
-            Err(e) => {
-                let e = e.to_string();
-                if self.dns_error.as_deref() != Some(&e) {
-                    self.event(
-                        "warn",
-                        None,
-                        &format!("cannot publish the service name: {e}"),
-                    );
-                    self.dns_error = Some(e);
-                }
-            }
         }
     }
 

@@ -202,6 +202,21 @@ names for its services, resolvable from anything in the same org:
 - `<service>.<stack>.<org>.isb`, e.g. `db.shop.acme.isb`;
 - `<service>.<stack>`, e.g. `db.shop`, the same records.
 
+Every stack belongs to one project environment
+([Projects and environments](apps.md#compose-stacks-in-an-environment)),
+and its services are also named there, as the environment's apps are:
+
+- `<service>.<project>-<env>.<org>.isb` and `<service>.<project>-<env>`,
+  e.g. `db.shop-production` for stack `shop-db` in `shop/production`.
+
+A name in an environment has one holder. A deploy that would give a new
+service a name the environment already gives an app, or another stack's
+service, is refused, naming both. Where two held the same name before
+stacks belonged to environments, an app keeps it, then the stack that
+joined the environment first (then the lower stack name); the other
+service keeps its `<service>.<stack>` names and gets no environment name,
+and `project_list` reports it under the environment's `conflicts`.
+
 A name resolves to the IPv4 address of every replica that is in rotation
 (healthy, or running when there is no healthcheck): DNS round-robin, like
 swarm's `dnsrr` endpoint mode, with a TTL of 0. A one-replica service
@@ -278,12 +293,26 @@ a stack written as a compose file, has no project: it lives in the org.
 - A stack's page has **Compose** (the file in a code editor), **Services**
   (each service's state, replicas, instances and published ports, refreshing
   while it rolls) and **Logs** (each replica's recent output).
-- The Compose tab shows what `stack_export` returns: the deployed file,
-  resolved, so no `${VAR}`. Secrets that were read from a file or an
-  environment variable when it was deployed are named as `external` store
-  secrets (`<stack>_<key>`), so the file deploys again without their values;
-  deploying it that way keeps the stored value but no longer counts the stack
-  as its owner, so removing the stack leaves that secret behind.
+- The Compose tab shows what `stack_export` returns: the file as it was
+  deployed, comments and `${VAR}` included, when it was deployed as text
+  that needed no variables from the deployer (the editor's own deploys, and
+  the CLI's for a stack with an environment). A file the CLI resolved is
+  shown resolved, with secrets that were read from a file or an environment
+  variable named as `external` store secrets (`<stack>_<key>`), so it deploys
+  again without their values; deploying it that way keeps the stored value
+  but no longer counts the stack as its owner, so removing the stack leaves
+  that secret behind.
+- A `file:`/`environment:` secret deployed again without a value (the
+  editor's Deploy, a rollback, an environment or domains change that
+  deploys) reuses the value an earlier deploy stored as `<stack>_<key>`.
+  That is never silent, since a rotated password that never reached the
+  deploy would leave the old one running: the deploy's result names those
+  secrets in `reused_secrets`, so does its deployment record, its log has a
+  `warn` event per secret with the stored value's date and version, and
+  `isb stack deploy` prints `warning: secret KEY: no value given; reusing
+  the value stored on DATE`. `stack_deploy` with `reuse_secrets: false`
+  (`isb stack deploy --no-reuse-secrets`) fails the deploy instead, naming
+  the secret that has no value.
 - As you type, the daemon checks the file (`stack_validate`: a dry run of
   `stack_deploy`) and marks problems on their lines. **Changes** is a line
   diff against what is deployed, and **Deploy** shows the diff for review,
@@ -291,9 +320,52 @@ a stack written as a compose file, has no project: it lives in the org.
   There is no save without deploying: a stack's file exists only as its
   deployment.
 - **Remove** is `stack_remove` (typed confirm); named volumes are kept.
-- Viewers read the file. `${VAR}` and `file:`/`environment:` secrets need a
-  value from the deployer, which the editor cannot give: use `external`
-  secrets (create them under Secrets) or deploy those files with the CLI.
+- Viewers read the file. `${VAR}` comes from the stack's environment (below);
+  a `file:` secret needs a value from the deployer the first time, which the
+  editor cannot give: use `external` secrets (create them under Secrets) or
+  deploy those files with the CLI.
+
+## Environment, domains and deployments
+
+A compose stack has the settings an app has, kept beside its file:
+
+- **Environment** (`stack_env_get`, `stack_env_set`, `isb stack env`): `.env`
+  text, as an app's (comments kept, `KEY=${{secret.NAME}}` for an org
+  secret). At every deploy the daemon resolves the file's `${VAR}` against it
+  (a deploy's own `vars` win), so the stored file keeps `${VAR}` and changing
+  the environment and deploying again takes effect. A variable nobody
+  defines fails the deploy, naming it. A secret variable reaches a service
+  only as the whole value of one of its environment variables
+  (`DB_PASSWORD: ${DB_PASSWORD}`), which is delivered as that store secret
+  (a top-level secret `env.<NAME>`), so its value is never in the stored
+  file, `stack_config` or the instance's config; used anywhere else
+  (`command`, part of a URL), the deploy is refused. An `environment:`
+  secret (`secrets: {db: {environment: DB_PASSWORD}}`) takes its value from
+  the environment too. A stack may have an environment before its first
+  deploy.
+- **Managed domains** (`stack_domains_get`, `stack_domains_set`): domain
+  records per service, in an app's domain shape, that the daemon adds to
+  the service at every deploy. The file is not changed: its own `domains:`
+  stay as written, and a hostname both give (or that the records give
+  twice) fails the deploy, naming it. `stack_config` shows the file with
+  them merged in; `stack_export` leaves them out. Records for a service the
+  file no longer has are kept, unused.
+- **Deployments** (`stack_deployments`, `stack_deployment_get`, `isb stack
+  deployments`): every deploy, rollback, and environment or domains change
+  that deployed is recorded with who did it, the services it changed, the
+  secrets it reused a stored value of (`reused_secrets`, when there are
+  some), the compose text, environment (references only) and managed
+  domains it used, and the stack's events while it rolled out. A record is `deploying` until
+  every service converges (`done`), one fails or pauses or 15 minutes pass
+  (`failed`), or a newer deploy comes first (`superseded`). The last 30 are
+  kept. `stack_rollback` with `to` (`isb stack rollback NAME --to ID`)
+  deploys a kept one's text and managed domains again, with the environment
+  as it is now; without it, a rollback swaps back to the previous
+  deployment as it ran.
+
+The stack's environment, managed domains and records go with it when it is
+removed. Stacks a project's apps run (`<project>-<env>`) refuse these tools:
+their apps have their own.
 
 ## Commands
 
@@ -304,7 +376,10 @@ isb stack ps NAME [--json]
 isb stack logs NAME SERVICE [--slot N] [-n 100]
 isb stack scale NAME SERVICE=N...
 isb stack redeploy NAME SERVICE
-isb stack rollback NAME
+isb stack rollback NAME [--to ID]
+isb stack deployments NAME [--json]
+isb stack env NAME                      the stack's environment, as .env text
+isb stack env-set NAME [FILE] [--deploy]   replace it (stdin without FILE)
 isb stack config NAME
 isb stack rm NAME [--volumes]
 ```
@@ -316,6 +391,13 @@ values in the org's store as `<stack>_<key>` and reads `external`, `age` and
 `driver` secrets itself ([Secrets](../guides/secrets.md#stacks)); relative
 bind paths stay relative to the file. It exits 0 once every service is
 converged, 1 if one paused or is failing.
+
+When the stack has an environment on the daemon, `deploy` sends the file's
+text instead, for the daemon to resolve `${VAR}` with that environment, plus
+only the variables it does not define from your `.env`, `--env-file` and
+shell (a file that needs one of those is then stored resolved, not as
+written). That takes one compose file (no overrides), and the stack's name
+comes from NAME or a file that loads without the environment.
 
 The CLI reaches the daemon over its unix socket (`$ISB_SERVE_SOCKET`, else
 `$XDG_RUNTIME_DIR/isb/serve.sock`). Setting up the daemon is in
