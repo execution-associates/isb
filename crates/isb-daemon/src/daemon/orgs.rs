@@ -15,20 +15,44 @@ use crate::error::{Error, Result};
 use crate::org::{self, Egress, OrgId, OrgInfo, OrgOptions};
 use crate::server::{Caller, Registry, Tool};
 
+/// An org-wide limit as the tools take it: a value, or `"none"` (or
+/// `null`) to lift it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum LimitArg<T> {
+    Set(T),
+    Lift,
+}
+
+/// A present limit field: `null` or `"none"` lifts it, anything else is its
+/// value. An absent one stays `None` (`#[serde(default)]`): kept.
+fn limit_arg<'de, D, T>(d: D) -> std::result::Result<Option<LimitArg<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    match Value::deserialize(d)? {
+        Value::Null => Ok(Some(LimitArg::Lift)),
+        Value::String(s) if s.trim().eq_ignore_ascii_case("none") => Ok(Some(LimitArg::Lift)),
+        v => serde_json::from_value(v)
+            .map(|t| Some(LimitArg::Set(t)))
+            .map_err(serde::de::Error::custom),
+    }
+}
+
 /// Limits and egress as the tools take them. `None` keeps what the org has.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Settings {
     #[serde(default)]
     pub org: Option<String>,
-    #[serde(default)]
-    pub cpus: Option<u32>,
-    #[serde(default)]
-    pub memory: Option<String>,
-    #[serde(default)]
-    pub disk: Option<String>,
-    #[serde(default)]
-    pub instances: Option<u32>,
+    #[serde(default, deserialize_with = "limit_arg")]
+    pub cpus: Option<LimitArg<u32>>,
+    #[serde(default, deserialize_with = "limit_arg")]
+    pub memory: Option<LimitArg<String>>,
+    #[serde(default, deserialize_with = "limit_arg")]
+    pub disk: Option<LimitArg<String>>,
+    #[serde(default, deserialize_with = "limit_arg")]
+    pub instances: Option<LimitArg<u32>>,
     #[serde(default)]
     pub default_cpus: Option<u32>,
     #[serde(default)]
@@ -113,29 +137,57 @@ impl Settings {
             None => None,
         };
         let parse_u32 = |v: Option<&String>| v.and_then(|s| s.parse::<u32>().ok());
+        let set = |v: &Option<LimitArg<String>>| match v {
+            Some(LimitArg::Set(s)) => Some(s.clone()),
+            _ => None,
+        };
+        let count = |v: &Option<LimitArg<u32>>| match v {
+            Some(LimitArg::Set(n)) => Some(*n),
+            _ => None,
+        };
+        let (memory, disk) = (set(&self.memory), set(&self.disk));
         for (what, v) in [
-            ("memory", &self.memory),
-            ("disk", &self.disk),
+            ("memory", &memory),
+            ("disk", &disk),
             ("default_memory", &self.default_memory),
         ] {
             if let Some(v) = v {
                 check_size(what, v)?;
             }
         }
+        let (cpus, instances) = (count(&self.cpus), count(&self.instances));
         for (what, v) in [
-            ("cpus", self.cpus),
-            ("instances", self.instances),
+            ("cpus", cpus),
+            ("instances", instances),
             ("default_cpus", self.default_cpus),
         ] {
             if v == Some(0) {
-                return Err(Error::invalid(format!("{what} must be at least 1")));
+                return Err(Error::invalid(format!(
+                    "{what} must be at least 1 (\"none\" lifts the limit)"
+                )));
             }
         }
+        let lift = [
+            (org::Limit::Cpus, matches!(self.cpus, Some(LimitArg::Lift))),
+            (
+                org::Limit::Memory,
+                matches!(self.memory, Some(LimitArg::Lift)),
+            ),
+            (org::Limit::Disk, matches!(self.disk, Some(LimitArg::Lift))),
+            (
+                org::Limit::Instances,
+                matches!(self.instances, Some(LimitArg::Lift)),
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(l, lifted)| lifted.then_some(l))
+        .collect();
         Ok(OrgOptions {
-            cpus: self.cpus,
-            memory: self.memory.clone(),
-            disk: self.disk.clone(),
-            instances: self.instances,
+            cpus,
+            memory,
+            disk,
+            instances,
+            lift,
             default_cpus: self
                 .default_cpus
                 .or_else(|| parse_u32(current.and_then(|c| c.default_cpus.as_ref()))),
@@ -198,10 +250,10 @@ fn schema(extra: Value, required: &[&str], org_desc: &str) -> Value {
 
 fn settings_props() -> Value {
     json!({
-        "cpus": {"type": "integer", "minimum": 1, "description": "CPUs across the org's instances."},
-        "memory": {"type": "string", "description": "Memory across the org, e.g. 16GiB."},
-        "disk": {"type": "string", "description": "Disk across the org, e.g. 100GiB."},
-        "instances": {"type": "integer", "minimum": 1, "description": "Instances in the org."},
+        "cpus": {"anyOf": [{"type": "integer", "minimum": 1}, {"type": "string", "enum": ["none"]}, {"type": "null"}], "description": "CPUs across the org: the sum of every instance's limits.cpu, stopped ones included. \"none\" or null lifts the limit."},
+        "memory": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Memory across the org, e.g. 16GiB: the sum of every instance's limits.memory, stopped ones included. \"none\" or null lifts the limit."},
+        "disk": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Disk across the org, e.g. 100GiB: the sum of every root disk's and volume's size. While set, an instance without a root size gets 10GiB from the org's default profile. \"none\" or null lifts the limit."},
+        "instances": {"anyOf": [{"type": "integer", "minimum": 1}, {"type": "string", "enum": ["none"]}, {"type": "null"}], "description": "Instances in the org, stopped ones included. \"none\" or null lifts the limit."},
         "default_cpus": {"type": "integer", "minimum": 1, "description": "CPUs an instance gets when its spec sets none."},
         "default_memory": {"type": "string", "description": "Memory an instance gets when its spec sets none, e.g. 512MiB."},
         "egress": {"type": "array", "items": {"type": "string"}, "description": "Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/concepts/orgs.md). Replaces the list; [] clears it."},
@@ -247,7 +299,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
     tool!(
         "org_get",
         "Show an org",
-        "An org's limits, per-instance defaults, network (bridge and subnet), egress exceptions, bind roots and service-name domain, with its instance, stack and member counts.",
+        "An org's limits with what is allocated against each (`allocation`: limit, allocated, free; allocated is the sum of every instance's limit, stopped ones included, which is what incus enforces), per-instance defaults, network (bridge and subnet), egress exceptions, bind roots and service-name domain, with its instance, stack and member counts.",
         schema(json!({}), &[], "The org (default: default)."),
         ro,
         |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
@@ -315,7 +367,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
     tool!(
         "org_update",
         "Change an org",
-        "Platform admins: change an org's limits, per-instance defaults, egress exceptions or the UDP ports its stacks may publish. Fields left out keep their value; `egress` and `udp` replace their lists. A limit cannot be lifted once set (as with `isb org create`).",
+        "Platform admins: change an org's limits, per-instance defaults, egress exceptions or the UDP ports its stacks may publish. Fields left out keep their value; a limit given as \"none\" (or null) is lifted; `egress` and `udp` replace their lists. The same as `isb org update`.",
         schema(settings_props(), &["org"], "The org."),
         write,
         |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
@@ -411,6 +463,8 @@ mod tests {
             instances_limit: None,
             default_cpus: Some("2".into()),
             default_memory: Some("1GiB".into()),
+            default_disk: None,
+            allocation: Default::default(),
             bind_roots: vec!["/srv/acme".into()],
             egress: vec!["10.9.0.0/16".into()],
             domains: vec![],
@@ -428,7 +482,7 @@ mod tests {
     fn update_keeps_what_it_is_not_given() {
         let s = Settings {
             org: Some("acme".into()),
-            memory: Some("8GiB".into()),
+            memory: Some(LimitArg::Set("8GiB".into())),
             ..Default::default()
         };
         let o = s.options(Some(&info())).unwrap();
@@ -438,6 +492,24 @@ mod tests {
         assert_eq!(o.default_memory.as_deref(), Some("1GiB"));
         assert_eq!(o.bind_roots, vec![std::path::PathBuf::from("/srv/acme")]);
         assert!(o.egress.is_none(), "egress left out is kept");
+    }
+
+    #[test]
+    fn a_limit_given_as_none_or_null_is_lifted() {
+        let s: Settings = serde_json::from_value(json!({
+            "org": "acme", "cpus": "none", "disk": null, "memory": "4GiB", "instances": 3
+        }))
+        .unwrap();
+        let o = s.options(Some(&info())).unwrap();
+        assert_eq!(o.lift, vec![org::Limit::Cpus, org::Limit::Disk]);
+        assert_eq!((o.cpus, o.disk), (None, None));
+        assert_eq!(o.memory.as_deref(), Some("4GiB"));
+        assert_eq!(o.instances, Some(3));
+        // Left out: kept, not lifted.
+        let s: Settings = serde_json::from_value(json!({"org": "acme"})).unwrap();
+        assert!(s.options(Some(&info())).unwrap().lift.is_empty());
+        let bad: std::result::Result<Settings, _> = serde_json::from_value(json!({"cpus": "lots"}));
+        assert!(bad.is_err());
     }
 
     #[test]
@@ -495,7 +567,7 @@ mod tests {
             assert!(check_size("memory", bad).is_err(), "{bad}");
         }
         let s = Settings {
-            cpus: Some(0),
+            cpus: Some(LimitArg::Set(0)),
             ..Default::default()
         };
         assert!(s.options(None).is_err());

@@ -978,7 +978,9 @@ Reconciled per the device rules.
 
 `root` is special: its properties are merged over the generated root disk
 (`{type: disk, path: /, pool: <storage pool>}`), for example to set `size`, and
-need no `type`. Like the rest of the root disk, they are used only at creation
+need no `type`. `root: {size: ...}` alone is allowed for remote callers without
+`--allow-raw`: it is how a stack service sizes its root disk against an org's
+disk limit ([Orgs](../concepts/orgs.md#limits-are-budgets)). Like the rest of the root disk, they are used only at creation
 and never reconciled.
 
 ```yaml

@@ -323,7 +323,8 @@ impl Client {
             ))
         })?;
         if env.kind == "error" || status >= 400 {
-            if let Some(e) = crate::org::limits::translate(self, &env.error) {
+            let request = body.map(|b| (path, b));
+            if let Some(e) = crate::org::limits::translate(self, &env.error, request) {
                 return Err(e);
             }
             return Err(Error::Api {
@@ -470,7 +471,7 @@ impl Client {
                     } else {
                         "operation failed"
                     });
-                if let Some(e) = crate::org::limits::translate(self, err) {
+                if let Some(e) = crate::org::limits::translate(self, err, None) {
                     return Err(e);
                 }
                 Err(Error::OperationFailed {
