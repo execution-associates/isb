@@ -6,7 +6,9 @@
 //! rename stays on one filesystem and is atomic), smoke-tested with
 //! `--version`, and renamed over it. A binary a package manager owns is left
 //! to that manager: replacing it underneath mise, cargo, npm or pip leaves
-//! their records lying about what is installed.
+//! their records lying about what is installed. mise installs are
+//! deprecated: mise does not check the release signature, so isb points them
+//! at [`INSTALL_COMMAND`] instead.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -26,6 +28,10 @@ pub const RELEASE_KEYS: &[&str] =
     &["4f08d05a2ffaf58f40d4d0e658a9934e5246de1b472ccd2143af6c928adfd51a"];
 /// The first release whose SHA256SUMS is signed; older ones cannot be installed.
 const FIRST_SIGNED: &str = "1.1.1";
+
+/// The installer: it checks the release signature as `isb update` does and
+/// installs to `~/.local/bin`, where `isb update` keeps isb current.
+pub const INSTALL_COMMAND: &str = "curl -fsSL https://github.com/execution-associates/isb/releases/latest/download/install.sh | sh";
 
 const LATEST_API: &str = "https://api.github.com/repos/execution-associates/isb/releases/latest";
 
@@ -117,13 +123,27 @@ impl Manager {
         }
     }
 
-    /// The command that upgrades isb through this manager.
+    /// The command that upgrades isb through this manager. For mise, the
+    /// installer: mise installs are deprecated (see [`Manager::deprecation`]).
     pub fn upgrade_command(self) -> &'static str {
         match self {
-            Manager::Mise => "mise use -g github:execution-associates/isb@latest",
+            Manager::Mise => INSTALL_COMMAND,
             Manager::Cargo => "cargo install isb --locked",
             Manager::Npm => "npm install @execution-associates/isb@latest",
             Manager::Pip => "pip install -U isb-sdk",
+        }
+    }
+
+    /// Why an install by this manager should move to the installer, and how,
+    /// if it should.
+    pub fn deprecation(self) -> Option<String> {
+        match self {
+            Manager::Mise => Some(format!(
+                "mise installs of isb are deprecated, since mise does not check the release \
+                 signature: install with `{INSTALL_COMMAND}`, then remove the mise one with \
+                 `mise unuse -g github:execution-associates/isb`"
+            )),
+            _ => None,
         }
     }
 }

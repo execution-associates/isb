@@ -4,30 +4,31 @@ description: What to do after installing a new isb binary on a host, on a Mac, a
 order: 2
 ---
 
-isb is one binary, so upgrading is installing the new release the way you
-installed the old one (`mise`, `cargo install isb`, or the
-[releases page](https://github.com/execution-associates/isb/releases)) and
-then pointing whatever runs it at the new file. A binary from the releases
-page updates itself: `isb update` replaces it in place with the latest
-release, checked against the release's signed `SHA256SUMS` (`isb update --check`
-only reports; see [the CLI reference](../reference/cli.md#updating-isb)). Workloads keep running
+isb is one binary, so upgrading is replacing it and then restarting whatever
+runs it. A binary from the [installer](../getting-started/install.md#2-the-binary)
+updates itself: `isb update` replaces it in place with the latest release,
+checked against the release's signed `SHA256SUMS` (`isb update --check`
+only reports; see [the CLI reference](../reference/cli.md#updating-isb)). A
+source build upgrades with `cargo install isb` again. mise installs are
+deprecated, since mise does not check the signature: move to the installer
+([Install isb](../getting-started/install.md#2-the-binary)). Workloads keep running
 throughout: stopping or restarting the daemon never stops an app.
 
 ## On a Linux host
 
 ```sh
-mise use -g github:execution-associates/isb@latest   # or however you install isb
-isb serve install                                     # point the unit at it, restart, wait for /healthz
+isb update                          # the latest signed release, in place
+systemctl --user restart isb        # the daemon runs the new binary
 isb --version
 ```
 
-- **Rerun `isb serve install`.** The unit runs the binary that installed it
-  by its full path, so with a version manager that keeps each version in its
-  own directory (mise does), the unit keeps running the old version until you
-  install again. The installer is idempotent: it rewrites the unit, keeps
-  `serve.env` and the secrets key, restarts the service and waits until it
-  answers. If isb lives at a fixed path that you replaced in place,
-  `systemctl --user restart isb` is enough.
+- **Restart, or rerun `isb serve install`.** The unit runs the binary that
+  installed it by its full path. `isb update` replaces that file in place, so
+  a restart runs the new version. A binary at a new path (moving from a mise
+  install to the installer, or a source build elsewhere) needs
+  `isb serve install` from the new binary: it is idempotent, rewrites the
+  unit, keeps `serve.env` and the secrets key, restarts the service and
+  waits until it answers.
 - **What a restart interrupts.** Apps run on in their guests. The load
   balancer and the ingress stop with the daemon, so published ports and
   domains are down for the few seconds until it is back; it then resumes

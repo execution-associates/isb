@@ -2,13 +2,16 @@ name: Release
 
 # Static (musl) Linux binaries for x86_64 and aarch64, and macOS binaries for
 # both (linked only against the system libraries), published as release
-# assets with SHA256SUMS when a v* tag is pushed, so hosts can install with
-# `mise use -g github:execution-associates/isb` and never build on the host.
+# assets with SHA256SUMS when a v* tag is pushed, together with install.sh,
+# the installer (`curl -fsSL .../releases/latest/download/install.sh | sh`),
+# so hosts never build isb themselves.
 # SHA256SUMS is signed (SHA256SUMS.sig, raw Ed25519) with the secret
 # ISB_RELEASE_SIGNING_KEY, whose public key isb compiles in (RELEASE_KEYS in
 # crates/isb-core/src/self_update.rs): `isb update`, `isb machine init` and
 # server upgrades install nothing whose signature does not verify. Each
 # tarball also gets a GitHub build attestation (`gh attestation verify`).
+# install.sh checks the same signature before it installs anything; the
+# install job then runs the published installer on Linux and macOS.
 # After the release, the seven crates go to crates.io (secret
 # CARGO_REGISTRY_TOKEN); a crate version that is already there is skipped, so a
 # failed run can be re-run. Run it by hand (workflow_dispatch) to build the
@@ -105,13 +108,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: crates/isb-core/src/self_update.rs
+          sparse-checkout: |
+            crates/isb-core/src/self_update.rs
+            install.sh
           sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
-      - run: cd dist && sha256sum *.tar.gz > SHA256SUMS && cat SHA256SUMS
+      - run: cp install.sh dist/ && cd dist && sha256sum *.tar.gz install.sh > SHA256SUMS && cat SHA256SUMS
       # Refuse to publish a release this version's isb could not verify: the
       # secret's public key must be one of the keys compiled in.
       - name: sign SHA256SUMS
@@ -138,8 +143,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS dist/SHA256SUMS.sig \
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/install.sh dist/SHA256SUMS dist/SHA256SUMS.sig \
             --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+
+  # The installer as users run it, from the release just published.
+  install:
+    name: install.sh on ${{ matrix.runner }}
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        runner: [ubuntu-24.04, macos-15]
+    steps:
+      - name: install with the published install.sh
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/install.sh" -o install.sh
+          ISB_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh "$v"
+          [ "$("$RUNNER_TEMP/bin/isb" --version)" = "isb $v" ]
 
   crates:
     name: publish to crates.io

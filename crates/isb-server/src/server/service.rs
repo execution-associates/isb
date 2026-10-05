@@ -1,9 +1,10 @@
 //! Installing `isb serve` as a systemd user service.
 //!
-//! The unit runs the isb binary that installed it, by its canonical path. A
-//! version manager that keeps each version in its own directory (mise does)
-//! therefore pins that version: after an upgrade, install again to point the
-//! unit at the new binary. Settings live in an environment file that is
+//! The unit runs the isb binary that installed it, by its canonical path. The
+//! installer's path (`~/.local/bin/isb`) stays put across `isb update`, so a
+//! restart picks up the new binary; a version manager that keeps each
+//! version in its own directory (a deprecated mise install) pins that
+//! version, and the service must be installed again after an upgrade. Settings live in an environment file that is
 //! created once and then left to the user.
 
 use std::net::ToSocketAddrs;
@@ -133,12 +134,7 @@ pub fn install_user_service(opts: &ServiceOptions) -> Result<ServiceInstall> {
              run `loginctl enable-linger {user}` to keep it running"
         ));
     }
-    if exe.to_string_lossy().contains("/mise/installs/") {
-        notes.push(format!(
-            "the unit runs {} directly; install the service again after upgrading isb",
-            exe.display()
-        ));
-    }
+    notes.extend(mise_note(&exe));
     Ok(ServiceInstall {
         exe,
         unit_path,
@@ -147,6 +143,20 @@ pub fn install_user_service(opts: &ServiceOptions) -> Result<ServiceInstall> {
         health_url,
         key_credential: key.credential,
         notes,
+    })
+}
+
+/// A unit running a mise install pins that version, and mise installs are
+/// deprecated: mise does not check the release signature.
+fn mise_note(exe: &Path) -> Option<String> {
+    exe.to_string_lossy().contains("/mise/installs/").then(|| {
+        format!(
+            "the unit runs the mise install {}; mise installs are deprecated (mise does not \
+             check the release signature): install with `{}`, then run \
+             `~/.local/bin/isb serve install`",
+            exe.display(),
+            crate::self_update::INSTALL_COMMAND
+        )
     })
 }
 

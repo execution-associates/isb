@@ -46,8 +46,10 @@ Two things it may tell you:
 
 - **Lingering is off**: user services stop when you log out. Keep it running
   with `loginctl enable-linger $USER`.
-- **The unit runs a versioned path** (a mise install): run
-  `isb serve install` again after upgrading isb.
+- **The unit runs a versioned path** (a mise install, which is deprecated
+  because mise does not check the release signature): install with
+  [the installer](install.md#2-the-binary) and run `isb serve install`
+  again from `~/.local/bin/isb`.
 
 The daemon's user needs the incus socket (the `incus-admin` group). Logs:
 `journalctl --user -u isb -f`.

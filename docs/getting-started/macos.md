@@ -16,9 +16,9 @@ ports are forwarded to the Mac, so `isb up`, `isb exec`, `isb stack` and
 ## Install
 
 ```sh
-brew install lima                            # Lima 2.0 or later
-mise use -g github:execution-associates/isb  # or download the darwin binary from the releases page
-isb machine init                             # first boot downloads Ubuntu and installs incus: a minute or two
+brew install lima openssl@3   # Lima 2.0 or later; OpenSSL 3 for the installer's signature check
+curl -fsSL https://github.com/execution-associates/isb/releases/latest/download/install.sh | sh
+isb machine init              # first boot downloads Ubuntu and installs incus: a minute or two
 ```
 
 `isb machine init [NAME] [--cpus 4] [--memory 4GiB] [--disk 10GiB]` creates

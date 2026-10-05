@@ -47,13 +47,16 @@ pub(crate) fn update(ctx: &Ctx, a: UpdateArgs) -> Result<u8> {
             return Ok(0);
         }
         if let Some(m) = manager {
-            return Err(Error::invalid(format!(
-                "{} was installed by {}; update it with `{}` (or pass --force to replace the \
-                 file anyway)",
-                exe.display(),
-                m.name(),
-                m.upgrade_command()
-            )));
+            let exe = exe.display();
+            return Err(Error::invalid(match m.deprecation() {
+                Some(d) => format!("{exe} was installed by {}; {d}", m.name()),
+                None => format!(
+                    "{exe} was installed by {}; update it with `{}` (or pass --force to replace \
+                     the file anyway)",
+                    m.name(),
+                    m.upgrade_command()
+                ),
+            }));
         }
     }
     let target = su::host_target().ok_or_else(|| {
@@ -78,7 +81,10 @@ fn check(current: &str, want: &str, latest: bool, manager: Option<Manager>) -> u
         return 0;
     }
     match manager {
-        Some(m) => println!("update with `{}`", m.upgrade_command()),
+        Some(m) => match m.deprecation() {
+            Some(d) => println!("{d}"),
+            None => println!("update with `{}`", m.upgrade_command()),
+        },
         None => println!("update with `isb update`"),
     }
     2
