@@ -114,7 +114,7 @@ the whole stack, `continue` carries on.
 
 Changing only `replicas` scales without replacing anything. `isb stack
 redeploy STACK SERVICE` replaces a service's instances anyway, to pick up a
-moved tag (`docker:app:latest`) or changed bind-mounted files. `isb stack
+moved tag (`docker:nginx:latest`) or changed bind-mounted files. `isb stack
 rollback STACK` goes back to the previous deployment; a second rollback
 undoes the first.
 

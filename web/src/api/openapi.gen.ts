@@ -1203,7 +1203,7 @@ export interface paths {
         put?: never;
         /**
          * Get an app
-         * @description An app's settings, stack, service name, current deployment and webhook path. Secrets in its env show as {secret: NAME}, never values.
+         * @description An app's settings, stack, service name, current deployment and webhook path, and what its service is doing now: status {state (converged, updating, failing, ...), replicas, healthy, message (why it is failing, e.g. image ... not found)}. Secrets in its env show as {secret: NAME}, never values.
          */
         post: operations["app_get"];
         delete?: never;
@@ -3643,7 +3643,7 @@ export interface paths {
         put?: never;
         /**
          * Deploy a stack
-         * @description Deploy or update a stack from a docker-compose-style file (isb's format: docs/reference/compose.md). Each service runs `deploy.replicas` incus instances, supervised inside their guests so they survive restarts of this server and of the host. Published ports are load-balanced over healthy replicas. A changed service is rolled out per `deploy.update_config` (stop-first by default; `order: start-first` for no downtime). Returns the change per service; pass wait=true to block until the rollout settles.
+         * @description Deploy or update a stack from a docker-compose-style file (isb's format: docs/reference/compose.md). Each service runs `deploy.replicas` incus instances, supervised inside their guests so they survive restarts of this server and of the host. Published ports are load-balanced over healthy replicas. A changed service is rolled out per `deploy.update_config` (stop-first by default; `order: start-first` for no downtime). A new or changed registry image (docker:nginx:1.27, docker:traefik/whoami, ghcr:OWNER/NAME:TAG) is looked up first: a deploy naming one its registry does not have is refused, and one that cannot be checked (offline, private) is listed in `warnings`. Returns the change per service; pass wait=true to block until the rollout settles.
          */
         post: operations["stack_deploy"];
         delete?: never;
@@ -3723,7 +3723,7 @@ export interface paths {
         put?: never;
         /**
          * Redeploy a service
-         * @description Replace every replica of a service with a fresh instance, rolling, even though its spec did not change: picks up a moved image tag (docker:app:latest) or changed bind-mounted files.
+         * @description Replace every replica of a service with a fresh instance, rolling, even though its spec did not change: picks up a moved image tag (docker:nginx:latest) or changed bind-mounted files.
          */
         post: operations["stack_redeploy"];
         delete?: never;
@@ -7181,7 +7181,7 @@ export interface operations {
                     replicas?: number;
                     /** @description {cpus, memory} per replica. */
                     resources?: Record<string, never>;
-                    /** @description Exactly one of {"image": "docker:nginx:1.27"} or {"git": {"url", "ref" (branch, tag or SHA; default main), "subdir", "auth": {"token_secret": NAME, "username"} | {"ssh_key_secret": NAME}, "submodules": false}}. */
+                    /** @description Exactly one of {"image": IMAGE} or {"git": {"url", "ref" (branch, tag or SHA; default main), "subdir", "auth": {"token_secret": NAME, "username"} | {"ssh_key_secret": NAME}, "submodules": false}}. IMAGE always carries its registry's prefix: Docker Hub is docker:NAME[:TAG] or docker:OWNER/NAME[:TAG] (docker:nginx:1.27, docker:traefik/whoami; never docker:traefik:whoami, which is the tag whoami of the image traefik), then ghcr:OWNER/NAME[:TAG], quay:OWNER/NAME[:TAG], oci:HOST/PATH[:TAG], registry:APP[:TAG] for the org's own builds; a name with no prefix is an image already on the host. A registry image is looked up when saved: one the registry does not have is refused, one that cannot be checked (offline, private) is saved with a warning. */
                     source: Record<string, never>;
                     /** @description The user the app runs as; numeric (uid[:gid]) on an OCI image. */
                     user?: string;
@@ -7971,7 +7971,7 @@ export interface operations {
                     replicas?: number;
                     /** @description {cpus, memory} per replica. */
                     resources?: Record<string, never>;
-                    /** @description Exactly one of {"image": "docker:nginx:1.27"} or {"git": {"url", "ref" (branch, tag or SHA; default main), "subdir", "auth": {"token_secret": NAME, "username"} | {"ssh_key_secret": NAME}, "submodules": false}}. */
+                    /** @description Exactly one of {"image": IMAGE} or {"git": {"url", "ref" (branch, tag or SHA; default main), "subdir", "auth": {"token_secret": NAME, "username"} | {"ssh_key_secret": NAME}, "submodules": false}}. IMAGE always carries its registry's prefix: Docker Hub is docker:NAME[:TAG] or docker:OWNER/NAME[:TAG] (docker:nginx:1.27, docker:traefik/whoami; never docker:traefik:whoami, which is the tag whoami of the image traefik), then ghcr:OWNER/NAME[:TAG], quay:OWNER/NAME[:TAG], oci:HOST/PATH[:TAG], registry:APP[:TAG] for the org's own builds; a name with no prefix is an image already on the host. A registry image is looked up when saved: one the registry does not have is refused, one that cannot be checked (offline, private) is saved with a warning. */
                     source?: Record<string, never>;
                     /** @description The user the app runs as; numeric (uid[:gid]) on an OCI image. */
                     user?: string;

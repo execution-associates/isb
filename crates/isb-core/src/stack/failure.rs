@@ -27,6 +27,30 @@ const MESSAGE_LINES: usize = 8;
 /// The most characters the message takes from them.
 const MESSAGE_CHARS: usize = 1200;
 
+/// The first wait after a replica failed because its image is missing.
+pub const IMAGE_RETRY: Duration = Duration::from_secs(300);
+/// The longest wait between such attempts.
+pub const IMAGE_RETRY_MAX: Duration = Duration::from_secs(3600);
+
+/// Why a replica's image could not be pulled, in plain words, when that is
+/// why it failed: `image docker:x:1 not found (manifest unknown)`. `None`
+/// for any other failure, and for a registry that did not answer (that
+/// may pass by itself).
+pub fn image_missing(image: &str, err: &str) -> Option<String> {
+    if !err.contains("Failed getting remote image") && !err.contains("Error parsing image name") {
+        return None;
+    }
+    match crate::image_check::classify(err) {
+        crate::image_check::Probe::NotFound(why) => {
+            Some(format!("image {image} not found ({why})"))
+        }
+        crate::image_check::Probe::Denied(why) => Some(format!(
+            "image {image} cannot be pulled without credentials ({why}): it is private or does not exist"
+        )),
+        _ => None,
+    }
+}
+
 /// The output of the last replica of a service that failed to come up.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FailedAttempt {
@@ -196,6 +220,21 @@ fn one_replica(client: &Client, i: &Inst, service: &str, oci: bool, lines: usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pull_of_a_missing_image_is_said_plainly() {
+        let incus = r#"create instance web-1 failed: Failed getting remote image info: Failed to run: skopeo --insecure-policy inspect docker://docker.io/library/traefik:whoami --no-tags: exit status 2 (time="2026-10-05T04:38:08Z" level=fatal msg="Error parsing image name \"docker://docker.io/library/traefik:whoami\": reading manifest whoami in docker.io/library/traefik: manifest unknown")"#;
+        assert_eq!(
+            image_missing("docker:traefik:whoami", incus).as_deref(),
+            Some("image docker:traefik:whoami not found (manifest unknown)")
+        );
+        let offline = "create instance web-1 failed: Failed getting remote image info: Failed to run: skopeo: dial tcp: lookup registry-1.docker.io: no such host";
+        assert_eq!(image_missing("docker:nginx", offline), None);
+        assert_eq!(
+            image_missing("docker:nginx", "out of disk: manifest unknown"),
+            None
+        );
+    }
 
     #[test]
     fn the_message_carries_the_end_of_the_output() {

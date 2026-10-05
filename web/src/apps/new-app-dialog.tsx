@@ -16,6 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import { errorMessage } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 import { type App, type Builder, type Deployment, keys } from "./api";
+import { IMAGE_HINT, IMAGE_PLACEHOLDER, imageNote, imageProblem } from "./image-ref";
 import { openDeployment } from "./use-deploy";
 import { nameProblem } from "./util";
 import { NewDatabaseDialog } from "@/data/new-database";
@@ -107,7 +108,7 @@ export function NewAppDialog({
   const nameErr = nameProblem("app", name);
   const portN = Number(port);
   const portErr = port && (!Number.isInteger(portN) || portN < 1 || portN > 65535) ? "A port is 1-65535." : null;
-  const imageErr = kind === "image" && !image.trim() ? "Enter an image, e.g. docker:nginx:1.27." : null;
+  const imageErr = kind === "image" ? imageProblem(image) : null;
   const urlErr = kind === "git" ? gitUrlProblem(url) : null;
   const sshUrl = /^(ssh:\/\/|[A-Za-z0-9._-]+@)/.test(url.trim());
   const authErr =
@@ -146,7 +147,8 @@ export function NewAppDialog({
       deploy: deploy && auth !== "ssh-generate",
     };
     try {
-      const r = await callTool<{ app: App; deployment?: Deployment }>("app_create", args, org);
+      const r = await callTool<{ app: App; deployment?: Deployment; warning?: string }>("app_create", args, org);
+      if (r.warning) toast.warning(r.warning);
       // The app page renders from the cache at once, with no loading state.
       qc.setQueryData(keys.app(org, name), r.app);
       if (auth === "ssh-generate") {
@@ -315,7 +317,7 @@ export function NewAppDialog({
             </Field>
           </div>
           {kind === "image" ? (
-            <Field label="Image" error={show(imageErr, image)} hint="docker:nginx:1.27, ghcr:org/app:tag, or a local alias. Pinned to its digest at each deploy.">
+            <Field label="Image" error={show(imageErr, image)} hint={imageNote(image) ?? `${IMAGE_HINT} Pinned to its digest at each deploy.`}>
               {(id, d) => (
                 <Input
                   id={id}
@@ -325,7 +327,7 @@ export function NewAppDialog({
                   className="font-mono"
                   value={image}
                   onChange={(e) => setImage(e.target.value)}
-                  placeholder="docker:traefik/whoami"
+                  placeholder={IMAGE_PLACEHOLDER}
                 />
               )}
             </Field>

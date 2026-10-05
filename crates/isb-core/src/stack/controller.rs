@@ -1196,6 +1196,32 @@ impl Worker {
         }
     }
 
+    /// A replica could not be created: wait before the next attempt, longer
+    /// each time. An image its registry does not have will not appear by
+    /// itself (until someone pushes it), so that waits longest, and says
+    /// so plainly instead of in incus' words.
+    fn back_off(&mut self, def: &StackDef, image: &str, msg: &str, e: &Error) {
+        let missing = super::failure::image_missing(image, &e.to_string());
+        let (first, cap) = match missing {
+            Some(_) => (super::failure::IMAGE_RETRY, super::failure::IMAGE_RETRY_MAX),
+            None => (Duration::from_secs(10), Duration::from_secs(300)),
+        };
+        let wait = self
+            .create_backoff
+            .map(|(_, w)| (w * 2).clamp(first, cap))
+            .unwrap_or(first);
+        self.create_backoff = Some((Instant::now(), wait));
+        self.state = "failing".into();
+        self.message = Some(match missing {
+            Some(m) => format!(
+                "{m}: change the image and deploy again (retrying in {}m)",
+                wait.as_secs() / 60
+            ),
+            None => format!("{msg}; retrying in {wait:?}"),
+        });
+        self.publish_status(def);
+    }
+
     /// Drop the retry backoff when the instructions changed (a new
     /// deployment) or were kicked (an org's limits changed), so the next
     /// pass makes a fresh attempt, and forget the failure the old
@@ -1658,14 +1684,7 @@ impl Worker {
                     self.event("error", None, &msg);
                     if old.is_none() {
                         // Nothing to protect: keep trying, slower each time.
-                        let wait = self
-                            .create_backoff
-                            .map(|(_, w)| (w * 2).min(Duration::from_secs(300)))
-                            .unwrap_or(Duration::from_secs(10));
-                        self.create_backoff = Some((Instant::now(), wait));
-                        self.state = "failing".into();
-                        self.message = Some(format!("{msg}; retrying in {wait:?}"));
-                        self.publish_status(def);
+                        self.back_off(def, &spec.image, &msg, &e);
                         return Ok(false);
                     }
                     match uc.failure_action.unwrap_or_default() {

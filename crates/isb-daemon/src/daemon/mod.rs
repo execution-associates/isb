@@ -45,6 +45,7 @@ mod secret_hooks;
 pub mod secrets;
 mod servers;
 mod ssh;
+mod stack_images;
 pub mod superadmin;
 pub mod templates;
 mod terminal;
@@ -1026,10 +1027,15 @@ fn stack_deploy(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     if let Some(m) = &d.ingress {
         m.check(&def)?;
     }
+    let current = d
+        .ctl
+        .definition(&crate::stack::qualified(&org, &a.name))
+        .ok();
+    let warnings = stack_images::check(&def, current.as_ref())?;
     def.secrets =
         crate::stack::secrets::bind(&d.secrets, &org, &a.name, &def.file, &given, a.dry_run)?;
     if a.dry_run {
-        return Ok(json!({"changes": d.ctl.plan(&def)?, "dry_run": true}));
+        return Ok(json!({"changes": d.ctl.plan(&def)?, "dry_run": true, "warnings": warnings}));
     }
     let who = def.deployed_by.clone();
     let changes = d.ctl.deploy(def)?;
@@ -1051,14 +1057,14 @@ fn stack_deploy(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         ),
     );
     if !a.wait {
-        return Ok(json!({"changes": changes}));
+        return Ok(json!({"changes": changes, "warnings": warnings}));
     }
     let timeout = match &a.timeout {
         Some(t) => crate::flex::parse_duration(t).map_err(Error::invalid)?,
         None => Duration::from_secs(600),
     };
     let st = wait_settled(&d.ctl, &crate::stack::qualified(&org, &a.name), timeout)?;
-    Ok(json!({"changes": changes, "status": st}))
+    Ok(json!({"changes": changes, "status": st, "warnings": warnings}))
 }
 
 /// Poll until every service is converged, or one is paused or failing (its

@@ -138,6 +138,9 @@ fn app_apply_tool(r: &mut Registry, apps: &Apps, ingress: bool) -> Result<()> {
                 "diff": plan.diff,
                 "removals": plan.removals,
             });
+            if let Some(w) = &plan.warning {
+                out["warning"] = json!(w);
+            }
             if a.dry_run {
                 out["dry_run"] = json!(true);
                 out["would_deploy"] = json!(a.deploy);
@@ -146,9 +149,8 @@ fn app_apply_tool(r: &mut Registry, apps: &Apps, ingress: bool) -> Result<()> {
             guard(&plan.spec.name, &plan.removals, a.allow_removals)?;
             let (app, secret) = manifest::apply(ap, &org, &plan)?;
             let mut aj = super::app_json(&org, &app);
-            if let Some(w) = note_ingress(&mut aj, ingress) {
-                out["warning"] = json!(w);
-            }
+            let ingress = note_ingress(&mut aj, ingress);
+            super::warn(&mut out, plan.warning.clone(), ingress);
             out["app"] = aj;
             // As stored: what the editor shows next.
             out["definition"] = json!(manifest::export_yaml(&app.spec)?);

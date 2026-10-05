@@ -46,7 +46,11 @@ pub struct AppCreate {
     /// Default: production.
     #[arg(long)]
     environment: Option<String>,
-    /// Run this image (docker:nginx:1.27, ghcr:org/app:tag, a local alias).
+    /// Run this image. It names its registry: Docker Hub is docker:NAME[:TAG]
+    /// or docker:OWNER/NAME[:TAG] (docker:nginx:1.27, docker:traefik/whoami),
+    /// then ghcr:OWNER/NAME:TAG, quay:..., oci:HOST/PATH:TAG, registry:APP:TAG
+    /// (the org's own builds); no prefix is an image already on the host.
+    /// Looked up in its registry first: one it does not have is refused.
     #[arg(long, conflicts_with = "git")]
     image: Option<String>,
     /// Build from this repository (https, ssh or git@host:owner/repo).
@@ -124,6 +128,8 @@ pub enum AppCmd {
         name: String,
         #[arg(short, long)]
         file: Option<PathBuf>,
+        /// A new image, written as for `isb app create --image`
+        /// (docker:traefik/whoami); looked up in its registry first.
         #[arg(long)]
         image: Option<String>,
         #[arg(long = "ref")]
@@ -460,6 +466,14 @@ fn follow(org: &Option<String>, name: &str, id: u64) -> Result<u8> {
     }
 }
 
+/// A tool's `warning` (an image that could not be checked, a domain with
+/// no ingress), on stderr.
+fn print_warning(r: &Value) {
+    for w in r["warning"].as_str().into_iter().flat_map(str::lines) {
+        eprintln!("warning: {w}");
+    }
+}
+
 fn print_app(a: &Value) {
     let src = &a["source"];
     let source = match (src["image"].as_str(), src["git"]["url"].as_str()) {
@@ -480,6 +494,12 @@ fn print_app(a: &Value) {
         println!("port:        {p}");
     }
     println!("deployment:  {}", a["current_deployment"]);
+    if let Some(st) = a["status"]["state"].as_str() {
+        match a["status"]["message"].as_str() {
+            Some(m) => println!("status:      {st}: {m}"),
+            None => println!("status:      {st}"),
+        }
+    }
     println!("webhook:     {}", a["webhook"].as_str().unwrap_or(""));
     let env = a["env"].as_str().unwrap_or("");
     if !env.is_empty() {
@@ -500,6 +520,7 @@ pub fn app(org: &Option<String>, cmd: AppCmd) -> Result<u8> {
         AppCmd::Create(c) => {
             let deploy = c.deploy;
             let r = call("app_create", create_args(*c)?)?;
+            print_warning(&r);
             let name = r["app"]["name"].as_str().unwrap_or("").to_string();
             eprintln!(
                 "created app {name}: service {}",
@@ -587,6 +608,7 @@ pub fn app(org: &Option<String>, cmd: AppCmd) -> Result<u8> {
             }
             patch["name"] = json!(name);
             let r = call("app_update", patch)?;
+            print_warning(&r);
             if deploy {
                 let d = call("app_deploy", json!({"name": name}))?;
                 let id = d["deployment"]["id"].as_u64().unwrap_or(0);

@@ -28,7 +28,7 @@ pub(super) fn stack_deploy_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) ->
         d,
         "stack_deploy",
         "Deploy a stack",
-        "Deploy or update a stack from a docker-compose-style file (isb's format: docs/reference/compose.md). Each service runs `deploy.replicas` incus instances, supervised inside their guests so they survive restarts of this server and of the host. Published ports are load-balanced over healthy replicas. A changed service is rolled out per `deploy.update_config` (stop-first by default; `order: start-first` for no downtime). Returns the change per service; pass wait=true to block until the rollout settles.",
+        "Deploy or update a stack from a docker-compose-style file (isb's format: docs/reference/compose.md). Each service runs `deploy.replicas` incus instances, supervised inside their guests so they survive restarts of this server and of the host. Published ports are load-balanced over healthy replicas. A changed service is rolled out per `deploy.update_config` (stop-first by default; `order: start-first` for no downtime). A new or changed registry image (docker:nginx:1.27, docker:traefik/whoami, ghcr:OWNER/NAME:TAG) is looked up first: a deploy naming one its registry does not have is refused, and one that cannot be checked (offline, private) is listed in `warnings`. Returns the change per service; pass wait=true to block until the rollout settles.",
         obj(
             json!({
                 "name": {"type": "string", "description": "Stack name: [a-z0-9-], starts with a letter, at most 30 characters."},
@@ -341,7 +341,7 @@ pub(super) fn stack_redeploy_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) 
         d,
         "stack_redeploy",
         "Redeploy a service",
-        "Replace every replica of a service with a fresh instance, rolling, even though its spec did not change: picks up a moved image tag (docker:app:latest) or changed bind-mounted files.",
+        "Replace every replica of a service with a fresh instance, rolling, even though its spec did not change: picks up a moved image tag (docker:nginx:latest) or changed bind-mounted files.",
         obj(
             json!({"name": {"type": "string"}, "service": {"type": "string"}}),
             &["name", "service"]

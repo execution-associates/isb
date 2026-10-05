@@ -1,7 +1,7 @@
 // /orgs/:org/apps/:app/:tab: one app, with its header (state, Deploy, Stop)
 // and tabs. Deployment logs live under the Deployments tab.
 import { useQueryClient } from "@tanstack/react-query";
-import { Activity, ArrowRight, ArrowUpRight, Boxes, CalendarClock, Database, DatabaseBackup, FileCode2, GitBranch, GitPullRequest, Globe, History, Loader2, Package, Play, Rocket, ScrollText, Server, Settings2, SlidersHorizontal, Square, TerminalSquare, Variable } from "lucide-react";
+import { Activity, ArrowRight, ArrowUpRight, Boxes, CalendarClock, CircleAlert, Database, DatabaseBackup, FileCode2, GitBranch, GitPullRequest, Globe, History, Loader2, Package, Play, Rocket, ScrollText, Server, Settings2, SlidersHorizontal, Square, TerminalSquare, Variable } from "lucide-react";
 import { lazy, Suspense, useEffect, useReducer, useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
@@ -158,6 +158,8 @@ function AppHeader({ org, app, writer, viewing }: { org: string; app: App; write
   const svc = serviceOf(stack.data, app.name);
   const latest = deps.data?.deployments[0];
   const state = appState(svc, latest);
+  // Why it is not running, in the controller's words: "image ... not found", say.
+  const problem = state === "failing" ? svc?.message : state === "failed" ? latest?.error : undefined;
   // Until both answer, "not deployed" would be a guess.
   const loading = stack.isLoading || deps.isLoading;
   const db = (app.source as { database?: { engine: string; version?: string } }).database;
@@ -246,6 +248,12 @@ function AppHeader({ org, app, writer, viewing }: { org: string; app: App; write
         }
       />
       {latest && !finished(latest.status) && latest.id !== viewing && <ActiveDeployment org={org} app={app.name} d={latest} />}
+      {problem && (
+        <p role="status" className="mb-5 flex animate-fade-up items-start gap-2 rounded-xl border border-destructive/25 bg-destructive/[0.06] px-4 py-3 text-sm text-destructive">
+          <CircleAlert className="mt-0.5 size-4 shrink-0" />
+          <span className="min-w-0 break-words">{problem}</span>
+        </p>
+      )}
       <ConfirmDialog
         open={stopOpen}
         onOpenChange={setStopOpen}

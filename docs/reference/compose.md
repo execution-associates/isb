@@ -272,11 +272,17 @@ Or an OCI (docker) image, pulled from a registry:
 
 | Prefix | Registry | Example |
 |---|---|---|
-| `docker:` | `https://docker.io` | `docker:nginx:1.27` (Docker Hub's `library/` and `:latest` are filled in) |
-| `ghcr:` | `https://ghcr.io` | `ghcr:org/app:v2` |
-| `quay:` | `https://quay.io` | `quay:org/app` |
-| `oci:` | `https://REGISTRY` | `oci:registry.example.com/team/app:1.0` (not a loopback registry) |
+| `docker:` | `https://docker.io` | `docker:nginx:1.27`, `docker:traefik/whoami` (Docker Hub's `library/` and `:latest` are filled in) |
+| `ghcr:` | `https://ghcr.io` | `ghcr:umami-software/umami:3.0.3` |
+| `quay:` | `https://quay.io` | `quay:prometheus/node-exporter` |
+| `oci:` | `https://REGISTRY` | `oci:public.ecr.aws/nginx/nginx:1.27` (not a loopback registry) |
 | `registry:` | the host's local registry, in this org | `registry:web:v1`, `registry:web@sha256:...` |
+
+After the prefix comes Docker's own reference, so a colon is a tag:
+`docker:traefik:whoami` is the image `library/traefik`, tag `whoami`; the image
+`traefik/whoami` is `docker:traefik/whoami`. Through `isb serve`, a stack
+deploy looks each new registry image up first and refuses one its registry
+does not have ([Image references](../guides/deploy-apps.md#image-references)).
 
 `registry:APP[:TAG][@sha256:DIGEST]` is an image the org built
 ([Builds](../guides/builds.md)): always the repository `<org>/APP` of the org the

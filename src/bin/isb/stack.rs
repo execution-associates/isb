@@ -94,6 +94,9 @@ pub(crate) fn stack(ctx: &Ctx, cmd: StackCmd) -> Result<u8> {
             let wait_for = isb::parse_duration(&timeout).map_err(Error::Invalid)?;
             let args = isb::daemon::local_deploy_args(&p, &name, !detach, Some(&timeout))?;
             let r = call("stack_deploy", args, wait_for + SHORT)?;
+            for w in r["warnings"].as_array().into_iter().flatten() {
+                eprintln!("warning: {}", w.as_str().unwrap_or(""));
+            }
             for c in r["changes"].as_array().into_iter().flatten() {
                 eprintln!(
                     "{}: {} (rev {}, {} replicas)",

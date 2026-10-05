@@ -88,6 +88,8 @@ pub struct Plan {
     /// What the document takes away from an existing app (see
     /// `super::removals::removals`); empty for a new app.
     pub removals: Vec<String>,
+    /// Why its image could not be checked, when it is new and could not.
+    pub warning: Option<String>,
 }
 
 /// The order an app's fields are written in.
@@ -556,6 +558,9 @@ pub fn plan(apps: &Apps, org: &OrgId, text: &str) -> std::result::Result<Plan, P
     }
     spec.validate().map_err(fail)?;
     apps.check_spec(org, &spec).map_err(fail)?;
+    let warning = apps
+        .check_image(existing.as_ref().map(|a| &a.spec), &spec)
+        .map_err(fail)?;
     let proposed = export_yaml(&spec).map_err(fail)?;
     let removals = existing
         .as_ref()
@@ -589,6 +594,7 @@ pub fn plan(apps: &Apps, org: &OrgId, text: &str) -> std::result::Result<Plan, P
         diff,
         changes,
         removals,
+        warning,
     })
 }
 

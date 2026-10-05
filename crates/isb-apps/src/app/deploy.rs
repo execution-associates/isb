@@ -37,8 +37,10 @@ mod db_secrets;
 pub type BuildFn =
     Arc<dyn Fn(&Client, &BuildRequest, &mut dyn FnMut(&str)) -> Result<BuiltImage> + Send + Sync>;
 
-/// The manifest digest an image reference names now, if it can be found.
-pub type DigestFn = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+/// Asks an image's registry about it, waiting at most the given time:
+/// whether it exists, and its manifest digest
+/// ([`crate::image_check::probe`], or a stand-in).
+pub type ImageProbe = Arc<dyn Fn(&str, Duration) -> crate::image_check::Probe + Send + Sync>;
 
 /// Deployment records kept per app (older ones and their logs are pruned).
 const KEEP_DEPLOYMENTS: usize = 30;
@@ -174,7 +176,7 @@ pub(super) struct Inner {
     pub(super) ctl: Controller,
     pub(super) secrets: Arc<Secrets>,
     pub(super) build: BuildFn,
-    digest: DigestFn,
+    pub(super) probe: ImageProbe,
     pub(super) timeout: Duration,
     /// Held across read-modify-write of app and project records.
     pub(super) edit: Mutex<()>,
@@ -213,7 +215,7 @@ impl Apps {
                 build: Arc::new(|c: &Client, r: &BuildRequest, l: &mut dyn FnMut(&str)| {
                     crate::build::run(c, r, l)
                 }),
-                digest: Arc::new(skopeo_digest),
+                probe: Arc::new(crate::image_check::probe),
                 timeout: DEPLOY_TIMEOUT,
                 edit: Mutex::new(()),
                 stacks: Mutex::new(()),
@@ -240,9 +242,9 @@ impl Apps {
         self.with(|i| i.build = f)
     }
 
-    /// Use `f` to find an image's digest instead of `skopeo inspect`.
-    pub fn with_digest(self, f: DigestFn) -> Apps {
-        self.with(|i| i.digest = f)
+    /// Use `f` to ask registries about images instead of `skopeo inspect`.
+    pub fn with_probe(self, f: ImageProbe) -> Apps {
+        self.with(|i| i.probe = f)
     }
 
     pub fn with_timeout(self, t: Duration) -> Apps {
@@ -941,7 +943,7 @@ impl Apps {
                 let (image, digest) = match &app.spec.source {
                     Source::Image(i) => {
                         log.line(&format!("image {i}"));
-                        self.resolve(i, log)
+                        self.resolve(i, log)?
                     }
                     Source::Database(db) => {
                         let i = db.image();
@@ -957,7 +959,7 @@ impl Apps {
                             log.line(&format!("secret {n}: the connection URL"));
                             self.url_secret_moved(org, &n, log);
                         }
-                        self.resolve(&i, log)
+                        self.resolve(&i, log)?
                     }
                     Source::Git(g) => {
                         let creds = self.credentials(org, &g.auth)?;
@@ -1036,21 +1038,6 @@ impl Apps {
         app.current = Some(dep.id);
         self.save(org, &app)?;
         Ok(())
-    }
-
-    /// An image reference pinned to its current digest, when one is found.
-    fn resolve(&self, i: &str, log: &mut DeployLog) -> (String, Option<String>) {
-        match (self.inner.digest)(i) {
-            Some(d) => {
-                let pinned = super::pin(i, &d).unwrap_or_else(|| i.to_string());
-                log.line(&format!("resolved to {pinned}"));
-                (pinned, Some(d))
-            }
-            None => {
-                log.line("no digest found; deploying by tag");
-                (i.to_string(), None)
-            }
-        }
     }
 
     /// The stack definition for `file`, with its secrets bound.
@@ -1335,7 +1322,7 @@ fn trim_ascii(b: &[u8]) -> &[u8] {
 }
 
 /// A deployment's log: a file, and each line on the events feed.
-struct DeployLog {
+pub(super) struct DeployLog {
     file: std::fs::File,
     apps: Apps,
     org: OrgId,
@@ -1364,53 +1351,18 @@ impl DeployLog {
         })
     }
 
-    fn line(&mut self, l: &str) {
+    pub(super) fn line(&mut self, l: &str) {
         let _ = writeln!(self.file, "{l}");
         self.apps
             .event(&self.org, &self.app, "log", format!("#{}: {l}", self.id));
     }
 }
 
-/// The digest `skopeo inspect` reports for an OCI image, if skopeo is
-/// installed and the registry answers within a minute.
-pub fn skopeo_digest(image: &str) -> Option<String> {
-    let src = crate::plan::ImageSource::parse(image).ok()?;
-    if !src.is_oci() {
-        return None;
-    }
-    let host = src.server.as_deref()?.strip_prefix("https://")?;
-    let r = format!("docker://{host}/{}", src.alias);
-    let mut child = std::process::Command::new("skopeo")
-        .args(["inspect", "--no-tags", "--format", "{{.Digest}}", &r])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .ok()?;
-    let started = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(s)) if s.success() => break,
-            Ok(Some(_)) | Err(_) => return None,
-            Ok(None) if started.elapsed() > Duration::from_secs(60) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(100)),
-        }
-    }
-    let mut out = String::new();
-    use std::io::Read;
-    child.stdout.take()?.read_to_string(&mut out).ok()?;
-    let d = out.trim();
-    (d.starts_with("sha256:") && d.len() == 71).then(|| d.to_string())
-}
-
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::app::EnvValue;
+    use crate::image_check::Probe;
 
     #[test]
     fn state_machine() {
@@ -1455,7 +1407,7 @@ mod tests {
 
     /// An `Apps` over a controller with no incusd behind it: everything up
     /// to the stack deploy works, which then fails.
-    fn apps(dir: &Path, gate: Arc<(Mutex<bool>, std::sync::Condvar)>) -> Apps {
+    pub(in crate::app) fn apps(dir: &Path, gate: Arc<(Mutex<bool>, std::sync::Condvar)>) -> Apps {
         let k = crate::secrets::Keyring::new(age::x25519::Identity::generate(), vec![]);
         let secrets = Arc::new(Secrets::new(crate::secrets::LocalDriver::new(
             dir,
@@ -1471,7 +1423,11 @@ mod tests {
         )
         .unwrap();
         // `docker:slow` holds its deploy in `building` until the gate opens.
-        let digest: DigestFn = Arc::new(move |image: &str| {
+        // `docker:traefik:whoami` is not on the registry; `docker:traefik/whoami` is.
+        let probe: ImageProbe = Arc::new(move |image: &str, _| {
+            if image == "docker:traefik:whoami" {
+                return Probe::NotFound("manifest unknown".into());
+            }
             if image == "docker:slow" {
                 let (m, cv) = &*gate;
                 let mut open = m.lock().unwrap();
@@ -1479,9 +1435,9 @@ mod tests {
                     open = cv.wait(open).unwrap();
                 }
             }
-            None
+            Probe::Found(None)
         });
-        Apps::new(dir, client, ctl, secrets).with_digest(digest)
+        Apps::new(dir, client, ctl, secrets).with_probe(probe)
     }
 
     fn spec(v: Value) -> AppSpec {

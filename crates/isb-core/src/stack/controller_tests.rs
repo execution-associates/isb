@@ -94,6 +94,35 @@ fn failing_worker(ctl: &Controller, d: &Arc<StackDef>) -> Worker {
 }
 
 #[test]
+fn a_missing_image_backs_off_long_and_says_so() {
+    let ctl = quiet_controller();
+    let d = org_def("app", "lab");
+    let mut w = failing_worker(&ctl, &d);
+    w.create_backoff = None;
+    let e = Error::invalid(
+        "create instance x failed: Failed getting remote image info: Failed to run: skopeo inspect docker://docker.io/library/traefik:whoami: reading manifest whoami in docker.io/library/traefik: manifest unknown",
+    );
+    w.back_off(&d, "docker:traefik:whoami", "slot 1: ...", &e);
+    assert_eq!(w.state, "failing");
+    assert_eq!(
+        w.message.as_deref(),
+        Some(
+            "image docker:traefik:whoami not found (manifest unknown): change the image and deploy again (retrying in 5m)"
+        )
+    );
+    assert_eq!(w.create_backoff.unwrap().1, Duration::from_secs(300));
+    for _ in 0..6 {
+        w.back_off(&d, "docker:traefik:whoami", "slot 1: ...", &e);
+    }
+    assert_eq!(w.create_backoff.unwrap().1, Duration::from_secs(3600));
+    // Anything else starts at seconds.
+    w.create_backoff = None;
+    w.back_off(&d, "docker:nginx", "slot 1: boom", &Error::invalid("boom"));
+    assert_eq!(w.create_backoff.unwrap().1, Duration::from_secs(10));
+    assert_eq!(w.message.as_deref(), Some("slot 1: boom; retrying in 10s"));
+}
+
+#[test]
 fn a_new_deployment_drops_the_retry_backoff() {
     let ctl = quiet_controller();
     let d = org_def("app", "lab");
