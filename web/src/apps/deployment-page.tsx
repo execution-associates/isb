@@ -18,6 +18,7 @@ import { buildStepLabel, DeploymentFollow, type LogReply, queuedEvent } from "./
 import { splitStack, useLiveEvents } from "./live";
 import { deploymentPath, useDeploy } from "./use-deploy";
 import { duration, imageName, shortDigest, shortSha } from "./util";
+import { invalidateOrg } from "@/lib/freshness";
 
 /** Follow one deployment: its log and record, pulled when the feed says so. */
 function useFollow(org: string, app: string, id: number) {
@@ -46,7 +47,7 @@ function useFollow(org: string, app: string, id: number) {
         const wasDone = follow.finished;
         follow.apply(at, r);
         // Finished: the app's state, current deployment and replicas moved.
-        if (!wasDone && follow.finished) void qc.invalidateQueries({ queryKey: keys.org(org) });
+        if (!wasDone && follow.finished) void invalidateOrg(qc, org);
         if (!hadLines && follow.firstLineAt !== null) performance.mark("isb:first-log-line");
         if (follow.record) qc.setQueryData(keys.deployment(org, app, id), follow.record);
         setError(null);

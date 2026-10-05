@@ -6,7 +6,6 @@ import { ArchiveRestore, Camera, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
-import { keys } from "@/apps/api";
 import { CronField } from "@/components/cron-field";
 import { Field, FormError } from "@/components/form";
 import { Button } from "@/components/ui/button";
@@ -19,6 +18,7 @@ import type { Run } from "@/data/api";
 import { cronPreview, parseOffset } from "@/lib/cron";
 import { errorMessage } from "@/lib/messages";
 import { hookTimeoutProblem, snapshotNameProblem, type VolumeSettings } from "./api";
+import { invalidateOrg } from "@/lib/freshness";
 
 type OpenProps = { open: boolean; onOpenChange: (o: boolean) => void };
 
@@ -42,7 +42,7 @@ export function SnapshotNowDialog({ org, volume, open, onOpenChange, onStarted }
     setError(null);
     try {
       const r = await callTool<{ run: Run }>("volume_snapshot_create", { name: volume, ...(name.trim() ? { snapshot: name.trim() } : {}) }, org);
-      await qc.invalidateQueries({ queryKey: keys.org(org) });
+      await invalidateOrg(qc, org);
       toast.success(`Snapshotting ${volume}`);
       onStarted(r.run);
       onOpenChange(false);
@@ -129,7 +129,7 @@ export function ScheduleDialog({ org, volume, settings, open, onOpenChange }: Op
         hook_required: hookRequired,
       };
       await callTool("volume_snapshot_schedule", args, org);
-      await qc.invalidateQueries({ queryKey: keys.org(org) });
+      await invalidateOrg(qc, org);
       toast.success(on ? `Snapshots of ${volume} scheduled` : `Saved; ${volume} has no snapshot schedule`);
       onOpenChange(false);
     } catch (err) {
@@ -216,7 +216,7 @@ export function StagedRestoreDialog({
     try {
       const src = "snapshot" in from ? { snapshot: from.snapshot } : { backup: from.backup, ...(from.key ? { key: from.key } : {}) };
       const r = await callTool<{ run: Run; staged: { volume: string; path: string } }>("volume_restore", { name: volume, ...src, ...(instance ? { instance } : {}) }, org);
-      await qc.invalidateQueries({ queryKey: keys.org(org) });
+      await invalidateOrg(qc, org);
       toast.success(`Restoring into ${r.staged.volume}`);
       onStarted(r.run);
       onOpenChange(false);

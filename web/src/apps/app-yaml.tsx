@@ -14,6 +14,7 @@ import { appVerdict, type DryRun } from "@/lib/yaml-edit";
 import { type App, type Deployment, keys } from "./api";
 import { QueryError, Section } from "./components";
 import { openDeployment } from "./use-deploy";
+import { invalidateOrg } from "@/lib/freshness";
 
 export function YamlTab({ org, app }: { org: string; app: App }) {
   const writer = canWrite(useMe().data!, org);
@@ -52,7 +53,7 @@ export function YamlTab({ org, app }: { org: string; app: App }) {
           if (r.deployment) {
             openDeployment(qc, navigate, org, r.deployment);
           } else {
-            await qc.invalidateQueries({ queryKey: keys.org(org) });
+            await invalidateOrg(qc, org);
             toast.success("Saved. It takes effect at the next deploy.");
           }
         }}

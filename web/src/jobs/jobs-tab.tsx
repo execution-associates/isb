@@ -6,7 +6,6 @@ import { CalendarClock, Loader2, MoreHorizontal, Pause, Pencil, Play, Plus, Squa
 import { type ReactNode, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
-import { keys } from "@/apps/api";
 import { ConfirmDialog, EmptyState, QueryError } from "@/apps/components";
 import { formatKv, parseKv } from "@/apps/util";
 import { CronField, ScheduleText } from "@/components/cron-field";
@@ -29,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { scheduleNameProblem, type Run } from "@/data/api";
 import { RunBadge, RunLogDialog, RunsTable } from "@/data/runs";
 import { durationSeconds, type JobEntry, type JobSpec, type JobTarget, joinWords, sameTarget, splitWords, targetName, useJobRuns, useJobs } from "./api";
+import { invalidateOrg } from "@/lib/freshness";
 
 /** The jobs of one target: `{app}`, or a compose stack's `{stack, service}`; `picker` (a service picker) sits above the intro. */
 export function JobsTab({ org, target, picker }: { org: string; target: JobTarget; picker?: ReactNode }) {
@@ -112,7 +112,7 @@ function JobCard({ org, entry, canWrite, onEdit, onLog }: { org: string; entry: 
   const runs = useJobRuns(org, j.name, running ? 2000 : false);
   const [busy, setBusy] = useState(false);
   const [del, setDel] = useState(false);
-  const refresh = () => qc.invalidateQueries({ queryKey: keys.org(org) });
+  const refresh = () => invalidateOrg(qc, org);
 
   const runNow = async () => {
     setBusy(true);
@@ -346,7 +346,7 @@ function JobDialog({ org, target, existing, open, onOpenChange }: { org: string;
       if (f.user.trim() || existing?.user) args.user = f.user.trim() || null;
       if (f.cwd.trim() || existing?.cwd) args.cwd = f.cwd.trim() || null;
       await callTool<unknown, string>(existing ? "job_update" : "job_create", args, org);
-      await qc.invalidateQueries({ queryKey: keys.org(org) });
+      await invalidateOrg(qc, org);
       toast.success(existing ? `Job ${f.name} saved` : `Job ${f.name} created`);
       setPending(false);
       onOpenChange(false);

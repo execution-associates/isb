@@ -588,8 +588,9 @@ export function DeleteOrgDialog({
         for (const n of r?.notes ?? []) toast.info(n);
         // Leave the org's pages before they learn it is gone.
         onDeleted();
+        for (const k of [["apps", org], ["stacks", org], ["workspace", org], ["workspace-sandboxes", org]]) qc.removeQueries({ queryKey: k });
         await qc.invalidateQueries({ queryKey: ["me"] });
-        await qc.invalidateQueries({ queryKey: ["tool", "org_list"] });
+        await qc.invalidateQueries({ queryKey: ["tool"] });
       }}
     >
       <label className="flex items-start gap-3 rounded-md border p-3 text-sm">

@@ -7,7 +7,7 @@ import { ExternalLink, GitBranch, GitPullRequest, Loader2, RotateCw, ScrollText,
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
-import { type App, type Deployment, keys, useSecretNames } from "@/apps/api";
+import { type App, type Deployment, useSecretNames } from "@/apps/api";
 import { ConfirmDialog, DeploymentBadge, EmptyState, QueryError, Section, ToneBadge } from "@/apps/components";
 import { EnvEditor } from "@/apps/env-editor";
 import { analyzeEnv, missingSecrets } from "@/apps/envtext";
@@ -27,6 +27,7 @@ import { errorMessage } from "@/lib/messages";
 import { type DeploymentStatus, inProgress } from "@/lib/status";
 import { useCanWrite } from "@/lib/use-role";
 import { formOf, formProblems, isPreviewEvent, pkeys, type Preview, type PreviewForm, type PreviewSettings, settingsOf, usePreviews } from "./api";
+import { invalidateOrg } from "@/lib/freshness";
 
 const STATUSES = new Set(["queued", "building", "deploying", "done", "failed", "superseded", "cancelled"]);
 const asStatus = (s: string | undefined): DeploymentStatus | null => (s && STATUSES.has(s) ? (s as DeploymentStatus) : null);
@@ -264,7 +265,7 @@ function PreviewRow({
         confirmLabel="Delete preview"
         onConfirm={async () => {
           await callTool("preview_delete", { name: p.app, number: p.number }, org);
-          await qc.invalidateQueries({ queryKey: keys.org(org) });
+          await invalidateOrg(qc, org);
           toast.success(`Preview #${p.number} is being removed`);
         }}
       />
@@ -299,7 +300,7 @@ function SettingsCard({ org, app, saved, canWrite }: { org: string; app: App; sa
       if (to.status && saved?.status?.api_url) to.status.api_url = saved.status.api_url;
       const patch = mergePatch(saved ?? {}, to);
       await callTool<unknown, string>("app_update", { name: app.name, previews: patch }, org);
-      await qc.invalidateQueries({ queryKey: keys.org(org) });
+      await invalidateOrg(qc, org);
       toast.success("Preview settings saved");
     } catch (e) {
       setError(errorMessage(e));

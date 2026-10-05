@@ -37,7 +37,7 @@ export function CreateWorkspace({
 }) {
   const qc = useQueryClient();
   const images = options?.images ?? [{ image: REMOTE_DEFAULT, description: "", source: "remote" as const }];
-  const info = useQuery({ queryKey: ["org", org], queryFn: () => callTool<OrgView & { server?: string }>("org_get", {}, org) });
+  const info = useQuery({ queryKey: ["tool", "org_get", org], queryFn: () => callTool<OrgView & { server?: string }>("org_get", {}, org) });
   const [f, setF] = useState({ image: options?.default_image ?? REMOTE_DEFAULT, name: "workspace", user: "dev", cpus: "", memory: "", root: "", home: "20GiB", env: "", setup: "" });
   const me = useMe();
   const [custom, setCustom] = useState(false);

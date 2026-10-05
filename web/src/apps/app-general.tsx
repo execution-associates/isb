@@ -26,6 +26,7 @@ import { gitUrlProblem } from "./new-app-dialog";
 import { useAppUpdate } from "./save";
 import { SaveFooter } from "./save-footer";
 import { formatKv, mergePatch, parseKv, sameJson, stableJson } from "./util";
+import { invalidateOrg } from "@/lib/freshness";
 
 export function GeneralTab({ org, app }: { org: string; app: App }) {
   // Viewers read the settings: the controls are disabled and nothing saves.
@@ -375,7 +376,7 @@ function ScaleSection({ org, app, writer }: Props) {
     if (svc) {
       try {
         await callTool("stack_scale", { name: app.stack, service: app.name, replicas: n }, org);
-        await qc.invalidateQueries({ queryKey: keys.org(org) });
+        await invalidateOrg(qc, org);
         toast.success(n === 0 ? `Stopping ${app.name}` : `Scaling ${app.name} to ${n}`);
       } catch (e) {
         toast.error(errorMessage(e));
@@ -455,7 +456,7 @@ function ReplicaList({ org, app, instances, writer }: { org: string; app: App; i
     setBusy(i.name);
     try {
       await callTool("instance_restart", { name: i.name }, org);
-      await qc.invalidateQueries({ queryKey: keys.org(org) });
+      await invalidateOrg(qc, org);
       toast.success(`Replacing replica ${i.slot}: its successor starts now`);
     } catch (e) {
       toast.error(errorMessage(e));

@@ -45,6 +45,15 @@ export function keysForOrg(org: string): QueryKey[] {
   return [["apps", org], ["stacks", org], ["tool", "stack_list"]];
 }
 
+/**
+ * After a change to anything in `org`: refetch what shows it. Mutations call
+ * this rather than naming the one key on screen, so lists, details, the
+ * overview and the stack list all follow.
+ */
+export async function invalidateOrg(qc: Pick<QueryClient, "invalidateQueries">, org: string): Promise<void> {
+  await Promise.all(keysForOrg(org).map((queryKey) => qc.invalidateQueries({ queryKey })));
+}
+
 /** What one event invalidates; a deployment's log line changes nothing. */
 export function keysForEvent(e: { level: string; stack: string }): QueryKey[] {
   if (e.level === "log") return [];

@@ -6,7 +6,6 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
-import { keys } from "@/apps/api";
 import { ConfirmDialog, EmptyState, QueryError, Section } from "@/apps/components";
 import { bytes } from "@/apps/util";
 import { PageHeader } from "@/components/app-shell";
@@ -20,6 +19,7 @@ import { useCanWrite } from "@/lib/use-role";
 import { type Destination, type Run, useBackups, useDestinations, useRestoreRuns } from "./api";
 import { DestinationDialog, type TestResult, TestOutcome } from "./backup-dialogs";
 import { RunBadge, RunLogDialog, RunsTable } from "./runs";
+import { invalidateOrg } from "@/lib/freshness";
 
 export function BackupsPage() {
   const { org = "" } = useParams();
@@ -277,7 +277,7 @@ function DestinationRow({ org, d, canWrite, usedBy }: { org: string; d: Destinat
         confirmLabel="Delete destination"
         onConfirm={async () => {
           await callTool("backup_destination_delete", { name: d.name }, org);
-          await qc.invalidateQueries({ queryKey: keys.org(org) });
+          await invalidateOrg(qc, org);
           toast.success(`Destination ${d.name} deleted`);
         }}
       />

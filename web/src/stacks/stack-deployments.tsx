@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { errorMessage } from "@/lib/messages";
-import { currentOf, finished, keys } from "@/apps/api";
+import { currentOf, finished } from "@/apps/api";
 import { ConfirmDialog, EmptyState, QueryError } from "@/apps/components";
 import { DeploymentView } from "@/apps/deployment-view";
 import { DeploymentRow, elapsed, elapsedText, TRIGGER_LABEL } from "@/apps/deployments-tab";
@@ -30,6 +30,7 @@ import {
   useStackDeployment,
   useStackDeployments,
 } from "./api";
+import { invalidateOrg } from "@/lib/freshness";
 
 /**
  * How a stack deployment came about, where an app's row says who triggered
@@ -85,7 +86,7 @@ function useRollback(org: string, name: string) {
   return async (to: number) => {
     try {
       const r = await callTool<DeployResult, string>("stack_rollback", { name, to }, org);
-      await Promise.all([qc.invalidateQueries({ queryKey: stackKeys.org(org) }), qc.invalidateQueries({ queryKey: keys.org(org) })]);
+      await Promise.all([qc.invalidateQueries({ queryKey: stackKeys.org(org) }), invalidateOrg(qc, org)]);
       deployToast(name, r, `Rolling ${name} back to #${to}`);
     } catch (e) {
       toast.error(errorMessage(e));

@@ -8,7 +8,6 @@ import { useState } from "react";
 import { useParams } from "react-router";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
-import { keys } from "@/apps/api";
 import { ConfirmDialog, EmptyState, QueryError, Section, ToneBadge } from "@/apps/components";
 import { PageHeader } from "@/components/app-shell";
 import { StatusBadge } from "@/components/status";
@@ -25,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { type Channel, type Delivery, describeRule, nkeys, PROVIDERS, providerSummary, useChannels, useDeliveries } from "./api";
 import { ChannelDialog } from "./channel-dialog";
 import { PROVIDER_ICON } from "./icons";
+import { invalidateOrg } from "@/lib/freshness";
 
 const DELIVERY_TONE: Record<Delivery["status"], "ok" | "bad" | "busy" | "idle" | "warn"> = {
   queued: "busy",
@@ -240,7 +240,7 @@ function ChannelCard({ org, c, canWrite, expanded, onToggle, onEdit }: { org: st
         confirmLabel="Delete channel"
         onConfirm={async () => {
           await callTool("notification_channel_delete", { name: c.name }, org);
-          await qc.invalidateQueries({ queryKey: keys.org(org) });
+          await invalidateOrg(qc, org);
           toast.success(`Channel ${c.name} deleted`);
         }}
       />

@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { errorMessage } from "@/lib/messages";
-import { keys, type StackDetail } from "@/apps/api";
+import { type StackDetail } from "@/apps/api";
 import { DomainsEditor } from "@/apps/app-domains";
 import { EnvironmentEditor } from "@/apps/app-environment";
 import { ServiceMonitoring } from "@/apps/app-monitoring";
@@ -25,6 +25,7 @@ import { LogView } from "@/apps/log-view";
 import { Segmented } from "@/apps/segmented";
 import { setStackDomains, type StackDeployment, type StackDomains, type StackEnvSet, stackKeys, useStackDomains, useStackEnv } from "./api";
 import { deployToast } from "./stack-deployments";
+import { invalidateOrg } from "@/lib/freshness";
 
 export type StackServices = StackDetail["services"];
 
@@ -146,7 +147,7 @@ export function StackDomainsTab({
             try {
               const r = await setStackDomains(org, name, service, next, deploy);
               qc.setQueryData(stackKeys.domains(org, name), (old: StackDomains | undefined) => ({ ...old, [service]: { managed: r?.domains ?? next, file: old?.[service]?.file ?? [] } }));
-              await Promise.all([qc.invalidateQueries({ queryKey: stackKeys.org(org) }), qc.invalidateQueries({ queryKey: keys.org(org) })]);
+              await Promise.all([qc.invalidateQueries({ queryKey: stackKeys.org(org) }), invalidateOrg(qc, org)]);
               if (deploy) {
                 deployToast(name, r);
                 open(r?.deployment);

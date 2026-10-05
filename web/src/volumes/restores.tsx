@@ -6,12 +6,12 @@ import { ArchiveRestore, FolderInput, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
-import { keys } from "@/apps/api";
 import { ConfirmDialog, EmptyState, Section } from "@/apps/components";
 import { StatusBadge } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { relativeTime } from "@/lib/format";
 import { originLabel, type StagedRestore, stampDate } from "./api";
+import { invalidateOrg } from "@/lib/freshness";
 
 export function StagedRestores({ org, volume, restores, canAdmin }: { org: string; volume: string; restores: StagedRestore[]; canAdmin: boolean }) {
   const qc = useQueryClient();
@@ -73,7 +73,7 @@ export function StagedRestores({ org, volume, restores, canAdmin }: { org: strin
         confirmLabel="Discard restore"
         onConfirm={async () => {
           await callTool("volume_restore_discard", { name: volume, stamp: discard?.stamp ?? "" }, org);
-          await qc.invalidateQueries({ queryKey: keys.org(org) });
+          await invalidateOrg(qc, org);
           toast.success("Restore discarded");
         }}
       />

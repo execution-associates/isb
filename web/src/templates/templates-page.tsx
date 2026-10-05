@@ -6,7 +6,6 @@ import { useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
-import { keys } from "@/apps/api";
 import { ConfirmDialog, EmptyState, QueryError, Section } from "@/apps/components";
 import { PageHeader } from "@/components/app-shell";
 import { Field, FormError } from "@/components/form";
@@ -22,6 +21,7 @@ import { useCanWrite, usePlatformAdmin } from "@/lib/use-role";
 import { cn } from "@/lib/utils";
 import { type CatalogConfig, filterTemplates, logoSrc, tagCounts, type TemplateInstance, type TemplateSummary, tkeys, useCatalogs, useInstances, useTemplates } from "./api";
 import { TemplateLogo } from "./logo";
+import { invalidateOrg } from "@/lib/freshness";
 
 export function TemplatesPage() {
   const { org = "" } = useParams();
@@ -284,7 +284,7 @@ function Instances({ org, instances, error, byRef }: { org: string; instances: T
         onConfirm={async () => {
           if (!del) return;
           await callTool("template_instance_delete", { name: del.name }, org);
-          await qc.invalidateQueries({ queryKey: keys.org(org) });
+          await invalidateOrg(qc, org);
           toast.success(`${del.name} removed`);
         }}
       />

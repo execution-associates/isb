@@ -24,15 +24,67 @@ Only through the public HTTP API, like any other client:
   `/api/v1/openapi.json`, and `bun run gen:api` turns it into
   `web/src/api/openapi.gen.ts`. A tool missing from the snapshot still works,
   untyped, so new tools need no change to the UI server.
-- `GET /api/v1/events` (server-sent events) for live updates, reconnecting
-  with backoff (1 s doubling to 30 s) and resuming after the last event seen.
-  Every page follows the event feed over one shared connection and refetches
-  what an event in its org touches.
+- `GET /api/v1/events` (server-sent events) for live updates, over one
+  connection the whole app shares, reconnecting with backoff (1 s doubling to
+  30 s) and resuming after the last event seen
+  ([Keeping data live](#keeping-data-live)).
 - `GET /orgs/<org>/api/v1/terminal` (a websocket) for terminals
   ([HTTP API](../reference/http-api.md#the-web-terminal)).
 
 The UI hides what a role may not do; the server decides, and its refusals are
 shown as it words them.
+
+## Keeping data live
+
+A page never needs a reload to show what the server has now, whoever changed
+it: this browser, another session, the CLI or an agent. Server state lives
+in the react-query cache, never copied into component state or context
+(only log followers and revealed credentials are held outside it), and four
+rules keep that cache current. `web/src/lib/freshness.ts`
+holds the defaults and the event mapping, with tests beside it.
+
+- **Nothing is trusted from cache.** The `QueryClient` defaults make every
+  query stale at once (`staleTime: 0`) and refetch it when it mounts, when
+  the window regains focus and when the network comes back. A query sets a
+  longer `staleTime` only for data that changes with a release (the tool
+  list, providers, templates).
+- **Events invalidate.** `useLiveSync`, mounted once by the app shell,
+  follows `GET /api/v1/events` for every org the user sees. An event about
+  `org/stack` (a bare name is the default org's) invalidates `["apps", org]`,
+  `["stacks", org]` and `["tool", "stack_list"]`, gathered for 300 ms so a
+  rollout's burst costs one refetch of each active query; deployment log
+  lines (level `log`) invalidate nothing. Pages do not subscribe for
+  freshness themselves; they use `useLiveEvents` only to react to an event
+  (a toast, a log line, following a deployment).
+- **A reconnect resyncs.** Events may be missed while the stream is down, so
+  when it reopens every active query refetches. The daemon numbers events
+  from 1 each time it starts and answers a cursor from before a restart from
+  the start, so the client keeps the last `seq` it received, not the
+  highest.
+- **What no event announces is polled.** Events cover stacks (deploys,
+  rollouts, health, restarts, removals). A project, environment or app made,
+  changed or removed elsewhere emits none, so the live views poll every
+  `LIVE_POLL` (15 s) while the tab is visible: the project, app and stack
+  lists, a stack's status and the org overview. Pages with their own pace
+  (a deployment in progress, logs, metrics, workspaces) set a
+  `refetchInterval` of their own. The signed-in user (`["me"]`, whose orgs
+  fill the org switcher) refetches every minute.
+
+Every key for org-scoped data carries the org right after its family
+(`["apps", org, ...]`, `["stacks", org, ...]`, `["workspace", org]`,
+`["templates", "list", org]`), so switching orgs never shows another org's
+cached data, and invalidating one org leaves the others alone. One tool
+answer has one key: `secret_list` is `["apps", org, "secret-list"]` and
+`org_get` is `["tool", "org_get", org]` wherever they are shown. Put a new
+org-scoped query under `["apps", org]`, where events already reach it.
+
+A mutation in an org calls `invalidateOrg(qc, org)`, which invalidates the
+same prefixes an event does, rather than naming the one key on screen: the
+list, the detail, the overview and the stack list all follow. Pages outside
+those families invalidate their own keys and every copy of the data (an
+org-bound token shows under `["tokens"]` and `["org-tokens", org]`; a server
+operation refreshes all of `["tool"]`). Invalidating a prefix is cheap,
+because only the queries on screen refetch.
 
 ## Built, embedded, served
 

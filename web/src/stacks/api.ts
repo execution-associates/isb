@@ -5,9 +5,10 @@
 import { type QueryClient, useQuery } from "@tanstack/react-query";
 import { ApiError } from "@/api/client";
 import { callTool } from "@/api/tools";
-import { type Deployment, type DeploymentStatus, finished, keys, type Project } from "@/apps/api";
+import { type Deployment, type DeploymentStatus, finished, type Project } from "@/apps/api";
 import type { DomainSpec } from "@/apps/domains";
 import { stackTab } from "@/apps/service-tabs";
+import { invalidateOrg } from "@/lib/freshness";
 
 export interface StackExport {
   name: string;
@@ -377,17 +378,7 @@ export function sourceReplicas(yaml: string, services: string[]): Record<string,
 export async function afterDeploy(qc: QueryClient, org: string, name: string) {
   const fresh = await callTool<StackExport>("stack_export", { name }, org);
   qc.setQueryData(stackKeys.export(org, name), fresh);
-  await invalidateStacks(qc, org);
-}
-
-/** Refresh everything that lists stacks: the stack queries, stack_list, and projects' compose lists. */
-async function invalidateStacks(qc: QueryClient, org: string) {
-  await Promise.all([
-    qc.invalidateQueries({ queryKey: stackKeys.org(org) }),
-    qc.invalidateQueries({ queryKey: ["tool", "stack_list"] }),
-    // The apps queries hold each stack's status and the projects' compose lists.
-    qc.invalidateQueries({ queryKey: keys.org(org) }),
-  ]);
+  await invalidateOrg(qc, org);
 }
 
 /** stack_validate and stack_deploy's project and environment arguments, when the stack has an owner. */

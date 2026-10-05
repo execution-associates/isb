@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { callTool } from "@/api/tools";
 import { errorMessage } from "@/lib/messages";
 import { type App, type Deployment, keys } from "./api";
+import { invalidateOrg } from "@/lib/freshness";
 
 /** How long a form says "Saved" after a save. */
 const SAVED_MS = 4000;
@@ -26,7 +27,7 @@ export function useAppUpdate(org: string, app: string) {
       const r = await callTool<{ app: App; deployment?: Deployment; warning?: string }>("app_update", { name: app, ...patch, ...(opts.deploy ? { deploy: true } : {}) }, org);
       qc.setQueryData(keys.app(org, app), r.app);
       if (r.warning) toast.warning(r.warning);
-      await qc.invalidateQueries({ queryKey: keys.org(org) });
+      await invalidateOrg(qc, org);
       if (!opts.quiet) toast.success(opts.deploy ? "Saved; deploying" : "Saved. It takes effect at the next deploy.");
       setSaved(true);
       timer.current = setTimeout(() => setSaved(false), SAVED_MS);

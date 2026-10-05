@@ -6,7 +6,7 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
-import { keys, useApps, useIngress, useProjects } from "@/apps/api";
+import { useApps, useIngress, useProjects } from "@/apps/api";
 import { ingressOff } from "@/apps/domains";
 import { NoIngressNotice } from "@/apps/ingress-notice";
 import { Crumbs, EmptyState, QueryError, Section } from "@/apps/components";
@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils";
 import { type DeployAnswer, emptyMeans, followOf, formProblems, logoSrc, type Plan, type PlannedVar, type TemplateDetail, useTemplate, valuesToSend, type Variable, varLabel } from "./api";
 import { TemplateLogo } from "./logo";
 import { defaultEnvironment, defaultProject, NEW } from "./where";
+import { invalidateOrg } from "@/lib/freshness";
 
 export function TemplatePage() {
   const { org = "", catalog = "", id = "" } = useParams();
@@ -321,7 +322,7 @@ function DeployForm({ org, detail }: { org: string; detail: TemplateDetail }) {
         );
         return;
       }
-      await qc.invalidateQueries({ queryKey: keys.org(org) });
+      await invalidateOrg(qc, org);
       const main = r.plan.order.includes(name) ? name : r.plan.order[r.plan.order.length - 1];
       navigate(`/orgs/${encodeURIComponent(org)}/apps/${main}/deployments`);
     } catch (e) {

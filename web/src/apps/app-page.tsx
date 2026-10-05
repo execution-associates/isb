@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { canWrite } from "@/lib/admin";
 import { errorMessage } from "@/lib/messages";
 import { useMe } from "@/lib/session";
-import { type App, appState, type Deployment, finished, isGit, isNotFound, keys, serviceOf, useApp, useDeployments, useIngress, useStack } from "./api";
+import { type App, appState, type Deployment, finished, isGit, isNotFound, serviceOf, useApp, useDeployments, useIngress, useStack } from "./api";
 import { autoHostLabel, ingressOff, NO_INGRESS_WARNING } from "./domains";
 import { AdvancedTab } from "./app-advanced";
 import { DomainsTab } from "./app-domains";
@@ -31,6 +31,7 @@ import { engineLabel, isDatabase } from "@/data/api";
 import { deploymentPath, useDeploy } from "./use-deploy";
 import { activeServiceTab, serviceTabs } from "./service-tabs";
 import { imageName } from "./util";
+import { invalidateOrg } from "@/lib/freshness";
 
 // xterm.js is loaded only when the Terminal tab opens; the day-2 tabs too.
 const TerminalTab = lazy(() => import("./app-terminal"));
@@ -146,7 +147,7 @@ function AppHeader({ org, app, writer, viewing }: { org: string; app: App; write
     setStarting(true);
     try {
       await callTool("stack_scale", { name: app.stack, service: app.name, replicas: Math.max(1, app.replicas) }, org);
-      await qc.invalidateQueries({ queryKey: keys.org(org) });
+      await invalidateOrg(qc, org);
       toast.success(`${app.name} starting`);
     } catch (e) {
       toast.error(errorMessage(e));
@@ -224,7 +225,7 @@ function AppHeader({ org, app, writer, viewing }: { org: string; app: App; write
         confirmLabel="Stop app"
         onConfirm={async () => {
           await callTool("stack_scale", { name: app.stack, service: app.name, replicas: 0 }, org);
-          await qc.invalidateQueries({ queryKey: keys.org(org) });
+          await invalidateOrg(qc, org);
           toast.success(`${app.name} stopped`);
         }}
       />

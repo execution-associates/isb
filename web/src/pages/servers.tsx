@@ -321,7 +321,7 @@ function VersionPanel({ s }: { s: ServerView }) {
             toast.error(`${s.name} was not upgraded`, { description: errorMessage(e) });
           } finally {
             setBusy(false);
-            await qc.invalidateQueries({ queryKey: SERVER_LIST_KEY });
+            await qc.invalidateQueries({ queryKey: ["tool"] });
           }
         }}
       />
@@ -347,7 +347,7 @@ function ServerSheet({ s, onOpenChange }: { s: ServerView | null; onOpenChange: 
     try {
       await callTool("server_rotate_cert", { name });
       toast.success(`${name} has a new certificate`, { description: "Its agent uses it for new connections; this control plane checked it does." });
-      await qc.invalidateQueries({ queryKey: SERVER_LIST_KEY });
+      await qc.invalidateQueries({ queryKey: ["tool"] });
     } catch (e) {
       toast.error(errorMessage(e));
     } finally {
@@ -462,7 +462,7 @@ function ServerSheet({ s, onOpenChange }: { s: ServerView | null; onOpenChange: 
                 const v = await callTool<{ note?: string }>("server_remove", { name: s.name });
                 toast.success(`${s.name} removed`, { description: v.note });
                 onOpenChange(false);
-                await qc.invalidateQueries({ queryKey: SERVER_LIST_KEY });
+                await qc.invalidateQueries({ queryKey: ["tool"] });
               }}
             />
           </>
@@ -510,7 +510,7 @@ function AddServerDialog({
     setRunning(null);
     setSeeded(null);
     onClose();
-    void qc.invalidateQueries({ queryKey: SERVER_LIST_KEY });
+    void qc.invalidateQueries({ queryKey: ["tool"] });
   };
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();

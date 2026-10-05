@@ -1,7 +1,7 @@
 import { QueryClient, type QueryKey } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/api/client";
-import { createInvalidator, keysForEvent, LIVE_POLL, queryDefaults, splitStack } from "./freshness";
+import { createInvalidator, invalidateOrg, keysForEvent, LIVE_POLL, queryDefaults, splitStack } from "./freshness";
 
 describe("query defaults", () => {
   const q = queryDefaults.queries!;
@@ -46,6 +46,24 @@ describe("event -> invalidation", () => {
 
   it("ignores deployment log lines", () => {
     expect(keysForEvent({ level: "log", stack: "acme/web" })).toEqual([]);
+  });
+});
+
+describe("invalidateOrg", () => {
+  it("reaches the org's lists, details, overview, compose stacks and the stack list, and no other org", async () => {
+    const qc = new QueryClient({ defaultOptions: queryDefaults });
+    const ks: QueryKey[] = [
+      ["apps", "acme", "projects"],
+      ["apps", "acme", "overview"],
+      ["apps", "acme", "secret-list"],
+      ["stacks", "acme", "deployments", "web", 30],
+      ["tool", "stack_list"],
+      ["apps", "other", "projects"],
+    ];
+    for (const k of ks) qc.setQueryData(k, 1);
+    await invalidateOrg(qc, "acme");
+    expect(ks.map((k) => qc.getQueryState(k)?.isInvalidated)).toEqual([true, true, true, true, true, false]);
+    qc.clear();
   });
 });
 

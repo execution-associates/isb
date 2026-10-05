@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { callTool } from "@/api/tools";
 import { keys } from "./api";
 import { DeleteServiceSection } from "./service-page";
+import { invalidateOrg } from "@/lib/freshness";
 
 export function DeleteAppSection({
   org,
@@ -44,7 +45,7 @@ export function DeleteAppSection({
       onConfirm={async () => {
         await callTool("app_delete", { name: app.name }, org);
         qc.removeQueries({ queryKey: keys.app(org, app.name) });
-        await qc.invalidateQueries({ queryKey: keys.org(org) });
+        await invalidateOrg(qc, org);
         toast.success(`${app.name} deleted`);
         navigate(`/orgs/${encodeURIComponent(org)}/projects/${encodeURIComponent(app.project)}/${encodeURIComponent(app.environment)}`);
       }}

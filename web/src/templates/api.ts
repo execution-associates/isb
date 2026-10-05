@@ -154,15 +154,15 @@ export interface CatalogConfig {
 }
 
 export const tkeys = {
-  list: () => ["templates", "list"] as const,
-  get: (ref: string) => ["templates", "get", ref] as const,
+  list: (org: string) => ["templates", "list", org] as const,
+  get: (org: string, ref: string) => ["templates", "get", org, ref] as const,
   catalogs: () => ["templates", "catalogs"] as const,
   instances: (org: string) => ["apps", org, "template-instances"] as const,
 };
 
 export function useTemplates(org: string) {
   return useQuery({
-    queryKey: tkeys.list(),
+    queryKey: tkeys.list(org),
     queryFn: () => callTool<{ templates: TemplateSummary[]; errors: string[] | Record<string, string> }>("template_list", {}, org),
     staleTime: 60_000,
   });
@@ -170,7 +170,7 @@ export function useTemplates(org: string) {
 
 export function useTemplate(org: string, ref: string) {
   return useQuery({
-    queryKey: tkeys.get(ref),
+    queryKey: tkeys.get(org, ref),
     queryFn: () => callTool<TemplateDetail>("template_get", { template: ref }, org),
     staleTime: 60_000,
   });

@@ -7,7 +7,6 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
-import { keys } from "@/apps/api";
 import { ConfirmDialog, EmptyState, QueryError, Section } from "@/apps/components";
 import { bytes } from "@/apps/util";
 import { ScheduleText } from "@/components/cron-field";
@@ -23,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { dkeys, type BackupEntry, type BackupFile, type Database, type Run, useBackupFiles, useBackupRuns, useBackups, useDatabase, useRestoreRuns } from "./api";
 import { BackupScheduleDialog, RestoreDialog } from "./backup-dialogs";
 import { RunBadge, RunLogDialog, RunsTable, sizeDetail } from "./runs";
+import { invalidateOrg } from "@/lib/freshness";
 
 type LogTarget = { kind: "backup"; backup: string; run: Run } | { kind: "restore"; run: Run };
 
@@ -163,7 +163,7 @@ function BackupCard({
     setBusy(true);
     try {
       const r = await callTool<{ run: Run }>("backup_run", { name: b.name }, org);
-      await qc.invalidateQueries({ queryKey: keys.org(org) });
+      await invalidateOrg(qc, org);
       toast.success(`Backup ${b.name} started`);
       onLog({ kind: "backup", backup: b.name, run: r.run });
     } catch (e) {
@@ -175,7 +175,7 @@ function BackupCard({
   const toggle = async () => {
     try {
       await callTool("backup_update", { name: b.name, enabled: !b.enabled }, org);
-      await qc.invalidateQueries({ queryKey: keys.org(org) });
+      await invalidateOrg(qc, org);
       toast.success(b.enabled ? `Backup ${b.name} paused` : `Backup ${b.name} resumed`);
     } catch (e) {
       toast.error(errorMessage(e));
@@ -320,7 +320,7 @@ function BackupCard({
         confirmLabel="Delete schedule"
         onConfirm={async () => {
           await callTool("backup_delete", { name: b.name }, org);
-          await qc.invalidateQueries({ queryKey: keys.org(org) });
+          await invalidateOrg(qc, org);
           toast.success(`Backup ${b.name} deleted`);
         }}
       />
