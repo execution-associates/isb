@@ -285,9 +285,13 @@ three remote sources ([Superadmins](../concepts/access.md#superadmins)):
 - a **Cloudflare Access identity** listed in `--superadmin-access`.
 
 Point it at the unbound `/mcp`: on `/orgs/ORG/mcp` a superadmin is scoped
-down to an admin of that org. A superadmin also sees this endpoint on the
-MCP page, with a warning, and for each source whether it is on and its
-snippets; the web never makes a superadmin token. Tailnet and Access
+down to an admin of that org. For a superadmin the MCP page opens on two
+tabs, **Superadmin (/mcp)** first and selected, and **This org
+(/orgs/ORG/mcp)**, each linkable as `/orgs/ORG/agents?endpoint=superadmin`
+or `?endpoint=org`. The superadmin tab shows this endpoint with a warning,
+and for each source whether it is on, its URL and its snippets (the client
+configs and the `curl` test); the org tab is the page everyone else sees,
+which has no tabs. The web never makes a superadmin token. Tailnet and Access
 superadmins are ambient credentials, so their `/mcp` calls must be
 `Content-Type: application/json` and a foreign `Origin` is refused.
 
