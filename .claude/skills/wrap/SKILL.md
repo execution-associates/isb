@@ -160,7 +160,8 @@ gh run list --branch main --commit "$SHA" --json name,status,conclusion
 Wait for every run (CI, Build health, Python SDK, SDK (TypeScript), Release
 binaries) to complete green. Release binaries builds the four release
 tarballs (Linux and macOS, x86_64 and aarch64) for this commit and keeps them
-as artifacts for 30 days; it is the long pole, about 5 minutes. A red main is
+as artifacts for 30 days; it is the long pole, about 10 minutes (the macOS
+x86_64 build). A red main is
 fixed forward with a new PR, never by tagging anyway.
 
 ## 6. Tag
