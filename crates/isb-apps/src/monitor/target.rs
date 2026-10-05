@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use super::chain::{self, Hop};
 use super::health_path;
 use super::probe::{self, HttpAnswer, HttpProbe};
 use super::{ACCESS_ID_SECRET, ACCESS_SECRET_SECRET, Kind, Monitor, parse_status};
@@ -40,6 +41,9 @@ pub struct Outcome {
     /// Why the check went where it did (a domain behind Cloudflare Access).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// A hop-by-hop check's hops ([`chain`]), in order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hops: Vec<Hop>,
 }
 
 impl Outcome {
@@ -74,9 +78,15 @@ struct AppView {
     path: String,
     /// Where the path came from, or why only its own endpoint is checked.
     note: Option<String>,
+    /// The ingress listener the domain's requests come in on.
+    origin: Option<String>,
+    /// The domain comes in through the org's Cloudflare tunnel.
+    tunnel: bool,
+    /// The domain is served over HTTPS (at Cloudflare, for a tunnel).
+    https: bool,
 }
 
-fn loopback_for(ip: IpAddr) -> IpAddr {
+pub(crate) fn loopback_for(ip: IpAddr) -> IpAddr {
     match ip {
         IpAddr::V4(v) if v.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
         IpAddr::V6(v) if v.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
@@ -263,6 +273,9 @@ fn app_view(ctx: &Ctx, org: &OrgId, m: &Monitor) -> Result<(AppView, &'static st
             host: pick.map(|d| d.host.clone()),
             path: paths.internal,
             note: paths.note,
+            origin: pick.and_then(|d| d.origin.clone()),
+            tunnel: pick.is_some_and(|d| d.provider == crate::org::INGRESS_CLOUDFLARE_TUNNEL),
+            https: pick.is_some_and(|d| d.https),
         },
         f.noun,
     ))
@@ -432,46 +445,150 @@ fn run_app(ctx: &Ctx, org: &OrgId, m: &Monitor, at: u64) -> Outcome {
         Ok(h) => h,
         Err(e) => return Outcome::fail(at, e),
     };
-    let mut note = view.note.clone();
-    if let Some(url) = &view.public {
-        let o = http_outcome(m, &probe_for(ctx, m, url.clone(), hs.clone()), at, "public");
-        let refused = o
-            .error
-            .as_deref()
-            .is_some_and(|e| e.starts_with("refusing "));
-        let access = o
-            .error
-            .as_deref()
-            .is_some_and(|e| e.contains("Cloudflare Access"));
-        if !refused && !access {
-            return Outcome { note, ..o };
-        }
-        // Users see it through its domain, but this daemon may not check
-        // it there: say why, and check its own endpoint.
-        let why = if access {
-            format!(
-                "the domain is behind Cloudflare Access: checked the {noun}'s own endpoint instead (add CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET secrets to check the public URL)"
-            )
-        } else {
-            format!(
-                "the domain resolves to a private address: checked the {noun}'s own endpoint instead (a platform admin can allow private targets)"
-            )
+    let note = view.note.clone();
+    let Some(url) = &view.public else {
+        return Outcome {
+            note,
+            ..replica(ctx, m, &view, hs, at)
         };
-        note = Some(match note {
-            Some(n) => format!("{n}; {why}"),
-            None => why,
-        });
+    };
+    let o = http_outcome(m, &probe_for(ctx, m, url.clone(), hs.clone()), at, "public");
+    let err = o.error.clone().unwrap_or_default();
+    let refused = err.starts_with("refusing ");
+    let access = err.contains("Cloudflare Access");
+    if !refused && !access {
+        return Outcome { note, ..o };
     }
-    let (addr, what) = match view.internal {
-        Ok(x) => x,
-        Err(e) => {
-            return Outcome {
-                note,
-                ..Outcome::fail(at, e)
-            };
+    let status = o.status.unwrap_or_default();
+    if access && has_access_token(&hs) {
+        // The token went with the request, and Access still stopped it.
+        let error = format!(
+            "HTTP {status}: {} with the service token: allow it in the Access application's policy",
+            access_why(&err)
+        );
+        return Outcome {
+            note,
+            error: Some(error),
+            ..o
+        };
+    }
+    // Users see it through its domain, but this daemon may not check it
+    // there: check every hop it can see instead.
+    let edge =
+        access.then(|| Hop::new("edge", true, format!("HTTP {status}: {}", access_why(&err))));
+    let c = Chain {
+        view: &view,
+        noun,
+        edge,
+        note,
+    };
+    hop_by_hop(ctx, org, m, hs, at, c)
+}
+
+fn has_access_token(hs: &[(String, String)]) -> bool {
+    hs.iter()
+        .any(|(k, _)| k.to_ascii_lowercase().starts_with("cf-access-client"))
+}
+
+/// How Access stopped a request, from the judged error.
+fn access_why(err: &str) -> &'static str {
+    if err.contains("refused by Cloudflare Access") {
+        "refused by Cloudflare Access"
+    } else {
+        "redirected to Cloudflare Access sign-in"
+    }
+}
+
+/// What a hop-by-hop check starts from.
+struct Chain<'a> {
+    view: &'a AppView,
+    noun: &'static str,
+    /// Access' answer at the edge; `None` when the domain resolved to an
+    /// address the policy refuses.
+    edge: Option<Hop>,
+    note: Option<String>,
+}
+
+fn hop_by_hop(
+    ctx: &Ctx,
+    org: &OrgId,
+    m: &Monitor,
+    mut hs: Vec<(String, String)>,
+    at: u64,
+    c: Chain,
+) -> Outcome {
+    let view = c.view;
+    let behind_access = c.edge.is_some();
+    let mut hops: Vec<Hop> = c.edge.into_iter().collect();
+    if view.tunnel {
+        hops.push(chain::tunnel(ctx, org, Duration::from_secs(m.timeout)));
+    }
+    // The public path: the ingress strips a route's prefix itself.
+    let path = view
+        .public
+        .as_deref()
+        .and_then(|u| crate::net::parse_url(u).ok())
+        .map(|t| t.path);
+    let target = view.origin.as_deref().zip(view.host.as_deref()).zip(path);
+    let last = match target {
+        Some(((origin, host), path)) => match chain::via_origin(origin, host, &path) {
+            Ok((url, addr)) => {
+                // What cloudflared tells the ingress of a visitor's HTTPS.
+                if view.tunnel && view.https && url.starts_with("http://") {
+                    hs.push(("X-Forwarded-Proto".into(), "https".into()));
+                }
+                let mut p = probe_for(ctx, m, url, hs);
+                p.connect_to = Some(addr);
+                p.follow_redirects = false;
+                let o = http_outcome(m, &p, at, &format!("ingress {origin}"));
+                hops.push(Hop::of("ingress", &o, origin));
+                o
+            }
+            Err(e) => {
+                hops.push(Hop::new("ingress", false, e.clone()));
+                Outcome::fail(at, e)
+            }
+        },
+        None => {
+            let o = replica(ctx, m, view, hs, at);
+            let via = o.via.clone().unwrap_or_default();
+            hops.push(Hop::of("replica", &o, via.trim_start_matches("internal: ")));
+            o
         }
     };
-    let host = view.host.unwrap_or_else(|| addr.ip().to_string());
+    let names = chain::labels(&hops);
+    let mut why = if behind_access {
+        format!(
+            "checked hop by hop ({names}); the Access policy is not verified: add CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET secrets for an end-to-end check"
+        )
+    } else {
+        format!(
+            "the domain resolves to a private address: checked hop by hop ({names}) (a platform admin can allow private targets)"
+        )
+    };
+    if hops.iter().any(|h| h.hop == "replica") {
+        why.push_str(&format!(
+            "; the ingress has no listener address for the domain, so the {}'s own endpoint stands in for it",
+            c.noun
+        ));
+    }
+    let note = Some(match c.note {
+        Some(n) => format!("{n}; {why}"),
+        None => why,
+    });
+    Outcome {
+        note,
+        ..chain::finish(hops, last)
+    }
+}
+
+/// The app's own endpoint, the ingress bypassed.
+fn replica(ctx: &Ctx, m: &Monitor, view: &AppView, hs: Vec<(String, String)>, at: u64) -> Outcome {
+    let (addr, what) = match &view.internal {
+        Ok(x) => x.clone(),
+        Err(e) => return Outcome::fail(at, e.clone()),
+    };
+    let host = view.host.clone().unwrap_or_else(|| addr.ip().to_string());
     let host = if host.contains(':') {
         format!("[{host}]")
     } else {
@@ -485,9 +602,7 @@ fn run_app(ctx: &Ctx, org: &OrgId, m: &Monitor, at: u64) -> Outcome {
     );
     p.connect_to = Some(addr);
     p.follow_redirects = false;
-    let mut o = http_outcome(m, &p, at, &format!("internal: {what}"));
-    o.note = note;
-    o
+    http_outcome(m, &p, at, &format!("internal: {what}"))
 }
 
 #[cfg(test)]

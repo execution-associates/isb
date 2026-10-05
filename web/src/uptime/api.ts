@@ -53,6 +53,15 @@ export interface Outcome {
   via?: string;
   cert_expires?: number;
   note?: string;
+  /** A hop-by-hop check's hops (a domain behind Cloudflare Access without a service token). */
+  hops?: Hop[];
+}
+
+export interface Hop {
+  /** `edge`, `tunnel`, `ingress`, or `replica`. */
+  hop: string;
+  ok: boolean;
+  detail?: string;
 }
 
 export interface Incident {

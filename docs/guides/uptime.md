@@ -223,13 +223,39 @@ metadata. isb recognises all three and never counts them as up:
   token allowed by the application's policy, and store it as the org secrets
   `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`. Every `app` and
   `service` monitor that sets no Access headers of its own presents them, so
-  the check goes through Access to the app, as users do. Any monitor can also name them in
-  `headers` (`CF-Access-Client-Id`, `CF-Access-Client-Secret`).
-- **Without a token**, an `app` or `service` monitor checks its own endpoint
-  instead (with the domain as the Host header) and says so in its last check
-  (`via`, `note`); an `http` monitor is down
-  with "redirected to Cloudflare Access sign-in" or "refused by Cloudflare
-  Access", since that is all it can see.
+  the check goes through Access to the app, as users do: one request, end to
+  end. Any monitor can also name them in `headers` (`CF-Access-Client-Id`,
+  `CF-Access-Client-Secret`). Access still stopping a request that carries a
+  token is down ("... with the service token: allow it in the Access
+  application's policy").
+- **Without a token**, an `app` or `service` monitor checks hop by hop, and
+  is up only when every hop is:
+
+  | Hop | Passes when | Down as |
+  |---|---|---|
+  | `edge` | the domain answered with Access' redirect or refusal: its DNS and Cloudflare's edge work | (the public check failing any other way is the check's own error) |
+  | `tunnel` (an org on the `cloudflare-tunnel` ingress) | the org's cloudflared (stack `isb-tunnel`) has a healthy replica, and its readiness endpoint reports connections to Cloudflare | "tunnel: the org's Cloudflare tunnel is not running", "tunnel: not connected (...)" |
+  | `ingress` | the ingress listener the domain comes in on (the org's tunnel listener, the address cloudflared forwards to) answers the domain's public path, with the domain as the Host header, as the monitor expects | "ingress: HTTP 502 (expected 200-399)" |
+
+  The check's `hops` list each hop (`hop`, `ok`, `detail`), its `via` names
+  the listener (`ingress http://10.64.3.1:8480`), and its `note` says
+  "checked hop by hop (Cloudflare edge, tunnel, ingress); the Access policy
+  is not verified: add CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET
+  secrets for an end-to-end check". The ingress is asked for the public path
+  (it strips a route's prefix itself) and, for an HTTPS domain on a tunnel,
+  with `X-Forwarded-Proto: https`, as cloudflared sends it.
+
+  What the hops cannot see: the Access policy itself, and Cloudflare's own
+  routing from the edge into the tunnel (the tunnel's public hostname rules,
+  which Access answers in front of). The tunnel hop reads cloudflared's
+  readiness at the replica's address (its image serves metrics on the first
+  free port of 20241-20245 on every address); when that cannot be read, a
+  healthy cloudflared passes and the hop says the connection is not
+  verified. With no listener address for the domain, the service's own
+  endpoint stands in for the ingress (hop `replica`), and the note says so.
+
+  An `http` monitor is down with "redirected to Cloudflare Access sign-in"
+  or "refused by Cloudflare Access", since that is all it can see.
 
 ## Where checks run, and what they may reach
 
@@ -255,9 +281,11 @@ plane raises `server.unreachable` when a server stops answering its heartbeat
   too.
 - An app's or stack service's own endpoint (a replica, a published port) is
   found by reference, not typed, so it is reached directly whatever the
-  policy. An `app` or `service` monitor whose domain resolves to a private
-  address while private targets are refused checks that endpoint instead,
-  and says so.
+  policy, and so is the ingress listener a domain comes in on. An `app` or
+  `service` monitor whose domain resolves to a private address while
+  private targets are refused checks hop by hop as
+  [behind Access](#behind-cloudflare-access) does, without the edge hop
+  (the tunnel, then the ingress), and says so.
 
 ## History
 
