@@ -9,6 +9,7 @@ import { appState, type Project } from "./api";
 import { activeServiceTab, SERVICE_TABS, serviceTabs } from "./service-tabs";
 import { envHealth, projectHealth } from "./health";
 import { lastDeploy, projectCounts } from "./projects-page";
+import { composeStates } from "./dashboard";
 import { imageNote, imageProblem } from "./image-ref";
 
 describe("env text analysis (src/app/env.rs rules)", () => {
@@ -347,6 +348,13 @@ describe("project cards", () => {
     expect(lastDeploy(shop, latest, [], "acme")).toBe(5_000);
     expect(lastDeploy(shop, latest, [stack("search", 1, 9)], "acme")).toBe(9_000);
     expect(lastDeploy(shop, new Map(), [], "acme")).toBeUndefined();
+  });
+
+  it("gives the overview's compose stacks a state, as apps have", () => {
+    const stacks = [stack("monitoring", 1), stack("search", 0)] as never[];
+    const deploying = new Map([["monitoring", [{ status: "deploying", created_at: 0 } as never]]]);
+    expect([...composeStates(["monitoring", "search", "gone"], stacks, new Map()).values()]).toEqual(["running", "failing", "stopped"]);
+    expect(composeStates(["monitoring"], stacks, deploying).get("monitoring")).toBe("deploying");
   });
 });
 

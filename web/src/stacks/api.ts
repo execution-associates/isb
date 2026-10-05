@@ -288,12 +288,16 @@ export function useStackDeployments(org: string, name: string, limit = 30, refet
   return useQuery({
     queryKey: [...stackKeys.deployments(org, name), limit],
     refetchInterval: typeof refetchInterval === "function" ? (q) => refetchInterval(q.state.data?.deployments[0]) : refetchInterval,
-    queryFn: () =>
-      callTool<StackDeployments, string>("stack_deployments", { name, limit }, org).then((r) => ({
-        current: r.current ?? null,
-        deployments: (r.deployments ?? []).map(stackDeploymentMs),
-      })),
+    queryFn: () => fetchStackDeployments(org, name, limit),
   });
+}
+
+/** A stack's last `limit` deployments, times in milliseconds (the query useStackDeployments caches). */
+export function fetchStackDeployments(org: string, name: string, limit: number): Promise<StackDeployments> {
+  return callTool<StackDeployments, string>("stack_deployments", { name, limit }, org).then((r) => ({
+    current: r.current ?? null,
+    deployments: (r.deployments ?? []).map(stackDeploymentMs),
+  }));
 }
 
 /** One deployment, read again every 2 s until it finishes. */

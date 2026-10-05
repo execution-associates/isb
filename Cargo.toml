@@ -53,7 +53,7 @@ members = ["crates/*"]
 default-members = [".", "crates/*"]
 
 [workspace.package]
-version = "1.6.5"
+version = "1.6.6"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -61,12 +61,12 @@ repository = "https://github.com/execution-associates/isb"
 homepage = "https://github.com/execution-associates/isb"
 
 [workspace.dependencies]
-isb-core = { path = "crates/isb-core", version = "=1.6.5" }
-isb-server = { path = "crates/isb-server", version = "=1.6.5" }
-isb-apps = { path = "crates/isb-apps", version = "=1.6.5" }
-isb-daemon = { path = "crates/isb-daemon", version = "=1.6.5" }
-isb-tui = { path = "crates/isb-tui", version = "=1.6.5" }
-isb-egress = { path = "crates/isb-egress", version = "=1.6.5" }
+isb-core = { path = "crates/isb-core", version = "=1.6.6" }
+isb-server = { path = "crates/isb-server", version = "=1.6.6" }
+isb-apps = { path = "crates/isb-apps", version = "=1.6.6" }
+isb-daemon = { path = "crates/isb-daemon", version = "=1.6.6" }
+isb-tui = { path = "crates/isb-tui", version = "=1.6.6" }
+isb-egress = { path = "crates/isb-egress", version = "=1.6.6" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
