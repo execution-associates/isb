@@ -73,7 +73,7 @@ export function UptimePage() {
                 )
               }
             >
-              Every app with a domain gets a monitor of its own within a minute of its first deploy going live (an app that has not come up yet has none){list.data?.settings.auto_monitors === false ? " (turned off for this org)" : ""}. Add one for any URL or TCP port too.
+              Every app and compose stack service with a domain gets a monitor of its own within a minute of its domain being served{list.data?.settings.auto_monitors === false ? " (turned off for this org)" : ""}. Add one for any URL or TCP port too.
             </EmptyState>
           </Card>
         ) : (
@@ -188,23 +188,28 @@ function AutoSettings({ org, list, canWrite }: { org: string; list: MonitorList;
     }
   };
   const excluded = s.exclude_apps ?? [];
+  const excludedServices = s.exclude_services ?? [];
+  const left: { name: string; back: Record<string, unknown> }[] = [
+    ...excluded.map((a) => ({ name: a, back: { exclude_apps: excluded.filter((x) => x !== a) } })),
+    ...excludedServices.map((a) => ({ name: a, back: { exclude_services: excludedServices.filter((x) => x !== a) } })),
+  ];
   return (
-    <Section title="Apps' own monitors" description="Every app with a served domain gets a monitor named app-<name>, so a down app is noticed with no setup. Deleting one keeps it away for that app.">
+    <Section title="Own monitors" description="Every app with a served domain gets a monitor named app-<name>, and every compose stack service with one stack-<stack>-<service>, so a down service is noticed with no setup. Deleting one keeps it away for that app or service.">
       <div className="grid gap-3 text-sm">
         <div className="flex items-center gap-3">
-          <Switch id="uptime-auto" checked={s.auto_monitors} disabled={!canWrite} onCheckedChange={(v) => save({ auto_monitors: v }, v ? "Apps get their own monitors" : "Apps' own monitors turned off")} />
+          <Switch id="uptime-auto" checked={s.auto_monitors} disabled={!canWrite} onCheckedChange={(v) => save({ auto_monitors: v }, v ? "Own monitors turned on" : "Own monitors turned off")} />
           <Label htmlFor="uptime-auto" className="font-normal">
-            Give apps with a domain their own monitor
+            Give apps and stack services with a domain their own monitor
           </Label>
         </div>
-        {excluded.length > 0 && (
+        {left.length > 0 && (
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-muted-foreground">Left out:</span>
-            {excluded.map((a) => (
+            {left.map(({ name: a, back }) => (
               <span key={a} className="inline-flex items-center gap-1 rounded-md border bg-muted/40 py-0.5 pr-1 pl-2 text-xs">
                 {a}
                 {canWrite && (
-                  <button type="button" className="rounded px-1 text-muted-foreground hover:text-foreground" aria-label={`Watch ${a} again`} onClick={() => save({ exclude_apps: excluded.filter((x) => x !== a) }, `${a} gets its monitor back`)}>
+                  <button type="button" className="rounded px-1 text-muted-foreground hover:text-foreground" aria-label={`Watch ${a} again`} onClick={() => save(back, `${a} gets its monitor back`)}>
                     ×
                   </button>
                 )}

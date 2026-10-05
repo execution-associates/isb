@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { callTool } from "@/api/tools";
 import type { Tone } from "@/lib/status";
 
-export type MonitorKind = "http" | "tcp" | "app";
+export type MonitorKind = "http" | "tcp" | "app" | "service";
 export type MonitorStatus = "up" | "down" | "pending" | "paused";
 
 export interface MonitorHeader {
@@ -21,6 +21,8 @@ export interface MonitorDef {
   host?: string;
   port?: number;
   app?: string;
+  stack?: string;
+  service?: string;
   domain?: string;
   path?: string;
   method: "GET" | "HEAD";
@@ -101,6 +103,8 @@ export type Bar = [number, number | null, number?];
 export interface Settings {
   auto_monitors: boolean;
   exclude_apps?: string[];
+  /** `<stack>/<service>` */
+  exclude_services?: string[];
 }
 
 export interface MonitorList {
@@ -222,7 +226,7 @@ export function downtimeText(ms: number): string {
 }
 
 /** What a monitor checks, for a listing. */
-export function targetText(m: Pick<MonitorDef, "type" | "url" | "host" | "port" | "app" | "domain" | "path">): string {
+export function targetText(m: Pick<MonitorDef, "type" | "url" | "host" | "port" | "app" | "stack" | "service" | "domain" | "path">): string {
   switch (m.type) {
     case "http":
       return (m.url ?? "").split(/[?#]/)[0];
@@ -230,6 +234,8 @@ export function targetText(m: Pick<MonitorDef, "type" | "url" | "host" | "port" 
       return `${m.host ?? ""}:${m.port ?? ""}`;
     case "app":
       return `app ${m.app ?? ""}${m.domain ? ` · ${m.domain}` : ""}${m.path ? ` ${m.path}` : ""}`;
+    case "service":
+      return `service ${m.stack ?? ""}/${m.service ?? ""}${m.domain ? ` · ${m.domain}` : ""}${m.path ? ` ${m.path}` : ""}`;
   }
 }
 

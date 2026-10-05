@@ -1,5 +1,6 @@
-//! Running one check: what a monitor's target is now (an app's, found by
-//! reference), the probe, and whether its answer counts as up.
+//! Running one check: what a monitor's target is now (an app's or a stack
+//! service's, found by reference), the probe, and whether its answer counts
+//! as up.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -35,7 +36,7 @@ pub struct Outcome {
     /// The HTTPS certificate's expiry, unix seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cert_expires: Option<u64>,
-    /// Why the check went where it did (an app behind Cloudflare Access).
+    /// Why the check went where it did (a domain behind Cloudflare Access).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
 }
@@ -59,11 +60,11 @@ pub(crate) struct Ctx<'a> {
     pub tls: Arc<rustls::ClientConfig>,
 }
 
-/// An app's endpoints right now.
+/// An app's or stack service's endpoints right now.
 struct AppView {
     /// The served domain's URL (with the monitor's path).
     public: Option<String>,
-    /// The app's own endpoint and how it was found, or why there is none.
+    /// Its own endpoint and how it was found, or why there is none.
     internal: Result<(SocketAddr, String), String>,
     /// The domain's host, for the Host header on the internal endpoint.
     host: Option<String>,
@@ -88,39 +89,77 @@ fn with_path(url: &str, path: &str) -> String {
     format!("{}{path}", &url[..end])
 }
 
-/// Does the app have a deployment that is live: its service has a healthy
-/// replica in rotation? Until it does, an app's monitor has nothing to check.
-pub(crate) fn app_is_live(apps: &Apps, org: &OrgId, m: &Monitor) -> bool {
-    let name = m.app.as_deref().unwrap_or_default();
-    let Ok(app) = apps.get(org, name) else {
-        return false;
-    };
-    let Ok(stack) = app.spec.stack() else {
-        return false;
-    };
-    apps.controller()
-        .status(&crate::stack::qualified(org, &stack))
-        .ok()
-        .and_then(|st| st.services.into_iter().find(|s| s.service == name))
-        .is_some_and(|s| s.healthy > 0 && s.instances.iter().any(|i| i.in_rotation))
+/// What an `app` or `service` monitor follows: a service of a stack.
+struct Followed {
+    /// The qualified stack.
+    stack: String,
+    service: String,
+    /// `app web`, `service wiki/web`: for messages.
+    what: String,
+    /// `app` or `service`.
+    noun: &'static str,
+    /// Where its replicas listen: an app's port. A stack service's is the
+    /// one its domain routes to.
+    port: Option<Result<u16, String>>,
 }
 
-fn app_view(ctx: &Ctx, org: &OrgId, m: &Monitor) -> Result<AppView, String> {
+fn followed(apps: &Apps, org: &OrgId, m: &Monitor) -> Result<Followed, String> {
+    if m.kind == Kind::Service {
+        let (st, sv) = (
+            m.stack.clone().unwrap_or_default(),
+            m.service.clone().unwrap_or_default(),
+        );
+        return Ok(Followed {
+            stack: crate::stack::qualified(org, &st),
+            what: format!("service {st}/{sv}"),
+            service: sv,
+            noun: "service",
+            port: None,
+        });
+    }
     let name = m.app.as_deref().unwrap_or_default();
-    let app = ctx
-        .apps
+    let app = apps
         .get(org, name)
         .map_err(|_| format!("app {name} does not exist"))?;
     let stack = app.spec.stack().map_err(|e| e.to_string())?;
+    Ok(Followed {
+        stack: crate::stack::qualified(org, &stack),
+        service: name.to_string(),
+        what: format!("app {name}"),
+        noun: "app",
+        port: Some(
+            app.spec
+                .port
+                .ok_or_else(|| format!("app {name} has no port to check")),
+        ),
+    })
+}
+
+/// Does the app or stack service have a deployment that is live: a healthy
+/// replica in rotation? Until it does, its monitor has nothing to check.
+pub(crate) fn is_live(apps: &Apps, org: &OrgId, m: &Monitor) -> bool {
+    let Ok(f) = followed(apps, org, m) else {
+        return false;
+    };
+    apps.controller()
+        .status(&f.stack)
+        .ok()
+        .and_then(|st| st.services.into_iter().find(|s| s.service == f.service))
+        .is_some_and(|s| s.healthy > 0 && s.instances.iter().any(|i| i.in_rotation))
+}
+
+fn app_view(ctx: &Ctx, org: &OrgId, m: &Monitor) -> Result<(AppView, &'static str), String> {
+    let f = followed(ctx.apps, org, m)?;
+    let what = &f.what;
     let st = ctx
         .ctl
-        .status(&crate::stack::qualified(org, &stack))
-        .map_err(|_| format!("app {name} is not deployed"))?;
+        .status(&f.stack)
+        .map_err(|_| format!("{what} is not deployed"))?;
     let svc = st
         .services
         .into_iter()
-        .find(|s| s.service == name)
-        .ok_or_else(|| format!("app {name} is not deployed"))?;
+        .find(|s| s.service == f.service)
+        .ok_or_else(|| format!("{what} is not deployed"))?;
     let served: Vec<_> = svc
         .domains
         .iter()
@@ -131,7 +170,7 @@ fn app_view(ctx: &Ctx, org: &OrgId, m: &Monitor) -> Result<AppView, String> {
             *served
                 .iter()
                 .find(|d| d.host == *h)
-                .ok_or_else(|| format!("app {name} does not serve {h}"))?,
+                .ok_or_else(|| format!("{what} does not serve {h}"))?,
         ),
         None => served.first().copied(),
     };
@@ -143,8 +182,15 @@ fn app_view(ctx: &Ctx, org: &OrgId, m: &Monitor) -> Result<AppView, String> {
     let public = pick
         .and_then(|d| d.url.as_deref())
         .map(|u| with_path(u, &path));
-    let internal = if let Some(p) = svc.ports.first() {
-        p.listen
+    let replica = |ip: IpAddr| {
+        svc.instances
+            .iter()
+            .find(|i| i.in_rotation && i.ip.as_deref() == Some(ip.to_string().as_str()))
+            .map(|i| i.name.clone())
+    };
+    let internal = match (&f.port, svc.ports.first()) {
+        (Some(_), Some(p)) => p
+            .listen
             .parse::<SocketAddr>()
             .map(|a| {
                 (
@@ -152,33 +198,45 @@ fn app_view(ctx: &Ctx, org: &OrgId, m: &Monitor) -> Result<AppView, String> {
                     format!("published port {}", p.listen),
                 )
             })
-            .map_err(|_| format!("published port {} is not an address", p.listen))
-    } else {
-        let port = app
-            .spec
-            .port
-            .ok_or_else(|| format!("app {name} has no port to check"));
-        let replica = svc
-            .instances
-            .iter()
-            .find(|i| i.in_rotation)
-            .and_then(|i| Some((i.name.clone(), i.ip.as_deref()?.parse::<IpAddr>().ok()?)));
-        match (port, replica) {
-            (Err(e), _) => Err(e),
-            (Ok(_), None) => Err(format!("app {name} has no replica in rotation")),
-            (Ok(p), Some((inst, ip))) => Ok((SocketAddr::new(ip, p), format!("replica {inst}"))),
+            .map_err(|_| format!("published port {} is not an address", p.listen)),
+        (Some(port), None) => {
+            let r = svc
+                .instances
+                .iter()
+                .find(|i| i.in_rotation)
+                .and_then(|i| Some((i.name.clone(), i.ip.as_deref()?.parse::<IpAddr>().ok()?)));
+            match (port, r) {
+                (Err(e), _) => Err(e.clone()),
+                (Ok(_), None) => Err(format!("{what} has no replica in rotation")),
+                (Ok(p), Some((inst, ip))) => {
+                    Ok((SocketAddr::new(ip, *p), format!("replica {inst}")))
+                }
+            }
         }
+        // A stack service: where the ingress sends its domain's requests.
+        (None, _) => pick
+            .or_else(|| served.first().copied())
+            .and_then(|d| d.upstreams.first())
+            .and_then(|u| u.parse::<SocketAddr>().ok())
+            .map(|a| match replica(a.ip()) {
+                Some(inst) => (a, format!("replica {inst}")),
+                None => (a, format!("upstream {a}")),
+            })
+            .ok_or_else(|| format!("{what} has no replica in rotation")),
     };
-    Ok(AppView {
-        public,
-        internal,
-        host: pick.map(|d| d.host.clone()),
-        path,
-    })
+    Ok((
+        AppView {
+            public,
+            internal,
+            host: pick.map(|d| d.host.clone()),
+            path,
+        },
+        f.noun,
+    ))
 }
 
-/// The monitor's headers, secrets read now; for app monitors, the org's
-/// Access service token when it sets no Access headers itself.
+/// The monitor's headers, secrets read now; for app and service monitors,
+/// the org's Access service token when it sets no Access headers itself.
 fn headers(ctx: &Ctx, org: &OrgId, m: &Monitor) -> Result<Vec<(String, String)>, String> {
     let read = |s: &str| -> Result<String, String> {
         let (v, _) = ctx.secrets.get(org, s).map_err(|e| {
@@ -204,7 +262,7 @@ fn headers(ctx: &Ctx, org: &OrgId, m: &Monitor) -> Result<Vec<(String, String)>,
     let has_access = out
         .iter()
         .any(|(k, _)| k.to_ascii_lowercase().starts_with("cf-access-client"));
-    if m.kind == Kind::App && !has_access {
+    if m.follows() && !has_access {
         if let (Ok(id), Ok(secret)) = (read(ACCESS_ID_SECRET), read(ACCESS_SECRET_SECRET)) {
             out.push(("CF-Access-Client-Id".into(), id));
             out.push(("CF-Access-Client-Secret".into(), secret));
@@ -317,12 +375,12 @@ pub(crate) fn run(ctx: &Ctx, org: &OrgId, m: &Monitor, at: u64) -> Outcome {
             ),
             Err(e) => Outcome::fail(at, e),
         },
-        Kind::App => run_app(ctx, org, m, at),
+        Kind::App | Kind::Service => run_app(ctx, org, m, at),
     }
 }
 
 fn run_app(ctx: &Ctx, org: &OrgId, m: &Monitor, at: u64) -> Outcome {
-    let view = match app_view(ctx, org, m) {
+    let (view, noun) = match app_view(ctx, org, m) {
         Ok(v) => v,
         Err(e) => return Outcome::fail(at, e),
     };
@@ -344,12 +402,16 @@ fn run_app(ctx: &Ctx, org: &OrgId, m: &Monitor, at: u64) -> Outcome {
         if !refused && !access {
             return o;
         }
-        // Users see the app through its domain, but this daemon may not
-        // check it there: say why, and check the app's own endpoint.
+        // Users see it through its domain, but this daemon may not check
+        // it there: say why, and check its own endpoint.
         note = Some(if access {
-            "the domain is behind Cloudflare Access: checked the app's own endpoint instead (add CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET secrets to check the public URL)".to_string()
+            format!(
+                "the domain is behind Cloudflare Access: checked the {noun}'s own endpoint instead (add CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET secrets to check the public URL)"
+            )
         } else {
-            "the domain resolves to a private address: checked the app's own endpoint instead (a platform admin can allow private targets)".to_string()
+            format!(
+                "the domain resolves to a private address: checked the {noun}'s own endpoint instead (a platform admin can allow private targets)"
+            )
         });
     }
     let (addr, what) = match view.internal {

@@ -67,7 +67,7 @@ fn fields(a: Value, drop_name: bool) -> Map<String, Value> {
     o
 }
 
-const KIND_DESC: &str = "http (a URL), tcp (host and port), or app (an app by name: its served domain's public URL, else its own endpoint; it follows the app)";
+const KIND_DESC: &str = "http (a URL), tcp (host and port), app (an app by name: its served domain's public URL, else its own endpoint; it follows the app), or service (a compose stack's service by stack and service, followed the same way)";
 
 /// The definition fields, for create and update.
 fn props(with_type: bool) -> Value {
@@ -77,8 +77,10 @@ fn props(with_type: bool) -> Value {
         "host": {"type": "string", "description": "tcp: a host name or address."},
         "port": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "tcp: the port."},
         "app": {"type": "string", "description": "app: the app's name."},
-        "domain": {"type": "string", "description": "app: which of its domains (default: the first one served)."},
-        "path": {"type": "string", "description": "app: the path to request (default: the domain's path)."},
+        "stack": {"type": "string", "description": "service: the compose stack's name."},
+        "service": {"type": "string", "description": "service: the stack's service."},
+        "domain": {"type": "string", "description": "app, service: which of its domains (default: the first one served)."},
+        "path": {"type": "string", "description": "app, service: the path to request (default: the domain's path)."},
         "method": {"type": "string", "enum": ["GET", "HEAD"], "description": "Default GET."},
         "expected_status": {"type": "string", "description": "Codes that count as up: 200-399 (default), 200,204, 200-299,301."},
         "keyword": {"type": "string", "description": "The body (its first 256 KiB) must contain this."},
@@ -93,8 +95,7 @@ fn props(with_type: bool) -> Value {
         "paused": {"type": "boolean"}
     });
     if with_type {
-        p["type"] =
-            json!({"type": "string", "enum": ["http", "tcp", "app"], "description": KIND_DESC});
+        p["type"] = json!({"type": "string", "enum": ["http", "tcp", "app", "service"], "description": KIND_DESC});
     }
     p
 }
@@ -135,7 +136,15 @@ fn update(m: &Monitors, a: Value, _: &Caller) -> Result<Value> {
 fn delete(m: &Monitors, a: Value, _: &Caller) -> Result<Value> {
     let org = arg_org(&a)?;
     let gone = m.delete(&org, &name_of(&a)?)?;
-    Ok(json!({"ok": true, "excluded_app": if gone.auto { gone.app } else { None }}))
+    let service = match (gone.auto, &gone.stack, &gone.service) {
+        (true, Some(st), Some(sv)) => Some(crate::monitor::auto::exclusion(st, sv)),
+        _ => None,
+    };
+    Ok(json!({
+        "ok": true,
+        "excluded_app": if gone.auto { gone.app } else { None },
+        "excluded_service": service,
+    }))
 }
 
 fn pause(m: &Monitors, a: Value, _: &Caller) -> Result<Value> {
@@ -177,6 +186,11 @@ fn settings(m: &Monitors, a: Value, _: &Caller) -> Result<Value> {
             .map_err(|_| Error::invalid("exclude_apps: a list of app names"))?;
         changed = true;
     }
+    if let Some(v) = a.get("exclude_services") {
+        s.exclude_services = serde_json::from_value(v.clone())
+            .map_err(|_| Error::invalid("exclude_services: a list of <stack>/<service> names"))?;
+        changed = true;
+    }
     if changed {
         m.set_settings(&org, &s)?;
         m.sync_auto(&org)?;
@@ -194,7 +208,7 @@ pub(super) fn register(r: &mut Registry, m: Monitors) -> Result<()> {
         (
             "monitor_create",
             "Create an uptime monitor",
-            "Watch something users reach: an HTTP(S) URL (status range, keyword present or absent, headers from secrets, certificate expiry), a TCP port, or an app by reference (its served domain, or its own endpoint). Checked every interval from this daemon; a new monitor is pending (failures before its first success are not downtime) until its first success; failure_threshold failures in a row then make it down (monitor.down to notification channels), recovery_threshold successes up again (monitor.up, with the downtime). URLs a member types are held to the platform's address policy.",
+            "Watch something users reach: an HTTP(S) URL (status range, keyword present or absent, headers from secrets, certificate expiry), a TCP port, or an app or a compose stack's service by reference (its served domain, or its own endpoint). Checked every interval from this daemon; a new monitor is pending (failures before its first success are not downtime) until its first success; failure_threshold failures in a row then make it down (monitor.down to notification channels), recovery_threshold successes up again (monitor.up, with the downtime). URLs a member types are held to the platform's address policy.",
         ),
         obj(props(true), &["name", "type"]),
         &write,
@@ -206,7 +220,7 @@ pub(super) fn register(r: &mut Registry, m: Monitors) -> Result<()> {
         (
             "monitor_list",
             "List uptime monitors",
-            "The org's monitors with status (up, down, pending, paused; `never_up` when pending 30 min with only failures), last check, uptime over 24h/7d/30d, latency p50/p95 (24h), 24 hourly uptime bars and the last 30 latencies; `down` (how many are down), the org's recent incidents, and its settings (auto_monitors, exclude_apps).",
+            "The org's monitors with status (up, down, pending, paused; `never_up` when pending 30 min with only failures), last check, uptime over 24h/7d/30d, latency p50/p95 (24h), 24 hourly uptime bars and the last 30 latencies; `down` (how many are down), the org's recent incidents, and its settings (auto_monitors, exclude_apps, exclude_services).",
         ),
         obj(json!({}), &[]),
         &ro,
@@ -230,7 +244,7 @@ pub(super) fn register(r: &mut Registry, m: Monitors) -> Result<()> {
         (
             "monitor_update",
             "Update an uptime monitor",
-            "Change a monitor's fields (others are kept; null puts one back to its default). The name and the app-owned flag cannot change. Its check counts start afresh.",
+            "Change a monitor's fields (others are kept; null puts one back to its default). The name and the auto flag (an app's or stack service's own) cannot change. Its check counts start afresh.",
         ),
         obj(props(true), &["name"]),
         &write,
@@ -250,7 +264,7 @@ fn register_more(r: &mut Registry, m: &Monitors, name_only: Value) -> Result<()>
         (
             "monitor_delete",
             "Delete an uptime monitor",
-            "Remove a monitor and its history. Deleting an app's own monitor (app-<name>) adds the app to the org's exclusions so it does not come back.",
+            "Remove a monitor and its history. Deleting an app's own monitor (app-<name>) adds the app to the org's exclude_apps, a stack service's (stack-<stack>-<service>) adds <stack>/<service> to exclude_services, so it does not come back.",
         ),
         name_only.clone(),
         &destructive,
@@ -301,10 +315,10 @@ fn register_more(r: &mut Registry, m: &Monitors, name_only: Value) -> Result<()>
         (
             "monitor_settings",
             "Uptime monitor settings",
-            "The org's monitoring settings: auto_monitors (every app with a served domain gets its own monitor, app-<name>; default true) and exclude_apps (apps that do not). Pass a field to change it; returns the settings.",
+            "The org's monitoring settings: auto_monitors (every app and compose stack service with a served domain gets its own monitor, app-<name> or stack-<stack>-<service>; default true), exclude_apps (apps that do not) and exclude_services (stack services that do not, as <stack>/<service>). Pass a field to change it; returns the settings.",
         ),
         obj(
-            json!({"auto_monitors": {"type": "boolean"}, "exclude_apps": {"type": "array", "items": {"type": "string"}}}),
+            json!({"auto_monitors": {"type": "boolean"}, "exclude_apps": {"type": "array", "items": {"type": "string"}}, "exclude_services": {"type": "array", "items": {"type": "string"}, "description": "<stack>/<service> names."}}),
             &[],
         ),
         &write,
@@ -428,8 +442,29 @@ mod tests {
             )
             .is_err()
         );
+        let s = settings(
+            &m,
+            json!({"org": "acme", "exclude_services": ["wiki/web"]}),
+            &local,
+        )
+        .unwrap();
+        assert_eq!(s["exclude_services"], json!(["wiki/web"]));
+        for bad in ["wiki", "Wiki/web", "wiki/a b"] {
+            assert!(
+                settings(
+                    &m,
+                    json!({"org": "acme", "exclude_services": [bad]}),
+                    &local
+                )
+                .is_err(),
+                "{bad}"
+            );
+        }
         let d = delete(&m, json!({"org": "acme", "name": "shop"}), &local).unwrap();
-        assert_eq!(d, json!({"ok": true, "excluded_app": null}));
+        assert_eq!(
+            d,
+            json!({"ok": true, "excluded_app": null, "excluded_service": null})
+        );
         assert!(get(&m, json!({"org": "acme", "name": "shop"}), &local).is_err());
     }
 }

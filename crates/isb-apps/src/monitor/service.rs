@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 use super::state::{NEVER_UP_MS, Notify, State, Status, Thresholds};
 use super::store::{Check, Db};
 use super::target::{self, Ctx, Outcome};
-use super::{AUTO_PREFIX, Kind, MAX_PER_ORG, Monitor, Settings, dir, human, read_json, write_json};
+use super::{Kind, MAX_PER_ORG, Monitor, Settings, auto, dir, human, read_json, write_json};
 use crate::app::Apps;
 use crate::error::{Error, Result};
 use crate::org::OrgId;
@@ -32,7 +32,7 @@ use crate::stack::controller::now_ms;
 pub const WORKERS: usize = 8;
 /// Due checks waiting for a worker, at most; more wait for the next tick.
 pub const QUEUE: usize = 256;
-/// How often apps are looked at for their own monitors.
+/// How often apps and stacks are looked at for their own monitors.
 const AUTO_SYNC_MS: u64 = 60_000;
 /// How often the history is rolled up and pruned.
 const ROLLUP_MS: u64 = 300_000;
@@ -41,6 +41,8 @@ const DETAILS_KEPT: usize = 256;
 
 /// Why an app's monitor has not checked yet.
 pub const WAITING_FOR_APP: &str = "waiting for the app's first live deployment";
+/// Why a stack service's monitor has not checked yet.
+pub const WAITING_FOR_SERVICE: &str = "waiting for the service's first replica in rotation";
 
 /// Is the address policy relaxed (the platform's private-targets setting)?
 pub type AllowPrivate = Arc<dyn Fn() -> bool + Send + Sync>;
@@ -87,7 +89,7 @@ pub struct Monitors {
     inner: Arc<Inner>,
 }
 
-fn fnv(s: &str) -> u64 {
+pub(super) fn fnv(s: &str) -> u64 {
     s.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| {
         (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
     })
@@ -193,15 +195,42 @@ impl Monitors {
         for a in &s.exclude_apps {
             crate::app::validate_app_name(a)?;
         }
+        for x in &s.exclude_services {
+            let ok = x.split_once('/').is_some_and(|(st, sv)| {
+                crate::stack::validate_stack_name(st).is_ok()
+                    && super::validate_service_name(sv).is_ok()
+            });
+            if !ok {
+                return Err(Error::invalid(format!(
+                    "exclude_services: {x:?} is not <stack>/<service>"
+                )));
+            }
+        }
         let _g = self.inner.edit.lock().unwrap();
         write_json(&self.path(org, "settings.json"), s)
     }
 
-    /// What a monitor needs to exist: its app and its secrets.
+    /// What a monitor needs to exist: its app or stack service, and its
+    /// secrets.
     fn check_refs(&self, org: &OrgId, m: &Monitor) -> Result<()> {
         if m.kind == Kind::App {
             let a = m.app.as_deref().unwrap_or_default();
             self.inner.apps.get(org, a)?;
+        }
+        if m.kind == Kind::Service {
+            let (st, sv) = (
+                m.stack.as_deref().unwrap_or_default(),
+                m.service.as_deref().unwrap_or_default(),
+            );
+            let d = self
+                .inner
+                .apps
+                .controller()
+                .definition(&crate::stack::qualified(org, st))
+                .map_err(|_| Error::NotFound(format!("stack {st} in org {org}")))?;
+            if !d.file.services.contains_key(sv) {
+                return Err(Error::NotFound(format!("service {sv} in stack {st}")));
+            }
         }
         for s in m.secrets() {
             self.inner.secrets.inspect(org, s).map_err(|e| {
@@ -280,8 +309,8 @@ impl Monitors {
         Ok(n)
     }
 
-    /// Remove a monitor and its history. An app's own monitor stays away:
-    /// the app joins the org's exclusions.
+    /// Remove a monitor and its history. An app's or a stack service's own
+    /// monitor stays away: it joins the org's exclusions.
     pub fn delete(&self, org: &OrgId, name: &str) -> Result<Monitor> {
         let _g = self.inner.edit.lock().unwrap();
         let mut all = self.list(org)?;
@@ -293,9 +322,18 @@ impl Monitors {
         self.save(org, &all)?;
         if m.auto {
             let mut s = self.settings(org)?;
-            let app = m.app.clone().unwrap_or_default();
-            if !s.exclude_apps.contains(&app) {
-                s.exclude_apps.push(app);
+            let (list, x) = match m.kind {
+                Kind::Service => (
+                    &mut s.exclude_services,
+                    auto::exclusion(
+                        m.stack.as_deref().unwrap_or_default(),
+                        m.service.as_deref().unwrap_or_default(),
+                    ),
+                ),
+                _ => (&mut s.exclude_apps, m.app.clone().unwrap_or_default()),
+            };
+            if !list.contains(&x) {
+                list.push(x);
                 write_json(&self.path(org, "settings.json"), &s)?;
             }
         }
@@ -338,57 +376,19 @@ impl Monitors {
         s.next = now_ms() + 1000;
     }
 
-    // ---- apps' own monitors ----
+    // ---- apps' and stack services' own monitors ----
 
-    /// Give every app with a served domain its own monitor, and remove
-    /// those whose app is gone, has no domains, or opted out.
+    /// Give every app and compose stack service with a served domain its
+    /// own monitor, and remove those whose target is gone, has no domains,
+    /// or opted out ([`auto`]).
     pub fn sync_auto(&self, org: &OrgId) -> Result<()> {
         let settings = self.settings(org)?;
-        let apps = self.inner.apps.list(org)?;
-        let ctl = self.inner.apps.controller();
-        let served = |a: &crate::app::App| -> bool {
-            let Ok(stack) = a.spec.stack() else {
-                return false;
-            };
-            ctl.status(&crate::stack::qualified(org, &stack))
-                .ok()
-                .and_then(|s| s.services.into_iter().find(|x| x.service == a.spec.name))
-                .is_some_and(|s| s.domains.iter().any(|d| d.url.is_some()))
-        };
-        let wanted = |a: &crate::app::App| {
-            settings.auto_monitors
-                && !settings.exclude_apps.contains(&a.spec.name)
-                && !a.spec.domains.is_empty()
-        };
+        let mut cands = auto::apps(&self.inner.apps, org)?;
+        cands.extend(auto::stack_services(&self.inner.apps, org));
         let _g = self.inner.edit.lock().unwrap();
         let mut all = self.list(org)?;
-        let before = all.len();
-        let mut gone = Vec::new();
-        all.retain(|m| {
-            let keep = !m.auto
-                || apps
-                    .iter()
-                    .any(|a| Some(&a.spec.name) == m.app.as_ref() && wanted(a));
-            if !keep {
-                gone.push(m.name.clone());
-            }
-            keep
-        });
-        let mut added = Vec::new();
-        for a in apps.iter().filter(|a| wanted(a) && served(a)) {
-            let name = format!("{AUTO_PREFIX}{}", a.spec.name);
-            if all.len() >= MAX_PER_ORG || all.iter().any(|m| m.name == name) {
-                continue;
-            }
-            let mut m = Monitor::new(&name, Kind::App);
-            m.app = Some(a.spec.name.clone());
-            m.auto = true;
-            let now = now_ms() / 1000;
-            (m.created_at, m.updated_at) = (now, now);
-            added.push(name);
-            all.push(m);
-        }
-        if all.len() != before || !gone.is_empty() {
+        let (gone, added) = auto::reconcile(&mut all, &settings, &cands, now_ms() / 1000);
+        if !gone.is_empty() || !added.is_empty() {
             self.save(org, &all)?;
         }
         drop(_g);
@@ -396,7 +396,7 @@ impl Monitors {
             self.db(org)?.lock().unwrap().forget(n)?;
         }
         for n in &added {
-            eprintln!("isb serve: monitor: {org}/{n}: watching the app's domain");
+            eprintln!("isb serve: monitor: {org}/{n}: watching its domain");
             self.due_soon(org, n);
         }
         Ok(())
@@ -436,7 +436,7 @@ impl Monitors {
             if now.saturating_sub(synced) >= AUTO_SYNC_MS {
                 for o in self.orgs() {
                     if let Err(e) = self.sync_auto(&o) {
-                        eprintln!("isb serve: monitor: {o}: apps' own monitors: {e}");
+                        eprintln!("isb serve: monitor: {o}: own monitors: {e}");
                     }
                 }
                 synced = now;
@@ -523,21 +523,26 @@ impl Monitors {
         }
     }
 
-    /// Run one check now. An app's monitor that has not been up yet does
-    /// not look at the app until it has a live deployment: the check fails
-    /// as "waiting", which the state machine keeps as pending.
+    /// Run one check now. An app's or stack service's monitor that has not
+    /// been up yet does not look at it until it has a live deployment: the
+    /// check fails as "waiting", which the state machine keeps as pending.
     pub fn check(&self, org: &OrgId, m: &Monitor) -> Outcome {
-        if m.kind == Kind::App
+        if m.follows()
             && self
                 .stored(org, &m.name)
                 .map(|s| s.state.status == Status::Pending)
                 .unwrap_or(true)
-            && !target::app_is_live(&self.inner.apps, org, m)
+            && !target::is_live(&self.inner.apps, org, m)
         {
+            let why = if m.kind == Kind::App {
+                WAITING_FOR_APP
+            } else {
+                WAITING_FOR_SERVICE
+            };
             return Outcome {
                 at: now_ms(),
                 ok: false,
-                error: Some(WAITING_FOR_APP.into()),
+                error: Some(why.into()),
                 ..Default::default()
             };
         }
@@ -627,9 +632,12 @@ impl Monitors {
     // ---- events ----
 
     /// Where a monitor's events go: an app's service (so channel rules on
-    /// apps and projects match), else `<org>/@monitors`, service = the
-    /// monitor.
+    /// apps and projects match), a stack service's own, else
+    /// `<org>/@monitors`, service = the monitor.
     fn subject(&self, org: &OrgId, m: &Monitor) -> (String, String) {
+        if let (Kind::Service, Some(st), Some(sv)) = (m.kind, &m.stack, &m.service) {
+            return (crate::stack::qualified(org, st), sv.clone());
+        }
         if let Some(a) = m
             .app
             .as_deref()
@@ -653,6 +661,8 @@ impl Monitors {
             "monitor": m.name,
             "type": m.kind,
             "app": m.app,
+            "stack": m.stack,
+            "service": m.service,
             "url": o.url.clone().unwrap_or_else(|| m.target()),
             "status": o.status,
             "latency_ms": o.latency_ms,
