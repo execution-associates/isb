@@ -312,6 +312,17 @@ pub fn access_redirect(a: &HttpAnswer) -> bool {
         })
 }
 
+/// Did Cloudflare Access stop the request, by redirect or by refusal?
+fn access_stopped(a: &HttpAnswer) -> Option<&'static str> {
+    if access_redirect(a) {
+        Some("redirected to Cloudflare Access sign-in")
+    } else if a.access_refused {
+        Some("refused by Cloudflare Access")
+    } else {
+        None
+    }
+}
+
 /// Judge an HTTP answer by the monitor's expectations.
 pub fn judge(m: &Monitor, a: &HttpAnswer) -> Result<(), String> {
     let ranges = parse_status(&m.expected_status).map_err(|e| e.to_string())?;
@@ -320,14 +331,14 @@ pub fn judge(m: &Monitor, a: &HttpAnswer) -> Result<(), String> {
         .any(|(lo, hi)| (*lo..=*hi).contains(&a.status))
     {
         let mut e = format!("HTTP {} (expected {})", a.status, m.expected_status);
-        if access_redirect(a) {
-            e.push_str(": redirected to Cloudflare Access sign-in");
+        if let Some(why) = access_stopped(a) {
+            e.push_str(&format!(": {why}"));
         }
         return Err(e);
     }
-    if access_redirect(a) {
+    if let Some(why) = access_stopped(a) {
         return Err(format!(
-            "HTTP {}: redirected to Cloudflare Access sign-in; give the monitor a service token (headers CF-Access-Client-Id and CF-Access-Client-Secret from secrets)",
+            "HTTP {}: {why}; give the monitor a service token (headers CF-Access-Client-Id and CF-Access-Client-Secret from secrets)",
             a.status
         ));
     }
@@ -508,6 +519,20 @@ mod tests {
             judge(&m, &access)
                 .unwrap_err()
                 .contains("Cloudflare Access")
+        );
+        // Access refusing outright: its 403 page, and its OAuth 401.
+        let refused = HttpAnswer {
+            access_refused: true,
+            ..ans(403, None, "")
+        };
+        assert_eq!(
+            judge(&m, &refused).unwrap_err(),
+            "HTTP 403 (expected 200-399): refused by Cloudflare Access"
+        );
+        assert!(
+            judge(&m, &ans(403, None, ""))
+                .unwrap_err()
+                .ends_with("200-399)")
         );
         m.expected_status = "200".into();
         assert!(

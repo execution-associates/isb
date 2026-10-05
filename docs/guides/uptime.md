@@ -213,9 +213,11 @@ the exclusions.
 
 ### Behind Cloudflare Access
 
-A domain behind [Cloudflare Access](remote-access.md) answers a sign-in
-redirect, not the app. isb recognises the redirect (to
-`*.cloudflareaccess.com`) and never counts it as up:
+A domain behind [Cloudflare Access](remote-access.md) answers for Access, not
+the app: a sign-in redirect (to `*.cloudflareaccess.com`), or a refusal, a 403
+page carrying Access' `cf-access-*` headers or, for an app Access fronts with
+OAuth, a 401 whose `WWW-Authenticate` names its `cloudflare-access-protected-resource`
+metadata. isb recognises all three and never counts them as up:
 
 - **Give monitors a service token** (recommended): create an Access service
   token allowed by the application's policy, and store it as the org secrets
@@ -226,8 +228,8 @@ redirect, not the app. isb recognises the redirect (to
 - **Without a token**, an `app` or `service` monitor checks its own endpoint
   instead (with the domain as the Host header) and says so in its last check
   (`via`, `note`); an `http` monitor is down
-  with "redirected to Cloudflare Access sign-in", since that is all it can
-  see.
+  with "redirected to Cloudflare Access sign-in" or "refused by Cloudflare
+  Access", since that is all it can see.
 
 ## Where checks run, and what they may reach
 

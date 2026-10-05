@@ -51,6 +51,9 @@ pub struct HttpAnswer {
     pub cert_expires: Option<u64>,
     /// The URL that answered, after redirects, without its query.
     pub final_url: String,
+    /// Cloudflare Access itself refused the request (401 or 403 with its
+    /// headers), rather than the app behind it answering.
+    pub access_refused: bool,
 }
 
 /// A URL without its query and fragment, for messages.
@@ -359,10 +362,21 @@ pub fn parse(raw: &[u8], head_only: bool) -> Result<HttpAnswer, String> {
         raw_body.to_vec()
     };
     body.truncate(MAX_BODY);
+    let status = r.code.unwrap_or(0);
+    // Access answers a request without a session two ways besides its
+    // sign-in redirect: a 403 page carrying its cf-access-* headers, and,
+    // for an app it fronts with OAuth, a 401 whose WWW-Authenticate names
+    // its protected-resource metadata.
+    let access_refused = matches!(status, 401 | 403)
+        && (header("cf-access-domain").is_some()
+            || header("cf-access-aud").is_some()
+            || header("www-authenticate")
+                .is_some_and(|v| v.contains("cloudflare-access-protected-resource")));
     Ok(HttpAnswer {
-        status: r.code.unwrap_or(0),
+        status,
         location: header("location"),
         body,
+        access_refused,
         ..Default::default()
     })
 }
@@ -501,6 +515,26 @@ mod tests {
             got
         });
         (port, h)
+    }
+
+    #[test]
+    fn access_refusals_are_told_from_the_app() {
+        let refused = |raw: &str| parse(raw.as_bytes(), true).unwrap().access_refused;
+        // Access' own 403 page, and its OAuth 401 for an app it fronts.
+        assert!(refused(
+            "HTTP/1.1 403 Forbidden\r\ncf-access-domain: broker.example.com\r\n\r\n"
+        ));
+        assert!(refused(
+            "HTTP/1.1 401 Unauthorized\r\nwww-authenticate: Bearer realm=\"OAuth\", resource_metadata=\"https://a.example.com/.well-known/cloudflare-access-protected-resource/x\"\r\n\r\n"
+        ));
+        // The app's own refusals, and Access headers on anything but 401/403.
+        assert!(!refused("HTTP/1.1 403 Forbidden\r\n\r\n"));
+        assert!(!refused(
+            "HTTP/1.1 401 Unauthorized\r\nwww-authenticate: Basic realm=\"x\"\r\n\r\n"
+        ));
+        assert!(!refused(
+            "HTTP/1.1 200 OK\r\ncf-access-domain: broker.example.com\r\n\r\n"
+        ));
     }
 
     #[test]
