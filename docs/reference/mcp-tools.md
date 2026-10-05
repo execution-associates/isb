@@ -269,8 +269,8 @@ and owners.
 
 | Tool | Who | Does |
 |---|---|---|
-| `job_create` | member | `name`, `schedule`, `timezone`, `target` (`{app}` or `{stack, service}`), `mode` (`exec`, `run`), `command`, `timeout`, `concurrency`, `keep`, `enabled`, `user`, `cwd`, `env`, `missed_grace`. |
-| `job_list`, `job_get` | viewer | Jobs with their next and last run. |
+| `job_create` | member | `name`, `schedule`, `timezone`, `target` (`{app}` or `{stack, service}`), `mode` (`exec`, `run`), `command`, `timeout`, `concurrency`, `keep`, `enabled` (default true; `false` creates it disabled), `user`, `cwd`, `env`, `missed_grace`. Answers as `job_get`. |
+| `job_list`, `job_get` | viewer | Each job is one object: its settings with `created_at`, `updated_at`, `next_run` (RFC 3339, null when disabled) and `last_run` at the top level. |
 | `job_update` | member | A merge patch; the name is fixed. |
 | `job_delete` | member | The job and its run records (refused while it runs). |
 | `job_run` | member | Run now (`wait`, `timeout`). |

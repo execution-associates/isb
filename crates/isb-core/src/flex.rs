@@ -52,6 +52,14 @@ pub(crate) fn string<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error
     })
 }
 
+/// As `opt_string`, with `null` read as unset (JSON API bodies send it).
+pub fn opt_string_or_null<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    Ok(Option::<IntOrString>::deserialize(d)?.map(|v| match v {
+        IntOrString::Int(n) => n.to_string(),
+        IntOrString::String(s) => s,
+    }))
+}
+
 pub(crate) fn opt_string<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     Ok(Some(match IntOrString::deserialize(d)? {
         IntOrString::Int(n) => n.to_string(),

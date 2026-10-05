@@ -57,7 +57,13 @@ pub enum ServerCmd {
         json: bool,
     },
     /// One server, as JSON.
-    Show { name: String },
+    Show {
+        name: String,
+        /// Accepted so scripts can pass --json everywhere; the output is
+        /// always JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Forget a server (refused while orgs are placed on it).
     #[command(alias = "remove")]
     Rm { name: String },
@@ -283,7 +289,7 @@ pub fn server(cmd: ServerCmd) -> Result<u8> {
             table(rows);
             Ok(0)
         }
-        ServerCmd::Show { name } => {
+        ServerCmd::Show { name, .. } => {
             print_json(&call("server_show", json!({"name": name}), SHORT)?);
             Ok(0)
         }

@@ -129,11 +129,15 @@ pub(crate) enum VolumeCmd {
         #[arg(long)]
         json: bool,
     },
-    /// Show a named volume.
+    /// Show a named volume, as JSON.
     Inspect {
         name: String,
         #[arg(long)]
         pool: Option<String>,
+        /// Accepted so scripts can pass --json everywhere; the output is
+        /// always JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Delete a named volume (refused while in use).
     #[command(alias = "remove")]
@@ -146,12 +150,22 @@ pub(crate) enum VolumeCmd {
     #[command(subcommand)]
     Snapshot(volumes::SnapshotCmd),
     /// A volume's snapshots, schedule, backups and staged restores (isb serve).
-    Show { name: String },
+    Show {
+        name: String,
+        /// Accepted so scripts can pass --json everywhere; the output is
+        /// always JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Restore a snapshot or a backup into a NEW volume, mounted at
     /// /restore/<stamp> in the instance using it; the live volume is untouched.
     Restore(volumes::RestoreArgs),
     /// Staged restores (of NAME, or every volume).
-    Restores { name: Option<String> },
+    Restores {
+        name: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Detach and delete a staged restore.
     Discard { name: String, stamp: String },
 }
@@ -179,6 +193,9 @@ pub(crate) enum PortCmd {
         /// Property to print (listen, connect, bind, ...).
         #[arg(default_value = "listen")]
         key: String,
+        /// Print every property of the device as a JSON object instead.
+        #[arg(long)]
+        json: bool,
     },
     /// List proxy devices.
     Ls {
@@ -437,9 +454,9 @@ pub(crate) fn exec(ctx: &Ctx, a: ExecArgs) -> Result<u8> {
 pub(crate) fn volume(ctx: &Ctx, v: VolumeCmd) -> Result<u8> {
     let cmd = match v {
         VolumeCmd::Snapshot(s) => volumes::Cmd::Snapshot(s),
-        VolumeCmd::Show { name } => volumes::Cmd::Show(name),
+        VolumeCmd::Show { name, .. } => volumes::Cmd::Show(name),
         VolumeCmd::Restore(a) => volumes::Cmd::Restore(a),
-        VolumeCmd::Restores { name } => volumes::Cmd::Restores(name),
+        VolumeCmd::Restores { name, json } => volumes::Cmd::Restores(name, json),
         VolumeCmd::Discard { name, stamp } => volumes::Cmd::Discard(name, stamp),
         other => return volume_local(ctx, other),
     };
@@ -465,13 +482,22 @@ pub(crate) fn port(ctx: &Ctx, p: PortCmd) -> Result<u8> {
             let listen = Sandbox::get(&c, &name)?.add_port(&ps)?;
             println!("{listen}");
         }
-        PortCmd::Get { name, device, key } => {
+        PortCmd::Get {
+            name,
+            device,
+            key,
+            json,
+        } => {
             let info = Sandbox::get(&c, &name)?.info()?;
             let dev = info
                 .devices
                 .get(&device)
                 .filter(|p| p.get("type").map(String::as_str) == Some("proxy"))
                 .ok_or_else(|| Error::NotFound(format!("proxy device {device} on {name}")))?;
+            if json {
+                print_json(dev);
+                return Ok(0);
+            }
             let v = dev
                 .get(&key)
                 .ok_or_else(|| Error::NotFound(format!("property {key} of {name}/{device}")))?;
