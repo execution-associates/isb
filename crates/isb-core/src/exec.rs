@@ -841,6 +841,38 @@ pub fn stdio_is_tty() -> bool {
     rustix::termios::isatty(std::io::stdin()) && rustix::termios::isatty(std::io::stdout())
 }
 
+/// Whether this process's stdin holds input a command would not get: a pipe
+/// or socket with bytes waiting (after up to 50ms for a writer that is still
+/// starting, as in `printf x | isb exec ...`), or a file with bytes left.
+/// Terminals and devices (`/dev/null`) never count. Nothing is read.
+pub fn stdin_has_input() -> bool {
+    has_input(std::io::stdin(), Duration::from_millis(50))
+}
+
+fn has_input(fd: impl rustix::fd::AsFd, wait: Duration) -> bool {
+    use rustix::fs::FileType;
+    let fd = fd.as_fd();
+    let Ok(st) = rustix::fs::fstat(fd) else {
+        return false;
+    };
+    match FileType::from_raw_mode(st.st_mode) {
+        FileType::RegularFile => rustix::fs::seek(fd, rustix::fs::SeekFrom::Current(0))
+            .is_ok_and(|pos| (pos as i64) < st.st_size),
+        FileType::Fifo | FileType::Socket => {
+            use rustix::event::{PollFd, PollFlags, Timespec, poll};
+            let mut fds = [PollFd::new(&fd, PollFlags::IN)];
+            let ts = Timespec {
+                tv_sec: wait.as_secs() as i64,
+                tv_nsec: wait.subsec_nanos() as i64,
+            };
+            // Readable means bytes or EOF; FIONREAD tells them apart.
+            matches!(poll(&mut fds, Some(&ts)), Ok(n) if n > 0)
+                && rustix::io::ioctl_fionread(fd).is_ok_and(|n| n > 0)
+        }
+        _ => false,
+    }
+}
+
 /// Puts the local terminal in raw mode for the life of the guard.
 struct RawMode {
     saved: rustix::termios::Termios,
@@ -869,6 +901,29 @@ impl Drop for RawMode {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn input_waiting_on_a_pipe_or_file_is_seen_without_reading_it() {
+        use std::io::{Seek, Write};
+        let no_wait = Duration::ZERO;
+        let (mut w, r) = std::os::unix::net::UnixStream::pair().unwrap();
+        assert!(!has_input(&r, no_wait), "an empty pipe");
+        w.write_all(b"hello").unwrap();
+        assert!(has_input(&r, no_wait), "a pipe with bytes");
+        assert!(has_input(&r, no_wait), "and they are still there");
+        let mut buf = [0u8; 5];
+        std::io::Read::read_exact(&mut &r, &mut buf).unwrap();
+        w.shutdown(std::net::Shutdown::Write).unwrap();
+        assert!(!has_input(&r, no_wait), "a pipe at EOF");
+        let mut f = tempfile::tempfile().unwrap();
+        assert!(!has_input(&f, no_wait), "an empty file");
+        f.write_all(b"x").unwrap();
+        f.rewind().unwrap();
+        assert!(has_input(&f, no_wait), "a file with bytes left");
+        let null = std::fs::File::open("/dev/null").unwrap();
+        assert!(!has_input(&null, no_wait), "a device");
+    }
+
     use super::*;
 
     #[test]
