@@ -1,0 +1,95 @@
+name: crates.io
+
+# Publishes the seven crates for the newest GitHub release, on its own and
+# after the fact, so crates.io never holds up a release.
+# crates.io allows each crate only so many new versions in a sliding 24
+# hours (20 when this was written) and answers the rest with 429. isb can
+# release faster than that, so this workflow takes crates.io's backpressure
+# instead of failing on it:
+# - Every finished Release run queues a run, and so does the hourly
+#   schedule. The concurrency group runs one at a time, and a newly queued
+#   run replaces the one still waiting, so a burst of releases collapses
+#   into one publish.
+# - Each run publishes the newest release (the latest tag with a GitHub
+#   release), not the release that queued it. Versions in between are skipped
+#   on crates.io; the GitHub releases, PyPI and npm still carry every one.
+# - A 429 ends the run green with a warning. The next scheduled run tries
+#   the same newest release again, once the window has room.
+# Any other publish error fails the run. A crate version already on
+# crates.io is skipped, so a run picks up where a cut-off one stopped.
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crates-io
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    name: publish to crates.io
+    runs-on: ubuntu-24.04
+    steps:
+      # The newest release, not the one that queued this run: a run queued
+      # by an older release publishes whatever is newest when it starts.
+      # Only a published GitHub release counts (Release made it after main's
+      # CI gate), so crates.io never gets a version GitHub did not release. isb is published last, so its
+      # presence means the version is done.
+      - name: newest release, and whether crates.io has it
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)
+          v="${tag#v}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -A "isb-release (github.com/$GITHUB_REPOSITORY)" \
+            "https://crates.io/api/v1/crates/isb/$v")
+          if [ "$code" = 200 ]; then
+            echo "isb $v is already on crates.io: nothing to do"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publishing $tag"
+          fi
+      - if: steps.target.outputs.done != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.target.outputs.tag }}
+      - if: steps.target.outputs.done != 'true'
+        uses: dtolnay/rust-toolchain@stable
+      # Dependency order: everything needs isb-core; isb-daemon needs the
+      # others; isb needs them all. --no-verify: main's CI ran `cargo
+      # package` on this commit, and Release refused to publish a commit
+      # that had not passed it.
+      - name: publish
+        if: steps.target.outputs.done != 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          V: ${{ steps.target.outputs.version }}
+        run: |
+          [ -n "$CARGO_REGISTRY_TOKEN" ] || { echo "secret CARGO_REGISTRY_TOKEN is not set"; exit 1; }
+          set -o pipefail
+          log="$RUNNER_TEMP/publish.log"
+          for c in isb-core isb-egress isb-apps isb-server isb-tui isb-daemon isb; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -A "isb-release (github.com/$GITHUB_REPOSITORY)" \
+              "https://crates.io/api/v1/crates/$c/$V")
+            if [ "$code" = 200 ]; then echo "$c $V is already on crates.io"; continue; fi
+            if cargo publish --locked --no-verify -p "$c" 2>&1 | tee "$log"; then continue; fi
+            if grep -q '429 Too Many Requests' "$log"; then
+              echo "::warning::crates.io is rate limiting $c; isb $V waits for the next scheduled run"
+              exit 0
+            fi
+            exit 1
+          done
