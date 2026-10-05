@@ -45,7 +45,7 @@ use crate::org::OrgId;
 use crate::spec::{NamedVolumeSpec, SandboxSpec, SecretDef};
 
 pub use database::{DatabaseSource, Engine};
-pub use deploy::{Apps, BuildFn, DigestFn};
+pub use deploy::{Apps, BuildFn, DigestFn, SecretHook};
 pub use env::{EnvFile, EnvValue};
 pub use git::{GitAuth, GitSource};
 pub use preview::{Preview, PreviewSettings};
