@@ -80,10 +80,14 @@ fn on_stop_signal(cleanup: extern "C" fn()) {
         unsafe { libc::write(fd, (&raw const b).cast(), 1) };
     }
     let mut fds = [0i32; 2];
-    // SAFETY: pipe2 fills the two-element array.
-    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
+    // SAFETY: pipe fills the two-element array. Not pipe2, which macOS lacks.
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
         eprintln!("cleanup: no pipe for signals; a stopped run leaves its org to the next sweep");
         return;
+    }
+    for fd in fds {
+        // SAFETY: fd is one of the pipe's own; children need neither end.
+        unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
     }
     PIPE_W.store(fds[1], std::sync::atomic::Ordering::Relaxed);
     std::thread::spawn(move || {
