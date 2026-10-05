@@ -18,7 +18,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::accounts::TOOLS as ACCOUNTS;
-use super::{Daemon, arg_org, args, visible_orgs};
+use super::{Daemon, arg_org, args, read_orgs, visible_orgs};
 use crate::error::{Error, Result};
 use crate::org::OrgId;
 use crate::server::http::{Request, Response};
@@ -697,7 +697,21 @@ fn fan_out(
     rid: Option<&str>,
 ) -> Result<Value> {
     let local = (tool.handler)(a.clone(), c)?;
-    let visible = visible_orgs(c);
+    // A read that names its org (all but org_list) asks only the servers
+    // holding that org, and passes the org on for them to narrow by too.
+    let named = if tool.name == "org_list" {
+        None
+    } else {
+        a.get("org")
+            .and_then(Value::as_str)
+            .map(OrgId::new)
+            .transpose()?
+    };
+    let visible = if named.is_some() {
+        read_orgs(c, a)?
+    } else {
+        visible_orgs(c)
+    };
     let targets: Vec<String> = s
         .records()
         .into_iter()
@@ -713,7 +727,9 @@ fn fan_out(
     let who = Assertion::for_caller(c)
         .ok_or_else(|| Error::Forbidden(format!("{c} cannot read servers")))?;
     let mut unscoped = a.clone();
-    if let Some(o) = unscoped.as_object_mut() {
+    if named.is_none()
+        && let Some(o) = unscoped.as_object_mut()
+    {
         o.remove("org");
     }
     let results: Vec<(String, std::result::Result<Value, String>)> = std::thread::scope(|sc| {

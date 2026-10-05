@@ -189,23 +189,42 @@ pub(crate) fn stack(ctx: &Ctx, cmd: StackCmd) -> Result<u8> {
                 print_json(&r["stacks"]);
                 return Ok(0);
             }
-            let mut rows = vec![vec![
+            let stacks = r["stacks"].as_array().cloned().unwrap_or_default();
+            // Without --org the rows can come from any org the caller sees.
+            let orgs: std::collections::BTreeSet<&str> =
+                stacks.iter().filter_map(|s| s["org"].as_str()).collect();
+            let show_org = org.is_none() || orgs.len() > 1;
+            let mut header: Vec<String> = vec![
                 "NAME".into(),
                 "SERVICES".into(),
                 "CONVERGED".into(),
                 "DEPLOYED BY".into(),
-            ]];
-            for s in r["stacks"].as_array().into_iter().flatten() {
-                rows.push(vec![
-                    s["name"].as_str().unwrap_or("").into(),
-                    s["services"]
-                        .as_array()
-                        .map(|a| a.len())
-                        .unwrap_or(0)
-                        .to_string(),
-                    s["converged"].to_string(),
-                    s["deployed_by"].as_str().unwrap_or("").into(),
-                ]);
+            ];
+            if show_org {
+                header.insert(0, "ORG".into());
+            }
+            let mut rows = vec![header];
+            for s in &stacks {
+                let mut row: Vec<String> = Vec::new();
+                if show_org {
+                    row.push(s["org"].as_str().unwrap_or("").into());
+                }
+                rows.push(
+                    [
+                        row,
+                        vec![
+                            s["name"].as_str().unwrap_or("").into(),
+                            s["services"]
+                                .as_array()
+                                .map(|a| a.len())
+                                .unwrap_or(0)
+                                .to_string(),
+                            s["converged"].to_string(),
+                            s["deployed_by"].as_str().unwrap_or("").into(),
+                        ],
+                    ]
+                    .concat(),
+                );
             }
             table(rows);
             Ok(0)

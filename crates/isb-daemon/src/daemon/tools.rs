@@ -59,12 +59,12 @@ pub(super) fn overview_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Res
         d,
         "overview",
         "Overview",
-        "Everything a dashboard shows in one call: the host's CPU and memory (with history), every stack in detail (as stack_status), the sandboxes (status, IP, CPU, memory), and the latest event number for the events tool.",
+        "Everything a dashboard shows in one call: the host's CPU and memory (with history), every stack in detail (as stack_status), the sandboxes (status, IP, CPU, memory), and the latest event number for the events tool. Every org the caller sees, or only `org` when it is given.",
         obj(json!({}), &[]),
         ann.ro,
-        |d: &Daemon, _a: Value, c: &Caller| -> Result<Value> {
+        |d: &Daemon, a: Value, c: &Caller| -> Result<Value> {
             let snap = d.ctl.snapshot();
-            let orgs = visible_orgs(c);
+            let orgs = read_orgs(c, &a)?;
             let sees = |org: &str| {
                 orgs.as_ref()
                     .is_none_or(|v| v.iter().any(|o| o.as_str() == org))
@@ -110,7 +110,7 @@ pub(super) fn events_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Resul
         d,
         "events",
         "Events",
-        "What happened, newest last: deploys, rollouts, health changes, restarts, failures. Pass the last `seq` you saw as `since` to get only newer ones; `wait` (seconds, at most 30) holds the call until one arrives.",
+        "What happened, newest last: deploys, rollouts, health changes, restarts, failures. Pass the last `seq` you saw as `since` to get only newer ones; `wait` (seconds, at most 30) holds the call until one arrives. Every org the caller sees, or only `org` when it is given.",
         obj(
             json!({
                 "since": {"type": "integer", "minimum": 0},
@@ -121,6 +121,7 @@ pub(super) fn events_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Resul
         ),
         ann.ro,
         |d: &Daemon, a: Value, c: &Caller| -> Result<Value> {
+            let orgs = read_orgs(c, &a)?;
             #[derive(Deserialize)]
             struct A {
                 #[serde(default)]
@@ -138,7 +139,6 @@ pub(super) fn events_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Resul
                 a.limit.unwrap_or(200).min(1000),
                 Duration::from_secs(a.wait.min(30)),
             );
-            let orgs = visible_orgs(c);
             let events: Vec<_> = events
                 .into_iter()
                 .filter(|e| event_visible(&orgs, &e.stack))
@@ -155,17 +155,17 @@ pub(super) fn ingress_status_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) 
         d,
         "ingress_status",
         "Ingress status",
-        "The HTTP(S) edge: its listeners, CA and Caddy process; every routed domain with its URL, certificate state (issued, pending, failed, unsupported, cloudflare, none) and live upstreams; domain conflicts and refusals; and each Cloudflare-tunnel org's cloudflared and API sync. Shows the caller's orgs only.",
+        "The HTTP(S) edge: its listeners, CA and Caddy process; every routed domain with its URL, certificate state (issued, pending, failed, unsupported, cloudflare, none) and live upstreams; domain conflicts and refusals; and each Cloudflare-tunnel org's cloudflared and API sync. Shows the caller's orgs only, or only `org` when it is given.",
         obj(json!({}), &[]),
         ann.ro,
-        |d: &Daemon, _a: Value, c: &Caller| -> Result<Value> {
+        |d: &Daemon, a: Value, c: &Caller| -> Result<Value> {
             let Some(m) = &d.ingress else {
                 return Ok(json!({
                     "enabled": false,
                     "message": "isb serve runs without an ingress (--ingress-http, --ingress-https or --ingress-tunnels)",
                 }));
             };
-            let orgs = visible_orgs(c);
+            let orgs = read_orgs(c, &a)?;
             Ok(m.status(orgs.as_deref()))
         }
     );
@@ -178,11 +178,11 @@ pub(super) fn stack_list_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> R
         d,
         "stack_list",
         "List stacks",
-        "List deployed stacks with each service's replica, health and rollout state, and the project environment each compose stack belongs to (`project`, `environment`).",
+        "List deployed stacks with each service's replica, health and rollout state, and the project environment each compose stack belongs to (`project`, `environment`). Every org the caller sees, or only `org` when it is given; each row names its `org`.",
         obj(json!({}), &[]),
         ann.ro,
-        |d: &Daemon, _a: Value, c: &Caller| -> Result<Value> {
-            let orgs = visible_orgs(c);
+        |d: &Daemon, a: Value, c: &Caller| -> Result<Value> {
+            let orgs = read_orgs(c, &a)?;
             let stacks: Vec<_> = d
                 .ctl
                 .list()

@@ -190,7 +190,7 @@ is described in [isb tui](tui.md); without a daemon it shows sandboxes only.
 
 ```text
 isb stack deploy [NAME] [-f FILE]... [-d] [--timeout 10m] [--project P [--env E]] [--no-reuse-secrets]   waits for the rollout unless -d
-isb stack ls [--json]
+isb stack ls [--json]               every org you see (an ORG column), or --org ORG's
 isb stack ps NAME [--json]
 isb stack logs NAME SERVICE [--slot N] [-n 100]
 isb stack scale NAME SERVICE=N...
