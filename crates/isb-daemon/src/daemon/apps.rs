@@ -93,8 +93,53 @@ pub(super) fn note_ingress(app: &mut Value, ingress: bool) -> Option<&'static st
     (!ingress && has_domains).then_some(NO_INGRESS_WARNING)
 }
 
+/// What the app's service is doing now (`state`, and `message` when it is
+/// failing: "image ... not found", say), or `None` before its first deploy.
+fn service_status(ap: &Apps, org: &OrgId, app: &App) -> Option<Value> {
+    let stack = app.spec.stack().ok()?;
+    let st = ap
+        .controller()
+        .status(&crate::stack::qualified(org, &stack))
+        .ok()?;
+    let s = st
+        .services
+        .into_iter()
+        .find(|s| s.service == app.spec.name)?;
+    let mut v = json!({"state": s.state, "replicas": s.replicas, "healthy": s.healthy});
+    if let Some(m) = s.message {
+        v["message"] = json!(m);
+    }
+    Some(v)
+}
+
+/// Put the image check's warning and the ingress one in a tool's answer.
+pub(super) fn warn(out: &mut Value, image: Option<String>, ingress: Option<&str>) {
+    let all: Vec<String> = image.into_iter().chain(ingress.map(String::from)).collect();
+    if !all.is_empty() {
+        out["warning"] = json!(all.join("\n"));
+    }
+}
+
+/// Check the image an update's patch would leave the app with, when it
+/// changes. A patch that does not make valid settings is left to `update`
+/// to refuse.
+fn check_patched_image(
+    ap: &Apps,
+    org: &OrgId,
+    name: &str,
+    patch: &Value,
+) -> Result<Option<String>> {
+    let cur = ap.get(org, name)?;
+    let mut v = serde_json::to_value(&cur.spec)?;
+    crate::app::merge_patch(&mut v, patch);
+    match serde_json::from_value::<AppSpec>(v) {
+        Ok(next) => ap.check_image(Some(&cur.spec), &next),
+        Err(_) => Ok(None),
+    }
+}
+
 const APP_PROPS: &str = r#"{
-  "source": {"type": "object", "description": "Exactly one of {\"image\": \"docker:nginx:1.27\"} or {\"git\": {\"url\", \"ref\" (branch, tag or SHA; default main), \"subdir\", \"auth\": {\"token_secret\": NAME, \"username\"} | {\"ssh_key_secret\": NAME}, \"submodules\": false}}."},
+  "source": {"type": "object", "description": "Exactly one of {\"image\": IMAGE} or {\"git\": {\"url\", \"ref\" (branch, tag or SHA; default main), \"subdir\", \"auth\": {\"token_secret\": NAME, \"username\"} | {\"ssh_key_secret\": NAME}, \"submodules\": false}}. IMAGE always carries its registry's prefix: Docker Hub is docker:NAME[:TAG] or docker:OWNER/NAME[:TAG] (docker:nginx:1.27, docker:traefik/whoami; never docker:traefik:whoami, which is the tag whoami of the image traefik), then ghcr:OWNER/NAME[:TAG], quay:OWNER/NAME[:TAG], oci:HOST/PATH[:TAG], registry:APP[:TAG] for the org's own builds; a name with no prefix is an image already on the host. A registry image is looked up when saved: one the registry does not have is refused, one that cannot be checked (offline, private) is saved with a warning."},
   "build": {"type": "object", "description": "Git sources only: {\"builder\": {\"type\": \"railpack\" | \"nixpacks\" | \"dockerfile\" (path, target) | \"buildpacks\" (builder)}, \"args\": {K: V}, \"untrusted\": true (build in a VM)}."},
   "env": {"description": ".env text, or a map {KEY: \"value\" | {\"secret\": NAME}}. A secret is an org secret, delivered as the variable."},
   "domains": {"type": "array", "items": {"type": "object"}, "description": "[{host, path?, port?, https?, redirect?}] for the ingress; port defaults to the app's port."},
@@ -436,13 +481,12 @@ fn app_create_tool(r: &mut Registry, apps: &Apps, ann: &Ann, ingress: bool) -> R
                 o.remove("deploy");
             }
             let spec: AppSpec = args(a)?;
+            let image = ap.check_image(None, &spec)?;
             let (app, secret) = ap.create(&org, spec)?;
             let mut aj = app_json(&org, &app);
-            let warning = note_ingress(&mut aj, ingress);
+            let ingress = note_ingress(&mut aj, ingress);
             let mut out = json!({"app": aj, "webhook_secret": secret});
-            if let Some(w) = warning {
-                out["warning"] = json!(w);
-            }
+            warn(&mut out, image, ingress);
             if deploy {
                 let d = ap.deploy(&org, &app.spec.name, trigger(c), &caller_name(c), None)?;
                 out["deployment"] = d.summary();
@@ -459,14 +503,18 @@ fn app_get_tool(r: &mut Registry, apps: &Apps, ann: &Ann, ingress: bool) -> Resu
         apps,
         "app_get",
         "Get an app",
-        "An app's settings, stack, service name, current deployment and webhook path. Secrets in its env show as {secret: NAME}, never values.",
+        "An app's settings, stack, service name, current deployment and webhook path, and what its service is doing now: status {state (converged, updating, failing, ...), replicas, healthy, message (why it is failing, e.g. image ... not found)}. Secrets in its env show as {secret: NAME}, never values.",
         obj(json!({"name": {"type": "string"}}), &["name"]),
         ann.ro,
         move |ap: &Apps, a: Value, _c: &Caller| -> Result<Value> {
             let org = org_of(&a)?;
             let a: Named = args(a)?;
-            let mut v = app_json(&org, &ap.get(&org, &a.name)?);
+            let app = ap.get(&org, &a.name)?;
+            let mut v = app_json(&org, &app);
             note_ingress(&mut v, ingress);
+            if let Some(st) = service_status(ap, &org, &app) {
+                v["status"] = st;
+            }
             Ok(v)
         }
     );
@@ -540,13 +588,15 @@ fn app_update_tool(r: &mut Registry, apps: &Apps, ann: &Ann, ingress: bool) -> R
                 o.remove("deploy");
                 o.remove("name");
             }
+            let image = match a.get("source") {
+                Some(_) => check_patched_image(ap, &org, &name, &a)?,
+                None => None,
+            };
             let app = ap.update(&org, &name, &a)?;
             let mut aj = app_json(&org, &app);
-            let warning = note_ingress(&mut aj, ingress);
+            let ingress = note_ingress(&mut aj, ingress);
             let mut out = json!({"app": aj});
-            if let Some(w) = warning {
-                out["warning"] = json!(w);
-            }
+            warn(&mut out, image, ingress);
             if deploy {
                 let d = ap.deploy(&org, &name, trigger(c), &caller_name(c), None)?;
                 out["deployment"] = d.summary();

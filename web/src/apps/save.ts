@@ -23,8 +23,9 @@ export function useAppUpdate(org: string, app: string) {
     clearTimeout(timer.current);
     setSaved(false);
     try {
-      const r = await callTool<{ app: App; deployment?: Deployment }>("app_update", { name: app, ...patch, ...(opts.deploy ? { deploy: true } : {}) }, org);
+      const r = await callTool<{ app: App; deployment?: Deployment; warning?: string }>("app_update", { name: app, ...patch, ...(opts.deploy ? { deploy: true } : {}) }, org);
       qc.setQueryData(keys.app(org, app), r.app);
+      if (r.warning) toast.warning(r.warning);
       await qc.invalidateQueries({ queryKey: keys.org(org) });
       if (!opts.quiet) toast.success(opts.deploy ? "Saved; deploying" : "Saved. It takes effect at the next deploy.");
       setSaved(true);

@@ -78,7 +78,7 @@ isb app update NAME [-f PATCH|-] [--image REF] [--ref R] [--replicas N] [--port 
 |---|---|
 | `name` | `[a-z0-9-]`, unique in the org; the service name in its stack. Fixed. |
 | `project`, `environment` | Where it runs (environment default `production`). Fixed. |
-| `source` | `{image: REF}` (`docker:nginx:1.27`, `ghcr:org/app:tag`, a local alias), `{git: {url, ref, subdir, auth, submodules}}` (`ref` default `main`), or `{database: {engine, version, database, user}}` ([Databases](databases.md)). |
+| `source` | `{image: REF}` ([Image references](#image-references)), `{git: {url, ref, subdir, auth, submodules}}` (`ref` default `main`), or `{database: {engine, version, database, user}}` ([Databases](databases.md)). |
 | `build` | Git sources only: `{builder: {type: railpack \| nixpacks \| dockerfile (path, target) \| buildpacks (builder)}, args: {K: V}, untrusted: true}`. `untrusted` (the default) builds in a VM. The `buildpacks` builder is refused at build time ([Builds](builds.md#building)). |
 | `env` | `.env` text, or a map `{KEY: value \| {secret: NAME}}` ([below](#the-environment-editor)). |
 | `domains` | `[{host, path?, port?, https?, redirect?}]` for the ingress ([Domains and ingress](domains.md)); `port` defaults to the app's `port`. |
@@ -94,6 +94,45 @@ isb app update NAME [-f PATCH|-] [--image REF] [--ref R] [--replicas N] [--port 
 | `user` | The user the app runs as; numeric (`uid[:gid]`) on an OCI image. |
 | `working_dir` | The working directory. |
 | `secret_on_change` | What a new version of a secret the app uses (in `env` or `files`) does: `roll` (default; a rolling update), `restart` (each replica's app restarted in place, one at a time, waiting until healthy) or `none` (files updated, replicas stale until they next start). See [When a secret changes](secrets.md#when-a-secret-changes). |
+
+### Image references
+
+An image names its registry before the first colon. Docker Hub needs
+`docker:`, and an image there is either `NAME` (an official image) or
+`OWNER/NAME`:
+
+| You want | Write |
+|---|---|
+| Docker Hub's official nginx, tag 1.27 | `docker:nginx:1.27` |
+| Docker Hub's `traefik/whoami`, tag latest | `docker:traefik/whoami` |
+| A GitHub Container Registry image | `ghcr:umami-software/umami:postgresql-latest` |
+| quay.io, or any other registry | `quay:OWNER/NAME:TAG`, `oci:HOST/PATH:TAG` |
+| The org's own build ([Builds](builds.md)) | `registry:APP:TAG` |
+| An image already on the host | its name, no prefix (`dev-base`) |
+
+Everything after the prefix is Docker's own reference, so a colon is still a
+tag: `docker:traefik:whoami` is the image `traefik` (Docker Hub's
+`library/traefik`) with the tag `whoami`, not `traefik/whoami`.
+
+A registry image is looked up when an app is created or its image changes
+(`app_create`, `app_update`, `app_apply`, the web UI), with `skopeo inspect`,
+the way incus will pull it, for this host's platform. An image its registry
+does not have is refused, with the likely fix when there is one:
+
+```text
+$ isb app create web --project shop --image docker:traefik:whoami
+error: image docker:traefik:whoami not found on Docker Hub (manifest unknown): did you mean docker:traefik/whoami?
+```
+
+A registry that does not answer within 15 seconds, or that wants credentials
+(a private image, or on Docker Hub a repository that does not exist), does
+not block the change: it is saved, and the answer carries a `warning`. Every
+deploy looks the image up again, since an image can be deleted later; a
+deploy whose image is gone fails before the stack is touched. An app whose
+replicas cannot pull their image (it went away after the deploy) shows
+`failing` with `image ... not found` as its status message (`isb app show`,
+the app page), and the controller retries after 5 minutes, then less often,
+up to once an hour, until the image appears or a deploy changes it.
 
 Changing a setting (`app_update`, a JSON merge patch where `null` clears a
 field; `isb app update NAME -f patch.yaml`, JSON or YAML) takes effect at the
@@ -223,7 +262,8 @@ queued → building → deploying → done
 ```
 
 - **building** resolves the image: an image source's digest is looked up
-  (`skopeo inspect`, when installed) and the app runs pinned to it
+  (`skopeo inspect`, when installed), an image the registry does not have
+  fails the deployment here, and the app runs pinned to it
   (`docker:traefik/whoami@sha256:...`), so a moved tag never changes a
   running app behind its back and a rollback gets exactly the old image. A git
   source is fetched and built ([below](#git-sources)).

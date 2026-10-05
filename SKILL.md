@@ -141,9 +141,13 @@ Rules worth knowing:
 - Docker keys with no isb equivalent (`build`, `networks`, `env_file`) are
   errors that say what to use instead.
 - Images: a local alias (`dev-base`), `images:debian/12`, or an OCI image:
-  `docker:nginx:1.27`, `ghcr:org/app:tag`, `registry:APP:TAG` (the org's own
-  builds). An OCI image's `command` is its whole command line, and its `user`
-  must be numeric.
+  `docker:nginx:1.27`, `docker:traefik/whoami`,
+  `ghcr:umami-software/umami:3.0.3`, `registry:APP:TAG` (the org's own
+  builds). After the prefix a colon is a tag: `docker:traefik:whoami` is
+  the image `traefik` tagged `whoami`, not `traefik/whoami`. `isb serve`
+  refuses an app or stack image its registry does not have. An OCI
+  image's `command` is its whole command line, and its `user` must be
+  numeric.
 - Readiness checks: `running`, `default_route`, `agent` (VMs),
   `{user_exists: U}`, `{path_writable: P}`, `{command: [argv]}`.
 - `restart: always` makes a service outlive `isb up` (a systemd unit in the

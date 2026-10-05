@@ -19,7 +19,9 @@ fn templates(dir: &Path) -> Templates {
     )
     .unwrap();
     let apps = Apps::new(dir, client, ctl, secrets.clone())
-        .with_digest(Arc::new(|_: &str| None))
+        .with_probe(Arc::new(|_: &str, _| {
+            crate::image_check::Probe::Found(None)
+        }))
         .with_timeout(Duration::from_secs(5));
     Templates::new(dir, apps, secrets, Some("203.0.113.7".parse().unwrap())).with(
         Catalogs::with_fetch(dir, Arc::new(|_: &str| Err(Error::invalid("offline")))),

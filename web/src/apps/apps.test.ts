@@ -9,6 +9,7 @@ import { appState, type Project } from "./api";
 import { activeServiceTab, SERVICE_TABS, serviceTabs } from "./service-tabs";
 import { envHealth, projectHealth } from "./health";
 import { lastDeploy, projectCounts } from "./projects-page";
+import { imageNote, imageProblem } from "./image-ref";
 
 describe("env text analysis (src/app/env.rs rules)", () => {
   const text = [
@@ -293,6 +294,26 @@ describe("ingress warning", () => {
   });
   it("says what to do about it", () => {
     expect(NO_INGRESS_WARNING).toContain("--ingress-https");
+  });
+});
+
+describe("image references (crates/isb-core/src/plan.rs)", () => {
+  it("accepts what isb reads", () => {
+    for (const ok of ["docker:traefik/whoami", "docker:nginx:1.27", "ghcr:org/app:v1", "registry:web:v2", "oci:reg.example.com:5000/a/b:1", "images:debian/12", "dev-base"]) {
+      expect(imageProblem(ok), ok).toBeNull();
+    }
+  });
+  it("catches a Docker Hub name without docker:, and offers both readings", () => {
+    expect(imageProblem("traefik:whoami")).toBe(
+      "Start with the registry: docker:traefik/whoami (the image traefik/whoami) or docker:traefik:whoami (the image traefik, tag whoami).",
+    );
+    expect(imageProblem("nginx/x:1")).toBe("Start with the registry, e.g. docker:nginx/x:1.");
+    expect(imageProblem(" ")).toMatch(/^Enter an image/);
+  });
+  it("notes that a bare owner/name is read as a local image", () => {
+    expect(imageNote("traefik/whoami")).toMatch(/docker:traefik\/whoami/);
+    expect(imageNote("docker:traefik/whoami")).toBeNull();
+    expect(imageNote("dev-base")).toBeNull();
   });
 });
 

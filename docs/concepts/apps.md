@@ -59,7 +59,7 @@ that `<project>-<env>` is a compose stack's name.
 
 | Source | What isb does |
 |---|---|
-| An image (`docker:nginx:1.27`, `ghcr:org/app:tag`, a local alias) | Looks up the tag's digest and runs the app pinned to it, so a moved tag never changes a running app behind its back. |
+| An image (`docker:nginx:1.27`, `docker:traefik/whoami`, `ghcr:umami-software/umami:3.0.3`, an image on the host) | Checks the registry has it, looks up the tag's digest and runs the app pinned to it, so a moved tag never changes a running app behind its back. |
 | A git repository | Fetches it on the host with hardened git, builds it in a fresh sandbox in the org ([Builds](../guides/builds.md)), and runs the image from the org's registry. |
 | A database engine (Postgres, MySQL, MariaDB, MongoDB, Redis) | Runs the engine's official image with a data volume, a health check and generated credentials ([Databases](../guides/databases.md)). |
 | A template | Creates one or more of the above with settings filled in and secrets generated ([Templates](../guides/templates.md)). |

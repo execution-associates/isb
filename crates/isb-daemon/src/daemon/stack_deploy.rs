@@ -3,6 +3,8 @@
 //! the record of the deployment ([`crate::stack::deployments`]). The
 //! stack settings tools redeploy through [`deploy`] too.
 
+mod stack_images;
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -177,10 +179,11 @@ pub(super) fn deploy(d: &Daemon, a: DeployArgs, c: &Caller) -> Result<Value> {
         Some(o) => crate::org::OrgId::new(o.clone())?,
         None => crate::org::OrgId::default_org(),
     };
-    let existed = d
+    let current = d
         .ctl
         .definition(&crate::stack::qualified(&org, &a.name))
-        .is_ok();
+        .ok();
+    let existed = current.is_some();
     // The web UI's page for a new stack is `.../compose/new`.
     if !existed && a.name == "new" {
         return Err(Error::invalid(
@@ -287,6 +290,7 @@ pub(super) fn deploy(d: &Daemon, a: DeployArgs, c: &Caller) -> Result<Value> {
     if let Some(m) = &d.ingress {
         m.check(&def)?;
     }
+    let warnings = stack_images::check(&def, current.as_ref())?;
     let bound = crate::stack::secrets::bind_reporting(
         &d.secrets,
         &org,
@@ -299,7 +303,7 @@ pub(super) fn deploy(d: &Daemon, a: DeployArgs, c: &Caller) -> Result<Value> {
     def.secrets = bound.bindings;
     let reused: Vec<String> = bound.reused.iter().map(|r| r.key.clone()).collect();
     if a.dry_run {
-        let mut out = json!({"changes": d.ctl.plan(&def)?, "dry_run": true, "owner": owner});
+        let mut out = json!({"changes": d.ctl.plan(&def)?, "dry_run": true, "owner": owner, "warnings": warnings});
         if !reused.is_empty() {
             out["reused_secrets"] = json!(reused);
         }
@@ -350,7 +354,8 @@ pub(super) fn deploy(d: &Daemon, a: DeployArgs, c: &Caller) -> Result<Value> {
         );
     }
     let record = pending.start(d, &org, &a.name, &changes);
-    let mut out = json!({"changes": changes, "owner": owner, "deployment": record});
+    let mut out =
+        json!({"changes": changes, "owner": owner, "deployment": record, "warnings": warnings});
     if !reused.is_empty() {
         out["reused_secrets"] = json!(reused);
     }

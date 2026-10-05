@@ -1650,13 +1650,11 @@ impl Worker {
                     self.event("error", None, &msg);
                     if old.is_none() {
                         // Nothing to protect: keep trying, slower each time.
-                        let wait = self
-                            .create_backoff
-                            .map(|(_, w)| (w * 2).min(Duration::from_secs(300)))
-                            .unwrap_or(Duration::from_secs(10));
+                        let prev = self.create_backoff.map(|(_, w)| w);
+                        let (wait, m) = super::failure::retry(prev, &spec.image, &msg, &e);
                         self.create_backoff = Some((Instant::now(), wait));
                         self.state = "failing".into();
-                        self.message = Some(format!("{msg}; retrying in {wait:?}"));
+                        self.message = Some(m);
                         self.publish_status(def);
                         return Ok(false);
                     }

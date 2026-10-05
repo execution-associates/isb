@@ -34,6 +34,7 @@ pub mod deploy;
 pub mod env;
 pub mod forge;
 pub mod git;
+mod image;
 pub mod manifest;
 pub mod preview;
 mod projects;
@@ -53,7 +54,7 @@ use crate::spec::{NamedVolumeSpec, SandboxSpec, SecretDef};
 
 pub use compose::ComposeOwner;
 pub use database::{DatabaseSource, Engine};
-pub use deploy::{Apps, BuildFn, DigestFn, SecretHook};
+pub use deploy::{Apps, BuildFn, ImageProbe, SecretHook};
 pub use env::{EnvFile, EnvValue};
 pub use git::{GitAuth, GitSource};
 pub use preview::{Preview, PreviewSettings};

@@ -94,13 +94,13 @@ mod tests {
             secrets.clone(),
         )
         .unwrap();
-        Apps::new(dir, client, ctl, secrets).with_digest(Arc::new(move |_: &str| {
+        Apps::new(dir, client, ctl, secrets).with_probe(Arc::new(move |_: &str, _| {
             let (m, cv) = &*gate;
             let mut open = m.lock().unwrap();
             while !*open {
                 open = cv.wait(open).unwrap();
             }
-            None
+            crate::image_check::Probe::Found(None)
         }))
     }
 

@@ -76,6 +76,8 @@ More in [isb on macOS](../getting-started/macos.md).
 |---|---|---|
 | A service is `paused` | A rollout failed with `failure_action: pause`; the message says why. | Fix the cause, then deploy again. |
 | A service is `failing` | Something the daemon keeps retrying: an image that will not pull, a replica that stays unhealthy. | `isb stack ps NAME` shows the last probe output; `isb stack logs NAME SERVICE` the replicas' output. |
+| An app or stack is refused with `image ... not found on Docker Hub` | The registry has no such image (or none for this host's platform). A colon where a slash was meant is the usual slip: `docker:traefik:whoami` is the image `traefik` with the tag `whoami`. | Use the suggested name, or check it on the registry ([Image references](../guides/deploy-apps.md#image-references)). |
+| A service is `failing` with `image ... not found` | Its image went away after it was deployed (a deleted tag or repository). Retries back off from 5 minutes to an hour. | Push the image again, or point the app at one that exists and deploy. |
 | A service is `waiting` | Its `depends_on` is not met. | Look at the dependency's state. |
 | Published ports pause during a daemon restart | The load balancer and ingress live in the daemon; apps do not. | Expected; they return within seconds. |
 | Apps cannot reach each other by name | Service names need an org with its own network: the `default` org on a host whose incus `default` project held workloads first has none. On a fresh org, the host may lack the service-name directory. | Use an org of its own; run `sudo isb host setup`, after which a running `isb serve` turns names on within a minute (`isb org create ORG` again does it without the daemon) ([Setting up a host](host-setup.md#service-names)). |

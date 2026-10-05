@@ -26,7 +26,7 @@ password:  secret db.pg.password (isb secret get db.pg.password / --show-passwor
 url:       postgres://pg:${{secret.db.pg.password}}@pg.shop-production:5432/pg
 for apps:  DATABASE_URL=${{secret.db.pg.url}}
 volume:    shop-production_pg_data
-$ isb app create web --project shop --image docker:myapp:1 -e 'DATABASE_URL=${{secret.db.pg.url}}' --deploy
+$ isb app create web --project shop --image ghcr:umami-software/umami:postgresql-latest -e 'DATABASE_URL=${{secret.db.pg.url}}' --deploy
 ```
 
 ```text

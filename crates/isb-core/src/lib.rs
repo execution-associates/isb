@@ -16,6 +16,7 @@ pub mod exec;
 pub mod flex;
 pub mod foreground;
 pub mod idmap;
+pub mod image_check;
 pub mod ingress;
 pub mod interp;
 pub mod lock;

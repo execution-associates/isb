@@ -21,6 +21,7 @@ import type { Tone } from "@/lib/status";
 import { type App, type AppSource, type Builder, type BuildSettings, type GitAuth, type InstanceDetail, isGit, keys, serviceOf, useStack } from "./api";
 import { ConfirmDialog, Section } from "./components";
 import { DeleteAppSection } from "./app-delete";
+import { IMAGE_HINT, IMAGE_PLACEHOLDER, imageNote, imageProblem } from "./image-ref";
 import { gitUrlProblem } from "./new-app-dialog";
 import { useAppUpdate } from "./save";
 import { SaveFooter } from "./save-footer";
@@ -122,7 +123,7 @@ function SourceSection({ org, app, writer }: Props) {
         };
   const dirty = !sameJson(next, app.source);
   const urlErr = f.kind === "git" ? gitUrlProblem(f.url) : null;
-  const imgErr = f.kind === "image" && !f.image.trim() ? "Enter an image." : null;
+  const imgErr = f.kind === "image" ? imageProblem(f.image) : null;
   const secretErr = f.kind === "git" && f.auth !== "none" && !f.secret.trim() ? "Name the org secret." : null;
 
   const submit = async (e: React.FormEvent) => {
@@ -177,8 +178,8 @@ function SourceSection({ org, app, writer }: Props) {
           {f.kind === "image" ? (
             <div className="grid items-start gap-4 sm:grid-cols-[12rem_minmax(0,1fr)]">
               {typeField}
-              <Field label="Image" error={imgErr} hint="docker:nginx:1.27, ghcr:org/app:tag, or a local alias.">
-                {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.image} onChange={(e) => set({ image: e.target.value })} />}
+              <Field label="Image" error={imgErr} hint={imageNote(f.image) ?? IMAGE_HINT}>
+                {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.image} onChange={(e) => set({ image: e.target.value })} placeholder={IMAGE_PLACEHOLDER} />}
               </Field>
             </div>
           ) : (

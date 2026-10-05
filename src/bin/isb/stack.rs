@@ -152,6 +152,9 @@ pub(crate) fn stack(ctx: &Ctx, cmd: StackCmd) -> Result<u8> {
                 args["reuse_secrets"] = json!(false);
             }
             let r = call("stack_deploy", args, wait_for + SHORT)?;
+            for w in r["warnings"].as_array().into_iter().flatten() {
+                eprintln!("warning: {}", w.as_str().unwrap_or(""));
+            }
             warn_reused(&call, &name, &r);
             if let (Some(p), Some(e)) = (
                 r["owner"]["project"].as_str(),
