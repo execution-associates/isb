@@ -2,13 +2,15 @@
 // server. The org endpoint for everyone in the org, with a token made here;
 // the unbound /mcp endpoint for superadmins, whose credentials are made on
 // the host only (docs/guides/agents.md, docs/concepts/access.md#superadmins).
+// A superadmin sees the two as tabs (?endpoint=), the superadmin one first.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, ChevronRight, Cloud, Crown, ExternalLink, KeyRound, Network, Plug, ShieldAlert, Terminal, Wrench } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
-import { Link, Navigate } from "react-router";
+import { Link, Navigate, useSearchParams } from "react-router";
 import { type AgentIdentity, type ApiToken, auth, type Me } from "@/api/auth";
 import { get } from "@/api/client";
 import { callTool } from "@/api/tools";
+import { TabLinks } from "@/apps/components";
 import { PageHeader } from "@/components/app-shell";
 import { Panel } from "@/components/confirm";
 import { CopyField, CopyIconButton, Field, FormError, SubmitButton } from "@/components/form";
@@ -30,6 +32,8 @@ import {
   isHostTool,
   isTailnetListen,
   listenOrigin,
+  mcpEndpoint,
+  mcpEndpointTabs,
   orgMcpUrl,
   orgWays,
   publicMcpUrl,
@@ -62,21 +66,33 @@ const origin = () => window.location.origin;
 
 export function McpPage() {
   const { org, me, redirect } = useOrgPage();
+  const [params] = useSearchParams();
   if (redirect) return redirect;
+  // A superadmin picks an endpoint with tabs, the superadmin one first; the
+  // rest see the org's alone.
+  const endpoint = mcpEndpoint(!!me.superadmin, params.get("endpoint"));
   return (
     <>
       <PageHeader
         title="MCP"
         description={
-          <>
-            Connect an agent (Claude Code, Codex, Cursor, anything that speaks MCP) to isb: the endpoint for {org}, a token for the agent, and the lines that install it.
-          </>
+          endpoint ? (
+            <>Connect an agent (Claude Code, Codex, Cursor, anything that speaks MCP) to isb: the unbound superadmin endpoint, or the endpoint for {org} with a token for the agent, and the lines that install it.</>
+          ) : (
+            <>Connect an agent (Claude Code, Codex, Cursor, anything that speaks MCP) to isb: the endpoint for {org}, a token for the agent, and the lines that install it.</>
+          )
         }
       />
+      {endpoint && <TabLinks tabs={mcpEndpointTabs(org)} active={endpoint} />}
       <div className="grid gap-6">
-        <OrgMcp me={me} org={org} />
-        {me.superadmin && <SuperadminMcp me={me} />}
-        <ClaudeApps org={org} />
+        {endpoint === "superadmin" ? (
+          <SuperadminMcp me={me} />
+        ) : (
+          <>
+            <OrgMcp me={me} org={org} />
+            <ClaudeApps org={org} />
+          </>
+        )}
       </div>
     </>
   );
@@ -599,7 +615,7 @@ function SuperadminMcp({ me }: { me: Me }) {
             <ShieldAlert className="text-warning" />
             <AlertTitle>Root on this host, in effect</AlertTitle>
             <AlertDescription className="leading-relaxed">
-              A superadmin has what the daemon's unix socket has: privileged containers, raw incus config and host bind mounts if it asks. Give it only to an agent you would hand a root shell on this machine, and prefer an org token above for everything else.
+              A superadmin has what the daemon's unix socket has: privileged containers, raw incus config and host bind mounts if it asks. Give it only to an agent you would hand a root shell on this machine, and prefer an org token for everything else.
             </AlertDescription>
           </Alert>
           <div className="grid gap-2">
@@ -612,7 +628,7 @@ function SuperadminMcp({ me }: { me: Me }) {
           {source === "access" && (policy.isLoading ? <RowsSkeleton rows={2} /> : <AccessSource allow={p?.superadmin.access ?? null} publicUrl={p?.public_url ?? null} />)}
         </div>
       </Panel>
-      <ToolList filter={(t) => isHostTool(t)} title="Host and platform tools, /mcp only" hint="On top of every tool above, at /mcp only: the host and superadmin tools for a superadmin, the platform tools (orgs, servers, users) for a platform admin." />
+      <ToolList filter={(t) => isHostTool(t)} title="Host and platform tools, /mcp only" hint="On top of every tool an org endpoint lists, at /mcp only: the host and superadmin tools for a superadmin, the platform tools (orgs, servers, users) for a platform admin." />
     </>
   );
 }
