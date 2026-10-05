@@ -21,7 +21,13 @@ url="https://$host:$PREVIEW_PORT"
 # A login session, so ubuntu has the incus-admin group provision.sh added.
 as_ubuntu() { isb exec -u root preview -- sudo -iu ubuntu "$@"; }
 mkdir -p web/node_modules   # the mount point node-modules.sh needs
-isb up -d
+# A fresh VM's first boot sometimes hangs in the firmware, before the kernel,
+# and stays "running"; a forced restart boots it. ready_timeout in isb.yaml
+# keeps the wait for a hung boot short.
+if ! isb up -d; then
+  incus restart -f "isb-preview-$USER" </dev/null
+  isb up -d
+fi
 isb exec -u root preview -- bash /src/scripts/preview/provision.sh
 as_ubuntu bash /src/scripts/preview/build.sh
 isb exec -u root preview -- /home/ubuntu/.local/bin/isb host setup --user ubuntu
@@ -31,6 +37,27 @@ ip=$(incus query "/1.0/instances/isb-preview-$USER/state" </dev/null |
   jq -r '.network.enp5s0.addresses[] | select(.family == "inet") | .address')
 tailscale serve --bg --https="$PREVIEW_PORT" "http://$ip:5173" >/dev/null
 echo "preview: $url"
+'''
+
+[tasks."preview:ui"]
+description = "Serve the existing preview VM's UI again on the tailnet, skipping provision and the isb build"
+run = '''
+#!/usr/bin/env bash
+# Seconds where `preview` takes minutes: for UI work, which vite hot-reloads,
+# once `preview` has made the VM. Starts a stopped VM, makes sure the daemon
+# and vite are running, and puts the tailnet URL back.
+set -euo pipefail
+if ! incus info "isb-preview-$USER" </dev/null >/dev/null 2>&1; then
+  echo "no preview VM: run \`mise run preview\` once first" >&2
+  exit 1
+fi
+host=$(tailscale status --self --json | jq -r '.Self.DNSName | rtrimstr(".")')
+isb up -d
+isb exec -u root preview -- sudo -iu ubuntu env XDG_RUNTIME_DIR=/run/user/1000 systemctl --user start isb.service isb-web.service
+ip=$(incus query "/1.0/instances/isb-preview-$USER/state" </dev/null |
+  jq -r '.network.enp5s0.addresses[] | select(.family == "inet") | .address')
+tailscale serve --bg --https="$PREVIEW_PORT" "http://$ip:5173" >/dev/null
+echo "preview: https://$host:$PREVIEW_PORT"
 '''
 
 [tasks."preview:rebuild"]
