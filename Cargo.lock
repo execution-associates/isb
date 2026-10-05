@@ -1339,6 +1339,7 @@ dependencies = [
  "isb-egress",
  "isb-server",
  "isb-tui",
+ "libc",
  "rustix 1.1.5",
  "rustls",
  "serde",
