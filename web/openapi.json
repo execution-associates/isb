@@ -9145,7 +9145,7 @@
                     "type": "string"
                   },
                   "path": {
-                    "description": "app, service: the path to request (default: the domain's path).",
+                    "description": "app, service: the path to request (default: the path the service's healthcheck requests over HTTP, else the domain's path).",
                     "type": "string"
                   },
                   "paused": {
@@ -9695,7 +9695,7 @@
                     "type": "string"
                   },
                   "path": {
-                    "description": "app, service: the path to request (default: the domain's path).",
+                    "description": "app, service: the path to request (default: the path the service's healthcheck requests over HTTP, else the domain's path).",
                     "type": "string"
                   },
                   "paused": {

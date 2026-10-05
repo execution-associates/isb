@@ -10476,7 +10476,7 @@ export interface operations {
                     name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
-                    /** @description app, service: the path to request (default: the domain's path). */
+                    /** @description app, service: the path to request (default: the path the service's healthcheck requests over HTTP, else the domain's path). */
                     path?: string;
                     paused?: boolean;
                     /** @description tcp: the port. */
@@ -10799,7 +10799,7 @@ export interface operations {
                     name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
-                    /** @description app, service: the path to request (default: the domain's path). */
+                    /** @description app, service: the path to request (default: the path the service's healthcheck requests over HTTP, else the domain's path). */
                     path?: string;
                     paused?: boolean;
                     /** @description tcp: the port. */
