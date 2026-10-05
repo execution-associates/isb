@@ -652,7 +652,8 @@ impl Client {
     }
 
     /// An instance's console log (an OCI app's output): the newest
-    /// [`console::KEEP`] bytes of it. See [`console`] for why isb keeps it.
+    /// [`console::KEEP`] bytes of it, from the host's console log (see
+    /// [`console`] for why isb keeps one).
     pub fn console_log(&self, instance: &str) -> Result<Vec<u8>> {
         Ok(self.console_since(instance, 0)?.0)
     }
@@ -661,30 +662,22 @@ impl Client {
     /// began; all that is kept if `pos` was trimmed away), and the position
     /// after it, for a follower.
     pub fn console_since(&self, instance: &str, pos: u64) -> Result<(Vec<u8>, u64)> {
-        // Without a place to keep it, a read is still a read.
-        let log = console::Log::open(self.project_name(), instance).ok();
         let url = format!("/1.0/instances/{}/console", encode_segment(instance));
-        let r = self.raw_bytes("GET", &url, &[], &[], self.timeouts.request)?;
-        let new = match r.status {
-            200 => r.body,
-            404 => Vec::new(),
-            status => {
-                return Err(Error::Api {
+        console::read_through(self.project_name(), instance, pos, &mut || {
+            let r = self.raw_bytes("GET", &url, &[], &[], self.timeouts.request)?;
+            match r.status {
+                200 => Ok((r.body, r.from_file)),
+                404 => Ok((Vec::new(), false)),
+                status => Err(Error::Api {
                     method: "GET".into(),
-                    path: url,
+                    path: url.clone(),
                     status,
                     message: serde_json::from_slice::<Envelope>(&r.body)
                         .map(|e| e.error)
                         .unwrap_or_default(),
-                });
+                }),
             }
-        };
-        if let Some(mut log) = log
-            && log.add(&new, r.from_file).is_ok()
-        {
-            return Ok(log.since(pos));
-        }
-        Ok((new, 0))
+        })
     }
 
     /// Read a file from an instance; `None` if it does not exist.

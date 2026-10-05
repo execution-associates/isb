@@ -172,6 +172,25 @@ pub(crate) fn dns_dir_command(user: &str, incus_group: bool) -> Vec<String> {
         .collect()
 }
 
+/// The group that may use the incus socket, and so the console log.
+const INCUS_ADMIN_GROUP: &str = "incus-admin";
+
+/// The command that makes the host's console log directory: shared, setgid,
+/// by everyone in `incus-admin` (whoever may read a console at all). Without
+/// that group, `user`'s alone.
+pub(crate) fn console_dir_command(user: &str, admin_group: bool) -> Vec<String> {
+    let dir = isb::client::console::dir().display().to_string();
+    let (mode, owner, group) = if admin_group {
+        ("2770", "root", INCUS_ADMIN_GROUP)
+    } else {
+        ("0700", user, user)
+    };
+    ["install", "-d", "-m", mode, "-o", owner, "-g", group, &dir]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
 pub(crate) fn group_exists(name: &str) -> bool {
     std::fs::read_to_string("/etc/group")
         .map(|t| t.lines().any(|l| l.split(':').next() == Some(name)))
@@ -202,6 +221,7 @@ pub(crate) fn host_setup(
         .or_else(|| std::env::var("USER").ok().filter(|u| !u.is_empty()))
         .ok_or_else(|| Error::Invalid("cannot tell who runs isb; pass --user".into()))?;
     let dns_cmd = dns_dir_command(&user, group_exists(isb::discovery::DNSMASQ_GROUP));
+    let console_cmd = console_dir_command(&user, group_exists(INCUS_ADMIN_GROUP));
     let ufw_active = std::process::Command::new("ufw")
         .arg("status")
         .output()
@@ -227,6 +247,8 @@ pub(crate) fn host_setup(
         }
         println!("# the directory service names are published in:");
         println!("{}", dns_cmd.join(" "));
+        println!("# the console log every isb process shares:");
+        println!("{}", console_cmd.join(" "));
         match &ca_path {
             Some((p, _)) if ca_current => {
                 println!("# the local registry's CA is installed at {}", p.display());
@@ -314,6 +336,17 @@ pub(crate) fn host_setup(
         "{}: service names for org stacks, written by {user}",
         isb::discovery::root().display()
     );
+    if !std::process::Command::new(&console_cmd[0])
+        .args(&console_cmd[1..])
+        .status()?
+        .success()
+    {
+        return Err(Error::Invalid(format!("{} failed", console_cmd.join(" "))));
+    }
+    println!(
+        "{}: the console log of OCI instances, shared by every isb process",
+        isb::client::console::dir().display()
+    );
     if let Some((p, pem)) = &ca_path {
         if !ca_current {
             use std::os::unix::fs::PermissionsExt;
@@ -371,6 +404,20 @@ pub(crate) fn default_route_iface() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn console_dir_is_shared_by_incus_admins() {
+        let shared = console_dir_command("alice", true).join(" ");
+        assert!(
+            shared.starts_with("install -d -m 2770 -o root -g incus-admin "),
+            "{shared}"
+        );
+        let own = console_dir_command("alice", false).join(" ");
+        assert!(
+            own.starts_with("install -d -m 0700 -o alice -g alice "),
+            "{own}"
+        );
+    }
 
     #[test]
     fn host_rules_cover_incus_default_bridge_for_image_builds() {

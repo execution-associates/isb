@@ -14,7 +14,7 @@ keeps on disk.
 The short version, on a Linux host with incus:
 
 ```sh
-sudo isb host setup               # firewall, DHCP/DNS for org bridges, service names
+sudo isb host setup               # firewall, DHCP/DNS for org bridges, service names, console log
 isb serve install                 # the daemon, as a systemd user service
 loginctl enable-linger "$USER"    # keep it running after you log out
 isb registry setup                # optional: the local registry, for builds
@@ -191,6 +191,26 @@ watches.
   others may pass through, not list) so dnsmasq can reach the hosts files;
   everything in them stays 0600/0700.
 
+## Console logs
+
+An OCI image's output is its instance's console, and incus hands a running
+container's console out once: each read drains what it returns. So that the
+daemon (the web UI, `stack_logs`, `app_logs`, a failed replica's last
+output), the TUI, `isb logs` and `isb up` all see the whole log, every isb
+process records what it drains in one SQLite database per host and reads
+from there: the newest 2 MiB of each instance, kept across daemon restarts,
+dropped when isb deletes the instance or after 30 days nobody read it.
+
+- `sudo isb host setup` creates `/var/lib/isb/console`, `root:incus-admin`
+  with the setgid bit, mode 2770: whoever may use the incus socket shares
+  the log, whichever user runs isb. The database is 0660. A host without an
+  `incus-admin` group gets a 0700 directory of the daemon's user.
+- Without the directory (or without write access to it), each user's isb
+  keeps its own `$XDG_STATE_HOME/isb/console.db`, and processes of
+  different users take lines from each other again.
+- `ISB_CONSOLE_DIR` moves the directory.
+- It is a cache of output, not worth backing up.
+
 ## The local registry
 
 Builds push to one OCI registry per host, run by isb in the incus project
@@ -256,6 +276,6 @@ Outside the state directory the daemon also uses:
 | `~/.config/isb/secrets.toml` | Break-glass recipients (`$ISB_SECRETS_CONFIG`). |
 | `$XDG_RUNTIME_DIR/isb/serve.sock` | The unix socket the local CLI talks to (`$ISB_SERVE_SOCKET`). |
 | `/var/lib/isb/dns/` | Service-name hosts files (`$ISB_DNS_DIR`). |
-| `$XDG_STATE_HOME/isb/console/<project>/<instance>.log` | OCI instances' console output, the newest 2 MiB each. incus hands a running container's console out once (each read drains it), so every isb process of this user, the daemon, the TUI, `isb logs` and `isb up`, records what it reads here and reads from here; it ignores `--state-dir` so that they all agree. Not worth backing up. |
+| `/var/lib/isb/console/console.db` | OCI instances' console output, shared by every isb process on the host (`$ISB_CONSOLE_DIR`; [Console logs](#console-logs)). |
 
 What to back up, and what to leave out, is in [Backing up isb](backups.md).
