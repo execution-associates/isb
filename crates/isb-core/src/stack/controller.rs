@@ -556,7 +556,7 @@ impl Controller {
     }
 
     /// Check a stack definition against this host without deploying it:
-    /// every service must resolve (image source, paths, ports).
+    /// every service must resolve (image source, paths, ports) and name its widest slot.
     pub fn validate(&self, def: &StackDef) -> Result<()> {
         validate_stack_name(&def.name)?;
         // In the org's project, which is what `registry:` images resolve in.
@@ -564,6 +564,7 @@ impl Controller {
         for (svc, spec) in &def.file.services {
             let mut s = instance_spec(def, svc, spec, 1, "0000")?;
             s.name = Some(instance_name(&def.name, svc, 1, "0000")?);
+            instance_name(&def.name, svc, spec.replicas().max(1), "0000")?;
             crate::plan::resolve(&s, &def.file.volumes, &host, &def.base_dir)?;
             published(spec)?;
             crate::ingress::domain::validate(svc, &spec.domains)?;
@@ -764,6 +765,7 @@ impl Controller {
             .ok_or_else(|| Error::NotFound(format!("service {service} in stack {name}")))?;
         spec.deploy.get_or_insert_with(Default::default).replicas = Some(replicas);
         super::ports::check_replicas(service, spec)?;
+        instance_name(name, service, replicas.max(1), "0000")?;
         self.inner.store.save(&def)?;
         self.apply(Arc::new(def));
         Ok(())

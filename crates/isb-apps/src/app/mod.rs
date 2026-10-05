@@ -158,16 +158,37 @@ fn yes() -> bool {
     true
 }
 
-/// CPU and memory limits per replica.
+/// CPU and memory limits per replica. Either may be written as a number
+/// (`{"cpus": 2}`); it is kept as the string it spells.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Resources {
     /// `limits.cpu`: a count, e.g. `2`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::flex::opt_string_or_null",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub cpus: Option<String>,
-    /// `512m`, `2g`, `2GiB`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// `512m`, `2g`, `2GiB`; a bare number is bytes.
+    #[serde(
+        default,
+        deserialize_with = "crate::flex::opt_string_or_null",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub memory: Option<String>,
+}
+
+/// The JSON schema of `resources` in the app and database tools.
+pub fn resources_schema() -> Value {
+    serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "cpus": {"type": ["string", "integer", "null"], "description": "CPUs per replica (limits.cpu), e.g. 2 or \"2\". null (app_update) removes the limit."},
+            "memory": {"type": ["string", "integer", "null"], "description": "Memory per replica: 512m, 2g, 2GiB, or a number of bytes. null (app_update) removes the limit."}
+        }
+    })
 }
 
 /// What a user sets on an app.
@@ -280,12 +301,9 @@ impl AppSpec {
         validate_part("project", &self.project)?;
         validate_part("environment", &self.environment)?;
         let stack = self.stack()?;
-        crate::stack::instance_name(&stack, &self.name, 100, "0000").map_err(|_| {
-            Error::invalid(format!(
-                "app {}: instance names in stack {stack} would be too long; shorten the app, project or environment name",
-                self.name
-            ))
-        })?;
+        // Long names are shortened; this refuses only what cannot fit at all.
+        crate::stack::instance_name(&stack, &self.name, self.replicas.max(1), "0000")
+            .map_err(|e| Error::invalid(format!("app {}: {e}", self.name)))?;
         match (&self.source, &self.build) {
             (Source::Image(i), None) => {
                 crate::plan::ImageSource::parse(i)?;
@@ -730,6 +748,37 @@ mod tests {
         assert!(bad.validate().is_err());
         assert!(try_spec("name: x\nproject: p\nsource: {image: x}\nbogus: 1\n").is_err());
         assert!(try_spec("name: x\nproject: p\nsource: {image: x, git: {url: u}}\n").is_err());
+    }
+
+    #[test]
+    fn long_names_validate_and_resources_take_numbers() {
+        // `<stack>-<app>-<slot>-<id>` is 70 characters: shortened, not refused.
+        let a = spec(
+            "name: project-management-postgres\nproject: project-management\nsource: {image: x}\n",
+        );
+        a.validate().unwrap();
+        let r = spec(
+            "name: x\nproject: p\nsource: {image: x}\nresources: {cpus: 2, memory: 536870912}\n",
+        )
+        .resources
+        .unwrap();
+        assert_eq!(
+            (r.cpus.as_deref(), r.memory.as_deref()),
+            (Some("2"), Some("536870912"))
+        );
+        // Strings are kept exactly, so stored specs serialize as before.
+        let s =
+            spec("name: x\nproject: p\nsource: {image: x}\nresources: {cpus: '2', memory: 1g}\n");
+        assert_eq!(
+            serde_json::to_value(&s.resources).unwrap(),
+            serde_json::json!({"cpus": "2", "memory": "1g"})
+        );
+        let n =
+            spec("name: x\nproject: p\nsource: {image: x}\nresources: {cpus: null, memory: 1g}\n");
+        assert_eq!(n.resources.unwrap().cpus, None);
+        assert!(
+            try_spec("name: x\nproject: p\nsource: {image: x}\nresources: {cpus: 1.5}\n").is_err()
+        );
     }
 
     #[test]

@@ -25,7 +25,7 @@ $ isb job logs prune 1
 ```text
 isb job create NAME --schedule CRON (--app A | --stack S --service SVC) [--mode exec|run]
               [--timeout D] [--concurrency skip|allow] [--keep N] [--timezone +HH:MM] [-u USER]
-              [-e K=V]... -- COMMAND...
+              [-e K=V]... [--disabled] -- COMMAND...
 isb job ls [--json] | show NAME | rm NAME
 isb job update NAME [--schedule CRON] [--timeout D] [--enable|--disable] [-- COMMAND...]
 isb job run NAME [-d] | runs NAME [--json] | logs NAME [RUN] [-f]
@@ -100,8 +100,8 @@ schedule in words and its next three runs before you save.
 
 | Tool | Does |
 |---|---|
-| `job_create` | `name`, `schedule`, `timezone`, `target`, `mode`, `command`, `timeout`, `concurrency`, `keep`, `enabled`, `user`, `cwd`, `env`, `missed_grace`. |
-| `job_list`, `job_get` | Jobs with their next and last run. |
+| `job_create` | `name`, `schedule`, `timezone`, `target`, `mode`, `command`, `timeout`, `concurrency`, `keep`, `enabled` (`false` creates it disabled), `user`, `cwd`, `env`, `missed_grace`. |
+| `job_list`, `job_get` | Each job as one object: its settings with `created_at`, `updated_at`, `next_run` and `last_run` beside them. |
 | `job_update` | A merge patch of the settings; the name is fixed. |
 | `job_delete` | The job and its run records (refused while it runs). |
 | `job_run` | Run now (`wait` returns when it finishes). |

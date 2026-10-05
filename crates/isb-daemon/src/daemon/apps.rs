@@ -148,7 +148,6 @@ const APP_PROPS: &str = r#"{
   "replicas": {"type": "integer", "minimum": 0, "maximum": 100},
   "port": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "The port the app listens on."},
   "healthcheck": {"type": "object", "description": "A compose healthcheck: {test, interval, timeout, retries, start_period}."},
-  "resources": {"type": "object", "description": "{cpus, memory} per replica."},
   "command": {"description": "argv (a list) or a command line."},
   "previews": {"type": "object", "description": "Preview deployments per pull request (git sources): {enabled, branches (base branches; default the app's ref), max (default 3), env (.env text or {KEY: value | {secret: NAME}}), inherit_env (default false), domain (auto | *.suffix), port, replicas (default 1), resources, ttl (e.g. 7d), forks (default false; fork PRs build in a VM and get only fork_secrets), fork_secrets [NAME], status {token_secret, kind: github | gitea, api_url}}. See preview_list."},
   "files": {"type": "array", "items": {"type": "object"}, "description": "[{path, secret, mode?}]: an org secret's value as a file at an absolute path (config files, certificates)."},
@@ -158,7 +157,9 @@ const APP_PROPS: &str = r#"{
 }"#;
 
 fn app_props() -> Value {
-    serde_json::from_str(APP_PROPS).expect("APP_PROPS is JSON")
+    let mut p: Value = serde_json::from_str(APP_PROPS).expect("APP_PROPS is JSON");
+    p["resources"] = crate::app::resources_schema();
+    p
 }
 
 /// app_create's properties: the app's, plus where it goes.

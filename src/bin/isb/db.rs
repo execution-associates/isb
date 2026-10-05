@@ -5,34 +5,7 @@ use super::*;
 #[derive(Subcommand)]
 pub enum DbCmd {
     /// Create (and deploy) a database in a project's environment.
-    Create {
-        name: String,
-        #[arg(long)]
-        project: String,
-        #[arg(long)]
-        environment: Option<String>,
-        /// postgres, mysql, mariadb, mongodb or redis, with an optional
-        /// image tag: postgres:16 (default per engine: 17, 8.4, 11.4, 8.0,
-        /// 7.4).
-        #[arg(long)]
-        engine: String,
-        /// The database created on first start.
-        #[arg(long)]
-        database: Option<String>,
-        #[arg(long)]
-        user: Option<String>,
-        /// Publish the port on the host: [IP:]PORT (default 127.0.0.1).
-        #[arg(long)]
-        publish: Option<String>,
-        /// Another secret isb keeps holding the internal URL, with an
-        /// optional query string for driver options:
-        /// `dsn.main-db.web?sslmode=disable`. Repeatable.
-        #[arg(long = "url", value_name = "SECRET[?QUERY]")]
-        urls: Vec<String>,
-        /// Create without deploying.
-        #[arg(long)]
-        no_deploy: bool,
-    },
+    Create(Box<DbCreate>),
     /// List databases.
     #[command(alias = "list")]
     Ls {
@@ -56,20 +29,59 @@ pub enum DbCmd {
     Rm { name: String },
 }
 
+#[derive(clap::Args)]
+pub struct DbCreate {
+    name: String,
+    #[arg(long)]
+    project: String,
+    #[arg(long)]
+    environment: Option<String>,
+    /// postgres, mysql, mariadb, mongodb or redis, with an optional
+    /// image tag: postgres:16 (default per engine: 17, 8.4, 11.4, 8.0,
+    /// 7.4).
+    #[arg(long)]
+    engine: String,
+    /// The database created on first start.
+    #[arg(long)]
+    database: Option<String>,
+    #[arg(long)]
+    user: Option<String>,
+    /// Publish the port on the host: [IP:]PORT (default 127.0.0.1).
+    #[arg(long)]
+    publish: Option<String>,
+    /// Another secret isb keeps holding the internal URL, with an
+    /// optional query string for driver options:
+    /// `dsn.main-db.web?sslmode=disable`. Repeatable.
+    #[arg(long = "url", value_name = "SECRET[?QUERY]")]
+    urls: Vec<String>,
+    /// CPUs, e.g. 2.
+    #[arg(long)]
+    cpus: Option<String>,
+    /// Memory: 512m, 2g, 2GiB.
+    #[arg(long)]
+    memory: Option<String>,
+    /// Create without deploying.
+    #[arg(long)]
+    no_deploy: bool,
+}
+
 pub fn db(org: &Option<String>, cmd: DbCmd) -> Result<u8> {
     let call = |tool: &str, args: Value| call(tool, with_org(org, args), SHORT);
     match cmd {
-        DbCmd::Create {
-            name,
-            project,
-            environment,
-            engine,
-            database,
-            user,
-            publish,
-            urls,
-            no_deploy,
-        } => {
+        DbCmd::Create(c) => {
+            let DbCreate {
+                name,
+                project,
+                environment,
+                engine,
+                database,
+                user,
+                publish,
+                urls,
+                cpus,
+                memory,
+                no_deploy,
+            } = *c;
             let (engine, version) = match engine.split_once(':') {
                 Some((e, v)) => (e.to_string(), Some(v.to_string())),
                 None => (engine, None),
@@ -89,6 +101,9 @@ pub fn db(org: &Option<String>, cmd: DbCmd) -> Result<u8> {
             }
             if !urls.is_empty() {
                 a["urls"] = url_map(&urls);
+            }
+            if let Some(r) = crate::apps::resources_arg(&cpus, &memory) {
+                a["resources"] = r;
             }
             let r = call("database_create", a)?;
             eprintln!("created database {name}");

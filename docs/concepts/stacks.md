@@ -81,7 +81,13 @@ directory without touching healthy instances.
 
 Each service has `deploy.replicas` slots. A slot holds one instance named
 `<stack>-<service>-<slot>-<id>`, with `id` new for every instance, labelled
-`user.isb.stack`, `user.isb.service`, `user.isb.slot` and `user.isb.rev`. A
+`user.isb.stack`, `user.isb.service`, `user.isb.slot` and `user.isb.rev`.
+When that name would pass incus' 63 characters, the service part is cut short
+and followed by a 6-character hash of the whole service name
+(`<stack>-<service-prefix>-<hash>-<slot>-<id>`), so two long services in one
+stack still get different names; isb finds replicas by their labels, never by
+parsing names. A stack name too long to leave room for any service is refused
+when the stack is deployed or scaled, naming the stack to shorten. A
 `container_name` in the file is ignored. Named volumes are `<stack>_<key>`
 and are shared by every replica, as docker volumes are on one host: a service
 that must own its volume should stay at one replica with `stop-first`

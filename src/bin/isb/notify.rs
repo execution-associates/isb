@@ -28,7 +28,13 @@ pub enum NotifyCmd {
         json: bool,
     },
     /// One channel, as JSON.
-    Show { name: String },
+    Show {
+        name: String,
+        /// Accepted so scripts can pass --json everywhere; the output is
+        /// always JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Change a channel: any rule flag replaces its rules with one rule.
     Update {
         name: String,
@@ -304,7 +310,7 @@ pub fn notify(org: &Option<String>, cmd: NotifyCmd) -> Result<u8> {
             }
             table(rows);
         }
-        NotifyCmd::Show { name } => {
+        NotifyCmd::Show { name, .. } => {
             print_json(&call("notification_channel_get", json!({"name": name}))?);
         }
         NotifyCmd::Update {
