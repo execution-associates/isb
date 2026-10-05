@@ -114,7 +114,7 @@ these checks by isb. Refused unless the operator allows it:
 | Refused | Allowed by |
 |---|---|
 | `privileged: true` | `--allow-privileged` |
-| `raw_config`, `raw_devices`, `incus_profiles`, an `idmap` other than `auto`/`none`, guest-bound ports (`bind: guest`, a guest reaching into the host) | `--allow-raw` |
+| `raw_config`, `raw_devices` (other than `root: {size}`, a quota), `incus_profiles`, an `idmap` other than `auto`/`none`, guest-bound ports (`bind: guest`, a guest reaching into the host) | `--allow-raw` |
 | bind mounts, and any whose real path (symlinks followed) is outside the roots | `--bind-root DIR` (repeatable) |
 | publishing a port on anything but loopback | `--publish-address IP` (repeatable), e.g. a tailnet address |
 | reaching instances `isb serve` does not manage (exec, remove, list) | `--any-instance` |
