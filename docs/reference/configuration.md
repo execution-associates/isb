@@ -155,6 +155,7 @@ settings for it.
 |---|---|---|
 | `--listen` | the env file's `ISB_SERVE_LISTEN`, else `127.0.0.1:8092` | the loopback address to serve on; given explicitly, it is written to the env file |
 | `--machine` | `isb` | macOS: the machine the LaunchAgent starts |
+| `--no-host-setup` | off | do not run `sudo isb host setup` on a host that has not had it ([Host setup](../operations/host-setup.md)) |
 
 ## Environment variables
 

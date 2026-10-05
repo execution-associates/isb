@@ -191,6 +191,48 @@ pub(crate) fn console_dir_command(user: &str, admin_group: bool) -> Vec<String> 
         .collect()
 }
 
+/// Whether `isb host setup` has run here: the directories it makes exist.
+pub(crate) fn host_is_set_up() -> bool {
+    isb::discovery::root().is_dir() && isb::client::console::dir().is_dir()
+}
+
+/// `isb host setup` for the user running this, through sudo unless already
+/// root. sudo runs this very binary: its `secure_path` seldom holds
+/// `~/.local/bin`.
+pub(crate) fn host_setup_with_sudo() -> Result<()> {
+    let failed = |why: String| {
+        Error::Invalid(format!(
+            "isb host setup {why}; fix that and run `isb serve install` again, or install the \
+             daemon without it (`--no-host-setup`) and run `sudo \"$(command -v isb)\" host setup` \
+             yourself"
+        ))
+    };
+    if rustix::process::geteuid().is_root() {
+        return match host_setup(None, None, false, false, false)? {
+            0 => Ok(()),
+            n => Err(failed(format!("exited {n}"))),
+        };
+    }
+    let user = std::env::var("USER")
+        .ok()
+        .filter(|u| !u.is_empty())
+        .ok_or_else(|| failed("cannot tell who runs isb ($USER is unset)".into()))?;
+    let exe = std::env::current_exe()?;
+    println!(
+        "host setup: firewall rules, service names and the console log need root; running it with sudo"
+    );
+    match std::process::Command::new("sudo")
+        .arg("--")
+        .arg(&exe)
+        .args(["host", "setup", "--user", &user])
+        .status()
+    {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(failed(format!("failed ({s})"))),
+        Err(e) => Err(failed(format!("could not run sudo: {e}"))),
+    }
+}
+
 pub(crate) fn group_exists(name: &str) -> bool {
     std::fs::read_to_string("/etc/group")
         .map(|t| t.lines().any(|l| l.split(':').next() == Some(name)))

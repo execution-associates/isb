@@ -14,17 +14,21 @@ keeps on disk.
 The short version, on a Linux host with incus:
 
 ```sh
-sudo isb host setup               # firewall, DHCP/DNS for org bridges, service names, console log
-isb serve install                 # the daemon, as a systemd user service
+isb serve install                 # the daemon as a systemd user service; the first time, sudo isb host setup
 loginctl enable-linger "$USER"    # keep it running after you log out
 isb registry setup                # optional: the local registry, for builds
 sudo isb host setup               # again after the registry exists: incus trusts its CA
 ```
 
-The order of the first two does not matter for service names: the daemon
-turns them on for every org that lacks them at each start and then once a
-minute, so a `host setup` after `serve install` takes effect without a
-restart (the daemon logs `turning on service names`).
+`isb host setup` (firewall rules, DHCP/DNS for org bridges, service names,
+the console log) needs root. `isb serve install` runs it through `sudo` on a
+host without its directories, and skips it once they exist or with
+`--no-host-setup`. Run it yourself to redo it (sudo's `secure_path` rarely
+holds `~/.local/bin`, hence `sudo "$(command -v isb)" host setup`). The order
+does not matter for service names: the daemon turns them on for every org
+that lacks them at each start and then once a minute, so a later `host
+setup` takes effect without a restart (the daemon logs `turning on service
+names`).
 
 ## The daemon as a service
 

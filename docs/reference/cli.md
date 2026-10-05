@@ -177,13 +177,15 @@ volumes](#volumes-snapshots-and-restores).
 
 ```text
 isb serve [FLAGS]                       run the daemon
-isb serve install [--listen ADDR] [--machine NAME]
+isb serve install [--listen ADDR] [--machine NAME] [--no-host-setup]
 isb tui                                 the live dashboard
 isb ingress [--json]                    routed domains, certificates, conflicts, tunnels
 ```
 
-`serve install` writes and starts the systemd user unit (on macOS, a
-LaunchAgent that starts the `isb machine` at login; `--machine` picks which).
+`serve install` writes and starts the systemd user unit, running `sudo isb
+host setup` first on a host that has not had it (`--no-host-setup` skips
+that); on macOS it writes a LaunchAgent that starts the `isb machine` at
+login (`--machine` picks which).
 `--listen` defaults to the env file's, else `127.0.0.1:8092`. Every flag of
 `isb serve` is in [Configuration](configuration.md#daemon-flags). `isb tui`
 is described in [isb tui](tui.md); without a daemon it shows sandboxes only.
