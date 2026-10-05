@@ -189,8 +189,9 @@ With Access configured (`CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD`), it stays
 the front door of the loopback listeners: `/api/v1/auth/*` also needs a
 valid `Cf-Access-Jwt-Assertion`, as `/mcp` does, and isb's own sign-in
 applies behind it, with the verified user as an [edge
-identity](#edge-identities). `--superadmin-access` makes listed Access identities
-superadmins; it needs Access and `--public-url`. Without Access the identity
+identity](#edge-identities). `--superadmin-access` (and `isb superadmin add
+--access`) makes listed Access identities superadmins; it needs Access and
+`--public-url`. Without Access the identity
 endpoints are still served: they authenticate their own callers.
 
 ## Edge identities
@@ -209,8 +210,9 @@ login such as `someone@github` is not one).
   the first admin without the setup token, and a password is optional. The
   identity is linked to the account (provider `tailnet` or `access` in
   [`user_identities`](#schema)). `can_claim` is false when the front door's
-  superadmin list (`--superadmin-tailnet`, `--superadmin-access`) is set and
-  leaves the identity out.
+  superadmin list (`--superadmin-tailnet`, `--superadmin-access`, or that
+  front door's identities from `isb superadmin add`) is set and leaves the
+  identity out.
 - **Sign-in**: `POST edge` starts an ordinary session by the [provider
   rules](#the-flow): a linked identity signs its user in, a verified email
   links to the user who has it, and a new account needs an invitation or
@@ -242,7 +244,7 @@ router's own route table.
 | `POST edge` | an edge identity | | session, cookie set; refused with the sign-in codes above, or `no_edge_identity` |
 | `POST login` | anyone | `{email, password}` | session, cookie set |
 | `POST logout` | anyone | | `204`, cookie cleared |
-| `GET me` | signed in | | `{user, platform_admin, memberships: [{org, role}], orgs: [ORG], auth: {kind: "session", id} \| {kind: "api_token", id, org, name, scopes?} \| {kind: "superadmin", source}, superadmin}`; `orgs` is every org the caller can open (all of them for a platform admin); `superadmin` is `null`, or `{source: "tailnet:...", via: {kind: "token" \| "tailnet" \| "access", ...}, account: bool}` |
+| `GET me` | signed in | | `{user, platform_admin, memberships: [{org, role}], orgs: [ORG], auth: {kind: "session", id} \| {kind: "api_token", id, org, name, scopes?} \| {kind: "superadmin", source}, superadmin}`; `orgs` is every org that exists and the caller can open (all of them for a platform admin), and `memberships` leaves out orgs that no longer exist; `superadmin` is `null`, or `{source: "tailnet:...", via: {kind: "token" \| "tailnet" \| "access", ...}, account: bool}` |
 | `GET sessions` | signed in | | `{sessions: [{id, created_at, last_seen, expires_at, idle_expires_at, user_agent, ip, current}]}` |
 | `DELETE sessions/ID` | signed in | | `204` |
 | `POST invitations` | org owner/admin | `{org, email, role?}` (default member) | `201 {invitation, token, link}` |

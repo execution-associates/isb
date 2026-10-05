@@ -80,20 +80,48 @@ pub fn may_mint_tokens(p: &Principal) -> R<()> {
     Ok(())
 }
 
+/// The orgs that exist, as the runtime knows them (the daemon asks incus
+/// and its servers). The store's org rows anchor memberships and tokens but
+/// are not the truth: an org made or removed past the daemon (`isb org`
+/// against incus with another state directory, a test) leaves them behind.
+pub type OrgsFn = std::sync::Arc<dyn Fn() -> Result<Vec<OrgId>, String> + Send + Sync>;
+
 /// Who is calling: the user, their orgs, and how they signed in.
-pub fn me(store: &AuthStore, p: &Principal) -> R<Value> {
+///
+/// `orgs` and `memberships` name only orgs that exist (`existing`, when
+/// given): every one for a platform admin (unless the credential is an org
+/// token), else the caller's memberships among them. A membership row for
+/// an org that is gone never shows. Without `existing` (or when asking it
+/// failed) the store's org rows stand in.
+pub fn me(store: &AuthStore, p: &Principal, existing: Option<&OrgsFn>) -> R<Value> {
+    let real: Option<Vec<OrgId>> = existing.and_then(|f| match f() {
+        Ok(v) => Some(v),
+        Err(e) => {
+            eprintln!("isb serve: whoami: listing orgs: {e}; using the identity store's");
+            None
+        }
+    });
+    let exists = |o: &OrgId| real.as_ref().is_none_or(|r| r.contains(o));
     let memberships: Vec<Value> = p
         .orgs
         .iter()
+        .filter(|(o, _)| exists(o))
         .map(|(o, r)| json!({"org": o, "role": r}))
         .collect();
-    // The orgs this caller can open: every org for a platform admin
-    // (unless the credential is an org token), else its memberships.
-    let orgs: Vec<OrgId> = if p.platform_admin {
-        store.list_orgs()?
+    let mut orgs: Vec<OrgId> = if p.platform_admin {
+        match &real {
+            Some(r) => r.clone(),
+            None => store.list_orgs()?,
+        }
     } else {
-        p.orgs.iter().map(|(o, _)| o.clone()).collect()
+        p.orgs
+            .iter()
+            .map(|(o, _)| o.clone())
+            .filter(|o| exists(o))
+            .collect()
     };
+    orgs.sort();
+    orgs.dedup();
     // A superadmin: where its power comes from, and whether it has an isb
     // account (sessions, passkeys and tokens of its own).
     let superadmin = match &p.kind {
@@ -424,6 +452,21 @@ pub fn agent_identities(
         .map(|u| u.email)
         .collect();
     let who = |l: &[String]| if names { l.to_vec() } else { Vec::new() };
+    // The flags' superadmins and isb.db's, where this server can match them.
+    let (mut sa_access, mut sa_tailnet) = (
+        ways.superadmin_access.clone(),
+        ways.superadmin_tailnet.clone(),
+    );
+    for i in store.list_superadmin_identities()? {
+        let list = match i.kind {
+            AgentKind::Access if ways.access && ways.public_url.is_some() => &mut sa_access,
+            AgentKind::Tailnet if !ways.tailnet_listen.is_empty() => &mut sa_tailnet,
+            _ => continue,
+        };
+        if !list.contains(&i.value) {
+            list.push(i.value);
+        }
+    }
     Ok(json!({
         "identities": store.list_agent_identities(org)?,
         "available": {
@@ -432,8 +475,8 @@ pub fn agent_identities(
             "public_url": ways.public_url,
             "reach": {
                 "platform_admins": {"count": admins.len(), "who": who(&admins)},
-                "access_superadmins": {"count": ways.superadmin_access.len(), "who": who(&ways.superadmin_access), "you": has(&ways.superadmin_access)},
-                "tailnet_superadmins": {"count": ways.superadmin_tailnet.len(), "who": who(&ways.superadmin_tailnet), "you": has(&ways.superadmin_tailnet)},
+                "access_superadmins": {"count": sa_access.len(), "who": who(&sa_access), "you": has(&sa_access)},
+                "tailnet_superadmins": {"count": sa_tailnet.len(), "who": who(&sa_tailnet), "you": has(&sa_tailnet)},
             },
         },
     }))

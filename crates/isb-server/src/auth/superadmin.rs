@@ -1,14 +1,16 @@
 //! Superadmins: the unix socket's reach (every tool, no remote-spec policy,
-//! any instance) for an HTTP caller. Three sources grant it, and nothing else:
+//! any instance) for an HTTP caller. These sources grant it, and nothing else:
 //!
 //! - a **superadmin token** (`isb_sa_...`), minted only on the host with
 //!   `isb token create NAME --superadmin`, never over HTTP, so a stolen HTTP
 //!   credential cannot mint a durable one;
-//! - a **tailnet identity** on `isb serve --superadmin-tailnet` (the daemon's
+//! - a **tailnet identity** on `isb serve --superadmin-tailnet` or added with
+//!   `isb superadmin add --tailnet` ([`SuperadminIdentity`]; the daemon's
 //!   [`crate::server::tailnet`] check), judged from the real socket peer;
-//! - a **Cloudflare Access identity** on `isb serve --superadmin-access`: a
-//!   verified `Cf-Access-Jwt-Assertion` whose email (or service token
-//!   client id) is on the list;
+//! - a **Cloudflare Access identity** on `isb serve --superadmin-access` or
+//!   added with `isb superadmin add --access`/`--access-token`: a verified
+//!   `Cf-Access-Jwt-Assertion` whose email (or service token client id) is
+//!   listed;
 //! - in a debug build, `ISB_DEV_SUPERADMIN` ([`super::dev`]): any loopback
 //!   request with no credential, for developing isb.
 //!
@@ -19,6 +21,9 @@ use std::time::Duration;
 
 use rusqlite::{OptionalExtension, params};
 use serde::Serialize;
+
+mod identities;
+pub use identities::{MAX_SUPERADMIN_IDENTITIES, SuperadminIdentity};
 
 use super::secret::{self, TokenKind};
 use super::{AuthError, AuthResult, AuthStore, Principal, PrincipalKind, TOUCH_EVERY, User};

@@ -12,7 +12,6 @@ use crate::error::{Error, Result};
 use crate::exec::{self, ExecOptions, ExecOutput, ExecStream, Stdin};
 use crate::idmap::SubIds;
 use crate::lock::NameLock;
-
 pub mod images;
 use crate::plan::{
     self, Action, Actual, Desired, DesiredDevice, DiffOptions, HostFacts, Props, SandboxPlan,
@@ -547,6 +546,7 @@ fn create_instance(client: &Client, desired: &Desired, report: &mut dyn FnMut(&s
             "devices": devices,
             "profiles": desired.profiles,
         });
+        let body = crate::org::disk::sized_root(client, body);
         match client.mutate(
             "POST",
             "/1.0/instances",

@@ -37,7 +37,10 @@ recorded.
 Each 10 s bucket (the average of the samples in it) is written as it closes;
 once a minute the coarser tiers are rolled up from the one below and older
 rows are deleted. The history lives in `<state>/orgs/<org>/metrics.db`
-(SQLite, WAL), one database per org.
+(SQLite, WAL), one database per org, and only for orgs that exist: an
+`isb-*` incus project without `user.isb.org` gets none, and an org's history
+is deleted with the org (by `org_delete`, or within a minute when another
+process removes it).
 
 Disk use is bounded by the number of instances: about 23 000 rows per
 instance at the steady state. Measured with 20 instances over 31 simulated

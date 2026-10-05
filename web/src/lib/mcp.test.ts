@@ -12,6 +12,8 @@ import {
   isHostTool,
   isTailnetListen,
   listenOrigin,
+  mcpEndpoint,
+  mcpEndpointTabs,
   orgMcpUrl,
   orgWays,
   memberOffer,
@@ -299,5 +301,30 @@ describe("the inline add-as-member action", () => {
     expect(memberOffer({ code: "is_user", data: { email: "a@b.c" } }, "lab", "member", true)).toBeNull();
     expect(memberOffer(new Error("x"), "lab", "member", true)).toBeNull();
     expect(memberOffer(null, "lab", "member", true)).toBeNull();
+  });
+});
+
+describe("the MCP page's endpoint tabs", () => {
+  it("shows no tabs to anyone but a superadmin, whatever the URL says", () => {
+    expect(mcpEndpoint(false, null)).toBeNull();
+    expect(mcpEndpoint(false, "superadmin")).toBeNull();
+    expect(mcpEndpoint(false, "org")).toBeNull();
+  });
+
+  it("opens a superadmin on the superadmin endpoint unless the URL picks the org's", () => {
+    expect(mcpEndpoint(true, null)).toBe("superadmin");
+    expect(mcpEndpoint(true, "superadmin")).toBe("superadmin");
+    expect(mcpEndpoint(true, "org")).toBe("org");
+    expect(mcpEndpoint(true, "bogus")).toBe("superadmin");
+    expect(mcpEndpoint(true, "")).toBe("superadmin");
+  });
+
+  it("puts the superadmin tab first, each linked by ?endpoint=", () => {
+    expect(mcpEndpointTabs("acme")).toEqual([
+      { id: "superadmin", label: "Superadmin (/mcp)", to: "/orgs/acme/agents?endpoint=superadmin" },
+      { id: "org", label: "This org (/orgs/acme/mcp)", to: "/orgs/acme/agents?endpoint=org" },
+    ]);
+    // Every tab's link reads back as itself.
+    for (const t of mcpEndpointTabs("acme")) expect(mcpEndpoint(true, new URL(t.to, "https://x").searchParams.get("endpoint"))).toBe(t.id);
   });
 });

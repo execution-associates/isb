@@ -128,8 +128,10 @@ what an event in its org touches.
   /api/v1/tools`) fold out below, and a note says claude.ai and Claude
   Desktop connectors need Access Managed OAuth
   ([remote access](../guides/remote-access.md#cloudflare-tunnel-and-access)).
-  A superadmin also sees the unbound `/mcp` endpoint, with a warning that it
-  is root on the host, and for each source (a token minted on the host with
+  A superadmin sees two tabs, **Superadmin (/mcp)** (first, and selected
+  unless the URL says `?endpoint=org`) and **This org (/orgs/ORG/mcp)**
+  (all of the above). The superadmin tab is the unbound `/mcp` endpoint,
+  with a warning that it is root on the host, and for each source (a token minted on the host with
   `isb token create NAME --superadmin`, a `--superadmin-tailnet` identity
   with the allow list and tailnet URL from `host_policy`, a
   `--superadmin-access` identity) whether it is on and its snippets; the web

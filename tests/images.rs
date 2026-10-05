@@ -5,8 +5,8 @@
 //! Gated like the other integration tests (`ISB_INTEGRATION=1`; build them
 //! in a sandbox with `cargo test --no-run`, run the binary on the host). It
 //! needs skopeo and network access to Docker Hub, and deploys into the
-//! test org (`isb-test`, never the default org); its stack is removed
-//! afterwards, pass or fail.
+//! test process's own org (`isbt-<pid>`, never the default org), deleted
+//! when the process exits; its stack is removed afterwards, pass or fail.
 
 #[allow(dead_code, reason = "each test binary uses some of the shared helpers")]
 mod common;

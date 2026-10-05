@@ -508,3 +508,249 @@ fn access_edge_identities_need_a_verified_user_assertion() {
         .with_agents(Vec::new(), Some((v, hosts)));
     assert!(!g.edge(&ok, None).unwrap().can_claim);
 }
+
+fn me_or_tagged() -> WhoisFetcher {
+    Arc::new(|p: std::net::SocketAddr| {
+        Ok(match p.ip().to_string().as_str() {
+            "100.64.0.1" => Whois {
+                login: "me@example.com".into(),
+                node: "laptop.t.ts.net".into(),
+                tags: vec![],
+            },
+            "100.64.0.3" => Whois {
+                login: "ops@example.com".into(),
+                node: "ops.t.ts.net".into(),
+                tags: vec![],
+            },
+            _ => Whois {
+                login: "tagged-devices".into(),
+                node: "agent.t.ts.net".into(),
+                tags: vec!["tag:agents".into()],
+            },
+        })
+    })
+}
+
+/// `isb superadmin add` writes isb.db from another process; the gate reads
+/// it per request, so the same gate (no restart) admits and then drops.
+#[test]
+fn state_tailnet_identities_take_effect_without_a_restart() {
+    use crate::auth::agent_identities::AgentKind;
+    let s = store();
+    let t = Tailnet::new(
+        AllowList::parse("ops@example.com").unwrap(),
+        me_or_tagged(),
+        vec!["100.86.22.100".into()],
+    );
+    let g = Gate::new(s.clone(), Some(t), None);
+    let host = ("Host", "100.86.22.100:18995");
+    let me = req("100.64.0.1:1", &[host]);
+    let tagged = req("100.64.0.2:1", &[host]);
+    assert!(label(g.resolve(&me, None)).is_none());
+    assert!(label(g.resolve(&tagged, None)).is_none());
+    // Only the flag's ops may claim setup while the state is empty...
+    assert!(!g.edge(&me, None).unwrap().can_claim);
+    s.add_superadmin_identity(AgentKind::Tailnet, "Me@Example.com", "t")
+        .unwrap();
+    s.add_superadmin_identity(AgentKind::Tailnet, "tag:agents", "t")
+        .unwrap();
+    assert_eq!(
+        label(g.resolve(&me, None)).as_deref(),
+        Some("tailnet:me@example.com")
+    );
+    assert_eq!(
+        label(g.resolve(&tagged, None)).as_deref(),
+        Some("tailnet:agent.t.ts.net")
+    );
+    // ...and isb.db's too, once added.
+    assert!(g.edge(&me, None).unwrap().can_claim);
+    // The flag still counts (the union), and the Host check still holds.
+    assert_eq!(
+        label(g.resolve(&req("100.64.0.3:1", &[host]), None)).as_deref(),
+        Some("tailnet:ops@example.com")
+    );
+    let evil = req("100.64.0.1:1", &[("Host", "evil.example")]);
+    assert!(label(g.resolve(&evil, None)).is_none());
+    s.remove_superadmin_identity(AgentKind::Tailnet, "me@example.com")
+        .unwrap();
+    assert!(label(g.resolve(&me, None)).is_none());
+    assert!(label(g.resolve(&tagged, None)).is_some());
+}
+
+/// The daemon and the host CLI hold separate connections to one isb.db:
+/// the CLI's commit reaches the daemon's gate at its next request.
+#[test]
+fn another_process_writes_reach_the_running_gate() {
+    use crate::auth::agent_identities::AgentKind;
+    let dir = tempfile::tempdir().unwrap();
+    let path = crate::auth::db_path(dir.path());
+    let daemon = Arc::new(AuthStore::open(&path).unwrap());
+    let t = Tailnet::new(
+        AllowList::default(),
+        me_or_tagged(),
+        vec!["100.86.22.100".into()],
+    );
+    let g = Gate::new(daemon, Some(t), None);
+    let me = req("100.64.0.1:1", &[("Host", "100.86.22.100:18995")]);
+    assert!(label(g.resolve(&me, None)).is_none());
+    let cli = AuthStore::open(&path).unwrap();
+    cli.add_superadmin_identity(AgentKind::Tailnet, "me@example.com", "local(uid 1)")
+        .unwrap();
+    assert!(label(g.resolve(&me, None)).is_some());
+    cli.remove_superadmin_identity(AgentKind::Tailnet, "me@example.com")
+        .unwrap();
+    assert!(label(g.resolve(&me, None)).is_none());
+}
+
+/// With Access and the public host but no `--superadmin-access`, isb.db's
+/// emails and client ids are Access superadmins, unioned with the flag's.
+#[test]
+fn state_access_identities_union_with_the_flag() {
+    use crate::auth::agent_identities::AgentKind;
+    let s = store();
+    let (v, _) = at::validator();
+    let v = Arc::new(v);
+    let hosts = vec!["isb.example.com".to_string()];
+    let host = ("Host", "isb.example.com");
+    let alice = at::sign(&at::header(), &at::claims());
+    let mut c = at::claims();
+    c.as_object_mut().unwrap().remove("email");
+    c["common_name"] = json!("svc.access");
+    let svc = at::sign(&at::header(), &c);
+    let a = |t: &str| req("127.0.0.1:1", &[("Cf-Access-Jwt-Assertion", t), host]);
+    // No flag at all.
+    let g = Gate::new(
+        s.clone(),
+        None,
+        Some((v.clone(), AccessAllowList::default(), hosts.clone())),
+    )
+    .with_agents(Vec::new(), Some((v.clone(), hosts.clone())));
+    assert!(g.access_list().is_none());
+    assert!(label(g.resolve(&a(&alice), None)).is_none());
+    assert!(g.edge(&a(&alice), None).unwrap().can_claim);
+    s.add_superadmin_identity(AgentKind::Access, "ALICE@example.com", "t")
+        .unwrap();
+    assert_eq!(
+        label(g.resolve(&a(&alice), None)).as_deref(),
+        Some("access:alice@example.com")
+    );
+    assert!(label(g.resolve(&a(&svc), None)).is_none());
+    s.add_superadmin_identity(AgentKind::Access, "svc.access", "t")
+        .unwrap();
+    assert_eq!(
+        label(g.resolve(&a(&svc), None)).as_deref(),
+        Some("access:svc.access")
+    );
+    // Off this host: still nobody.
+    let evil = req(
+        "127.0.0.1:1",
+        &[
+            ("Cf-Access-Jwt-Assertion", &alice),
+            ("Host", "evil.example"),
+        ],
+    );
+    assert!(label(g.resolve(&evil, None)).is_none());
+    // With the flag naming someone else, both count.
+    let g = Gate::new(
+        s.clone(),
+        None,
+        Some((v, AccessAllowList::parse("bob@example.com").unwrap(), hosts)),
+    );
+    assert!(label(g.resolve(&a(&alice), None)).is_some());
+    s.remove_superadmin_identity(AgentKind::Access, "alice@example.com")
+        .unwrap();
+    assert!(label(g.resolve(&a(&alice), None)).is_none());
+}
+
+/// `superadmin_list`: the flags' and isb.db's, each with its source and
+/// whether this daemon can match it.
+#[test]
+fn listing_names_sources_and_what_cannot_match() {
+    use crate::auth::agent_identities::AgentKind;
+    let s = store();
+    s.add_superadmin_identity(AgentKind::Access, "a@example.com", "local(uid 1000)")
+        .unwrap();
+    s.add_superadmin_identity(AgentKind::Tailnet, "tag:ops", "t")
+        .unwrap();
+    let t = Tailnet::new(
+        AllowList::parse("me@example.com").unwrap(),
+        me_or_tagged(),
+        vec!["100.86.22.100".into()],
+    );
+    // No Access, no tailnet listen address: nothing can match.
+    let g = Gate::new(s.clone(), Some(t), None);
+    let l = g.listing().unwrap();
+    let got: Vec<_> = l
+        .iter()
+        .map(|l| (l.kind, l.value.as_str(), l.source, l.effective))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            (AgentKind::Tailnet, "me@example.com", "flag", false),
+            (AgentKind::Access, "a@example.com", "state", false),
+            (AgentKind::Tailnet, "tag:ops", "state", false),
+        ]
+    );
+    assert!(l[1].note.unwrap().contains("Cloudflare Access"));
+    assert_eq!(l[1].added_by.as_deref(), Some("local(uid 1000)"));
+    let (v, _) = at::validator();
+    let t = Tailnet::new(AllowList::default(), me_or_tagged(), vec![]);
+    let g = Gate::new(
+        s,
+        Some(t),
+        Some((
+            Arc::new(v),
+            AccessAllowList::parse("b@example.com").unwrap(),
+            vec!["isb.example.com".into()],
+        )),
+    )
+    .with_agents(vec!["100.86.22.100:18995".into()], None);
+    let l = g.listing().unwrap();
+    assert!(l.iter().all(|l| l.effective && l.note.is_none()), "{l:?}");
+    assert_eq!(
+        (l[0].value.as_str(), l[0].source),
+        ("b@example.com", "flag")
+    );
+    let v = serde_json::to_value(&l[1]).unwrap();
+    assert_eq!(v["kind"], "access");
+    assert_eq!(v["source"], "state");
+    assert!(v.get("note").is_none() && v["id"].is_i64());
+    assert!(TOOLS.contains(&"superadmin_list"));
+}
+
+/// No HTTP surface writes superadmin identities: only the host CLI calls
+/// the store's add and remove (as with superadmin tokens).
+#[test]
+fn only_the_host_cli_writes_superadmin_identities() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut callers = Vec::new();
+    let mut stack = vec![root.join("crates"), root.join("src")];
+    while let Some(dir) = stack.pop() {
+        for e in std::fs::read_dir(&dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                if !p.ends_with("target") && !p.ends_with("node_modules") {
+                    stack.push(p);
+                }
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                let text = std::fs::read_to_string(&p).unwrap();
+                if text.contains(".add_superadmin_identity(")
+                    || text.contains(".remove_superadmin_identity(")
+                {
+                    let rel = p.strip_prefix(&root).unwrap();
+                    callers.push(rel.to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+    callers.sort();
+    assert_eq!(
+        callers,
+        vec![
+            "crates/isb-daemon/src/daemon/superadmin/tests.rs",
+            "crates/isb-server/src/auth/superadmin/identities.rs",
+            "src/bin/isb/superadmin.rs",
+        ]
+    );
+}

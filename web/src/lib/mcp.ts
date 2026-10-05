@@ -11,6 +11,29 @@ export const rootMcpUrl = (origin: string) => `${trimSlash(origin)}/mcp`;
 
 const trimSlash = (s: string) => s.replace(/\/+$/, "");
 
+/** The MCP page's two endpoints, a tab each for a superadmin. */
+export type McpEndpoint = "superadmin" | "org";
+
+/**
+ * Which endpoint the MCP page shows, from `?endpoint=`: a superadmin gets
+ * tabs, the superadmin one first and chosen unless the URL says `org`,
+ * since it is the one a superadmin's agent usually wants; anyone else gets
+ * the org's alone, with no tabs (null).
+ */
+export function mcpEndpoint(superadmin: boolean, param: string | null): McpEndpoint | null {
+  if (!superadmin) return null;
+  return param === "org" ? "org" : "superadmin";
+}
+
+/** A superadmin's tabs on the MCP page, in order, each linked by its `?endpoint=`. */
+export function mcpEndpointTabs(org: string): { id: McpEndpoint; label: string; to: string }[] {
+  const page = `/orgs/${encodeURIComponent(org)}/agents`;
+  return [
+    { id: "superadmin", label: "Superadmin (/mcp)", to: `${page}?endpoint=superadmin` },
+    { id: "org", label: `This org (/orgs/${org}/mcp)`, to: `${page}?endpoint=org` },
+  ];
+}
+
 /**
  * Whether an address is one only this machine or the tailnet reaches
  * (loopback, 100.64.0.0/10, fd7a:115c:a1e0::/48, *.ts.net), so no

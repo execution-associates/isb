@@ -848,7 +848,7 @@
   "info": {
     "description": "isb serve's HTTP surface: the tools (also MCP), the workspace resource, the identity endpoints, streams, websockets and webhooks. docs/reference/http-api.md.",
     "title": "isb",
-    "version": "1.6.2"
+    "version": "1.6.4"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -10357,7 +10357,7 @@
                         "type": "null"
                       }
                     ],
-                    "description": "Disk across the org, e.g. 100GiB: the sum of every root disk's and volume's size. While set, an instance without a root size gets 10GiB from the org's default profile. \"none\" or null lifts the limit."
+                    "description": "Disk across the org, e.g. 100GiB: the sum of every root disk's and volume's size. While set, each instance isb creates gets a root size of its own (raw_devices.root.size, else 10GiB); setting it is refused while an instance has none, naming each. \"none\" or null lifts the limit."
                   },
                   "egress": {
                     "description": "Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/concepts/orgs.md). Replaces the list; [] clears it.",
@@ -10512,7 +10512,7 @@
     },
     "/api/v1/tools/org_delete": {
       "post": {
-        "description": "Platform admins: delete an org: its project with its volumes, its network, ACL and service names, and its members, invitations and tokens. Refused while stacks are deployed in it (remove them first); with force=true its remaining sandboxes are deleted too. Its secrets stay on disk under the state directory.",
+        "description": "Platform admins: delete an org: its project with its volumes, its network, ACL and service names, its members, invitations and tokens, and its metrics history. Refused while stacks are deployed in it (remove them first); with force=true its remaining sandboxes are deleted too. Its secrets stay on disk under the state directory.",
         "operationId": "org_delete",
         "requestBody": {
           "content": {
@@ -10800,7 +10800,7 @@
                         "type": "null"
                       }
                     ],
-                    "description": "Disk across the org, e.g. 100GiB: the sum of every root disk's and volume's size. While set, an instance without a root size gets 10GiB from the org's default profile. \"none\" or null lifts the limit."
+                    "description": "Disk across the org, e.g. 100GiB: the sum of every root disk's and volume's size. While set, each instance isb creates gets a root size of its own (raw_devices.root.size, else 10GiB); setting it is refused while an instance has none, naming each. \"none\" or null lifts the limit."
                   },
                   "egress": {
                     "description": "Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/concepts/orgs.md). Replaces the list; [] clears it.",
@@ -14887,6 +14887,61 @@
           "tools"
         ],
         "x-isb-tool": "stack_validate"
+      }
+    },
+    "/api/v1/tools/superadmin_list": {
+      "post": {
+        "description": "Superadmin identities: tailnet logins and tags, Cloudflare Access emails and service token client ids, each with its source (`flag`: --superadmin-tailnet / --superadmin-access, read at start-up; `state`: isb.db, added with `isb superadmin add` and read per request) and whether this daemon can match it (`effective`, with a `note` when not). Read only: identities are added and removed only on the host (isb superadmin add / rm), never over HTTP. Superadmins only.",
+        "operationId": "superadmin_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Superadmin identities",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "superadmin_list"
       }
     },
     "/api/v1/tools/superadmin_token_list": {

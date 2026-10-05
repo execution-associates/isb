@@ -10,7 +10,6 @@ crates/isb-apps/src/notify/mod.rs 1263
 crates/isb-apps/src/s3.rs 1263
 crates/isb-core/src/ingress/caddy.rs 1130
 crates/isb-core/src/machine.rs 1097
-crates/isb-core/src/metrics_history.rs 1024
 crates/isb-core/src/plan.rs 1517
 crates/isb-core/src/registry/oci.rs 1081
 crates/isb-core/src/sandbox.rs 1352

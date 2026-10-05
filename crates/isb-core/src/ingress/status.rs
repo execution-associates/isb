@@ -81,15 +81,18 @@ impl Manager {
             cert: String::new(),
             message: None,
             upstreams: s.upstreams.iter().map(|a| a.to_string()).collect(),
+            origin: None,
         };
         let off = match s.via {
-            Via::Tunnel(_) => {
+            Via::Tunnel(ref org) => {
                 d.cert = if r.https { "cloudflare" } else { "none" }.into();
                 d.url = Some(r.url(None, None));
+                d.origin = st.tunnels.get(org).and_then(|t| t.origin.clone());
                 None
             }
             Via::Public if r.https => {
                 d.url = Some(r.url(self.cfg.https.map(|a| a.port()), None));
+                d.origin = self.cfg.https.map(|a| format!("https://{a}"));
                 if self.cfg.https.is_none() {
                     d.cert = "none".into();
                     Some("this server has no HTTPS listener (isb serve --ingress-https)")
@@ -116,6 +119,7 @@ impl Manager {
             Via::Public => {
                 d.cert = "none".into();
                 d.url = Some(r.url(None, self.cfg.http.map(|a| a.port())));
+                d.origin = self.cfg.http.map(|a| format!("http://{a}"));
                 if self.cfg.http.is_none() {
                     Some("this server has no HTTP listener (isb serve --ingress-http)")
                 } else {

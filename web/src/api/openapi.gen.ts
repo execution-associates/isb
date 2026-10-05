@@ -2723,7 +2723,7 @@ export interface paths {
         put?: never;
         /**
          * Delete an org
-         * @description Platform admins: delete an org: its project with its volumes, its network, ACL and service names, and its members, invitations and tokens. Refused while stacks are deployed in it (remove them first); with force=true its remaining sandboxes are deleted too. Its secrets stay on disk under the state directory.
+         * @description Platform admins: delete an org: its project with its volumes, its network, ACL and service names, its members, invitations and tokens, and its metrics history. Refused while stacks are deployed in it (remove them first); with force=true its remaining sandboxes are deleted too. Its secrets stay on disk under the state directory.
          */
         post: operations["org_delete"];
         delete?: never;
@@ -3966,6 +3966,26 @@ export interface paths {
          * @description A dry run of stack_deploy for an editor: parses the compose YAML, checks it the way a deploy would (services, secrets, ports, ingress) and says what would change, without deploying or storing anything, including the project environment it goes in and whether its service names are free there. Answers {valid, errors: [{line, column, message}], changes (per service), exists, managed_by, project, environment (where it belongs, or would), diff (a unified diff from stack_export's text to this one)}; a bad file is an answer, not a failed call.
          */
         post: operations["stack_validate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/superadmin_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Superadmin identities
+         * @description Superadmin identities: tailnet logins and tags, Cloudflare Access emails and service token client ids, each with its source (`flag`: --superadmin-tailnet / --superadmin-access, read at start-up; `state`: isb.db, added with `isb superadmin add` and read per request) and whether this daemon can match it (`effective`, with a `note` when not). Read only: identities are added and removed only on the host (isb superadmin add / rm), never over HTTP. Superadmins only.
+         */
+        post: operations["superadmin_list"];
         delete?: never;
         options?: never;
         head?: never;
@@ -11185,7 +11205,7 @@ export interface operations {
                     default_cpus?: number;
                     /** @description Memory an instance gets when its spec sets none, e.g. 512MiB. */
                     default_memory?: string;
-                    /** @description Disk across the org, e.g. 100GiB: the sum of every root disk's and volume's size. While set, an instance without a root size gets 10GiB from the org's default profile. "none" or null lifts the limit. */
+                    /** @description Disk across the org, e.g. 100GiB: the sum of every root disk's and volume's size. While set, each instance isb creates gets a root size of its own (raw_devices.root.size, else 10GiB); setting it is refused while an instance has none, naming each. "none" or null lifts the limit. */
                     disk?: string | null;
                     /** @description Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/concepts/orgs.md). Replaces the list; [] clears it. */
                     egress?: string[];
@@ -11413,7 +11433,7 @@ export interface operations {
                     default_cpus?: number;
                     /** @description Memory an instance gets when its spec sets none, e.g. 512MiB. */
                     default_memory?: string;
-                    /** @description Disk across the org, e.g. 100GiB: the sum of every root disk's and volume's size. While set, an instance without a root size gets 10GiB from the org's default profile. "none" or null lifts the limit. */
+                    /** @description Disk across the org, e.g. 100GiB: the sum of every root disk's and volume's size. While set, each instance isb creates gets a root size of its own (raw_devices.root.size, else 10GiB); setting it is refused while an instance has none, naming each. "none" or null lifts the limit. */
                     disk?: string | null;
                     /** @description Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/concepts/orgs.md). Replaces the list; [] clears it. */
                     egress?: string[];
@@ -13865,6 +13885,43 @@ export interface operations {
                     vars?: {
                         [key: string]: string;
                     };
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    superadmin_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    org?: string;
                 };
             };
         };

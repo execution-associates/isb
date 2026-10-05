@@ -90,8 +90,9 @@ pub(crate) enum OrgCmd {
         /// Total memory, e.g. 16GiB, or `none`.
         #[arg(long, value_name = "SIZE|none")]
         memory: Option<String>,
-        /// Total disk, e.g. 100GiB, or `none`. While set, an instance
-        /// without a root size gets 10GiB from the org's default profile.
+        /// Total disk, e.g. 100GiB, or `none`. While set, each new instance
+        /// gets a root size of its own (`raw_devices.root.size`, else 10GiB);
+        /// refused while an existing instance has none.
         #[arg(long, value_name = "SIZE|none")]
         disk: Option<String>,
         /// Most instances the org may have, or `none`.

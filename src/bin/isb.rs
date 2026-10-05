@@ -49,6 +49,8 @@ mod servers;
 mod ssh;
 #[path = "isb/stack.rs"]
 mod stack;
+#[path = "isb/superadmin.rs"]
+mod superadmin;
 #[path = "isb/templates.rs"]
 mod templates;
 #[path = "isb/update.rs"]
@@ -377,6 +379,9 @@ enum Cmd {
     /// API tokens for `isb serve`.
     #[command(subcommand)]
     Token(TokenCmd),
+    /// Superadmin identities in isb.db (tailnet, Access), beside the flags.
+    #[command(subcommand)]
+    Superadmin(superadmin::SuperadminCmd),
     /// SSH public keys on isb accounts: what `isb ssh-proxy` lets into an
     /// org's instances (docs/guides/ssh.md).
     #[command(subcommand)]
@@ -598,6 +603,7 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
             db,
         } => invite_cmd(&org, &email, &role, &db),
         Cmd::Token(c) => token_cmd(c),
+        Cmd::Superadmin(c) => superadmin::superadmin_cmd(c),
         Cmd::Key(c) => ssh::key(c),
         Cmd::SshProxy {
             target,

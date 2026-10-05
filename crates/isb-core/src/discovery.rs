@@ -92,6 +92,43 @@ pub fn remove_org(org: &OrgId) {
     let _ = std::fs::remove_dir_all(org_dir(org));
 }
 
+/// How long an org's hosts directory may sit with no org behind it before
+/// [`prune_orgs`] takes it: longer than an org's creation takes between
+/// making the directory and the project.
+pub const STALE_ORG_DIR: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// Delete the hosts directories under the root of orgs not in `orgs` (the
+/// ones that exist) and untouched for `older_than`; returns the orgs whose
+/// directory went. An org removed past the daemon (another process, a test)
+/// leaves its directory behind, or the daemon's minute pass makes it again
+/// in the moment between the project going and the directory going.
+pub fn prune_orgs(orgs: &[OrgId], older_than: std::time::Duration) -> Vec<OrgId> {
+    prune_orgs_in(&root(), orgs, older_than)
+}
+
+fn prune_orgs_in(root: &Path, orgs: &[OrgId], older_than: std::time::Duration) -> Vec<OrgId> {
+    let Ok(rd) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut gone = Vec::new();
+    for e in rd.flatten() {
+        let Ok(org) = OrgId::new(e.file_name().to_string_lossy().to_string()) else {
+            continue;
+        };
+        let Ok(md) = e.metadata() else { continue };
+        let old = md
+            .modified()
+            .ok()
+            .and_then(|m| m.elapsed().ok())
+            .is_some_and(|age| age >= older_than);
+        if md.is_dir() && old && !orgs.contains(&org) && std::fs::remove_dir_all(e.path()).is_ok() {
+            gone.push(org);
+        }
+    }
+    gone.sort();
+    gone
+}
+
 /// `rwxr-s---` under a group-only root, `rwxr-sr-x` under a world-readable
 /// one (a host whose dnsmasq is not in a group of its own).
 fn dir_mode(root: &Path) -> u32 {
@@ -297,5 +334,26 @@ mod tests {
         publish(d.path(), &o, "wiki", "redis", &ips, Some("wiki-production")).unwrap();
         let t = std::fs::read_to_string(d.path().join("wiki.redis")).unwrap();
         assert!(t.ends_with("redis.wiki-production\n"), "{t}");
+    }
+
+    #[test]
+    fn hosts_directories_of_gone_orgs_are_pruned_once_stale() {
+        let root = tempfile::tempdir().unwrap();
+        for d in ["acme", "gone", "fresh"] {
+            std::fs::create_dir(root.path().join(d)).unwrap();
+            std::fs::write(root.path().join(d).join("web.shop"), "10.0.0.1 web\n").unwrap();
+        }
+        // Not an org's directory: left alone whatever its age.
+        std::fs::write(root.path().join("README"), "x").unwrap();
+        let acme = [OrgId::new("acme").unwrap()];
+        // Nothing is old enough yet.
+        let hour = std::time::Duration::from_secs(3600);
+        assert!(prune_orgs_in(root.path(), &acme, hour).is_empty());
+        let gone = prune_orgs_in(root.path(), &acme, std::time::Duration::ZERO);
+        let names: Vec<&str> = gone.iter().map(OrgId::as_str).collect();
+        assert_eq!(names, ["fresh", "gone"]);
+        assert!(root.path().join("acme/web.shop").is_file());
+        assert!(root.path().join("README").is_file());
+        assert!(!root.path().join("gone").exists());
     }
 }

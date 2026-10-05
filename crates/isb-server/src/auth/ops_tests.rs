@@ -204,7 +204,7 @@ fn scoped_tokens_only_read_and_workspaces_reach_nothing() {
     };
     assert!(forbidden(create_token(s, &ws, t)));
     // But it may ask who it is.
-    assert_eq!(me(s, &ws).unwrap()["auth"]["kind"], "workspace");
+    assert_eq!(me(s, &ws, None).unwrap()["auth"]["kind"], "workspace");
 }
 
 fn new_token(o: &str) -> NewToken {
@@ -339,4 +339,75 @@ fn users_are_for_platform_admins() {
         },
     );
     assert!(forbidden(users(s, &t)));
+}
+
+/// `orgs` (and `memberships`) of `me` with `existing` as the orgs there are.
+fn listed(s: &AuthStore, p: &Principal, existing: &[&str]) -> (Vec<String>, Vec<String>) {
+    let real: Vec<OrgId> = existing.iter().map(|o| org(o)).collect();
+    let f: OrgsFn = std::sync::Arc::new(move || Ok(real.clone()));
+    let v = me(s, p, Some(&f)).unwrap();
+    let names = |a: &Value, k: Option<&str>| -> Vec<String> {
+        a.as_array()
+            .unwrap()
+            .iter()
+            .map(|x| k.map_or(x, |k| &x[k]).as_str().unwrap().to_string())
+            .collect()
+    };
+    (
+        names(&v["orgs"], None),
+        names(&v["memberships"], Some("org")),
+    )
+}
+
+#[test]
+fn whoami_lists_the_orgs_that_exist() {
+    let w = world();
+    let s = &w.s;
+    // Rows the store keeps for an org that is gone (removed past the
+    // daemon), and a membership in it.
+    s.ensure_org(&org("stale")).unwrap();
+    s.set_member(&org("stale"), w.member.id, Role::Admin)
+        .unwrap();
+    // A platform admin sees every org that exists, including ones the store
+    // has no row for (made past the daemon) and none it only remembers.
+    let (orgs, _) = listed(s, &session(s, &w.root), &["acme", "default", "made-by-cli"]);
+    assert_eq!(orgs, ["acme", "default", "made-by-cli"]);
+    // A superadmin likewise.
+    let sa = Superadmin::synthetic(SuperadminSource::Token {
+        id: 1,
+        name: "ci".into(),
+    })
+    .principal;
+    let (orgs, _) = listed(s, &sa, &["acme", "default"]);
+    assert_eq!(orgs, ["acme", "default"]);
+    // A member: their memberships among the orgs that exist; the stale one
+    // shows nowhere.
+    let (orgs, ms) = listed(s, &session(s, &w.member), &["acme", "default"]);
+    assert_eq!(orgs, ["acme"]);
+    assert_eq!(ms, ["acme"]);
+    // A platform admin's org token is confined like anyone's.
+    let t = org_token(s, &w.root, "acme", &[]);
+    assert!(listed(s, &t, &["acme", "default"]).0.is_empty());
+    // Without a source of truth (or when it fails), the store stands in.
+    let v = me(s, &session(s, &w.member), None).unwrap();
+    assert_eq!(v["orgs"], json!(["acme", "stale"]));
+    let broken: OrgsFn = std::sync::Arc::new(|| Err("incus is down".into()));
+    let v = me(s, &session(s, &w.member), Some(&broken)).unwrap();
+    assert_eq!(v["orgs"], json!(["acme", "stale"]));
+}
+
+#[test]
+fn deleting_an_org_takes_its_memberships_invitations_and_tokens() {
+    let w = world();
+    let s = &w.s;
+    let acme = org("acme");
+    s.create_invitation(Some(w.owner.id), &acme, "n@x.io", Role::Member)
+        .unwrap();
+    create_token(s, &session(s, &w.member), new_token("acme")).unwrap();
+    assert!(s.delete_org(&acme).unwrap());
+    assert!(s.memberships(w.member.id).unwrap().is_empty());
+    assert!(s.list_members(&acme).unwrap().is_empty());
+    assert!(s.list_invitations(&acme).unwrap().is_empty());
+    let v = tokens(s, &session(s, &w.member), None).unwrap();
+    assert!(v["tokens"].as_array().unwrap().is_empty(), "{v}");
 }

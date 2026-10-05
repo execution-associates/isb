@@ -69,7 +69,8 @@ fills it in and refuses any other value. Then, in order:
   orgs, or only the one their `org` names (an org-bound endpoint names its
   own). `audit_list` and `history_query` filter themselves the same way.
 - **Superadmin tools** (`host_inventory`, `host_policy`,
-  `superadmin_token_list`, `superadmin_token_revoke`, `org_nesting`) are
+  `superadmin_token_list`, `superadmin_token_revoke`, `superadmin_list`,
+  `org_nesting`) are
   refused to everyone else, platform admins included.
 - **API token scopes** narrow a token below its role: `read` (read-only
   tools), `deploy` (`read` plus `stack_deploy`, `stack_redeploy`,
@@ -93,7 +94,7 @@ means every member of the org, *member* means members, admins and owners.
 |---|---|---|
 | `stack_deploy` | member | Deploy or update a stack from compose YAML (`name`, `compose`, `vars`, `secrets`, `base_dir`, `wait`, `timeout`, `dry_run`, `reuse_secrets`, `project`, `environment`). The stack belongs to one project environment: a new one goes where `project`/`environment` say (the project is made if missing; the environment defaults to `production`, else the project's first), or to the project named like the stack; an existing one keeps its owner, and naming another is refused. A service name the environment already gives an app or another stack's service is refused, and so is the name `new` for a new stack. `${VAR}` in `compose` resolves from `vars`, then the stack's environment (`stack_env_set`); an undefined one fails the deploy, naming it. The stack's managed domains (`stack_domains_set`) are merged into its services. A `file:`/`environment:` secret given no value (in `secrets`, `vars` or the stack's environment) reuses the value an earlier deploy stored as `<stack>_<key>`, and is named in `reused_secrets` and in a `warn` event with that value's date and version; `reuse_secrets: false` (default true) fails the deploy instead. Returns the change per service, `owner: {project, environment}`, the `deployment` it recorded (`stack_deployments`) and `reused_secrets` (omitted when none); `wait` blocks until it settles; `dry_run` returns the changes, owner and `reused_secrets` without deploying or recording anything. A new or changed registry image its registry does not have is refused; one that cannot be checked is listed in `warnings`. A `deploy` token may create the project this way. |
 | `stack_list` | anyone signed in | Every stack in the caller's orgs (`org`: that one only), each row naming its `org`, with its services' replica, health and rollout state, and `project`/`environment` (the owner, null for stacks the apps run). |
-| `stack_status` | viewer | One stack in detail: per service its revision, state, message, every replica (status, health, IP, in rotation, restarts, last probe output, the `stale_secrets` it runs an older version of), while a service is not converged its `last_failed_attempt` (`instance`, `at_ms`, `reason`, `output_lines`; `stack_logs` has the output), published ports with their backends, and each domain with its URL and certificate state. |
+| `stack_status` | viewer | One stack in detail: per service its revision, state, message, every replica (status, health, IP, in rotation, restarts, last probe output, the `stale_secrets` it runs an older version of), while a service is not converged its `last_failed_attempt` (`instance`, `at_ms`, `reason`, `output_lines`; `stack_logs` has the output), published ports with their backends, and each domain with its URL, certificate state and `origin` (the ingress listener its requests come in on). |
 | `stack_config` | viewer | The compose file as it resolved at the last deploy (the effective file: variables filled, secret variables as `{secret}` references, managed domains merged in; `domains` lists those per service), `source` (the text it was deployed from when kept as written, else null), and its secrets as references (store name, driver, version), never values. |
 | `stack_export` | viewer | The compose file a stack runs from as YAML text for `stack_deploy` (what the web UI's stack editor shows). A file deployed as text that needed no `vars` comes back as written (`resolved: false`: comments kept, `${VAR}` for the stack's environment to fill); otherwise as it resolved (`resolved: true`), with file/environment secrets named as `external` store secrets so no value is needed. Managed domains are never in it. Also `managed_by` (`apps` for a project environment's stack), `project` and `environment` (a compose stack's owner, null when it has none) and the services. |
 | `stack_validate` | viewer | A dry run of `stack_deploy` for an editor (takes `project` and `environment` as it does): `{valid, errors: [{line, column, message}], changes, exists, managed_by, project, environment, diff}`, where `project`/`environment` say where the stack belongs (or would) and `diff` is a unified diff from `stack_export`'s text. A refused owner or a service name taken in the environment is an error in the answer. A bad file is an answer, not an error. Writes nothing. |
@@ -304,7 +305,7 @@ and owners.
 | `notification_deliveries` | viewer | A channel's last 50 deliveries, newest first. |
 | `notification_settings` | platform admin | `allow_private_targets`, server-wide. |
 | `monitor_create`, `monitor_update` | member | An uptime monitor: `name`, `type` (`http`, `tcp`, `app`, `service`), its target, `path` (`app`, `service`; default: the path the service's healthcheck requests, else the domain's), `expected_status`, keywords, `headers` (values or secret names), `interval`, `timeout`, thresholds, `cert_expiry_days` ([Uptime monitoring](../guides/uptime.md)). |
-| `monitor_list`, `monitor_get` | viewer | Monitors with status, last check, uptime (24 h, 7 d, 30 d), latency p50/p95, bars; the org's incidents and settings. |
+| `monitor_list`, `monitor_get` | viewer | Monitors with status, last check (`ok`, `status`, `latency_ms`, `error`, `url`, `via`, `note`, and for a hop-by-hop check `hops`: `hop`, `ok`, `detail`), uptime (24 h, 7 d, 30 d), latency p50/p95, bars; the org's incidents and settings. |
 | `monitor_checks` | viewer | A monitor's history over `range`: buckets, uptime, raw checks. |
 | `monitor_delete`, `monitor_pause`, `monitor_resume` | member | Remove (with its history), stop or start checking. Deleting an app's or stack service's own monitor excludes it (`excluded_app`, `excluded_service`). |
 | `monitor_settings` | member | `auto_monitors` (apps and compose stack services with a served domain get their own monitor), `exclude_apps`, `exclude_services` (`<stack>/<service>`). |
@@ -316,11 +317,11 @@ and owners.
 
 | Tool | Who | Does |
 |---|---|---|
-| `org_get` | viewer | Limits with `allocation` (per limited `cpu`, `memory`, `disk`, `instances`: `limit`, `allocated`, `free`; allocated is the sum of every instance's limit, stopped ones included; bytes for memory and disk), per-instance defaults (`default_disk` while the org has a disk limit), bridge and subnet, egress exceptions, bind roots, service-name domain, counts, and `placement` (`kind`, `server`, `isolation`). |
+| `org_get` | viewer | Limits with `allocation` (per limited `cpu`, `memory`, `disk`, `instances`: `limit`, `allocated`, `free`; allocated is the sum of every instance's limit, stopped ones included; bytes for memory and disk), per-instance defaults (`default_disk`, the root size a new instance gets, while the org has a disk limit), bridge and subnet, egress exceptions, bind roots, service-name domain, counts, and `placement` (`kind`, `server`, `isolation`). |
 | `org_list` | platform admin | Every org, as `org_get` shows one, with the server it runs on. |
 | `org_create` | platform admin | `org`, `cpus`, `memory`, `disk`, `instances`, `default_cpus`, `default_memory`, `egress`, `udp`, `placement` (`"local"`, `{"server": NAME}`, `{"vm": {cpus, memory, disk}}`), `wait`. Bind roots are set on the host only. |
-| `org_update` | platform admin | Limits (`"none"` or `null` lifts one: `cpus`, `memory`, `disk`, `instances`), defaults, `egress` or `udp` (UDP ports its stacks may publish, `IP:PORT`; each replaces its list, `[]` clears it); a different placement is refused. |
-| `org_delete` | platform admin | Refused while stacks are deployed; `force` deletes remaining sandboxes; `delete_vm` deletes a dedicated VM. |
+| `org_update` | platform admin | Limits (`"none"` or `null` lifts one: `cpus`, `memory`, `disk`, `instances`; a `disk` limit is refused while an instance has no root size, naming each, and under it each new instance gets its own root size: `raw_devices.root.size`, else 10GiB), defaults, `egress` or `udp` (UDP ports its stacks may publish, `IP:PORT`; each replaces its list, `[]` clears it); a different placement is refused. |
+| `org_delete` | platform admin | Refused while stacks are deployed; `force` deletes remaining sandboxes; `delete_vm` deletes a dedicated VM. Its members, invitations, tokens, metrics history and hosts directory go; its secrets stay. |
 | `ingress_status` | anyone signed in | Listeners, CA, the Caddy process, every routed domain (URL, certificate state, upstreams), conflicts and refusals, each tunnel org's cloudflared. The caller's orgs only. |
 | `overview` | anyone signed in | Everything a dashboard shows in one call: host CPU and memory with history, every stack in detail, sandboxes with CPU and memory, the latest event number. |
 | `events` | anyone signed in | The event feed after a `since` cursor (`limit`), waiting up to 30 s (`wait`) for one. Numbering restarts with the daemon: a `since` past the newest `seq` starts over from the kept events. |
@@ -367,7 +368,7 @@ platform admin) touches an owner or makes one.
 
 | Tool | Who | Does |
 |---|---|---|
-| `whoami` | anyone signed in, a workspace included | The caller: user, platform admin flag, orgs and roles, how it signed in (`auth`), the orgs it can open, and `superadmin`. |
+| `whoami` | anyone signed in, a workspace included | The caller: user, platform admin flag, orgs and roles, how it signed in (`auth`), the orgs it can open (every org that exists for a platform admin; its memberships among them for anyone else), and `superadmin`. |
 | `member_list` | viewer | Each member's user (id, email, name), role and last activity. |
 | `member_update` | admin | `user_id` or `email`, `role`. |
 | `member_remove` | admin; anyone for themselves | `user_id` or `email`. Their account stays. |
@@ -399,4 +400,5 @@ superadmin tokens are minted on the host only.
 | `host_policy` | How the daemon serves: listen addresses, Access, the remote tool policy, what remote specs may ask for, and each superadmin source with its allow list and token count. |
 | `superadmin_token_list` | Superadmin tokens' metadata, never the token. |
 | `superadmin_token_revoke` | Revoke one by `id`. Minting is `isb token create NAME --superadmin`, on the host only. |
+| `superadmin_list` | Every tailnet and Access superadmin identity: `kind` (`tailnet`, `access`), `value`, `source` (`flag`: `--superadmin-tailnet` / `--superadmin-access`; `state`: `isb.db`, with `id`, `added_at`, `added_by`), `effective`, and a `note` when this daemon cannot match it. Read only: adding and removing is `isb superadmin add` / `rm`, on the host only. |
 | `org_nesting` | Read (`org`) or set (`allow_nesting`) whether the org's workspace may run Docker with `security.nesting` ([The Docker exception](../concepts/security.md#the-docker-exception)). Turning it off is refused while the workspace runs with nesting. |

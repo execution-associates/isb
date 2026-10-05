@@ -42,7 +42,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { canWrite } from "@/lib/admin";
 import { errorMessage } from "@/lib/messages";
 import { type Command, filterCommands, groupCommands, move, sequence } from "@/lib/palette";
-import { defaultOrg, useSignOut } from "@/lib/session";
+import { canOpenOrg, defaultOrg, useSignOut } from "@/lib/session";
 import { setTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
@@ -136,7 +136,7 @@ function Palette({ me, org, close }: { me: Me; org: string | null; close: () => 
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const list = useRef<HTMLDivElement>(null);
-  const known = !!org && me.orgs.includes(org);
+  const known = canOpenOrg(me, org);
   const writer = known && canWrite(me, org!);
   const o = org ? encodeURIComponent(org) : "";
 

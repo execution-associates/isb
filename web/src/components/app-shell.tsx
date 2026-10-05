@@ -32,7 +32,7 @@ import { crumbsFor, useCrumbs } from "@/lib/crumbs";
 import { initials } from "@/lib/format";
 import { setTheme, type Theme, useTheme } from "@/lib/theme";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ambientSuperadmin, defaultOrg, roleIn, superadminVia, useMe, useSetupNeeded, useSignOut } from "@/lib/session";
+import { ambientSuperadmin, canOpenOrg, defaultOrg, roleIn, superadminVia, useMe, useSetupNeeded, useSignOut } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
 /** Signed-in pages: redirects to /login (with `next`) or /setup otherwise. */
@@ -337,7 +337,7 @@ function SearchButton({ className }: { className?: string }) {
 function SidebarContent({ me, onNavigate }: { me: Me; onNavigate?: () => void }) {
   const org = useCurrentOrg(me);
   const o = org ? encodeURIComponent(org) : "";
-  const known = !!org && me.orgs.includes(org);
+  const known = canOpenOrg(me, org);
   const [main, manage] = [SECTIONS.slice(0, 7), SECTIONS.slice(7)];
   return (
     <div className="flex h-full flex-col gap-3 px-3 pt-3 pb-2">
@@ -471,7 +471,7 @@ export function AppShell({ me }: { me: Me }) {
         </div>
       </div>
       <LiveSync />
-      <DeployWatcher org={org && me.orgs.includes(org) ? org : null} />
+      <DeployWatcher org={org && canOpenOrg(me, org) ? org : null} />
     </CommandPaletteProvider>
   );
 }

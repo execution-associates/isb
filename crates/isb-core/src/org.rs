@@ -104,11 +104,12 @@ use crate::client::{Client, encode_segment};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
+pub mod disk;
 mod ensure;
 mod homes;
 mod names;
 pub use ensure::{Names, ensure_service_names};
-pub use names::{ensure_all_service_names, ensure_default};
+pub use names::{ensure_all_service_names, ensure_default, names, of_project};
 pub(crate) mod limits;
 pub use limits::{Budget, DEFAULT_ROOT_SIZE, Limit, bytes as format_bytes};
 pub mod nesting;
@@ -199,7 +200,7 @@ pub struct OrgInfo {
     /// What an instance gets when its spec sets no limits (the org's default profile).
     pub default_cpus: Option<String>,
     pub default_memory: Option<String>,
-    /// The root disk size it gets: set while the org has a disk limit.
+    /// The root disk size it gets under a disk limit: the profile's, else [`DEFAULT_ROOT_SIZE`].
     pub default_disk: Option<String>,
     /// Each limit's budget (`cpu`, `memory`, `disk`, `instances`): what
     /// every instance's limit adds up to, stopped ones included.
@@ -606,7 +607,8 @@ fn info(base: &Client, org: OrgId, p: &Value) -> Result<OrgInfo> {
     Ok(OrgInfo {
         default_disk: profile["devices"]["root"]["size"]
             .as_str()
-            .map(String::from),
+            .map(String::from)
+            .or_else(|| cfg.get("limits.disk").map(|_| DEFAULT_ROOT_SIZE.into())),
         allocation,
         project: org.incus_project(),
         name: org,
@@ -688,13 +690,9 @@ pub fn list(base: &Client) -> Result<Vec<OrgInfo>> {
     let v = h.get("/1.0/projects?recursion=1")?;
     let mut out = Vec::new();
     for p in v.as_array().into_iter().flatten() {
-        let name = p["name"].as_str().unwrap_or_default();
-        let Some(org) = OrgId::from_incus_project(name) else {
+        let Some(org) = of_project(p) else {
             continue;
         };
-        if p["config"][KEY_ORG].as_str() != Some(org.as_str()) {
-            continue;
-        }
         out.push(info(base, org, p)?);
     }
     out.sort_by(|a, b| (!a.name.is_default(), &a.name).cmp(&(!b.name.is_default(), &b.name)));
