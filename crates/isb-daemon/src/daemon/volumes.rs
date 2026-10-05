@@ -63,6 +63,7 @@ fn reg(
 
 pub fn register(r: &mut Registry, v: VolumeBackups) -> Result<()> {
     register_reads(r, &v)?;
+    register_lifecycle(r, &v)?;
     register_writes(r, &v)?;
     register_restores(r, &v)
 }
@@ -160,6 +161,61 @@ fn register_reads(r: &mut Registry, v: &VolumeBackups) -> Result<()> {
         |v, a, _| {
             let name = a.get("name").and_then(Value::as_str);
             Ok(json!({"restores": v.staged_list(&org_of(&a)?, name)?}))
+        },
+    )
+}
+
+/// `isb volume create` and `isb volume rm`.
+fn register_lifecycle(r: &mut Registry, v: &VolumeBackups) -> Result<()> {
+    let write = json!({"destructiveHint": false, "openWorldHint": false});
+    let destructive = json!({"destructiveHint": true, "openWorldHint": false});
+    reg(
+        r,
+        v,
+        (
+            "volume_create",
+            "Create a volume",
+            "Create an empty named volume in the org's pool, for a sandbox spec or an app to mount by name. `size` (e.g. 10GiB) bounds it; under the org's disk limit it defaults to the root disk's size. An existing volume is left as it is (`created`: false). Org admins and owners.",
+        ),
+        obj(
+            json!({"name": {"type": "string", "description": "The volume: letters, digits, _, - and ."}, "size": {"type": "string", "description": "e.g. 10GiB."}}),
+            &["name"],
+        ),
+        write,
+        |v, a, c| {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct A {
+                name: String,
+                #[serde(default)]
+                size: Option<String>,
+                #[serde(default)]
+                #[allow(dead_code)]
+                org: Option<String>,
+            }
+            let org = org_of(&a)?;
+            require_admin(c, &org, "creating a volume")?;
+            let a: A = args(a)?;
+            let created = v.create(&org, &a.name, a.size.as_deref())?;
+            Ok(json!({"name": a.name, "created": created}))
+        },
+    )?;
+    reg(
+        r,
+        v,
+        (
+            "volume_delete",
+            "Delete a volume",
+            "Delete a named volume, its snapshots and its snapshot settings, for good. Refused while an instance has it attached, running or not (sandbox_device_remove, or remove the instance, first), while a snapshot of it is being taken, while a backup names it (backup_delete), and for a staged restore (volume_restore_discard). Org admins and owners.",
+        ),
+        obj(json!({"name": {"type": "string"}}), &["name"]),
+        destructive,
+        |v, a, c| {
+            let org = org_of(&a)?;
+            require_admin(c, &org, "deleting a volume")?;
+            let name = name_of(&a)?;
+            v.delete(&org, &name)?;
+            Ok(json!({"ok": true, "deleted": name}))
         },
     )
 }

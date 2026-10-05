@@ -168,7 +168,9 @@ See [isb from code](../guides/sdk.md).
 [`SKILL.md`](https://github.com/execution-associates/isb/blob/main/SKILL.md) at the repository root teaches a coding agent to
 use isb correctly: the compose file, `isb up` versus `isb up -d`, the safety
 rules, and the MCP tools. Put it in your agent's skills directory (for
-Claude Code, `~/.claude/skills/isb/SKILL.md`).
+Claude Code, `~/.claude/skills/isb/SKILL.md`). An agent connected to
+`isb serve` over MCP does not need it: the server's instructions and its
+`guide` tool teach the same.
 
 ## Upgrading
 

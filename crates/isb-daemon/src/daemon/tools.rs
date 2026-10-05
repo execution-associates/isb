@@ -4,6 +4,7 @@
 
 use super::*;
 
+mod sandbox_ops;
 mod stack_manifest;
 pub(super) mod stack_settings;
 
@@ -655,6 +656,7 @@ pub(super) fn sandbox_tools(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Res
     sandbox_exec_tool(r, d, ann)?;
     sandbox_remove_tool(r, d, ann)?;
     sandbox_extend_tool(r, d, ann)?;
+    sandbox_ops::register(r, d, ann)?;
     super::kube::register(r, d, ann)
 }
 

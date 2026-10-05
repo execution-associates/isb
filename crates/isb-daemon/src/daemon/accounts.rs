@@ -65,6 +65,18 @@ pub const USER_TOOLS: &[&str] = &[
     "user_update",
 ];
 
+/// The account tools that act on someone else's account when the call
+/// names a `user` (and `token_list`, every org's tokens with `all_orgs`):
+/// platform admins only, as `isb ... --user` is the host's.
+pub fn names_another_user(tool: &str, a: &Value) -> bool {
+    let set = |k: &str| a.get(k).is_some_and(|v| !v.is_null() && v != &json!(false));
+    match tool {
+        "ssh_key_list" | "ssh_key_remove" => set("user"),
+        "token_list" => set("all_orgs"),
+        _ => false,
+    }
+}
+
 /// The authorizer's part for a signed-in user calling an account tool,
 /// after its scopes: a workspace only asks `whoami`, and a token scoped
 /// short of `admin` only reads. The rest is judged per call, by
@@ -138,6 +150,24 @@ fn member_id(d: &Daemon, user_id: Option<i64>, email: Option<&str>) -> Result<i6
         (None, None) => Err(Error::invalid("pass user_id or email")),
     }
 }
+
+/// The account a call names with `user` (an email), taken out of the
+/// arguments: `None` acts on the caller's own. Platform admins only.
+fn another(d: &Daemon, p: &Principal, a: &mut Value) -> Result<Option<i64>> {
+    let user = match a.as_object_mut().and_then(|o| o.remove("user")) {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::String(e)) => e,
+        Some(_) => return Err(Error::invalid("user: an email")),
+    };
+    if !p.platform_admin {
+        return Err(Error::Forbidden(
+            "acting on another user's account is for platform admins".into(),
+        ));
+    }
+    member_id(d, None, Some(&user)).map(Some)
+}
+
+const USER: &str = "Platform admins: act on this user's account (their email) instead of yours, as `--user` does on the host.";
 
 fn schema(props: Value, required: &[&str], org: &str) -> Value {
     let mut props = props;
@@ -422,9 +452,12 @@ fn register_tokens(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> {
         d,
         "token_list",
         "List API tokens",
-        "Your API tokens' metadata (id, name, org, scopes, created, last used, expiry; never the secret), only one org's when `org` is given (an org token sees only its org's). With all=true, every token in `org`, with who holds each: owners and admins.",
+        "Your API tokens' metadata (id, name, org, scopes, created, last used, expiry; never the secret), only one org's when `org` is given (an org token sees only its org's). With all=true, every token in `org`, with who holds each: owners and admins. With all_orgs=true, every token on the platform, in every org and none, with who holds each: platform admins (superadmin tokens: superadmin_token_list).",
         schema(
-            json!({"all": {"type": "boolean", "description": "Every token in the org, not just yours (owners and admins)."}}),
+            json!({
+                "all": {"type": "boolean", "description": "Every token in the org, not just yours (owners and admins)."},
+                "all_orgs": {"type": "boolean", "description": "Every token on the platform (platform admins), as `isb token ls` lists them on the host."},
+            }),
             &[],
             "Only this org's tokens (all: the org to list; default: default)."
         ),
@@ -435,9 +468,14 @@ fn register_tokens(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> {
             struct A {
                 #[serde(default)]
                 all: bool,
+                #[serde(default)]
+                all_orgs: bool,
                 org: Option<String>,
             }
             let a: A = args(a)?;
+            if a.all_orgs {
+                return ops::all_tokens(&d.users, p).map_err(err);
+            }
             let org = a.org.map(OrgId::new).transpose()?;
             if a.all {
                 let org = org.unwrap_or_else(OrgId::default_org);
@@ -517,18 +555,25 @@ fn register_sessions(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()>
     Ok(())
 }
 
-/// The caller's SSH keys.
+/// The caller's SSH keys (a platform admin's: anyone's, with `user`).
 fn register_keys(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> {
     account_tool!(
         r,
         d,
         "ssh_key_list",
         "List your SSH keys",
-        "The SSH public keys on your account: what `isb ssh-proxy` lets in to your orgs' workspaces and sandboxes (id, name, algorithm, fingerprint, last use).",
-        schema(json!({}), &[], NO_ORG),
+        "The SSH public keys on your account: what `isb ssh-proxy` lets in to your orgs' workspaces and sandboxes (id, name, algorithm, fingerprint, last use). A platform admin may list another user's (`user`).",
+        schema(
+            json!({"user": {"type": "string", "description": USER}}),
+            &[],
+            NO_ORG
+        ),
         ann.ro,
-        |d: &Daemon, p: &Principal, _a: Value, _c: &Caller| -> Result<Value> {
-            ops::ssh_keys(&d.users, p).map_err(err)
+        |d: &Daemon, p: &Principal, mut a: Value, _c: &Caller| -> Result<Value> {
+            match another(d, p, &mut a)? {
+                Some(uid) => ops::user_ssh_keys(&d.users, p, uid).map_err(err),
+                None => ops::ssh_keys(&d.users, p).map_err(err),
+            }
         }
     );
     account_tool!(
@@ -564,12 +609,21 @@ fn register_keys(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> {
         d,
         "ssh_key_remove",
         "Remove an SSH key",
-        "Remove one of your SSH keys by id; sessions it opened end within seconds.",
-        schema(json!({"id": {"type": "integer"}}), &["id"], NO_ORG),
+        "Remove one of your SSH keys by id (a platform admin: another user's, with `user`); sessions it opened end within seconds.",
+        schema(
+            json!({"id": {"type": "integer"}, "user": {"type": "string", "description": USER}}),
+            &["id"],
+            NO_ORG
+        ),
         ann.destructive,
-        |d: &Daemon, p: &Principal, a: Value, _c: &Caller| -> Result<Value> {
+        |d: &Daemon, p: &Principal, mut a: Value, _c: &Caller| -> Result<Value> {
+            let uid = another(d, p, &mut a)?;
             let a: Id = args(a)?;
-            ops::delete_ssh_key(&d.users, p, a.id).map_err(err)?;
+            match uid {
+                Some(uid) => ops::delete_user_ssh_key(&d.users, p, uid, a.id),
+                None => ops::delete_ssh_key(&d.users, p, a.id),
+            }
+            .map_err(err)?;
             Ok(json!({"removed": a.id}))
         }
     );

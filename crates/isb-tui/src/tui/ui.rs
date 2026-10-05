@@ -8,7 +8,7 @@ use ratatui::widgets::{
     Block, BorderType, Borders, Cell, Clear, Padding, Paragraph, Row, Table, TableState, Wrap,
 };
 
-use super::app::{App, Focus, Item, LogView, Mode, PALETTE};
+use super::app::{App, Focus, Item, LogLine, LogView, Mode, PALETTE, find_matches};
 use super::fmt::{age, bar, bytes, clock, spark, trunc};
 use super::model::{Replica, Rollout, Sandbox, Service, Stack};
 use super::theme::Theme;
@@ -849,6 +849,15 @@ fn keybar(f: &mut Frame, app: &App, area: Rect) {
             f.render_widget(Paragraph::new(l), area);
             return;
         }
+        Mode::Logs(v) if v.typing.is_some() => {
+            let l = Line::from(vec![
+                Span::styled(" search /", t.accent().add_modifier(Modifier::BOLD)),
+                Span::styled(v.pattern().to_string(), t.bold()),
+                Span::styled("▏", t.accent()),
+            ]);
+            f.render_widget(Paragraph::new(l), area);
+            return;
+        }
         Mode::Palette(_) => return,
         _ => {}
     }
@@ -940,7 +949,7 @@ fn modal<'a>(app: &App, title: String, danger: bool) -> Block<'a> {
 
 fn help(f: &mut Frame, app: &App, area: Rect) {
     let t = &app.theme;
-    let sections: [(&str, &[(&str, &str)]); 3] = [
+    let sections: [(&str, &[(&str, &str)]); 4] = [
         (
             "move",
             &[
@@ -971,6 +980,15 @@ fn help(f: &mut Frame, app: &App, area: Rect) {
                 ("e", "shell"),
                 ("t", "start or stop"),
                 ("x", "remove"),
+            ],
+        ),
+        (
+            "logs",
+            &[
+                ("/", "search (a capital letter makes it match case)"),
+                ("n N", "older, newer match"),
+                ("f w", "follow, wrap"),
+                ("1-9 a", "one replica, all"),
             ],
         ),
     ];
@@ -1118,6 +1136,16 @@ fn logs(f: &mut Frame, app: &App, v: &LogView, area: Rect) {
     if let Some(n) = v.only {
         title.push_str(&format!(" · replica {n}"));
     }
+    let pat = v.pattern();
+    if !pat.is_empty() {
+        let n = v
+            .shown()
+            .iter()
+            .filter(|l| find_matches(&l.text, pat).next().is_some())
+            .count();
+        let s = if n == 1 { "" } else { "es" };
+        title.push_str(&format!(" · /{pat} {n} match{s}"));
+    }
     let state = if v.loading {
         "loading"
     } else if v.follow {
@@ -1149,45 +1177,21 @@ fn logs(f: &mut Frame, app: &App, v: &LogView, area: Rect) {
         );
     let inner = block.inner(area);
     f.render_widget(block, area);
-    // Replica colours cycle through the accent palette so interleaved lines
-    // stay attributable at a glance.
-    let colors = [t.accent, t.info, t.ok, t.warn, t.dim];
-    let shown: Vec<&super::app::LogLine> = v
-        .lines
-        .iter()
-        .filter(|l| v.only.is_none_or(|o| l.slot == o))
-        .collect();
+    let shown = v.shown();
+    // The bottom line is where a search lands, so mark it when it matches.
+    let cur = (!pat.is_empty() && !v.follow)
+        .then(|| shown.len().checked_sub(1 + v.scroll))
+        .flatten();
     let mut lines: Vec<Line> = shown
         .iter()
-        .map(|l| {
-            let c = colors[(l.slot as usize).saturating_sub(1) % colors.len()];
-            let mut spans = Vec::new();
-            if l.slot > 0 {
-                spans.push(Span::styled(
-                    format!("{} ", l.slot),
-                    Style::default().fg(c).add_modifier(Modifier::BOLD),
-                ));
-                spans.push(Span::styled("│ ", t.faint()));
-            }
-            if !l.time.is_empty() {
-                spans.push(Span::styled(
-                    format!("{} ", l.time.get(11..19).unwrap_or(&l.time)),
-                    t.faint(),
-                ));
-            }
-            let lower = l.text.to_lowercase();
-            let style = if lower.contains("error")
-                || lower.contains("traceback")
-                || lower.contains("panic")
-            {
-                Style::default().fg(t.err)
-            } else if lower.contains("warn") {
-                Style::default().fg(t.warn)
+        .enumerate()
+        .map(|(i, l)| {
+            let line = log_line(t, l, pat);
+            if cur == Some(i) {
+                line.style(t.selected())
             } else {
-                t.fg()
-            };
-            spans.push(Span::styled(l.text.clone(), style));
-            Line::from(spans)
+                line
+            }
         })
         .collect();
     if let Some(e) = &v.error {
@@ -1206,10 +1210,57 @@ fn logs(f: &mut Frame, app: &App, v: &LogView, area: Rect) {
     f.render_widget(p, inner);
 }
 
+/// One log line: its replica, its time, and its text coloured by level with
+/// the search's matches picked out.
+fn log_line(t: &Theme, l: &LogLine, pat: &str) -> Line<'static> {
+    // Replica colours cycle through the accent palette so interleaved lines
+    // stay attributable at a glance.
+    let colors = [t.accent, t.info, t.ok, t.warn, t.dim];
+    let hit = Style::default()
+        .fg(t.warn)
+        .add_modifier(Modifier::REVERSED | Modifier::BOLD);
+    let c = colors[(l.slot as usize).saturating_sub(1) % colors.len()];
+    let mut spans = Vec::new();
+    if l.slot > 0 {
+        spans.push(Span::styled(
+            format!("{} ", l.slot),
+            Style::default().fg(c).add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled("│ ", t.faint()));
+    }
+    if !l.time.is_empty() {
+        spans.push(Span::styled(
+            format!("{} ", l.time.get(11..19).unwrap_or(&l.time)),
+            t.faint(),
+        ));
+    }
+    let lower = l.text.to_lowercase();
+    let style = if lower.contains("error") || lower.contains("traceback") || lower.contains("panic")
+    {
+        Style::default().fg(t.err)
+    } else if lower.contains("warn") {
+        Style::default().fg(t.warn)
+    } else {
+        t.fg()
+    };
+    let mut at = 0;
+    for (a, b) in find_matches(&l.text, pat) {
+        if a > at {
+            spans.push(Span::styled(l.text[at..a].to_string(), style));
+        }
+        spans.push(Span::styled(l.text[a..b].to_string(), hit));
+        at = b;
+    }
+    if at < l.text.len() || at == 0 {
+        spans.push(Span::styled(l.text[at..].to_string(), style));
+    }
+    Line::from(spans)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::app::{App, Focus, LogLine, LogTarget, LogView};
+    use crate::tui::app::{App, Focus, LogTarget, LogView};
     use crate::tui::model::*;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -1479,6 +1530,8 @@ mod tests {
             wrap: false,
             scroll: 0,
             only: None,
+            query: String::new(),
+            typing: None,
             loading: false,
             error: None,
             fetched: None,
@@ -1486,6 +1539,13 @@ mod tests {
         let s = render(&a, 100, 20);
         dump("logs-100x20", &s);
         assert!(s.contains("following"), "{s}");
+        if let Mode::Logs(v) = &mut a.mode {
+            v.query = "trace".into();
+            v.follow = false;
+        }
+        let s = render(&a, 100, 20);
+        dump("logs-search-100x20", &s);
+        assert!(s.contains("/trace 1 match"), "{s}");
 
         a.mode = Mode::Help;
         dump("help-100x30", &render(&a, 100, 30));
