@@ -40,6 +40,13 @@ pub(super) fn register(r: &mut Registry, d: &Arc<Daemon>) -> Result<()> {
         Arc::new(move |org: &crate::org::OrgId, name: &str, value: &[u8]| {
             ctl.rotate_before_set(org, name, value)
         });
+    // A database deploy rewrote a URL secret: the controller already
+    // cycled its stacks; the workspaces get the new file.
+    let (ctl, wsm) = (d.ctl.clone(), d.workspaces.clone());
+    d.apps
+        .on_secret_changed(Arc::new(move |org: &crate::org::OrgId, name: &str| {
+            workspace_secret_changed(&ctl, &wsm, org, name, true);
+        }));
     let (ctl, wsm, apps) = (d.ctl.clone(), d.workspaces.clone(), d.apps.clone());
     let changed: secrets::Changed = Arc::new(move |org: &crate::org::OrgId, name: &str| {
         let mut cycles = ctl.secret_changed(org, name);

@@ -83,8 +83,10 @@ What a database gets that an image app does not:
 
   On an existing database, `isb app update pg -f patch.yaml --deploy` with
   `source: {database: {urls: {dsn.pg.web: "sslmode=disable"}}}` (a merge
-  patch; `null` drops one). Names under `db.<name>.` and references to an
-  external driver are refused.
+  patch; `null` drops one). The deploy writes the new entries, and when one
+  names a secret that already exists with another value (adopting a
+  hand-made copy), the apps using it follow, as after `isb secret set`.
+  Names under `db.<name>.` and references to an external driver are refused.
 
   The database's own engine reads them only on first start, when the data
   directory is empty. So a database deleted and created again with the same
