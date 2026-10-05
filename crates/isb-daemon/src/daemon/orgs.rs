@@ -252,7 +252,7 @@ fn settings_props() -> Value {
     json!({
         "cpus": {"anyOf": [{"type": "integer", "minimum": 1}, {"type": "string", "enum": ["none"]}, {"type": "null"}], "description": "CPUs across the org: the sum of every instance's limits.cpu, stopped ones included. \"none\" or null lifts the limit."},
         "memory": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Memory across the org, e.g. 16GiB: the sum of every instance's limits.memory, stopped ones included. \"none\" or null lifts the limit."},
-        "disk": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Disk across the org, e.g. 100GiB: the sum of every root disk's and volume's size. While set, an instance without a root size gets 10GiB from the org's default profile. \"none\" or null lifts the limit."},
+        "disk": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Disk across the org, e.g. 100GiB: the sum of every root disk's and volume's size. While set, each instance isb creates gets a root size of its own (raw_devices.root.size, else 10GiB); setting it is refused while an instance has none, naming each. \"none\" or null lifts the limit."},
         "instances": {"anyOf": [{"type": "integer", "minimum": 1}, {"type": "string", "enum": ["none"]}, {"type": "null"}], "description": "Instances in the org, stopped ones included. \"none\" or null lifts the limit."},
         "default_cpus": {"type": "integer", "minimum": 1, "description": "CPUs an instance gets when its spec sets none."},
         "default_memory": {"type": "string", "description": "Memory an instance gets when its spec sets none, e.g. 512MiB."},

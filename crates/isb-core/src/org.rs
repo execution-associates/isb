@@ -104,6 +104,7 @@ use crate::client::{Client, encode_segment};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
+pub mod disk;
 mod ensure;
 mod homes;
 mod names;
@@ -199,7 +200,7 @@ pub struct OrgInfo {
     /// What an instance gets when its spec sets no limits (the org's default profile).
     pub default_cpus: Option<String>,
     pub default_memory: Option<String>,
-    /// The root disk size it gets: set while the org has a disk limit.
+    /// The root disk size it gets under a disk limit: the profile's, else [`DEFAULT_ROOT_SIZE`].
     pub default_disk: Option<String>,
     /// Each limit's budget (`cpu`, `memory`, `disk`, `instances`): what
     /// every instance's limit adds up to, stopped ones included.
@@ -606,7 +607,8 @@ fn info(base: &Client, org: OrgId, p: &Value) -> Result<OrgInfo> {
     Ok(OrgInfo {
         default_disk: profile["devices"]["root"]["size"]
             .as_str()
-            .map(String::from),
+            .map(String::from)
+            .or_else(|| cfg.get("limits.disk").map(|_| DEFAULT_ROOT_SIZE.into())),
         allocation,
         project: org.incus_project(),
         name: org,

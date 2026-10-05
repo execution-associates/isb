@@ -589,6 +589,39 @@ mod tests {
         assert_eq!(a.revision("web").unwrap(), "d59025b7");
     }
 
+    #[test]
+    fn an_org_disk_limit_sizes_the_request_not_the_revision() {
+        use crate::client::fake::{Route, serve};
+        let a = def("services:\n  web:\n    image: docker:busybox\n    command: [sleep, 1d]\n");
+        let rev = a.revision("web").unwrap();
+        assert_eq!(rev, "9e74ea35");
+        let body = || {
+            serde_json::json!({
+                "name": "app-web-1-x", "config": {LABEL_REV: rev},
+                "devices": {"root": {"type": "disk", "path": "/", "pool": "default"}},
+            })
+        };
+        for limited in [false, true] {
+            let config = if limited {
+                serde_json::json!({"limits.disk": "100GiB"})
+            } else {
+                serde_json::json!({})
+            };
+            let (_d, c) = serve(vec![Route {
+                prefix: "GET /1.0/projects/isb-default",
+                status: 200,
+                body: serde_json::json!({"config": config}),
+            }]);
+            let c = c.project("isb-default");
+            let sent = crate::org::disk::sized_root(&c, body());
+            // The revision, and the label carrying it, are the same either way.
+            assert_eq!(a.revision("web").unwrap(), rev);
+            assert_eq!(sent["config"], body()["config"]);
+            let size = sent["devices"]["root"].get("size");
+            assert_eq!(size.is_some(), limited, "{sent}");
+        }
+    }
+
     fn binding(name: &str, version: u64) -> SecretBinding {
         SecretBinding {
             name: name.into(),

@@ -840,7 +840,7 @@ const DEFAULT_ROOT_SIZE: &str = "20GiB";
 
 /// A sandbox's root disk size when it gives none in an org with a disk
 /// quota.
-pub const SANDBOX_ROOT_SIZE: &str = "10GiB";
+pub const SANDBOX_ROOT_SIZE: &str = crate::org::DEFAULT_ROOT_SIZE;
 
 /// A storage pool's driver (`zfs`, `btrfs`, `lvm`, `dir`, ...).
 pub fn pool_driver(client: &Client, pool: &str) -> Result<String> {
