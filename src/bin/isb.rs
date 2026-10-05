@@ -828,17 +828,16 @@ fn call(tool: &str, args: serde_json::Value, timeout: Duration) -> Result<serde_
             return remote.remote()?.call_tool(&org, tool, args);
         }
     }
+    // The error already says "cannot connect to isb serve at <socket>: <why>".
     isb::server::client::call_tool(&socket, tool, args, timeout).map_err(|e| match e {
-        Error::Io(_) | Error::Connect { .. } if cfg!(target_os = "macos") => {
+        Error::Io(_) if cfg!(target_os = "macos") => {
             Error::Invalid(format!(
-                "no isb serve on {} ({e}); it runs in the isb machine: `isb machine start`, \
-                 or `isb machine init` to create it",
-                socket.display()
+                "{e}; it runs in the isb machine: `isb machine start`, \
+                 or `isb machine init` to create it"
             ))
         }
-        Error::Io(_) | Error::Connect { .. } => Error::Invalid(format!(
-            "no isb serve on {} ({e}); start it with `isb serve`, or install it with `isb serve install`",
-            socket.display()
+        Error::Io(_) => Error::Invalid(format!(
+            "{e}; start it with `isb serve`, or install it with `isb serve install`"
         )),
         e => e,
     })
