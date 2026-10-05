@@ -116,6 +116,17 @@ export function defaultOrg(me: Me): string | null {
   return own[0] ?? me.orgs[0] ?? null;
 }
 
+/**
+ * May the caller open `org`'s pages? Any org `whoami` lists (every org that
+ * exists, for a platform admin or superadmin; its memberships for anyone
+ * else), and, for a platform admin, any other org too: one made since `me`
+ * was fetched (by the CLI, another tab) opens instead of bouncing to the
+ * first org, and one that does not exist says so on its own page.
+ */
+export function canOpenOrg(me: Me, org: string | null | undefined): boolean {
+  return !!org && (me.orgs.includes(org) || me.platform_admin);
+}
+
 export function roleIn(me: Me, org: string): string | null {
   return me.memberships.find((m) => m.org === org)?.role ?? (me.superadmin ? "superadmin" : me.platform_admin ? "platform admin" : null);
 }

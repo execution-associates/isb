@@ -174,6 +174,7 @@ fn auth_routes(
     secrets: &Arc<crate::secrets::Secrets>,
     log: &Arc<crate::audit::AuditLog>,
     gate: Arc<superadmin::Gate>,
+    orgs: crate::auth::ops::OrgsFn,
 ) -> Result<crate::server::Routes> {
     use crate::auth::oauth::SecretFn;
     let default_org = crate::org::OrgId::default_org();
@@ -211,6 +212,7 @@ fn auth_routes(
                 superadmin::Resolved::Superadmin(s) => Some(s),
                 _ => None,
             })),
+            orgs: Some(orgs),
         },
     )?;
     eprintln!("isb serve: identity store {}", path.display());
@@ -333,6 +335,10 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         None => None,
     };
     let gate = Arc::new(superadmin::gate(&cfg, users.clone(), access.clone())?);
+    let servers = match &cfg.agent {
+        None => Some(crate::servers::Servers::open(&cfg.state_dir)?),
+        Some(_) => None,
+    };
     let auth = if cfg.listen.is_empty() {
         None
     } else {
@@ -342,11 +348,8 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
             &secrets,
             &audit_log,
             gate.clone(),
+            orgs::existing_fn(client.clone(), servers.clone()),
         )?)
-    };
-    let servers = match &cfg.agent {
-        None => Some(crate::servers::Servers::open(&cfg.state_dir)?),
-        Some(_) => None,
     };
     // The local registry, when set up: this daemon pushes to it and keeps
     // its push index under the state directory.

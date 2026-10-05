@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/app-shell";
 import { InviteDialog } from "@/components/invite-dialog";
 import { Button } from "@/components/ui/button";
 import { canWrite } from "@/lib/admin";
-import { canManage, rememberOrg, roleIn, useMe } from "@/lib/session";
+import { canManage, canOpenOrg, rememberOrg, roleIn, useMe } from "@/lib/session";
 import { DownMonitorsBanner } from "@/uptime/cards";
 import { WorkspaceCard } from "@/workspace/workspace-card";
 
@@ -22,7 +22,7 @@ export function OrgPage() {
   const me = useMe().data!;
   const [inviteOpen, setInviteOpen] = useState(false);
   const [newProject, setNewProject] = useState(false);
-  const known = me.orgs.includes(org);
+  const known = canOpenOrg(me, org);
 
   useEffect(() => {
     if (known) rememberOrg(org);
