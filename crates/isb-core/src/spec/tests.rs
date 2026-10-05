@@ -61,6 +61,35 @@ fn list_forms_of_environment_and_labels() {
 }
 
 #[test]
+fn secret_variables_as_a_file() {
+    let f = parse(
+        "services:\n  web:\n    image: x\n    environment:\n      A: {secret: a}\n      B: {secret: b, as: env}\n      C: {secret: c, as: file, on_change: restart}\n",
+    )
+    .unwrap();
+    let w = &f.services["web"];
+    assert_eq!(w.env.secrets["A"], "a");
+    assert_eq!(w.env.secrets["B"], "b");
+    assert_eq!(w.env.files["C"], "c");
+    assert!(!w.env.secrets.contains_key("C"));
+    assert_eq!(w.secret_on_change("c"), Some(OnChange::Restart));
+    assert!(w.secret_keys().contains("c"));
+    assert!(w.has_secret_files());
+    assert_eq!(
+        w.env.file_vars().collect::<Vec<_>>(),
+        [("C_FILE".to_string(), "/run/secrets/c".to_string())]
+    );
+    // `as: env` is the default and serializes as it always did; `as: file`
+    // round-trips.
+    let y = serde_yaml_ng::to_string(&w.env).unwrap();
+    assert!(!y.contains("as: env"), "{y}");
+    let back: Environment = serde_yaml_ng::from_str(&y).unwrap();
+    assert_eq!(back, w.env);
+    assert!(
+        parse("services:\n  web: {image: x, environment: {A: {secret: a, as: disk}}}\n").is_err()
+    );
+}
+
+#[test]
 fn volume_forms() {
     let f = parse(
         "services:\n  web:\n    image: x\n    volumes:\n      - ./src:/home/dev/src:ro\n      - cache:/home/dev/.cache:owner=dev\n      - {type: bind, source: ~/ref, target: /srv/ref, read_only: true, options: {shift: true}}\n      - {source: data, target: /data, device: d}\n",

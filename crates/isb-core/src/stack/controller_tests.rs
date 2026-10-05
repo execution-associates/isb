@@ -442,3 +442,94 @@ fn a_scope_change_rewrites_the_service_name_and_nothing_else_does() {
     // republish_dns wakes the org's workers (none here): no panic, no lock held.
     ctl.republish_dns(&crate::org::OrgId::new("lab").unwrap());
 }
+
+fn health_probe(start_period: Option<&str>) -> HealthProbe {
+    crate::spec::Healthcheck {
+        test: vec!["CMD".into(), "true".into()],
+        interval: Some("5s".into()),
+        start_period: start_period.map(Into::into),
+        ..Default::default()
+    }
+    .probe()
+    .unwrap()
+    .unwrap()
+}
+
+/// Failures `at` these offsets (seconds) from the (re)start.
+fn fail_at(rt: &mut InstRt, p: &HealthProbe, t0: Instant, at: &[u64]) {
+    for s in at {
+        rt.record_probe(false, p, t0 + Duration::from_secs(*s));
+    }
+}
+
+#[test]
+fn the_startup_grace_defaults_to_twice_the_failure_budget_within_bounds() {
+    let p = health_probe(None);
+    assert_eq!(p.start_period, Duration::ZERO);
+    // 5s x 3 x 2 = 30s, raised to 60s.
+    assert_eq!(p.startup_grace, Duration::from_secs(60));
+    let g = |i: u64, r: u32| HealthProbe::default_grace(Duration::from_secs(i), r);
+    assert_eq!(g(30, 3), Duration::from_secs(180));
+    assert_eq!(g(120, 5), Duration::from_secs(300));
+    // A start_period, even 0s, is the grace as written.
+    assert_eq!(
+        health_probe(Some("10s")).startup_grace,
+        Duration::from_secs(10)
+    );
+    assert_eq!(health_probe(Some("0s")).startup_grace, Duration::ZERO);
+}
+
+#[test]
+fn a_replica_that_never_passed_is_starting_not_restarted_within_its_grace() {
+    let p = health_probe(None);
+    let t0 = Instant::now();
+    let mut rt = InstRt::default();
+    rt.started(t0);
+    // Stalwart blocking ~30s on OIDC discovery: interval * retries (15s)
+    // would have restarted it; within the 60s grace it stays starting.
+    fail_at(&mut rt, &p, t0, &[0, 5, 10, 15, 20, 25, 30, 45, 55]);
+    assert_eq!(rt.healthy, None, "starting: out of rotation, not restarted");
+    assert_eq!(rt.failures, 0);
+    rt.record_probe(true, &p, t0 + Duration::from_secs(58));
+    assert_eq!(rt.healthy, Some(true));
+}
+
+#[test]
+fn a_replica_that_never_passed_is_restarted_after_its_grace() {
+    let p = health_probe(None);
+    let t0 = Instant::now();
+    let mut rt = InstRt::default();
+    rt.started(t0);
+    fail_at(&mut rt, &p, t0, &[50, 60, 65]);
+    assert_eq!(rt.healthy, None, "two counted failures of three");
+    fail_at(&mut rt, &p, t0, &[70]);
+    assert_eq!(rt.healthy, Some(false), "unhealthy: its app is restarted");
+    // The restart starts a new grace.
+    let t1 = t0 + Duration::from_secs(75);
+    rt.started(t1);
+    fail_at(&mut rt, &p, t1, &[5, 10, 15, 20]);
+    assert_eq!(rt.healthy, None);
+}
+
+#[test]
+fn a_replica_that_passed_then_fails_is_restarted_as_before() {
+    let p = health_probe(None);
+    let t0 = Instant::now();
+    let mut rt = InstRt::default();
+    rt.started(t0);
+    rt.record_probe(true, &p, t0 + Duration::from_secs(5));
+    // Well within the startup grace, but it has passed: failures count.
+    fail_at(&mut rt, &p, t0, &[10, 15]);
+    assert_eq!(rt.healthy, Some(true), "still serving below retries");
+    fail_at(&mut rt, &p, t0, &[20]);
+    assert_eq!(rt.healthy, Some(false));
+    // With a start_period, a pass inside it does not end it.
+    let p = health_probe(Some("30s"));
+    let mut rt = InstRt::default();
+    rt.started(t0);
+    rt.record_probe(true, &p, t0 + Duration::from_secs(5));
+    fail_at(&mut rt, &p, t0, &[10, 15, 20]);
+    assert_eq!(rt.healthy, Some(true));
+    fail_at(&mut rt, &p, t0, &[30, 35, 40]);
+    assert_eq!(rt.healthy, Some(false));
+}

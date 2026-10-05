@@ -616,12 +616,13 @@ impl Jobs {
             Mode::Run => {
                 let def = self.inner.apps.controller().definition(&stack)?;
                 let (mut spec, _) = one_off_spec(&def, &service, &s.name, timeout)?;
-                let keys: Vec<&str> = spec.env.secrets.values().map(String::as_str).collect();
+                // Files (`secrets:`, `as: file`) too: they are pushed below.
+                let keys: Vec<String> = spec.secret_keys().into_iter().map(String::from).collect();
                 let values = crate::stack::secrets::values(
                     self.inner.apps.secrets(),
                     org,
                     &def.secrets,
-                    keys,
+                    keys.iter().map(String::as_str),
                 )?;
                 let secret_env = crate::supervise::secret_env(&spec, &values)?;
                 spec.env.secrets.clear();
@@ -644,7 +645,7 @@ impl Jobs {
                 );
                 let r = match made {
                     Ok((sb, _)) => {
-                        if !spec.secrets.is_empty() {
+                        if spec.has_secret_files() {
                             crate::supervise::push_secrets(&sb, &spec, &values)?;
                         }
                         log.line(&format!("isb: run: {}", s.command.join(" ")));

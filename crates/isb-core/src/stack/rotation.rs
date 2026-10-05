@@ -573,7 +573,7 @@ impl Worker {
         } else if spec.command.is_some() {
             let mut s = spec.clone();
             s.restart = Some(RestartMode::Always);
-            if !supervise::install(&sb, &self.service, &s, !spec.secrets.is_empty(), &env)? {
+            if !supervise::install(&sb, &self.service, &s, spec.has_secret_files(), &env)? {
                 supervise::restart_app(&sb, &self.service, oci)?;
             }
         }
@@ -610,14 +610,7 @@ impl Worker {
         } else if spec.command.is_some() {
             let mut s = spec.clone();
             s.restart = Some(RestartMode::Always);
-            supervise::install_with(
-                &sb,
-                &self.service,
-                &s,
-                !spec.secrets.is_empty(),
-                &env,
-                false,
-            )?;
+            supervise::install_with(&sb, &self.service, &s, spec.has_secret_files(), &env, false)?;
         }
         Ok(())
     }

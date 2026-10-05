@@ -385,6 +385,17 @@ fn secret_environment_is_set_but_never_shown() {
 }
 
 #[test]
+fn a_file_secret_variable_puts_only_its_path_in_config() {
+    let t = tmp();
+    let mut s = lasso_spec(t.path().to_str().unwrap());
+    s.env.files.insert("DB_PASSWORD".into(), "db".into());
+    let d = resolve(&s, &VolumeDefs::new(), &host(), Path::new("/")).unwrap();
+    assert_eq!(d.config["environment.DB_PASSWORD_FILE"], "/run/secrets/db");
+    assert!(!d.config.contains_key("environment.DB_PASSWORD"));
+    assert!(d.sensitive.is_empty());
+}
+
+#[test]
 fn stopped_instance_is_started_after_changes() {
     let t = tmp();
     let d = resolve(

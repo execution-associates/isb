@@ -173,6 +173,12 @@ fn managed_files(
     if let Ok(def) = d.ctl.definition(stack) {
         if let Ok(spec) = def.service(service) {
             out.extend(spec.secrets.iter().map(|s| s.guest_path()));
+            out.extend(
+                spec.env
+                    .files
+                    .values()
+                    .map(|k| crate::spec::Environment::file_path(k)),
+            );
         }
     }
     out

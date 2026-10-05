@@ -109,6 +109,21 @@ impl OnChange {
     }
 }
 
+/// How an `environment` secret reaches the app (`KEY: {secret: NAME, as: ...}`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SecretAs {
+    /// The variable `KEY` holds the value. An OCI image's variables are
+    /// instance config (`environment.KEY`), readable by anyone with access
+    /// to the incus project.
+    #[default]
+    Env,
+    /// The value is the file `/run/secrets/NAME` (mode 0400, owned by the
+    /// user the app starts as) and the variable `KEY_FILE` holds its path:
+    /// the `_FILE` convention of postgres, mariadb and many other images.
+    File,
+}
+
 impl std::fmt::Display for OnChange {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())

@@ -265,6 +265,7 @@ fn replica_detail(
         if let Ok(spec) = def.service(svc) {
             det.env_names.extend(spec.env.vars.keys().cloned());
             det.env_names.extend(spec.env.secrets.keys().cloned());
+            det.env_names.extend(spec.env.file_vars().map(|(k, _)| k));
             det.volumes = spec
                 .volumes
                 .iter()
@@ -272,6 +273,12 @@ fn replica_detail(
                 .collect();
             det.ports = serde_json::to_value(&spec.ports).unwrap_or_default();
             det.managed = spec.secrets.iter().map(|s| s.guest_path()).collect();
+            det.managed.extend(
+                spec.env
+                    .files
+                    .values()
+                    .map(|k| crate::spec::Environment::file_path(k)),
+            );
             out["image"] = json!(def.instance_image(svc, &spec.image));
             out["resources"] = json!({"cpus": spec.cpus, "memory": spec.memory});
         }
