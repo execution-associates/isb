@@ -69,7 +69,8 @@ fills it in and refuses any other value. Then, in order:
   orgs, or only the one their `org` names (an org-bound endpoint names its
   own). `audit_list` and `history_query` filter themselves the same way.
 - **Superadmin tools** (`host_inventory`, `host_policy`,
-  `superadmin_token_list`, `superadmin_token_revoke`, `org_nesting`) are
+  `superadmin_token_list`, `superadmin_token_revoke`, `superadmin_list`,
+  `org_nesting`) are
   refused to everyone else, platform admins included.
 - **API token scopes** narrow a token below its role: `read` (read-only
   tools), `deploy` (`read` plus `stack_deploy`, `stack_redeploy`,
@@ -399,4 +400,5 @@ superadmin tokens are minted on the host only.
 | `host_policy` | How the daemon serves: listen addresses, Access, the remote tool policy, what remote specs may ask for, and each superadmin source with its allow list and token count. |
 | `superadmin_token_list` | Superadmin tokens' metadata, never the token. |
 | `superadmin_token_revoke` | Revoke one by `id`. Minting is `isb token create NAME --superadmin`, on the host only. |
+| `superadmin_list` | Every tailnet and Access superadmin identity: `kind` (`tailnet`, `access`), `value`, `source` (`flag`: `--superadmin-tailnet` / `--superadmin-access`; `state`: `isb.db`, with `id`, `added_at`, `added_by`), `effective`, and a `note` when this daemon cannot match it. Read only: adding and removing is `isb superadmin add` / `rm`, on the host only. |
 | `org_nesting` | Read (`org`) or set (`allow_nesting`) whether the org's workspace may run Docker with `security.nesting` ([The Docker exception](../concepts/security.md#the-docker-exception)). Turning it off is refused while the workspace runs with nesting. |

@@ -510,6 +510,9 @@ isb token create NAME [--org ORG] [--expires 90d] [--user EMAIL] [--scope S]...
 isb token create NAME --superadmin [--expires 30d]
 isb token ls [--json]
 isb token revoke ID|sa-ID...
+isb superadmin ls [--json]
+isb superadmin add --access EMAIL | --access-token CLIENT_ID | --tailnet LOGIN_OR_TAG
+isb superadmin rm  --access EMAIL | --access-token CLIENT_ID | --tailnet LOGIN_OR_TAG
 ```
 
 - The first user is always a platform admin and owner of the `default` org.
@@ -521,6 +524,16 @@ isb token revoke ID|sa-ID...
   repeatable) only narrows the user's role. `--superadmin` mints a token
   that belongs to nobody and has the unix socket's reach; it is the only way
   to make one. See [Users, roles and superadmins](../concepts/access.md).
+- `superadmin add` makes one tailnet or Access identity a superadmin, `rm`
+  removes one it made; the running daemon picks either up at the next
+  request, with no restart. They are the only way to change these
+  identities: no HTTP caller can. `superadmin ls` asks the running daemon
+  (`superadmin_list`), so it shows the `--superadmin-tailnet` and
+  `--superadmin-access` entries too, each with `SOURCE` (`flag` or `state`)
+  and `EFFECTIVE` (`NO` with a reason when the daemon has no Access or no
+  tailnet listen address for it); with `--state-dir`, or when the daemon
+  does not answer, it shows `isb.db`'s alone. See [Superadmin identities in
+  isb.db](../concepts/access.md#superadmin-identities-in-isbdb).
 
 Passwords never come from argv.
 

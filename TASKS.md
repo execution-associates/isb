@@ -69,11 +69,16 @@ minime only runs binaries downloaded from our CI runs.
   and generic OIDC SSO, invitations, API tokens. Cloudflare Access stays as an
   optional front door, mapped to users.
 - **Superadmin = the unix socket's reach, from four sources only:** the
-  socket, superadmin tokens, `--superadmin-tailnet`, `--superadmin-access`.
-  Superadmin tokens are minted by the host CLI (which writes `isb.db` as the
-  daemon's user) and never over HTTP, so a stolen HTTP credential cannot
-  become a durable one. Tailnet and Access identities are ambient (like a
-  cookie), so they get the CSRF/Origin/Content-Type/Host checks.
+  socket, superadmin tokens, tailnet identities, Access identities. Tailnet
+  and Access identities are the `--superadmin-tailnet` / `--superadmin-access`
+  flags (the bootstrap, read at start-up) united with `isb.db`'s
+  `superadmin_identities` (`isb superadmin add/rm/ls`, read per request, so
+  granting one needs no config edit and no restart). Superadmin tokens and
+  superadmin identities are written only by the host CLI (which writes
+  `isb.db` as the daemon's user), never over HTTP, so a stolen HTTP credential
+  cannot become a durable one; `superadmin_list` reads them over HTTP, for
+  superadmins. Tailnet and Access identities are ambient (like a cookie), so
+  they get the CSRF/Origin/Content-Type/Host checks.
   `Caller::is_trusted` means superadmin; `is_local` is the literal socket
   (deploy triggers labelled `manual`, `sandbox_create` resolving relative
   paths in the daemon's cwd).

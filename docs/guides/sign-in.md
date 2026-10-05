@@ -27,8 +27,9 @@ While no user exists, make one of three ways:
   on, opening isb through the same front door signs them in
   ([edge identities](../reference/identity-api.md#edge-identities)). Only
   people count (not tagged nodes or service tokens), and when
-  `--superadmin-tailnet` or `--superadmin-access` is set, only someone on
-  that list can claim setup. Reaching the port took getting past the front
+  `--superadmin-tailnet` or `--superadmin-access` is set, or `isb superadmin
+  add` has listed that front door's identities, only someone on that list
+  can claim setup. Reaching the port took getting past the front
   door, so the first person through is someone it already let in. Without a
   password the front door is the only way in; `isb user passwd EMAIL` on the
   host sets one if that ever changes.

@@ -1,9 +1,11 @@
 //! Who is a superadmin ([`crate::auth::superadmin`]) on this daemon: a
 //! superadmin token, a tailnet identity on `--superadmin-tailnet`, a
-//! verified Cloudflare Access identity on `--superadmin-access`, or, in a
-//! debug build, any credential-less loopback request under
-//! `ISB_DEV_SUPERADMIN` ([`crate::auth::dev`]). Nothing else grants it. One gate serves the tool endpoints (through the authn
-//! hook) and the identity endpoints (`/api/v1/auth/*`).
+//! verified Cloudflare Access identity on `--superadmin-access`, either kind
+//! of identity added to `isb.db` with `isb superadmin add` (read per request,
+//! so no restart), or, in a debug build, any credential-less loopback request
+//! under `ISB_DEV_SUPERADMIN` ([`crate::auth::dev`]). Nothing else grants it.
+//! One gate serves the tool endpoints (through the authn hook) and the
+//! identity endpoints (`/api/v1/auth/*`).
 
 use std::sync::Arc;
 
@@ -11,6 +13,7 @@ use serde_json::{Value, json};
 
 use crate::auth::agent_identities::{AgentKind, AgentWays};
 use crate::auth::edge::EdgeIdentity;
+use crate::auth::superadmin::SuperadminIdentity;
 use crate::auth::{AuthStore, Principal, Superadmin, SuperadminSource};
 use crate::error::{Error, Result};
 use crate::server::access::{ASSERTION_HEADER, AccessValidator, Identity};
@@ -66,7 +69,36 @@ impl AccessAllowList {
             .cloned()
             .collect()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.emails.is_empty() && self.client_ids.is_empty()
+    }
 }
+
+/// One superadmin identity, as `superadmin_list` and the start-up line
+/// show it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Listed {
+    pub kind: AgentKind,
+    pub value: String,
+    /// `flag` (`--superadmin-access` / `--superadmin-tailnet`, read at
+    /// start-up) or `state` (`isb.db`, `isb superadmin add`, read per request).
+    pub source: &'static str,
+    /// Whether a request can match it on this daemon at all.
+    pub effective: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub added_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub added_by: Option<String>,
+}
+
+const NO_ACCESS: &str = "not effective: an Access superadmin needs Cloudflare Access (CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD) and --public-url";
+const NO_TAILNET: &str =
+    "not effective: no tailnet --listen address, so no tailnet peer reaches this daemon";
 
 /// What the gate makes of a request.
 pub enum Resolved {
@@ -85,8 +117,10 @@ pub struct Gate {
     /// The validator of the listeners Access guards, and the `Host` names an
     /// Access agent's request may carry (empty: no public URL, not checked).
     access_agents: Option<(Arc<AccessValidator>, Vec<String>)>,
-    /// The Access validator of the loopback listeners, the allow list, and
-    /// the `Host` names an Access superadmin's request may carry.
+    /// The Access validator of the loopback listeners, the
+    /// `--superadmin-access` list (empty without the flag; `isb.db`'s
+    /// entries count too), and the `Host` names an Access superadmin's
+    /// request may carry. None: no Access superadmin is possible here.
     access: Option<(Arc<AccessValidator>, AccessAllowList, Vec<String>)>,
     /// `ISB_DEV_SUPERADMIN`: the email a loopback request with no
     /// credential is signed in as.
@@ -234,7 +268,14 @@ impl Gate {
                     return None;
                 }
             }
-            let can_claim = self.access_list().is_none_or(|a| a.admits(id));
+            let can_claim = self.access.as_ref().is_none_or(|(_, flag, _)| {
+                let state = self.state(AgentKind::Access);
+                (flag.is_empty() && state.is_empty())
+                    || flag.admits(id)
+                    || state
+                        .iter()
+                        .any(|s| s.admits_access(id.email.as_deref(), id.common_name.as_deref()))
+            });
             return Some(EdgeIdentity {
                 kind: AgentKind::Access,
                 subject: id.sub.clone(),
@@ -249,14 +290,16 @@ impl Gate {
         if !w.tags.is_empty() {
             return None;
         }
-        let listed = !t.allow().entries().is_empty();
+        let state = self.state(AgentKind::Tailnet);
+        let listed = !t.allow().entries().is_empty() || !state.is_empty();
+        let can_claim = !listed || self.tailnet_admits(&w, &state);
         Some(EdgeIdentity {
             kind: AgentKind::Tailnet,
             subject: w.login.clone(),
             name: w.login.clone(),
             email: crate::auth::edge::login_email(&w.login),
             node: Some(w.node.clone()),
-            can_claim: !listed || t.allow().admits(&w),
+            can_claim,
         })
     }
 
@@ -275,8 +318,85 @@ impl Gate {
         self.tailnet.as_ref()
     }
 
+    /// `--superadmin-access`, when given.
     pub fn access_list(&self) -> Option<&AccessAllowList> {
-        self.access.as_ref().map(|(_, a, _)| a)
+        self.access
+            .as_ref()
+            .map(|(_, a, _)| a)
+            .filter(|a| !a.is_empty())
+    }
+
+    /// Every superadmin identity, the flags' then `isb.db`'s, each with
+    /// whether this daemon can match it.
+    pub fn listing(&self) -> Result<Vec<Listed>> {
+        let access_on = self.access.is_some();
+        let tailnet_on = self.tailnet.is_some() && !self.tailnet_listens.is_empty();
+        let flag = |kind, value: String, on: bool, note| Listed {
+            kind,
+            value,
+            source: "flag",
+            effective: on,
+            note: (!on).then_some(note),
+            id: None,
+            added_at: None,
+            added_by: None,
+        };
+        let mut v: Vec<Listed> = Vec::new();
+        for e in self
+            .access_list()
+            .map(AccessAllowList::entries)
+            .unwrap_or_default()
+        {
+            v.push(flag(AgentKind::Access, e, true, NO_ACCESS));
+        }
+        for e in self
+            .tailnet
+            .as_ref()
+            .map(|t| t.allow().entries())
+            .unwrap_or_default()
+        {
+            v.push(flag(AgentKind::Tailnet, e, tailnet_on, NO_TAILNET));
+        }
+        for i in self.store.list_superadmin_identities()? {
+            let (on, note) = match i.kind {
+                AgentKind::Access => (access_on, NO_ACCESS),
+                AgentKind::Tailnet => (tailnet_on, NO_TAILNET),
+            };
+            v.push(Listed {
+                kind: i.kind,
+                value: i.value,
+                source: "state",
+                effective: on,
+                note: (!on).then_some(note),
+                id: Some(i.id),
+                added_at: Some(i.added_at),
+                added_by: Some(i.added_by),
+            });
+        }
+        Ok(v)
+    }
+
+    /// `isb.db`'s superadmin identities of `kind`, read now: the host CLI
+    /// writes the table from another process, so a cached copy would need a
+    /// restart. A failed read admits nobody, and says why.
+    fn state(&self, kind: AgentKind) -> Vec<SuperadminIdentity> {
+        match self.store.list_superadmin_identities() {
+            Ok(v) => v.into_iter().filter(|i| i.kind == kind).collect(),
+            Err(e) => {
+                eprintln!("isb serve: superadmin identities in isb.db: {e}");
+                Vec::new()
+            }
+        }
+    }
+
+    /// On `--superadmin-tailnet` or among `state`.
+    fn tailnet_admits(
+        &self,
+        w: &crate::server::tailnet::Whois,
+        state: &[SuperadminIdentity],
+    ) -> bool {
+        self.tailnet.as_ref().is_some_and(|t| t.allow().admits(w))
+            || state.iter().any(|s| s.admits_tailnet(&w.login, &w.tags))
     }
 
     /// `id` is the Access identity the listener already verified, if any.
@@ -312,7 +432,9 @@ impl Gate {
         if let Some(s) = self.access_superadmin(req, id) {
             return Resolved::Superadmin(s);
         }
-        if let Some(w) = self.tailnet.as_ref().and_then(|t| t.superadmin(req)) {
+        let tailnet = self.tailnet.as_ref().and_then(|t| t.identify(req));
+        if let Some(w) = tailnet.filter(|w| self.tailnet_admits(w, &self.state(AgentKind::Tailnet)))
+        {
             let source = SuperadminSource::Tailnet {
                 login: w.login.clone(),
                 node: w.node,
@@ -359,6 +481,10 @@ impl Gate {
         if !loopback {
             return None;
         }
+        let state = self.state(AgentKind::Access);
+        if allow.is_empty() && state.is_empty() {
+            return None;
+        }
         let verified;
         let id = match id {
             Some(id) => id,
@@ -368,7 +494,11 @@ impl Gate {
                 &verified
             }
         };
-        if !allow.admits(id) {
+        let listed = allow.admits(id)
+            || state
+                .iter()
+                .any(|s| s.admits_access(id.email.as_deref(), id.common_name.as_deref()));
+        if !listed {
             return None;
         }
         let host = req.header("host").map(host_only).unwrap_or_default();
@@ -406,6 +536,7 @@ pub const TOOLS: &[&str] = &[
     "host_policy",
     "superadmin_token_list",
     "superadmin_token_revoke",
+    "superadmin_list",
     "org_nesting",
 ];
 
@@ -459,8 +590,15 @@ pub fn gate(
         };
         (v, hosts)
     });
+    // Access superadmins are possible wherever Access and the public host
+    // are: the flag's list, else only `isb superadmin add`'s.
     let access = match (&cfg.superadmin_access, access) {
-        (None, _) => None,
+        (None, Some(v)) => public.clone().map(|host| {
+            let mut hosts = vec![host];
+            hosts.extend(cfg.listen.iter().filter(|a| !is_tailnet_listen(a)).cloned());
+            (v, AccessAllowList::default(), hosts)
+        }),
+        (None, None) => None,
         (Some(_), None) => {
             return Err(Error::invalid(
                 "--superadmin-access needs Cloudflare Access (CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD): it trusts only a verified assertion",
@@ -555,16 +693,39 @@ pub fn announce(cfg: &super::ServeConfig, gate: &Gate, store: &AuthStore) {
     }
     if let Some(t) = cfg.superadmin_tailnet.as_ref().and(gate.tailnet()) {
         v.push(format!(
-            "tailnet identities {} (Host: {})",
+            "tailnet identities {} (--superadmin-tailnet; Host: {})",
             t.allow().entries().join(", "),
             t.hosts().join(", ")
         ));
     }
     if let Some(a) = gate.access_list() {
         v.push(format!(
-            "Cloudflare Access identities {}",
+            "Cloudflare Access identities {} (--superadmin-access)",
             a.entries().join(", ")
         ));
+    }
+    let state: Vec<Listed> = match gate.listing() {
+        Ok(l) => l.into_iter().filter(|l| l.source == "state").collect(),
+        Err(e) => {
+            eprintln!("isb serve: superadmin identities in isb.db: {e}");
+            Vec::new()
+        }
+    };
+    for (kind, what) in [
+        (AgentKind::Tailnet, "tailnet identities"),
+        (AgentKind::Access, "Cloudflare Access identities"),
+    ] {
+        let on: Vec<&str> = state
+            .iter()
+            .filter(|l| l.kind == kind && l.effective)
+            .map(|l| l.value.as_str())
+            .collect();
+        if !on.is_empty() {
+            v.push(format!(
+                "{what} {} (isb.db: isb superadmin add)",
+                on.join(", ")
+            ));
+        }
     }
     #[cfg(debug_assertions)]
     if let Some(e) = &gate.dev {
@@ -574,6 +735,14 @@ pub fn announce(cfg: &super::ServeConfig, gate: &Gate, store: &AuthStore) {
         ));
     }
     eprintln!("isb serve: superadmins: {}", v.join("; "));
+    for l in state.iter().filter(|l| !l.effective) {
+        eprintln!(
+            "isb serve: WARNING: superadmin {} {} (isb.db) is {}",
+            l.kind.as_str(),
+            l.value,
+            l.note.unwrap_or("not effective")
+        );
+    }
 }
 
 /// The superadmin-only tools.
@@ -602,6 +771,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<super::Daemon>) -> Result<()> {
                 let mut v = dd.host.clone();
                 v["superadmin"]["token_count"] =
                     json!(dd.users.list_superadmin_tokens().map(|t| t.len()).unwrap_or(0));
+                v["superadmin"]["identities"] = json!(dd.gate.listing()?);
                 Ok(v)
             },
         )
@@ -617,6 +787,17 @@ pub(super) fn register(r: &mut Registry, d: Arc<super::Daemon>) -> Result<()> {
             move |_a, _c| Ok(json!({"tokens": dd.users.list_superadmin_tokens()?})),
         )
         .title("Superadmin tokens")
+        .annotations(ro.clone()),
+    )?;
+    let dd = d.clone();
+    r.register(
+        Tool::new(
+            "superadmin_list",
+            "Superadmin identities: tailnet logins and tags, Cloudflare Access emails and service token client ids, each with its source (`flag`: --superadmin-tailnet / --superadmin-access, read at start-up; `state`: isb.db, added with `isb superadmin add` and read per request) and whether this daemon can match it (`effective`, with a `note` when not). Read only: identities are added and removed only on the host (isb superadmin add / rm), never over HTTP. Superadmins only.",
+            empty(),
+            move |_a, _c| Ok(json!({"identities": dd.gate.listing()?})),
+        )
+        .title("Superadmin identities")
         .annotations(ro),
     )?;
     let dd = d;

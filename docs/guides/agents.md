@@ -272,17 +272,20 @@ be reached as a sandbox.
 A superadmin has the unix socket's reach over HTTP: every tool, no
 remote-spec policy, any instance on the host, and the host tools
 (`host_inventory`, `host_policy`, `superadmin_token_list`,
-`superadmin_token_revoke`). It is for agents that administer the host itself,
-across orgs, and it is root on the host in all but name. It comes from exactly
-three remote sources ([Superadmins](../concepts/access.md#superadmins)):
+`superadmin_token_revoke`, `superadmin_list`). It is for agents that
+administer the host itself, across orgs, and it is root on the host in all
+but name. It comes from exactly three remote sources
+([Superadmins](../concepts/access.md#superadmins)):
 
 - a **superadmin token**, `isb token create NAME --superadmin [--expires
   30d]`, minted only on the host (no HTTP caller can mint one), sent as
   `Authorization: Bearer isb_sa_...`;
 - a **tailnet identity** on a tailnet `--listen` address, listed in
-  `--superadmin-tailnet`: the agent's machine signs it in, so no token is
+  `--superadmin-tailnet` or added on the host with `isb superadmin add
+  --tailnet LOGIN_OR_TAG`: the agent's machine signs it in, so no token is
   needed;
-- a **Cloudflare Access identity** listed in `--superadmin-access`.
+- a **Cloudflare Access identity** listed in `--superadmin-access` or added
+  with `isb superadmin add --access EMAIL` / `--access-token CLIENT_ID`.
 
 Point it at the unbound `/mcp`: on `/orgs/ORG/mcp` a superadmin is scoped
 down to an admin of that org. A superadmin also sees this endpoint on the
