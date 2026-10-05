@@ -170,7 +170,7 @@ impl Apps {
 
     /// A stack whose services were rendered from apps (an environment's or
     /// a preview's), whatever its name.
-    fn app_rendered(def: &StackDef) -> bool {
+    pub(crate) fn app_rendered(def: &StackDef) -> bool {
         def.file
             .services
             .values()

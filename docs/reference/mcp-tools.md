@@ -303,11 +303,11 @@ and owners.
 | `notification_test` | member | Send a test message now; returns the delivery. |
 | `notification_deliveries` | viewer | A channel's last 50 deliveries, newest first. |
 | `notification_settings` | platform admin | `allow_private_targets`, server-wide. |
-| `monitor_create`, `monitor_update` | member | An uptime monitor: `name`, `type` (`http`, `tcp`, `app`), its target, `expected_status`, keywords, `headers` (values or secret names), `interval`, `timeout`, thresholds, `cert_expiry_days` ([Uptime monitoring](../guides/uptime.md)). |
+| `monitor_create`, `monitor_update` | member | An uptime monitor: `name`, `type` (`http`, `tcp`, `app`, `service`), its target, `expected_status`, keywords, `headers` (values or secret names), `interval`, `timeout`, thresholds, `cert_expiry_days` ([Uptime monitoring](../guides/uptime.md)). |
 | `monitor_list`, `monitor_get` | viewer | Monitors with status, last check, uptime (24 h, 7 d, 30 d), latency p50/p95, bars; the org's incidents and settings. |
 | `monitor_checks` | viewer | A monitor's history over `range`: buckets, uptime, raw checks. |
-| `monitor_delete`, `monitor_pause`, `monitor_resume` | member | Remove (with its history), stop or start checking. |
-| `monitor_settings` | member | `auto_monitors` (apps with a domain get their own monitor), `exclude_apps`. |
+| `monitor_delete`, `monitor_pause`, `monitor_resume` | member | Remove (with its history), stop or start checking. Deleting an app's or stack service's own monitor excludes it (`excluded_app`, `excluded_service`). |
+| `monitor_settings` | member | `auto_monitors` (apps and compose stack services with a served domain get their own monitor), `exclude_apps`, `exclude_services` (`<stack>/<service>`). |
 | `metrics_query` | viewer | Metrics history: `metric`, `app` or `stack`/`service` or `instance`, `range` or `from`/`to`, `step`, `aggregate`. |
 
 ## Orgs, the ingress and the dashboard

@@ -2383,7 +2383,7 @@ export interface paths {
         put?: never;
         /**
          * Create an uptime monitor
-         * @description Watch something users reach: an HTTP(S) URL (status range, keyword present or absent, headers from secrets, certificate expiry), a TCP port, or an app by reference (its served domain, or its own endpoint). Checked every interval from this daemon; a new monitor is pending (failures before its first success are not downtime) until its first success; failure_threshold failures in a row then make it down (monitor.down to notification channels), recovery_threshold successes up again (monitor.up, with the downtime). URLs a member types are held to the platform's address policy.
+         * @description Watch something users reach: an HTTP(S) URL (status range, keyword present or absent, headers from secrets, certificate expiry), a TCP port, or an app or a compose stack's service by reference (its served domain, or its own endpoint). Checked every interval from this daemon; a new monitor is pending (failures before its first success are not downtime) until its first success; failure_threshold failures in a row then make it down (monitor.down to notification channels), recovery_threshold successes up again (monitor.up, with the downtime). URLs a member types are held to the platform's address policy.
          */
         post: operations["monitor_create"];
         delete?: never;
@@ -2403,7 +2403,7 @@ export interface paths {
         put?: never;
         /**
          * Delete an uptime monitor
-         * @description Remove a monitor and its history. Deleting an app's own monitor (app-<name>) adds the app to the org's exclusions so it does not come back.
+         * @description Remove a monitor and its history. Deleting an app's own monitor (app-<name>) adds the app to the org's exclude_apps, a stack service's (stack-<stack>-<service>) adds <stack>/<service> to exclude_services, so it does not come back.
          */
         post: operations["monitor_delete"];
         delete?: never;
@@ -2443,7 +2443,7 @@ export interface paths {
         put?: never;
         /**
          * List uptime monitors
-         * @description The org's monitors with status (up, down, pending, paused; `never_up` when pending 30 min with only failures), last check, uptime over 24h/7d/30d, latency p50/p95 (24h), 24 hourly uptime bars and the last 30 latencies; `down` (how many are down), the org's recent incidents, and its settings (auto_monitors, exclude_apps).
+         * @description The org's monitors with status (up, down, pending, paused; `never_up` when pending 30 min with only failures), last check, uptime over 24h/7d/30d, latency p50/p95 (24h), 24 hourly uptime bars and the last 30 latencies; `down` (how many are down), the org's recent incidents, and its settings (auto_monitors, exclude_apps, exclude_services).
          */
         post: operations["monitor_list"];
         delete?: never;
@@ -2503,7 +2503,7 @@ export interface paths {
         put?: never;
         /**
          * Uptime monitor settings
-         * @description The org's monitoring settings: auto_monitors (every app with a served domain gets its own monitor, app-<name>; default true) and exclude_apps (apps that do not). Pass a field to change it; returns the settings.
+         * @description The org's monitoring settings: auto_monitors (every app and compose stack service with a served domain gets its own monitor, app-<name> or stack-<stack>-<service>; default true), exclude_apps (apps that do not) and exclude_services (stack services that do not, as <stack>/<service>). Pass a field to change it; returns the settings.
          */
         post: operations["monitor_settings"];
         delete?: never;
@@ -2523,7 +2523,7 @@ export interface paths {
         put?: never;
         /**
          * Update an uptime monitor
-         * @description Change a monitor's fields (others are kept; null puts one back to its default). The name and the app-owned flag cannot change. Its check counts start afresh.
+         * @description Change a monitor's fields (others are kept; null puts one back to its default). The name and the auto flag (an app's or stack service's own) cannot change. Its check counts start afresh.
          */
         post: operations["monitor_update"];
         delete?: never;
@@ -10449,7 +10449,7 @@ export interface operations {
                     app?: string;
                     /** @description monitor.cert_expiring this many days before an HTTPS certificate expires (default 14, 0 never). */
                     cert_expiry_days?: number;
-                    /** @description app: which of its domains (default: the first one served). */
+                    /** @description app, service: which of its domains (default: the first one served). */
                     domain?: string;
                     /** @description Codes that count as up: 200-399 (default), 200,204, 200-299,301. */
                     expected_status?: string;
@@ -10476,20 +10476,24 @@ export interface operations {
                     name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
-                    /** @description app: the path to request (default: the domain's path). */
+                    /** @description app, service: the path to request (default: the domain's path). */
                     path?: string;
                     paused?: boolean;
                     /** @description tcp: the port. */
                     port?: number;
                     /** @description Successful checks in a row that make it up again (default 2). */
                     recovery_threshold?: number;
+                    /** @description service: the stack's service. */
+                    service?: string;
+                    /** @description service: the compose stack's name. */
+                    stack?: string;
                     /** @description Seconds a check may take (default 10, under the interval). */
                     timeout?: number;
                     /**
-                     * @description http (a URL), tcp (host and port), or app (an app by name: its served domain's public URL, else its own endpoint; it follows the app)
+                     * @description http (a URL), tcp (host and port), app (an app by name: its served domain's public URL, else its own endpoint; it follows the app), or service (a compose stack's service by stack and service, followed the same way)
                      * @enum {string}
                      */
-                    type: "http" | "tcp" | "app";
+                    type: "http" | "tcp" | "app" | "service";
                     /** @description http: the URL (http:// or https://). */
                     url?: string;
                 };
@@ -10724,6 +10728,8 @@ export interface operations {
                 "application/json": {
                     auto_monitors?: boolean;
                     exclude_apps?: string[];
+                    /** @description <stack>/<service> names. */
+                    exclude_services?: string[];
                     /** @description The org to act in (default: default). */
                     org?: string;
                 };
@@ -10766,7 +10772,7 @@ export interface operations {
                     app?: string;
                     /** @description monitor.cert_expiring this many days before an HTTPS certificate expires (default 14, 0 never). */
                     cert_expiry_days?: number;
-                    /** @description app: which of its domains (default: the first one served). */
+                    /** @description app, service: which of its domains (default: the first one served). */
                     domain?: string;
                     /** @description Codes that count as up: 200-399 (default), 200,204, 200-299,301. */
                     expected_status?: string;
@@ -10793,20 +10799,24 @@ export interface operations {
                     name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
-                    /** @description app: the path to request (default: the domain's path). */
+                    /** @description app, service: the path to request (default: the domain's path). */
                     path?: string;
                     paused?: boolean;
                     /** @description tcp: the port. */
                     port?: number;
                     /** @description Successful checks in a row that make it up again (default 2). */
                     recovery_threshold?: number;
+                    /** @description service: the stack's service. */
+                    service?: string;
+                    /** @description service: the compose stack's name. */
+                    stack?: string;
                     /** @description Seconds a check may take (default 10, under the interval). */
                     timeout?: number;
                     /**
-                     * @description http (a URL), tcp (host and port), or app (an app by name: its served domain's public URL, else its own endpoint; it follows the app)
+                     * @description http (a URL), tcp (host and port), app (an app by name: its served domain's public URL, else its own endpoint; it follows the app), or service (a compose stack's service by stack and service, followed the same way)
                      * @enum {string}
                      */
-                    type?: "http" | "tcp" | "app";
+                    type?: "http" | "tcp" | "app" | "service";
                     /** @description http: the URL (http:// or https://). */
                     url?: string;
                 };

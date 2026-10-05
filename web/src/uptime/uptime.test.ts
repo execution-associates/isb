@@ -11,6 +11,8 @@ const form = (p: Record<string, unknown> = {}) =>
     host: "",
     port: "",
     app: "",
+    stack: "",
+    service: "",
     domain: "",
     path: "",
     method: "GET",
@@ -71,6 +73,10 @@ describe("uptime", () => {
     expect("args" in tcp && tcp.args).toMatchObject({ host: "db", port: 5432, keyword: null, url: null });
     expect(argsOf(form({ type: "app", app: "" }))).toHaveProperty("error");
     expect(targetText({ type: "app", app: "web", path: "/healthz" })).toBe("app web /healthz");
+    expect(argsOf(form({ type: "service", stack: "wiki", service: "" }))).toHaveProperty("error");
+    const svc = argsOf(form({ type: "service", stack: "wiki", service: "web" }));
+    expect("args" in svc && svc.args).toMatchObject({ type: "service", stack: "wiki", service: "web", app: null, url: null });
+    expect(targetText({ type: "service", stack: "wiki", service: "web" })).toBe("service wiki/web");
     expect(targetText({ type: "http", url: "https://a/b?token=1" })).toBe("https://a/b");
   });
 

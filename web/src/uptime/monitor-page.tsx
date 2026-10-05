@@ -114,7 +114,7 @@ export function MonitorPage() {
         open={del}
         onOpenChange={setDel}
         title={`Delete monitor ${name}?`}
-        description={x.auto ? `Its history goes too, and ${x.app} gets no monitor of its own from now on (turn that back on under Uptime).` : "Its checks and incidents go too."}
+        description={x.auto ? `Its history goes too, and ${x.type === "service" ? `${x.stack}/${x.service}` : x.app} gets no monitor of its own from now on (turn that back on under Uptime).` : "Its checks and incidents go too."}
         confirmLabel="Delete monitor"
         onConfirm={async () => {
           await callTool("monitor_delete", { name }, org);

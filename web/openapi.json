@@ -848,7 +848,7 @@
   "info": {
     "description": "isb serve's HTTP surface: the tools (also MCP), the workspace resource, the identity endpoints, streams, websockets and webhooks. docs/reference/http-api.md.",
     "title": "isb",
-    "version": "1.5.1"
+    "version": "1.6.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -9067,7 +9067,7 @@
     },
     "/api/v1/tools/monitor_create": {
       "post": {
-        "description": "Watch something users reach: an HTTP(S) URL (status range, keyword present or absent, headers from secrets, certificate expiry), a TCP port, or an app by reference (its served domain, or its own endpoint). Checked every interval from this daemon; a new monitor is pending (failures before its first success are not downtime) until its first success; failure_threshold failures in a row then make it down (monitor.down to notification channels), recovery_threshold successes up again (monitor.up, with the downtime). URLs a member types are held to the platform's address policy.",
+        "description": "Watch something users reach: an HTTP(S) URL (status range, keyword present or absent, headers from secrets, certificate expiry), a TCP port, or an app or a compose stack's service by reference (its served domain, or its own endpoint). Checked every interval from this daemon; a new monitor is pending (failures before its first success are not downtime) until its first success; failure_threshold failures in a row then make it down (monitor.down to notification channels), recovery_threshold successes up again (monitor.up, with the downtime). URLs a member types are held to the platform's address policy.",
         "operationId": "monitor_create",
         "requestBody": {
           "content": {
@@ -9086,7 +9086,7 @@
                     "type": "integer"
                   },
                   "domain": {
-                    "description": "app: which of its domains (default: the first one served).",
+                    "description": "app, service: which of its domains (default: the first one served).",
                     "type": "string"
                   },
                   "expected_status": {
@@ -9145,7 +9145,7 @@
                     "type": "string"
                   },
                   "path": {
-                    "description": "app: the path to request (default: the domain's path).",
+                    "description": "app, service: the path to request (default: the domain's path).",
                     "type": "string"
                   },
                   "paused": {
@@ -9163,6 +9163,14 @@
                     "minimum": 1,
                     "type": "integer"
                   },
+                  "service": {
+                    "description": "service: the stack's service.",
+                    "type": "string"
+                  },
+                  "stack": {
+                    "description": "service: the compose stack's name.",
+                    "type": "string"
+                  },
                   "timeout": {
                     "description": "Seconds a check may take (default 10, under the interval).",
                     "maximum": 60,
@@ -9170,11 +9178,12 @@
                     "type": "integer"
                   },
                   "type": {
-                    "description": "http (a URL), tcp (host and port), or app (an app by name: its served domain's public URL, else its own endpoint; it follows the app)",
+                    "description": "http (a URL), tcp (host and port), app (an app by name: its served domain's public URL, else its own endpoint; it follows the app), or service (a compose stack's service by stack and service, followed the same way)",
                     "enum": [
                       "http",
                       "tcp",
-                      "app"
+                      "app",
+                      "service"
                     ],
                     "type": "string"
                   },
@@ -9230,7 +9239,7 @@
     },
     "/api/v1/tools/monitor_delete": {
       "post": {
-        "description": "Remove a monitor and its history. Deleting an app's own monitor (app-<name>) adds the app to the org's exclusions so it does not come back.",
+        "description": "Remove a monitor and its history. Deleting an app's own monitor (app-<name>) adds the app to the org's exclude_apps, a stack service's (stack-<stack>-<service>) adds <stack>/<service> to exclude_services, so it does not come back.",
         "operationId": "monitor_delete",
         "requestBody": {
           "content": {
@@ -9354,7 +9363,7 @@
     },
     "/api/v1/tools/monitor_list": {
       "post": {
-        "description": "The org's monitors with status (up, down, pending, paused; `never_up` when pending 30 min with only failures), last check, uptime over 24h/7d/30d, latency p50/p95 (24h), 24 hourly uptime bars and the last 30 latencies; `down` (how many are down), the org's recent incidents, and its settings (auto_monitors, exclude_apps).",
+        "description": "The org's monitors with status (up, down, pending, paused; `never_up` when pending 30 min with only failures), last check, uptime over 24h/7d/30d, latency p50/p95 (24h), 24 hourly uptime bars and the last 30 latencies; `down` (how many are down), the org's recent incidents, and its settings (auto_monitors, exclude_apps, exclude_services).",
         "operationId": "monitor_list",
         "requestBody": {
           "content": {
@@ -9535,7 +9544,7 @@
     },
     "/api/v1/tools/monitor_settings": {
       "post": {
-        "description": "The org's monitoring settings: auto_monitors (every app with a served domain gets its own monitor, app-<name>; default true) and exclude_apps (apps that do not). Pass a field to change it; returns the settings.",
+        "description": "The org's monitoring settings: auto_monitors (every app and compose stack service with a served domain gets its own monitor, app-<name> or stack-<stack>-<service>; default true), exclude_apps (apps that do not) and exclude_services (stack services that do not, as <stack>/<service>). Pass a field to change it; returns the settings.",
         "operationId": "monitor_settings",
         "requestBody": {
           "content": {
@@ -9547,6 +9556,13 @@
                     "type": "boolean"
                   },
                   "exclude_apps": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "exclude_services": {
+                    "description": "<stack>/<service> names.",
                     "items": {
                       "type": "string"
                     },
@@ -9601,7 +9617,7 @@
     },
     "/api/v1/tools/monitor_update": {
       "post": {
-        "description": "Change a monitor's fields (others are kept; null puts one back to its default). The name and the app-owned flag cannot change. Its check counts start afresh.",
+        "description": "Change a monitor's fields (others are kept; null puts one back to its default). The name and the auto flag (an app's or stack service's own) cannot change. Its check counts start afresh.",
         "operationId": "monitor_update",
         "requestBody": {
           "content": {
@@ -9620,7 +9636,7 @@
                     "type": "integer"
                   },
                   "domain": {
-                    "description": "app: which of its domains (default: the first one served).",
+                    "description": "app, service: which of its domains (default: the first one served).",
                     "type": "string"
                   },
                   "expected_status": {
@@ -9679,7 +9695,7 @@
                     "type": "string"
                   },
                   "path": {
-                    "description": "app: the path to request (default: the domain's path).",
+                    "description": "app, service: the path to request (default: the domain's path).",
                     "type": "string"
                   },
                   "paused": {
@@ -9697,6 +9713,14 @@
                     "minimum": 1,
                     "type": "integer"
                   },
+                  "service": {
+                    "description": "service: the stack's service.",
+                    "type": "string"
+                  },
+                  "stack": {
+                    "description": "service: the compose stack's name.",
+                    "type": "string"
+                  },
                   "timeout": {
                     "description": "Seconds a check may take (default 10, under the interval).",
                     "maximum": 60,
@@ -9704,11 +9728,12 @@
                     "type": "integer"
                   },
                   "type": {
-                    "description": "http (a URL), tcp (host and port), or app (an app by name: its served domain's public URL, else its own endpoint; it follows the app)",
+                    "description": "http (a URL), tcp (host and port), app (an app by name: its served domain's public URL, else its own endpoint; it follows the app), or service (a compose stack's service by stack and service, followed the same way)",
                     "enum": [
                       "http",
                       "tcp",
-                      "app"
+                      "app",
+                      "service"
                     ],
                     "type": "string"
                   },

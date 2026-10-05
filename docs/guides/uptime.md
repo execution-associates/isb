@@ -1,6 +1,6 @@
 ---
 title: Uptime monitoring
-description: Hear about it when an app users reach is down, with uptime history, incidents, certificate expiry warnings, and a heartbeat for when the host itself dies.
+description: Hear about it when an app or stack service users reach is down, with uptime history, incidents, certificate expiry warnings, and a heartbeat for when the host itself dies.
 order: 9.5
 ---
 
@@ -13,8 +13,9 @@ from outside the app, every interval, and tells your
 when it comes back.
 
 Every app with a served domain gets a monitor of its own (`app-<name>`)
-within a minute, so with a channel that hears `monitor.*` there is nothing
-else to set up:
+within a minute, and so does every service of a compose stack
+(`stack-<stack>-<service>`), so with a channel that hears `monitor.*` there
+is nothing else to set up:
 
 ```sh
 isb secret create OPS_HOOK <<<'https://hooks.slack.com/services/...'
@@ -31,13 +32,17 @@ overview shows a banner while any monitor is down.
 | Type | Checks | Up when |
 |---|---|---|
 | `app` | an app, by name: its served domain's public URL (the first, or `domain`), with `path` | the answer's status is in `expected_status` and the keywords hold |
+| `service` | a compose stack's service, by `stack` and `service`: the same, for its domains | the same |
 | `http` | any `url` (`http://` or `https://`) | the same |
 | `tcp` | `host` and `port` | a connection opens |
 
 An `app` monitor follows the app: rename its domain, add one, scale it, and
 the monitor checks what is served now. With no domain it checks the app's own
 endpoint instead: its published port, else a replica in rotation (and with no
-replica in rotation it is down, saying so).
+replica in rotation it is down, saying so). A `service` monitor follows a
+service of a stack deployed with `stack_deploy` the same way; its own
+endpoint is where the ingress sends the domain's requests (a replica in
+rotation, on the domain's port).
 
 HTTP checks take:
 
@@ -76,10 +81,11 @@ curl -H "Authorization: Bearer $ISB_TOKEN" -H 'Content-Type: application/json' \
   uptime percentages and the uptime bars' red. The first success makes it
   **up**, without a `monitor.up`. After that the thresholds below apply as
   usual, so real downtime is never hidden.
-- An `app` monitor (including an app's own) does not even look at the app
-  while it is pending and the app has no live deployment (no healthy replica
-  in rotation); it records a pending "waiting for the app's first live
-  deployment" check instead. Once it has been up, a failed rollout that leaves
+- An `app` or `service` monitor (including an app's or service's own) does
+  not even look at its target while it is pending and the target has no live
+  deployment (no healthy replica in rotation); it records a pending "waiting
+  for the app's first live deployment" (or "the service's first replica in
+  rotation") check instead. Once it has been up, a failed rollout that leaves
   the old revision serving does not page, and a real outage does.
 - A monitor still pending with only failures after 30 minutes is flagged **never came
   up** (`never_up: true` in `monitor_list` and `monitor_get`; shown red as
@@ -105,8 +111,8 @@ curl -H "Authorization: Bearer $ISB_TOKEN" -H 'Content-Type: application/json' \
 `monitor.down`, `monitor.up` and `monitor.cert_expiring` are event kinds like
 any other ([Event kinds](notifications.md#event-kinds)). An `app` monitor's
 events are about the app's service (so a rule's `apps` and `projects` filters
-match them); other monitors' are about the stack `@monitors`, service = the
-monitor. The webhook body carries the details:
+match them), a `service` monitor's about that stack and service; other
+monitors' are about the stack `@monitors`, service = the monitor. The webhook body carries the details:
 
 ```json
 {
@@ -145,14 +151,34 @@ monitor. The webhook body carries the details:
 latency and the link. The link needs `--public-url`. URLs in messages and
 details never carry their query string, which may hold a token.
 
-## Apps' own monitors
+## Apps' and stack services' own monitors
 
-Every app with a served domain gets `app-<name>`: GET its first domain,
-`200-399`, every 60 s, down after 2 failures. Edit it like any other monitor
-(it stays the app's). It goes away when the app does, or loses its domains.
-Deleting it adds the app to the org's exclusions so it does not come back;
+Every app with a served domain gets `app-<name>`, and every service of a
+compose stack with a served domain gets `stack-<stack>-<service>` (a `service`
+monitor): GET its first domain, `200-399`, every 60 s, down after 2 failures.
+Each is made within a minute of the domain being served. Edit it like any
+other monitor (it stays the app's or service's). It goes away when its target
+does, or no longer declares a domain; a domain that is briefly not served (a
+conflict, no replica) keeps it.
+
+- A stack service's monitor name is `stack-<stack>-<service>`, the service
+  spelled as its instances are. When that is over 63 characters, or another
+  stack service's monitor already has it (`a-b`/`c` and `a`/`b-c`), it is cut
+  to fit and ends in a 6-digit hash of `<stack>/<service>`. It never looks
+  like an app's, and a monitor you made with the name keeps it.
+- Stacks that apps render (a project environment's `<project>-<env>`, a
+  preview's) are covered by the apps' own monitors, and the org's tunnel
+  stack (`isb-tunnel`) serves nothing of its own: neither gets `service`
+  monitors. Services without a domain (a database, a cache) get none.
+- A workspace's published ports get no monitor of their own: they are
+  development servers that stop with the workspace or the session that
+  started them, so a monitor would page every time one stops. Give one an
+  `http` monitor on its host when it should be watched.
+
+Deleting an own monitor adds its target to the org's exclusions so it does
+not come back (`exclude_apps`, or `exclude_services` as `<stack>/<service>`);
 `monitor_settings` turns the whole thing off (`auto_monitors: false`) or edits
-the exclusions (`exclude_apps`).
+the exclusions.
 
 ### Behind Cloudflare Access
 
@@ -162,12 +188,13 @@ redirect, not the app. isb recognises the redirect (to
 
 - **Give monitors a service token** (recommended): create an Access service
   token allowed by the application's policy, and store it as the org secrets
-  `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`. Every `app` monitor
-  that sets no Access headers of its own presents them, so the check goes
-  through Access to the app, as users do. Any monitor can also name them in
+  `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`. Every `app` and
+  `service` monitor that sets no Access headers of its own presents them, so
+  the check goes through Access to the app, as users do. Any monitor can also name them in
   `headers` (`CF-Access-Client-Id`, `CF-Access-Client-Secret`).
-- **Without a token**, an `app` monitor checks the app's own endpoint instead
-  and says so in its last check (`via`, `note`); an `http` monitor is down
+- **Without a token**, an `app` or `service` monitor checks its own endpoint
+  instead (with the domain as the Host header) and says so in its last check
+  (`via`, `note`); an `http` monitor is down
   with "redirected to Cloudflare Access sign-in", since that is all it can
   see.
 
@@ -193,10 +220,11 @@ plane raises `server.unreachable` when a server stops answering its heartbeat
   to a checked address, and redirects are checked again. A platform admin's
   `notification_settings` `allow_private_targets` relaxes it for monitors
   too.
-- An app's own endpoint (a replica, a published port) is found by reference,
-  not typed, so it is reached directly whatever the policy. An `app`
-  monitor whose domain resolves to a private address while private targets
-  are refused checks that endpoint instead, and says so.
+- An app's or stack service's own endpoint (a replica, a published port) is
+  found by reference, not typed, so it is reached directly whatever the
+  policy. An `app` or `service` monitor whose domain resolves to a private
+  address while private targets are refused checks that endpoint instead,
+  and says so.
 
 ## History
 
@@ -238,10 +266,10 @@ check.
 | `monitor_list` | viewer | Every monitor with status, last check, uptime, latency, bars and sparkline; `down`, the org's recent `incidents`, and `settings`. |
 | `monitor_get` | viewer | One monitor, with its last 20 incidents and checks. |
 | `monitor_update` | member | Change fields (null puts one back to its default). |
-| `monitor_delete` | member | The monitor and its history; an app's own one excludes the app. |
+| `monitor_delete` | member | The monitor and its history; an app's or stack service's own one excludes it. |
 | `monitor_pause`, `monitor_resume` | member | Stop and start checking. |
 | `monitor_checks` | viewer | History over `range` (`1h`, `24h`, `7d`, `30d`, `90d`): buckets, uptime, raw checks. |
-| `monitor_settings` | member | `auto_monitors`, `exclude_apps`. |
+| `monitor_settings` | member | `auto_monitors`, `exclude_apps`, `exclude_services`. |
 
 Every change is in the [audit log](../operations/audit.md).
 

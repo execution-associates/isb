@@ -6,8 +6,11 @@
 //! a TCP connect, or an **app** monitor that follows an app by reference:
 //! its served domain's public URL, or (with no domain, or when the domain
 //! sits behind Cloudflare Access without a service token) the app's own
-//! endpoint. Every app with a served domain gets an app monitor of its own
-//! (`app-<name>`, `auto`), unless the org or the app opts out.
+//! endpoint. A **service** monitor does the same for one service of a
+//! compose stack. Every app with a served domain gets an app monitor of its
+//! own (`app-<name>`, `auto`), and every compose stack service with one a
+//! service monitor (`stack-<stack>-<service>`, `auto`, see [`auto`]), unless
+//! the org opts out or excludes it.
 //!
 //! Checks run in the daemon that runs the org's apps ([`service`]); state,
 //! thresholds and flap damping are in [`state`], the probes in [`probe`],
@@ -17,6 +20,7 @@
 //! Definitions are kept in `<state>/orgs/<org>/monitors/monitors.json`, the
 //! org's settings beside them in `settings.json`.
 
+pub mod auto;
 pub mod heartbeat;
 pub mod probe;
 pub mod service;
@@ -39,6 +43,8 @@ pub const MAX_PER_ORG: usize = 200;
 pub const MIN_INTERVAL: u64 = 30;
 /// The prefix of an app's own monitor.
 pub const AUTO_PREFIX: &str = "app-";
+/// The prefix of a compose stack service's own monitor.
+pub const STACK_PREFIX: &str = "stack-";
 /// The org secrets an app monitor presents to Cloudflare Access, when both
 /// exist and the monitor sets no Access headers of its own.
 pub const ACCESS_ID_SECRET: &str = "CF_ACCESS_CLIENT_ID";
@@ -50,6 +56,7 @@ pub enum Kind {
     Http,
     Tcp,
     App,
+    Service,
 }
 
 impl Kind {
@@ -58,6 +65,7 @@ impl Kind {
             Kind::Http => "http",
             Kind::Tcp => "tcp",
             Kind::App => "app",
+            Kind::Service => "service",
         }
     }
 }
@@ -92,10 +100,16 @@ pub struct Monitor {
     /// app: the app, by name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app: Option<String>,
-    /// app: which of its domains (default: the first one served).
+    /// service: the compose stack, by name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stack: Option<String>,
+    /// service: the stack's service, by name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    /// app, service: which of its domains (default: the first one served).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub domain: Option<String>,
-    /// app: the path to request (default: the domain's path).
+    /// app, service: the path to request (default: the domain's path).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
     /// `GET` or `HEAD`.
@@ -131,7 +145,8 @@ pub struct Monitor {
     pub cert_expiry_days: u32,
     #[serde(default)]
     pub paused: bool,
-    /// Made for an app with a served domain (`app-<name>`).
+    /// Made for an app (`app-<name>`) or a compose stack service
+    /// (`stack-<stack>-<service>`) with a served domain.
     #[serde(default)]
     pub auto: bool,
     #[serde(default)]
@@ -169,6 +184,10 @@ pub struct Settings {
     /// Apps that get no monitor of their own.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude_apps: Vec<String>,
+    /// Compose stack services that get no monitor of their own, as
+    /// `<stack>/<service>`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude_services: Vec<String>,
 }
 
 fn yes() -> bool {
@@ -180,6 +199,7 @@ impl Default for Settings {
         Settings {
             auto_monitors: true,
             exclude_apps: Vec::new(),
+            exclude_services: Vec::new(),
         }
     }
 }
@@ -196,6 +216,21 @@ pub fn validate_name(n: &str) -> Result<()> {
     } else {
         Err(Error::invalid(format!(
             "monitor name {n:?}: [a-z0-9-], starting with a letter, at most 63 characters"
+        )))
+    }
+}
+
+/// A compose service's name, as a service monitor refers to it.
+pub fn validate_service_name(s: &str) -> Result<()> {
+    let ok = !s.is_empty()
+        && s.len() <= 63
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c));
+    if ok {
+        Ok(())
+    } else {
+        Err(Error::invalid(format!(
+            "service {s:?}: a compose service's name ([A-Za-z0-9._-], at most 63)"
         )))
     }
 }
@@ -323,6 +358,10 @@ impl Monitor {
                     ("host", self.host.is_some()),
                     ("port", self.port.is_some()),
                     ("app", self.app.is_some()),
+                    (
+                        "stack or service",
+                        self.stack.is_some() || self.service.is_some(),
+                    ),
                     ("domain", self.domain.is_some()),
                     ("path", self.path.is_some()),
                 ])?;
@@ -335,6 +374,10 @@ impl Monitor {
                 self.refuse(&[
                     ("url", self.url.is_some()),
                     ("app", self.app.is_some()),
+                    (
+                        "stack or service",
+                        self.stack.is_some() || self.service.is_some(),
+                    ),
                     ("domain", self.domain.is_some()),
                     ("path", self.path.is_some()),
                     ("keyword, headers or follow_redirects", http_only),
@@ -344,15 +387,28 @@ impl Monitor {
                 let app = self.app.as_deref().unwrap_or_default();
                 crate::app::validate_app_name(app)
                     .map_err(|_| Error::invalid(format!("app {app:?}: an app's name")))?;
-                if let Some(p) = &self.path {
-                    if !p.starts_with('/') || p.len() > 1024 || p.contains(char::is_whitespace) {
-                        return Err(Error::invalid("path: starts with /, no spaces"));
-                    }
-                }
+                self.validate_path()?;
                 self.refuse(&[
                     ("url", self.url.is_some()),
                     ("host", self.host.is_some()),
                     ("port", self.port.is_some()),
+                    (
+                        "stack or service",
+                        self.stack.is_some() || self.service.is_some(),
+                    ),
+                ])?;
+            }
+            Kind::Service => {
+                let stack = self.stack.as_deref().unwrap_or_default();
+                crate::stack::validate_stack_name(stack)
+                    .map_err(|_| Error::invalid(format!("stack {stack:?}: a stack's name")))?;
+                validate_service_name(self.service.as_deref().unwrap_or_default())?;
+                self.validate_path()?;
+                self.refuse(&[
+                    ("url", self.url.is_some()),
+                    ("host", self.host.is_some()),
+                    ("port", self.port.is_some()),
+                    ("app", self.app.is_some()),
                 ])?;
             }
         }
@@ -369,6 +425,20 @@ impl Monitor {
             validate_headers(&self.headers)?;
         }
         Ok(())
+    }
+
+    fn validate_path(&self) -> Result<()> {
+        match &self.path {
+            Some(p) if !p.starts_with('/') || p.len() > 1024 || p.contains(char::is_whitespace) => {
+                Err(Error::invalid("path: starts with /, no spaces"))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Does it follow something by reference (an app or a stack service)?
+    pub fn follows(&self) -> bool {
+        matches!(self.kind, Kind::App | Kind::Service)
     }
 
     fn refuse(&self, fields: &[(&str, bool)]) -> Result<()> {
@@ -399,6 +469,11 @@ impl Monitor {
                 self.port.unwrap_or_default()
             ),
             Kind::App => format!("app {}", self.app.as_deref().unwrap_or_default()),
+            Kind::Service => format!(
+                "service {}/{}",
+                self.stack.as_deref().unwrap_or_default(),
+                self.service.as_deref().unwrap_or_default()
+            ),
         }
     }
 }

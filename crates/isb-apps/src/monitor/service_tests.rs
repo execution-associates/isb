@@ -425,3 +425,199 @@ fn an_app_monitor_waits_for_a_live_deployment() {
     let c = db.lock().unwrap().recent("app-web", 5).unwrap();
     assert!(c[0].pending);
 }
+
+/// The ingress as the controller sees it: fixed domains per service.
+type Domains = BTreeMap<(String, String), Vec<crate::ingress::DomainStatus>>;
+struct FakeIngress(Mutex<Domains>);
+
+impl crate::stack::controller::Observer for FakeIngress {
+    fn rotation(&self, _: &str, _: &str, _: &[std::net::IpAddr]) {}
+    fn drain(&self, _: &str, _: &str, _: std::net::IpAddr, _: Duration) {}
+    fn stacks_changed(&self, _: Vec<Arc<crate::stack::StackDef>>) {}
+    fn domains(&self, stack: &str, service: &str) -> Vec<crate::ingress::DomainStatus> {
+        let m = self.0.lock().unwrap();
+        m.get(&(stack.to_string(), service.to_string()))
+            .cloned()
+            .unwrap_or_default()
+    }
+}
+
+impl FakeIngress {
+    fn set(&self, stack: &str, service: &str, d: Vec<crate::ingress::DomainStatus>) {
+        self.0
+            .lock()
+            .unwrap()
+            .insert((stack.to_string(), service.to_string()), d);
+    }
+}
+
+fn serving(url: &str, upstream: &str) -> crate::ingress::DomainStatus {
+    crate::ingress::DomainStatus {
+        host: "wiki.acme.dev".into(),
+        path: "/".into(),
+        url: Some(url.into()),
+        provider: "caddy".into(),
+        state: "serving".into(),
+        cert: "none".into(),
+        upstreams: vec![upstream.into()],
+        ..Default::default()
+    }
+}
+
+/// A service over a controller with `stacks` deployed in org acme and a
+/// fake ingress; private targets as `allow_private` says.
+fn service_with(
+    dir: &Path,
+    stacks: &[(&str, &str)],
+    allow_private: bool,
+) -> (Monitors, Arc<FakeIngress>) {
+    let store = crate::stack::Store::open(dir).unwrap();
+    for (name, y) in stacks {
+        store
+            .save(&crate::stack::StackDef {
+                source: None,
+                domains: Default::default(),
+                name: (*name).into(),
+                org: OrgId::new("acme").unwrap(),
+                file: serde_yaml_ng::from_str(y).unwrap(),
+                base_dir: "/".into(),
+                secrets: Default::default(),
+                force: Default::default(),
+                images: Default::default(),
+                deployed_at: 0,
+                deployed_by: String::new(),
+                previous: None,
+            })
+            .unwrap();
+    }
+    let k = crate::secrets::Keyring::new(age::x25519::Identity::generate(), vec![]);
+    let secrets = Arc::new(Secrets::new(crate::secrets::LocalDriver::new(
+        dir,
+        Arc::new(k),
+    )));
+    let client = Client::with_socket("/nonexistent/isb-test/incus.sock");
+    let ing = Arc::new(FakeIngress(Mutex::new(BTreeMap::new())));
+    let ctl = Controller::start_with(
+        client.clone(),
+        store,
+        Duration::from_secs(3600),
+        secrets.clone(),
+        Some(ing.clone()),
+    )
+    .unwrap();
+    let apps = Apps::new(dir, client, ctl, secrets.clone());
+    let m = Monitors::new(dir, apps, secrets, Arc::new(move || allow_private), None);
+    (m, ing)
+}
+
+/// An HTTP server that answers every request with `head` and `ok`.
+fn answering(head: &'static str) -> u16 {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for s in l.incoming() {
+            let Ok(mut s) = s else { continue };
+            let mut b = [0u8; 4096];
+            let _ = s.read(&mut b);
+            let _ = write!(s, "{head}\r\nContent-Length: 2\r\n\r\nok");
+        }
+    });
+    port
+}
+
+const WIKI: &str = "services:\n  web: {image: x, domains: [{host: wiki.acme.dev, port: 80}]}\n  redis: {image: x}\n";
+
+#[test]
+fn compose_stack_services_with_a_domain_get_their_own_monitor() {
+    let dir = tempfile::tempdir().unwrap();
+    let app_web = "services:\n  web: {image: x, labels: {isb.app: web}, domains: [{host: shop.acme.dev, port: 80}]}\n";
+    let (svc, ing) = service_with(
+        dir.path(),
+        &[
+            ("wiki", WIKI),
+            ("isb-tunnel", "services:\n  cloudflared: {image: x}\n"),
+            ("shop-production", app_web),
+            ("shop-production-pr-3", app_web),
+        ],
+        true,
+    );
+    let org = OrgId::new("acme").unwrap();
+    for s in ["acme/shop-production", "acme/shop-production-pr-3"] {
+        ing.set(
+            s,
+            "web",
+            vec![serving("https://shop.acme.dev/", "10.0.0.6:80")],
+        );
+    }
+    // Declared but not served yet: nothing.
+    svc.sync_auto(&org).unwrap();
+    assert!(svc.list(&org).unwrap().is_empty());
+    ing.set(
+        "acme/wiki",
+        "web",
+        vec![serving("https://wiki.acme.dev/", "10.0.0.5:80")],
+    );
+    svc.sync_auto(&org).unwrap();
+    let all = svc.list(&org).unwrap();
+    // Only wiki's web: not redis (no domain), the tunnel, or what apps render.
+    assert_eq!(all.len(), 1, "{all:?}");
+    let m = &all[0];
+    assert_eq!(m.name, "stack-wiki-web");
+    assert_eq!((m.kind, m.auto), (Kind::Service, true));
+    assert_eq!(m.target(), "service wiki/web");
+    // Not live yet: a pending wait, as an app's.
+    let o = svc.check(&org, m);
+    assert_eq!(o.error.as_deref(), Some(WAITING_FOR_SERVICE));
+    // Deleting it excludes the service from then on.
+    svc.delete(&org, "stack-wiki-web").unwrap();
+    assert_eq!(svc.settings(&org).unwrap().exclude_services, ["wiki/web"]);
+    svc.sync_auto(&org).unwrap();
+    assert!(svc.list(&org).unwrap().is_empty());
+    // Made by hand, it must name a stack and service that exist.
+    let mut h = Monitor::new("w", Kind::Service);
+    (h.stack, h.service) = (Some("wiki".into()), Some("nope".into()));
+    assert!(svc.create(&org, h.clone()).is_err());
+    h.service = Some("web".into());
+    svc.create(&org, h).unwrap();
+}
+
+#[test]
+fn a_service_behind_access_is_checked_at_its_own_endpoint() {
+    let org = OrgId::new("acme").unwrap();
+    let access = answering(
+        "HTTP/1.1 302 Found\r\nLocation: https://team.cloudflareaccess.com/cdn-cgi/access/login/x",
+    );
+    let origin = answering("HTTP/1.1 200 OK");
+    let mut m = Monitor::new("stack-wiki-web", Kind::Service);
+    (m.stack, m.service) = (Some("wiki".into()), Some("web".into()));
+    let upstream = format!("127.0.0.1:{origin}");
+    for (allow_private, public, why) in [
+        (true, access, "behind Cloudflare Access"),
+        (false, origin, "private address"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let (svc, ing) = service_with(dir.path(), &[("wiki", WIKI)], allow_private);
+        let url = format!("http://127.0.0.1:{public}/");
+        ing.set("acme/wiki", "web", vec![serving(&url, &upstream)]);
+        svc.create(&org, m.clone()).unwrap();
+        // Up before: checked without waiting for a live deployment.
+        svc.edit_state(&org, &m.name, |s| s.status = Status::Up)
+            .unwrap();
+        let o = svc.check(&org, &m);
+        assert!(o.ok, "{o:?}");
+        assert_eq!(
+            o.via.as_deref(),
+            Some(format!("internal: upstream {upstream}").as_str())
+        );
+        let note = o.note.unwrap_or_default();
+        assert!(
+            note.contains(why) && note.contains("checked the service's own endpoint"),
+            "{note}"
+        );
+        // Events are about the stack's service.
+        assert_eq!(
+            svc.subject(&org, &m),
+            ("acme/wiki".to_string(), "web".to_string())
+        );
+    }
+}

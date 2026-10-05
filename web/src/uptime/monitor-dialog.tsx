@@ -1,7 +1,7 @@
 // Create or edit an uptime monitor: what it checks (a URL, a TCP port, or
 // an app by reference), what counts as up, and how often.
 import { useQueryClient } from "@tanstack/react-query";
-import { Globe, Loader2, Network, Plus, Rocket, X } from "lucide-react";
+import { Globe, Layers, Loader2, Network, Plus, Rocket, X } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import { toast } from "sonner";
 import { useApps, useSecretNames } from "@/apps/api";
@@ -20,6 +20,7 @@ const KINDS: { id: MonitorKind; label: string; hint: string; icon: typeof Globe 
   { id: "app", label: "App", hint: "Follows an app's domain", icon: Rocket },
   { id: "http", label: "HTTP(S)", hint: "Any URL", icon: Globe },
   { id: "tcp", label: "TCP port", hint: "A host and port", icon: Network },
+  { id: "service", label: "Stack service", hint: "Follows a compose service's domain", icon: Layers },
 ];
 
 interface HeaderRow {
@@ -35,6 +36,8 @@ interface Form {
   host: string;
   port: string;
   app: string;
+  stack: string;
+  service: string;
   domain: string;
   path: string;
   method: "GET" | "HEAD";
@@ -58,6 +61,8 @@ function formOf(m?: Monitor, app?: string): Form {
     host: m?.host ?? "",
     port: m?.port ? String(m.port) : "",
     app: m?.app ?? app ?? "",
+    stack: m?.stack ?? "",
+    service: m?.service ?? "",
     domain: m?.domain ?? "",
     path: m?.path ?? "",
     method: m?.method ?? "GET",
@@ -96,6 +101,8 @@ export function argsOf(f: Form): { args: Record<string, unknown> } | { error: st
     host: null,
     port: null,
     app: null,
+    stack: null,
+    service: null,
     domain: null,
     path: null,
   };
@@ -108,6 +115,9 @@ export function argsOf(f: Form): { args: Record<string, unknown> } | { error: st
     // What only HTTP checks have goes back to its defaults.
     Object.assign(a, { host: f.host.trim(), port, method: null, expected_status: null, keyword: null, keyword_absent: null, follow_redirects: null, headers: null, cert_expiry_days: null });
     return { args: a };
+  } else if (f.type === "service") {
+    if (!f.stack.trim() || !f.service.trim()) return { error: "Name the stack and its service." };
+    Object.assign(a, { stack: f.stack.trim(), service: f.service.trim(), domain: blank(f.domain), path: blank(f.path) });
   } else {
     if (!f.app) return { error: "Choose the app." };
     Object.assign(a, { app: f.app, domain: blank(f.domain), path: blank(f.path) });
@@ -189,7 +199,7 @@ export function MonitorDialog({ org, existing, app, open, onOpenChange, onSaved 
           <Field label="Name">
             {(id) => <Input id={id} disabled={!!existing} autoFocus={!existing} spellCheck={false} value={f.name} onChange={(e) => set({ name: e.target.value.toLowerCase() })} placeholder="shop-home" />}
           </Field>
-          <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="What to check">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label="What to check">
             {KINDS.map((k) => (
               <button
                 key={k.id}
@@ -251,6 +261,23 @@ export function MonitorDialog({ org, existing, app, open, onOpenChange, onSaved 
             </div>
           )}
 
+          {f.type === "service" && (
+            <div className="grid items-start gap-4 sm:grid-cols-2">
+              <Field label="Stack" hint="A compose stack (stack_deploy).">
+                {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} disabled={!!existing?.auto} value={f.stack} onChange={(e) => set({ stack: e.target.value })} placeholder="wiki" />}
+              </Field>
+              <Field label="Service" hint="Its served domain, else its own endpoint.">
+                {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} disabled={!!existing?.auto} value={f.service} onChange={(e) => set({ service: e.target.value })} placeholder="web" />}
+              </Field>
+              <Field label="Domain (optional)" hint="Default: the first one served.">
+                {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.domain} onChange={(e) => set({ domain: e.target.value })} placeholder="wiki.example.com" />}
+              </Field>
+              <Field label="Path (optional)" hint="Default: the domain's path.">
+                {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.path} onChange={(e) => set({ path: e.target.value })} placeholder="/healthz" />}
+              </Field>
+            </div>
+          )}
+
           {httpish && (
             <div className="grid items-start gap-4 sm:grid-cols-3">
               <Field label="Up when the status is" hint="200-399, or 200,204.">
@@ -260,6 +287,23 @@ export function MonitorDialog({ org, existing, app, open, onOpenChange, onSaved 
               <Field label="Body lacks (optional)">{(id) => <Input id={id} value={f.keyword_absent} onChange={(e) => set({ keyword_absent: e.target.value })} placeholder="error" />}</Field>
             </div>
           )}
+          {f.type === "service" && (
+            <div className="grid items-start gap-4 sm:grid-cols-2">
+              <Field label="Stack" hint="A compose stack (stack_deploy).">
+                {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} disabled={!!existing?.auto} value={f.stack} onChange={(e) => set({ stack: e.target.value })} placeholder="wiki" />}
+              </Field>
+              <Field label="Service" hint="Its served domain, else its own endpoint.">
+                {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} disabled={!!existing?.auto} value={f.service} onChange={(e) => set({ service: e.target.value })} placeholder="web" />}
+              </Field>
+              <Field label="Domain (optional)" hint="Default: the first one served.">
+                {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.domain} onChange={(e) => set({ domain: e.target.value })} placeholder="wiki.example.com" />}
+              </Field>
+              <Field label="Path (optional)" hint="Default: the domain's path.">
+                {(id, d) => <Input id={id} aria-describedby={d} className="font-mono" spellCheck={false} value={f.path} onChange={(e) => set({ path: e.target.value })} placeholder="/healthz" />}
+              </Field>
+            </div>
+          )}
+
           {httpish && (
             <div className="grid gap-3">
               <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
