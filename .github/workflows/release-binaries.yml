@@ -1,0 +1,100 @@
+name: Release binaries
+
+# The release tarballs, built on every push to main: static (musl) Linux
+# binaries for x86_64 and aarch64, and macOS binaries for both (linked only
+# against the system libraries), each uploaded as the artifact isb-<target>
+# holding isb-v<Cargo.toml version>-<target>.tar.gz, kept 30 days.
+# A v* tag does not rebuild: release.yml finds this workflow's successful run
+# for the tag's commit, downloads these artifacts, then signs and publishes
+# them. It calls this workflow itself (workflow_call) only when that run is
+# missing, failed or expired.
+# This workflow holds no secrets and gets no id-token: signing, attestation
+# and publishing live only in release.yml's tag jobs.
+# Pull requests that change this file or the release scripts run it too, so a
+# broken build is caught before it reaches main.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - ".github/workflows/release-binaries.yml"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            runner: macos-15
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      # The web UI is embedded at build time (build.rs); ISB_WEB_REQUIRED
+      # makes a missing web/dist a build error, so a release never ships
+      # the placeholder page.
+      - uses: oven-sh/setup-bun@v2
+      - name: build the web UI
+        working-directory: web
+        run: bun install --frozen-lockfile && bun run build
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+        env:
+          ISB_WEB_REQUIRED: "1"
+      - name: check the binary is static and runs
+        if: runner.os == 'Linux'
+        run: |
+          bin=target/${{ matrix.target }}/release/isb
+          file "$bin"
+          file "$bin" | grep -qE 'statically linked|static-pie linked'
+          "$bin" --version
+      # macOS has no static linking: allow only the system libraries.
+      - name: check the binary links only system libraries and runs
+        if: runner.os == 'macOS'
+        run: |
+          bin=target/${{ matrix.target }}/release/isb
+          file "$bin"
+          otool -L "$bin"
+          if otool -L "$bin" | tail -n +2 | grep -vE '^\s+/(usr/lib|System/Library)/'; then
+            echo "links a non-system library"; exit 1
+          fi
+          "$bin" --version
+      # Named by Cargo.toml's version, so the tarball a tag promotes has the
+      # name install.sh asks for (isb-v<version>-<target>.tar.gz), and the
+      # binary must report that version.
+      - name: package
+        run: |
+          v=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          bin=target/${{ matrix.target }}/release/isb
+          [ "$("$bin" --version)" = "isb $v" ] || { echo "binary reports $("$bin" --version), want isb $v"; exit 1; }
+          name="isb-v$v-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          cp "$bin" LICENSE README.md "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: isb-${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 30

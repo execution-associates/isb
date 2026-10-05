@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the release binary the way release.yml does: the web UI, then a
+# Build the release binary the way release-binaries.yml does: the web UI, then a
 # static musl `isb` (no libc on the host needed to run it).
 #
 #   scripts/build-release.sh              # for this machine's architecture
