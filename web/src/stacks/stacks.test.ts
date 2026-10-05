@@ -4,8 +4,22 @@ import { activeServiceTab, serviceTabs, stackTab } from "@/apps/service-tabs";
 import { sameTarget, targetName } from "@/jobs/api";
 import { elapsed } from "@/apps/deployments-tab";
 import { toYaml } from "@/lib/yaml-edit";
-import { asDeployment, composePath, composeStacks, ownerOf, reusedSecrets, sourceReplicas, stackDeploymentDetail, stackDomains, stackRedirect } from "./api";
-import { reusedSecretsLine, stackDeploymentAction, stackDeploymentServices } from "./stack-deployments";
+import { stepStates } from "@/lib/status";
+import {
+  asDeployment,
+  composePath,
+  composeStacks,
+  eventLine,
+  eventServices,
+  ownerOf,
+  reusedSecrets,
+  sourceReplicas,
+  stackDeploymentDetail,
+  stackDomains,
+  stackRedirect,
+  stackStages,
+} from "./api";
+import { reusedSecretsLine, stackDeploymentAction, stackDeploymentServices, stackRecentLabel, stackSource } from "./stack-deployments";
 
 const project = (name: string, envs: Record<string, string[]>): Project => ({
   name,
@@ -105,7 +119,9 @@ describe("compose day-2 adapters", () => {
     const flat = stackDeploymentDetail({ id: 3, trigger: "api", status: "done", created_at: 1_700_000_000, source: "services: {}\n", events: ["queued", { service: "web", message: "rolled" }], log: "a\nb\n" });
     expect(flat.record.created_at).toBe(1_700_000_000_000);
     expect(flat.source).toBe("services: {}\n");
-    expect(flat.lines).toEqual(["queued", "[web] rolled", "a", "b"]);
+    // The log is the events as text: the events win, the log stands in without them.
+    expect(flat.lines).toEqual(["queued", "web: rolled"]);
+    expect(stackDeploymentDetail({ id: 5, trigger: "api", status: "done", created_at: 1, log: "a\nb\n" }).lines).toEqual(["a", "b"]);
     const wrapped = stackDeploymentDetail({ deployment: { id: 4, trigger: "webhook", status: "failed", created_at: 1_700_000_000_123 } });
     expect(wrapped.record.id).toBe(4);
     expect(wrapped.record.created_at).toBe(1_700_000_000_123);
@@ -243,5 +259,58 @@ describe("toYaml", () => {
         "",
       ].join("\n"),
     );
+  });
+});
+
+describe("a stack deployment on the deployment page", () => {
+  const ev = (message: string, service?: string, level = "info") => ({ at: 1_791_172_387_000, level, service, message });
+  // The events stack_deployment_get answers for a compose deploy.
+  const rollout = [
+    ev("deployed by dev@dev.com: web update"),
+    ev("rolling out rev 005cf334 to 2 slot(s), stop-first", "web"),
+    ev("slot 1: replacing wiki-web-1-2906 (stop-first)", "web"),
+    ev("slot 1: creating wiki-web-1-4fe7 (rev 005cf334)", "web"),
+  ];
+
+  it("is at Pull until a slot rolls out, then at Roll out", () => {
+    const before = stackStages({ status: "deploying", started_at: 1 }, rollout.slice(0, 1));
+    expect(before).toEqual({ status: "building", reached: { building: true, deploying: false } });
+    expect(stepStates(before.status, before.reached)).toMatchObject({ queued: "done", building: "current", deploying: "waiting" });
+    const during = stackStages({ status: "deploying", started_at: 1 }, rollout);
+    expect(during).toEqual({ status: "deploying", reached: { building: true, deploying: true } });
+    expect(stepStates(during.status, during.reached)).toMatchObject({ queued: "done", building: "done", deploying: "current", done: "waiting" });
+  });
+
+  it("pins a failure to the stage it happened in", () => {
+    const rolling = stackStages({ status: "failed", started_at: 1 }, [...rollout, ev("slot 1: wiki-web-1-4fe7 failed its health check", "web", "error")]);
+    expect(stepStates(rolling.status, rolling.reached)).toMatchObject({ building: "done", deploying: "failed", done: "skipped" });
+    const early = stackStages({ status: "failed", started_at: 1 }, [ev("cannot resolve image", undefined, "error")]);
+    expect(stepStates(early.status, early.reached)).toMatchObject({ building: "failed", deploying: "skipped" });
+    const never = stackStages({ status: "failed" }, []);
+    expect(stepStates(never.status, never.reached)).toMatchObject({ queued: "failed", building: "skipped" });
+  });
+
+  it("draws done and superseded as an app deployment's", () => {
+    const done = stackStages({ status: "done", started_at: 1 }, []);
+    expect(Object.values(stepStates(done.status, done.reached))).toEqual(["done", "done", "done", "done"]);
+    const sup = stackStages({ status: "superseded" }, []);
+    expect(stepStates(sup.status, sup.reached)).toMatchObject({ queued: "failed", building: "skipped" });
+  });
+
+  it("writes events as log lines, and lists their services", () => {
+    expect(eventLine({ message: "slot 1: creating x", service: "web", level: "warn" })).toBe("[warn] web: slot 1: creating x");
+    expect(eventLine({ message: "slot 1: creating x", service: "web", level: "info" }, "web")).toBe("slot 1: creating x");
+    expect(eventLine(ev("deployed")).endsWith(" deployed")).toBe(true);
+    expect(eventServices([...rollout, ev("x", "db"), ev("y", "web")])).toEqual(["web", "db"]);
+  });
+
+  it("says what it deployed, in the grid and in Recent deployments", () => {
+    expect(stackSource({ action: "deploy" })).toBe("Compose file");
+    expect(stackSource({ action: "rollback", rollback_of: 1 })).toBe("Rollback to #1");
+    expect(stackSource({ action: "env" })).toBe("Environment changed");
+    expect(stackSource({ action: "domains" })).toBe("Domains changed");
+    expect(stackRecentLabel({ id: 2, trigger: "api", status: "done", created_at: 0, action: "deploy", services: ["web"] })).toBe("web");
+    expect(stackRecentLabel({ id: 3, trigger: "api", status: "done", created_at: 0, action: "deploy", services: [] })).toBe("manual");
+    expect(stackRecentLabel({ id: 4, trigger: "api", status: "done", created_at: 0, action: "rollback", rollback_of: 1 })).toBe("rollback to #1");
   });
 });

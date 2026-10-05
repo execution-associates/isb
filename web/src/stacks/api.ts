@@ -144,17 +144,29 @@ export interface StackDeployments {
   deployments: StackDeployment[];
 }
 
+/** One of the stack's events while a deployment ran (stack_deployment_get's `events`). */
+export interface StackDeploymentEvent {
+  /** Unix milliseconds. */
+  at?: number;
+  level?: string;
+  service?: string;
+  message: string;
+}
+
 /** stack_deployment_get {name, id}: the record, the compose file it deployed, and its events. */
 export type StackDeploymentReply = (StackDeployment | { deployment: StackDeployment }) & {
   /** The compose file it deployed. */
   source?: string;
-  events?: (string | { at?: number; level?: string; service?: string; message: string })[];
+  events?: (string | StackDeploymentEvent)[];
+  /** The events as text (the same lines), for a reply without them. */
   log?: string | string[];
 };
 
 export interface StackDeploymentDetail {
   record: StackDeployment;
   source: string;
+  events: StackDeploymentEvent[];
+  /** The events as log lines, or the reply's log when it has no events. */
   lines: string[];
 }
 
@@ -166,12 +178,48 @@ export function stackDeploymentMs(d: StackDeployment): StackDeployment {
   return { ...d, created_at: ms(d.created_at) ?? 0, started_at: ms(d.started_at), finished_at: ms(d.finished_at) };
 }
 
+const pad = (n: number) => String(n).padStart(2, "0");
+
+/**
+ * An event as a log line, as the server's `log` writes it: its time (local),
+ * its level unless info, its service unless `service` is the one shown.
+ */
+export function eventLine(e: StackDeploymentEvent, service?: string): string {
+  const t = e.at ? new Date(e.at) : null;
+  const time = t ? `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())} ` : "";
+  const level = e.level && e.level !== "info" && e.level !== "log" ? `[${e.level}] ` : "";
+  const svc = e.service && e.service !== service ? `${e.service}: ` : "";
+  return `${time}${level}${svc}${e.message}`;
+}
+
 /** stack_deployment_get's reply, flat or `{deployment}`, as one shape with its log as lines. */
 export function stackDeploymentDetail(r: StackDeploymentReply): StackDeploymentDetail {
   const record = stackDeploymentMs("deployment" in r ? r.deployment : r);
-  const events = (r.events ?? []).map((e) => (typeof e === "string" ? e : e.service ? `[${e.service}] ${e.message}` : e.message));
+  const events = (r.events ?? []).map((e) => (typeof e === "string" ? { message: e } : e));
   const log = typeof r.log === "string" ? (r.log.trim() ? r.log.replace(/\n$/, "").split("\n") : []) : (r.log ?? []);
-  return { record, source: r.source ?? "", lines: [...events, ...log] };
+  return { record, source: r.source ?? "", events, lines: events.length ? events.map((e) => eventLine(e)) : log };
+}
+
+// What the stack's controller says once it rolls out (src/stack/controller.rs):
+// "rolling out rev R to N slot(s)", "slot N: creating|replacing ...".
+const ROLLOUT = /^(rolling out rev |slot \d+: |scaling down|removing |rollout of rev )/;
+
+/**
+ * A stack deployment's stages for the strip an app deployment has (Queued,
+ * Pull, Roll out, Live), from its events: Pull once it started (any event),
+ * Roll out from the first rollout event. A deployment rolling no
+ * slot out yet is drawn at Pull.
+ */
+export function stackStages(r: Pick<StackDeployment, "status" | "started_at">, events: StackDeploymentEvent[]): { status: DeploymentStatus; reached: { building: boolean; deploying: boolean } } {
+  const deploying = events.some((e) => ROLLOUT.test(e.message));
+  const building = deploying || !!r.started_at || events.length > 0;
+  const status: DeploymentStatus = r.status === "deploying" && !deploying ? "building" : r.status;
+  return { status, reached: { building, deploying } };
+}
+
+/** The services a deployment's events name, in the order they first speak. */
+export function eventServices(events: StackDeploymentEvent[]): string[] {
+  return [...new Set(events.map((e) => e.service).filter((s): s is string => !!s))];
 }
 
 /**

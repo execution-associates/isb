@@ -208,7 +208,7 @@ export function DeploymentRow({
         <span className="pl-[18px] text-xs text-muted-foreground tabular-nums">
           {live ? (
             <span className="font-medium text-info">{ms !== null ? elapsedText(ms, coarse) : "Starting"}</span>
-          ) : ms !== null ? (
+          ) : ms !== null && (ms || coarse) ? (
             elapsedText(ms, coarse)
           ) : (
             "–"

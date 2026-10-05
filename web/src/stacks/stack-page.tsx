@@ -254,7 +254,15 @@ export function StackPage() {
       )}
       {active === "deployments" &&
         (id ? (
-          <StackDeploymentPage org={org} name={name} id={Number(id)} writer={writer} path={deploymentsPath} />
+          <StackDeploymentPage
+            org={org}
+            name={name}
+            id={Number(id)}
+            writer={writer}
+            path={deploymentsPath}
+            deploy={deploy}
+            urls={(services ?? []).flatMap((s) => s.domains ?? []).map((d) => d.url).filter((u): u is string => !!u)}
+          />
         ) : (
           <StackDeploymentsTab org={org} name={name} writer={writer} path={deploymentsPath} deploy={deploy} />
         ))}

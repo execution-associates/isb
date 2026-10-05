@@ -3,22 +3,33 @@
 // its events (stack_deployment_get), and Roll back to any finished one
 // (stack_rollback with `to`). Each row says what deployed it (a compose file,
 // a rollback, an environment or domains change) and the services it changed.
+// One deployment is drawn by the app's deployment page (DeploymentView).
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, History, KeyRound, Layers, Loader2, RotateCcw } from "lucide-react";
-import { useState } from "react";
-import { Link } from "react-router";
+import { ChevronRight, FileCode, History, KeyRound, Layers } from "lucide-react";
+import { useEffect, useReducer, useState } from "react";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { dateTime, relativeTime } from "@/lib/format";
 import { errorMessage } from "@/lib/messages";
 import { currentOf, finished, keys } from "@/apps/api";
-import { ConfirmDialog, DeploymentBadge, EmptyState, QueryError, Section } from "@/apps/components";
+import { ConfirmDialog, EmptyState, QueryError } from "@/apps/components";
+import { DeploymentView } from "@/apps/deployment-view";
 import { DeploymentRow, elapsed, elapsedText, TRIGGER_LABEL } from "@/apps/deployments-tab";
-import { LogView } from "@/apps/log-view";
-import { asDeployment, type DeployResult, reusedSecrets, type StackDeployment, stackKeys, useStackDeployment, useStackDeployments } from "./api";
+import { buildStepLabel } from "@/apps/follow";
+import {
+  asDeployment,
+  type DeployResult,
+  eventLine,
+  eventServices,
+  reusedSecrets,
+  type StackDeployment,
+  stackKeys,
+  stackStages,
+  useStackDeployment,
+  useStackDeployments,
+} from "./api";
 
 /**
  * How a stack deployment came about, where an app's row says who triggered
@@ -167,18 +178,66 @@ export function StackDeploymentsTab({
   );
 }
 
-export function StackDeploymentPage({ org, name, id, writer, path }: { org: string; name: string; id: number; writer: boolean; path: (id?: number) => string }) {
+/** A stack deployment's line in Recent deployments, as an app's says its commit or trigger. */
+export function stackRecentLabel(d: StackDeployment): string {
+  if (d.action === "rollback" || d.rollback_of) return d.rollback_of ? `rollback to #${d.rollback_of}` : "rollback";
+  if (d.action === "env") return "environment changed";
+  if (d.action === "domains") return "domains changed";
+  return d.services?.length ? d.services.join(", ") : TRIGGER_LABEL[d.trigger ?? "api"].toLowerCase();
+}
+
+/** What a stack deployment deployed, for the Source cell. */
+export function stackSource(d: Pick<StackDeployment, "action" | "rollback_of">): string {
+  if (d.action === "rollback" || d.rollback_of) return d.rollback_of ? `Rollback to #${d.rollback_of}` : "Rollback";
+  if (d.action === "env") return "Environment changed";
+  if (d.action === "domains") return "Domains changed";
+  return "Compose file";
+}
+
+/**
+ * One stack deployment, on the page an app deployment has: its record read
+ * every 2 s until it finishes (stack_deployment_get), its events as the log,
+ * and the compose file it deployed below.
+ */
+export function StackDeploymentPage({
+  org,
+  name,
+  id,
+  writer,
+  path,
+  deploy,
+  urls,
+}: {
+  org: string;
+  name: string;
+  id: number;
+  writer: boolean;
+  path: (id?: number) => string;
+  /** Deploy the stack's compose file as it is now (the header's Deploy). */
+  deploy?: { run: () => void; pending: boolean };
+  urls?: string[];
+}) {
   const q = useStackDeployment(org, name, id);
   const history = useStackDeployments(org, name, 30);
   const rollbackTo = useRollback(org, name);
-  const [rollback, setRollback] = useState(false);
+  const [service, setService] = useState("");
   const r = q.data?.record;
   const done = r ? finished(r.status) : false;
-  const current = currentOf((history.data?.deployments ?? []).map((d) => asDeployment(name, d)), history.data?.current ?? null);
+  const list = history.data?.deployments ?? [];
+  const current = currentOf(list.map((d) => asDeployment(name, d)), history.data?.current ?? null);
 
-  if (q.error) return <QueryError error={q.error} />;
+  // The clock ticks each second while it runs.
+  const [, tick] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    if (done) return;
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, [done]);
+
   if (!q.data || !r) {
-    return (
+    return q.error ? (
+      <QueryError error={q.error} />
+    ) : (
       <div className="grid gap-4">
         <Skeleton className="h-36" />
         <Skeleton className="h-96" />
@@ -187,89 +246,106 @@ export function StackDeploymentPage({ org, name, id, writer, path }: { org: stri
   }
   const d = asDeployment(name, r);
   const ms = elapsed(d);
+  const events = q.data.events;
+  const services = eventServices(events);
+  const shown = service ? events.filter((e) => e.service === service) : null;
+  const changed = stackDeploymentServices(r);
+  const reused = r.reused_secrets ?? [];
+  const lastGood = list.find((x) => x.status === "done" && x.id < d.id)?.id;
+
   return (
-    <div className="grid animate-fade-up gap-4">
-      <div>
-        <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted-foreground">
-          <Link to={path()}>
-            <ArrowLeft />
-            All deployments
-          </Link>
-        </Button>
-      </div>
-      <Card className="gap-4 px-5 py-5">
-        <div className="flex flex-wrap items-start gap-4">
-          <div className="min-w-0 flex-1 space-y-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-lg font-semibold tracking-tight">
-                Deployment <span className="font-mono">#{d.id}</span>
-              </h2>
-              <DeploymentBadge status={d.status} />
-              {d.id === current && <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">Current</span>}
-            </div>
-            <p className="text-[13px] text-muted-foreground">
-              {d.rollback_of ? (
-                <>
-                  Rollback to{" "}
-                  <Link className="font-medium text-foreground underline-offset-4 hover:underline" to={path(d.rollback_of)}>
-                    #{d.rollback_of}
-                  </Link>
-                </>
-              ) : (
-                stackDeploymentAction(r)
-              )}{" "}
-              by <span className="font-medium text-foreground">{d.by}</span> ·{" "}
-              <span title={dateTime(d.created_at / 1000)}>{relativeTime(d.created_at / 1000)}</span>
-            </p>
-          </div>
-          <div className="text-right">
-            <div className="font-mono text-2xl font-semibold tracking-tight tabular-nums" aria-label="Duration">
-              {ms !== null ? elapsedText(ms, true) : "–"}
-            </div>
-            <div className="text-xs text-muted-foreground">{done ? "Total" : "Elapsed"}</div>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-3 border-t pt-4">
-          <Services d={r} />
-          {writer && d.status === "done" && d.id !== current && !!current && (
-            <Button size="sm" variant="outline" className="ml-auto" onClick={() => setRollback(true)}>
-              <RotateCcw />
-              Roll back to #{d.id}
-            </Button>
-          )}
-        </div>
-        {d.status === "failed" && d.error && <p className="font-mono text-xs break-words whitespace-pre-wrap text-destructive">{d.error}</p>}
-        {!!r.reused_secrets?.length && (
-          <p className="flex items-start gap-1.5 text-[13px] text-warning">
-            <KeyRound className="mt-0.5 size-3.5 shrink-0" />
-            <span>
-              Secrets reused from an earlier deploy: <span className="font-mono">{r.reused_secrets.join(", ")}</span> — no new value was given
+    <DeploymentView
+      d={d}
+      current={current}
+      back={path()}
+      link={(x) => path(x)}
+      how={r.action === "env" || r.action === "domains" ? stackDeploymentAction(r) : undefined}
+      clock={ms !== null ? elapsedText(ms, true) : "–"}
+      steps={{ ...stackStages(r, events), middle: buildStepLabel(d, false) }}
+      facts={[
+        {
+          label: "Source",
+          className: "flex min-w-0 items-center gap-1.5",
+          value: (
+            <>
+              <FileCode className="size-4 shrink-0 text-muted-foreground" />
+              <span className="truncate">{stackSource(r)}</span>
+            </>
+          ),
+        },
+        {
+          label: "Services",
+          className: "truncate font-mono text-xs",
+          title: changed || undefined,
+          value: changed || <span className="font-sans text-sm text-muted-foreground">{changed === null ? "No changes" : "–"}</span>,
+        },
+        {
+          label: "Secrets",
+          className: "flex min-w-0 items-center gap-1.5",
+          title: reused.length ? reusedSecretsLine(reused) : undefined,
+          value: reused.length ? (
+            <>
+              <KeyRound className="size-3.5 shrink-0 text-warning" />
+              <span className="truncate text-warning">
+                Reused: <span className="font-mono text-xs">{reused.join(", ")}</span>
+              </span>
+            </>
+          ) : (
+            <span className="text-muted-foreground">–</span>
+          ),
+        },
+      ]}
+      name={name}
+      liveText="Every service runs this compose file and these settings."
+      urls={urls}
+      failureTitle={stackStages(r, events).reached.deploying ? "The rollout failed" : "The deployment failed before it rolled out"}
+      failureHint="The log below has the details; fix the cause and deploy again."
+      writer={writer}
+      redeploy={deploy}
+      lastGood={lastGood}
+      onRollback={current ? (x) => rollbackTo(x) : undefined}
+      rollbackDescription="A new deployment puts back that one's compose file. The YAML tab then shows that file, and the next deploy starts from it."
+      error={q.error}
+      log={{
+        lines: shown ? shown.map((e) => eventLine(e, service)) : q.data.lines,
+        filename: `${name}${service ? `-${service}` : ""}-deployment-${d.id}.log`,
+        title:
+          services.length > 0 ? (
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <span className="truncate">{`${name} · #${d.id}`}</span>
+              <select
+                value={service}
+                onChange={(e) => setService(e.target.value)}
+                aria-label="Service"
+                className="rounded border border-white/10 bg-transparent px-1 py-0.5 text-[11px] text-zinc-300 outline-none focus-visible:ring-1 focus-visible:ring-white/30"
+              >
+                <option value="" className="bg-zinc-900">
+                  all services
+                </option>
+                {services.map((s) => (
+                  <option key={s} value={s} className="bg-zinc-900">
+                    {s}
+                  </option>
+                ))}
+              </select>
             </span>
-          </p>
-        )}
-      </Card>
-      <LogView
-        lines={q.data.lines}
-        live={!done}
-        filename={`${name}-deployment-${d.id}.log`}
-        title={`${name} · #${d.id}`}
-        status={!done ? <Loader2 className="size-3 animate-spin text-zinc-500" /> : undefined}
-        empty={d.status === "queued" ? "Queued: waiting for the deploy before it to finish..." : "No events recorded."}
-      />
+          ) : (
+            `${name} · #${d.id}`
+          ),
+        empty: d.status === "queued" ? "Queued: waiting for the deploy before it to finish..." : done ? "No events recorded." : "Waiting for the first line...",
+      }}
+      recent={list.slice(0, 12).map((x) => ({ id: x.id, status: x.status, created_at: x.created_at, label: stackRecentLabel(x) }))}
+    >
       {q.data.source && (
-        <Section title="Compose file" description="The file this deployment deployed, as it was then.">
-          <pre className="max-h-[60svh] overflow-auto rounded-lg border bg-muted/30 p-3 font-mono text-xs leading-relaxed">{q.data.source}</pre>
-        </Section>
+        <details className="group rounded-xl border bg-card">
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-[13px] font-medium text-muted-foreground select-none hover:text-foreground">
+            <ChevronRight className="size-4 transition-transform group-open:rotate-90" />
+            Compose file
+            <span className="font-normal">· as this deployment deployed it</span>
+          </summary>
+          <pre className="max-h-[60svh] overflow-auto border-t bg-muted/30 p-4 font-mono text-xs leading-relaxed">{q.data.source}</pre>
+        </details>
       )}
-      <ConfirmDialog
-        open={rollback}
-        onOpenChange={setRollback}
-        destructive={false}
-        title={`Roll back to deployment #${d.id}?`}
-        description="A new deployment puts back this one's compose file."
-        confirmLabel="Roll back"
-        onConfirm={() => rollbackTo(d.id)}
-      />
-    </div>
+    </DeploymentView>
   );
 }
