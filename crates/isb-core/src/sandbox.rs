@@ -14,11 +14,13 @@ use crate::idmap::SubIds;
 use crate::lock::NameLock;
 
 pub mod images;
+mod owner;
 use crate::plan::{
     self, Action, Actual, Desired, DesiredDevice, DiffOptions, HostFacts, Props, SandboxPlan,
     VolumeDefs, split_addr,
 };
 use crate::spec::{ExecDefaults, PortSpec, ReadyCheck, SandboxSpec};
+use owner::fix_owner;
 
 /// Config key recording which isb call created an instance. A half-created
 /// instance is only ever cleaned up by the call whose token it carries.
@@ -340,6 +342,9 @@ pub fn apply(
                 out.created = true;
             }
             Action::StartInstance => {
+                if let (true, Some(h)) = (out.created, &desired.before_start) {
+                    (h.0)(client, name)?;
+                }
                 report(&format!("{name}: starting"));
                 retry_once(report, || start_instance(client, name))?;
             }
@@ -706,58 +711,6 @@ fn add_port_searching(
             .map(|e| format!(" (last error: {e})"))
             .unwrap_or_default()
     )))
-}
-
-const OWNER_SCRIPT: &str = r#"set -e
-owner="$1"; path="$2"
-user="${owner%%:*}"
-group=""
-case "$owner" in *:*) group="${owner#*:}" ;; esac
-home=""
-if ent="$(getent passwd "$user")"; then
-  uid="$(printf %s "$ent" | cut -d: -f3)"
-  gid="$(printf %s "$ent" | cut -d: -f4)"
-  home="$(printf %s "$ent" | cut -d: -f6)"
-else
-  case "$user" in ''|*[!0-9]*) echo "isb: no such user: $user" >&2; exit 1 ;; esac
-  uid="$user"; gid="$user"
-fi
-[ -n "$group" ] || group="$gid"
-chown "$uid:$group" "$path"
-# Parents the mount conjured are root-owned; fix those inside the user's home
-# only, and stop at the first one that is not root's.
-[ -n "$home" ] && [ "$home" != / ] || exit 0
-case "$path" in
-  "$home"/*)
-    d="$(dirname "$path")"
-    while [ "$d" != "$home" ] && [ "$d" != "/" ]; do
-      [ "$(stat -c %u "$d")" = 0 ] || break
-      chown "$uid:$group" "$d"
-      d="$(dirname "$d")"
-    done ;;
-esac
-"#;
-
-fn fix_owner(client: &Client, name: &str, path: &str, owner: &str) -> Result<()> {
-    let argv: Vec<String> = ["sh", "-c", OWNER_SCRIPT, "isb-owner", owner, path]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-    let out = exec::run_captured(
-        client,
-        name,
-        &argv,
-        &exec::Request::default(),
-        Stdin::Null,
-        Some(Duration::from_secs(60)),
-    )?;
-    if !out.success() {
-        return Err(Error::OperationFailed {
-            step: format!("chown {owner} {path} in {name}"),
-            message: out.stderr_text().trim().to_string(),
-        });
-    }
-    Ok(())
 }
 
 /// Parse `/proc/net/route` and `/proc/net/ipv6_route` for a default route.

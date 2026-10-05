@@ -208,6 +208,11 @@ impl StackDef {
             h.write(var.as_bytes());
             h.write(&secret(key));
         }
+        for (var, key) in &spec.env.files {
+            h.write(b"envfile");
+            h.write(var.as_bytes());
+            h.write(&secret(key));
+        }
         // Named volumes are part of the instance's devices; their definitions
         // are only used at creation, but a renamed one must move the instance.
         for v in &spec.volumes {
@@ -606,6 +611,28 @@ mod tests {
         f.secrets.get_mut("k").unwrap().owned = true;
         f.deployed_at = 99;
         assert_eq!(f.revision("web").unwrap(), web);
+    }
+
+    /// Specs written before `as: file` (secret variables, secret files, a
+    /// healthcheck without `start_period`) keep their revisions, so an
+    /// upgraded daemon replaces none of their instances. `as: file` is a
+    /// revision of its own.
+    #[test]
+    fn existing_specs_keep_their_revisions() {
+        let y = "secrets: {k: {external: true}, e: {external: true}}\nservices:\n  web: {image: x, secrets: [k], healthcheck: {test: [CMD, true], interval: 5s}}\n  api: {image: docker:busybox, environment: {PLAIN: '1', TOKEN: {secret: e}, OTHER: {secret: k, on_change: none}}}\n";
+        let mut a = def(y);
+        a.secrets.insert("k".into(), binding("k", 1));
+        a.secrets.insert("e".into(), binding("e", 1));
+        assert_eq!(a.revision("web").unwrap(), "76486ba4");
+        assert_eq!(a.revision("api").unwrap(), "8d6c644f");
+        let file = y.replace("TOKEN: {secret: e}", "TOKEN: {secret: e, as: file}");
+        let mut b = def(&file);
+        b.secrets = a.secrets.clone();
+        assert_ne!(b.revision("api").unwrap(), a.revision("api").unwrap());
+        let env = y.replace("TOKEN: {secret: e}", "TOKEN: {secret: e, as: env}");
+        let mut c = def(&env);
+        c.secrets = a.secrets.clone();
+        assert_eq!(c.revision("api").unwrap(), a.revision("api").unwrap());
     }
 
     #[test]

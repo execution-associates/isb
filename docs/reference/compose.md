@@ -482,10 +482,29 @@ environment:
 - **OCI image:** the process is the instance's init, so the variable is
   instance config, `environment.API_TOKEN`: **plaintext in the incus
   database**, readable by anyone who can read the instance's config (`incus
-  config show`). isb never shows it in plans or reports (`(secret)`). Mount
-  the secret as a file instead when that matters.
+  config show`). isb never shows it in plans or reports (`(secret)`), and
+  `isb stack deploy` and `isb up` warn once per deploy, naming each such
+  variable. Use `as: file` (below) instead.
 
-The value must be text (UTF-8, no NUL). A new version of the secret reaches a
+`{secret: NAME, as: file}` keeps the value out of instance config: it is
+written to the file `/run/secrets/NAME` (mode `0400`, owned by the user the
+app starts as: a numeric `user`, else the OCI image's own user), and the
+variable `KEY_FILE` holds that path. Postgres, MariaDB, MySQL and many other
+images read `KEY_FILE` in place of `KEY`; for an app that does not, read the
+file in its entrypoint. On an OCI image the file is written before the
+instance's first start, so the app finds it as it starts. Setting `KEY_FILE`
+yourself as well is an error. `as: env` is the default; changing a variable
+between the two is a new revision.
+
+```yaml
+environment:
+  POSTGRES_PASSWORD: {secret: db_password, as: file}   # POSTGRES_PASSWORD_FILE=/run/secrets/db_password
+```
+
+For another path, owner or mode, mount the secret with the service's
+[`secrets`](#secrets) and set `KEY_FILE` to its path as a plain value.
+
+A variable's value (`as: env`) must be text (UTF-8, no NUL). A new version of the secret reaches a
 stack's replicas per its [`on_change`](#on_change) (default: replaced by a
 rolling update); `{secret: NAME, on_change: restart}` sets it for this
 variable.
@@ -836,13 +855,25 @@ docker compose's healthcheck. `isb up` uses it for `depends_on` with
 `condition: service_healthy`; `isb stack deploy` probes every replica on its
 `interval`, keeps unhealthy ones out of the load balancer and restarts them.
 
+Under `isb stack deploy` it is both of Kubernetes' probes. As a readiness
+probe, throughout: a replica is in the load balancer only while it passes. As
+a liveness probe, once it has passed since it (re)started: then `retries`
+consecutive failures (after `start_period`) make it `unhealthy`, its app is
+restarted, and after 3 such restarts in a row its instance is replaced. Until
+its first pass a replica is `starting` (`isb stack ps`): out of the load
+balancer, and not restarted for failing until its startup grace is over. The
+grace is `start_period` when set, else `interval * retries * 2`, at least 60s
+and at most 5m: 180s with the defaults, 60s with `interval: 5s`.
+A rollout waits for a new replica through its grace, then `interval *
+retries`, then 30s, before failing it.
+
 | Field | Default | Meaning |
 |---|---|---|
 | `test` | required | `[CMD, argv...]`, `[CMD-SHELL, "shell line"]`, a plain string (a shell line), or `[NONE]`. Run in the guest as the service's `user`. |
 | `interval` | `30s` | Between checks once healthy or unhealthy. |
 | `timeout` | `30s` | One check's deadline. |
 | `retries` | `3` | Consecutive failures before unhealthy. |
-| `start_period` | `0s` | After a start, failures do not count for this long. |
+| `start_period` | none | After a start, failures do not count for this long. Unset, a replica that has not passed yet gets the startup grace above, and one that has passed counts every failure. |
 | `start_interval` | `5s` | Between checks until the first result. |
 | `disable` | `false` | Turn off a healthcheck set in another file. |
 
@@ -921,10 +952,10 @@ as is), owned by `uid`/`gid` (default: a numeric `user`, else root) with `mode`
 `/run` is a tmpfs in a systemd guest, so isb also keeps a root-only copy in
 `/var/lib/isb/secrets` with a script that puts the files back; a supervised
 unit runs it before every start, so after a reboot the app has its secrets with
-no isb around. On an OCI image the files can only be written once the app (the
-instance's init) is running, so when one was missing or different isb restarts
-the app once, and an app that reads its config at startup sees it; files already
-in place (a daemon restart) restart nothing. The values never appear in instance
+no isb around. On an OCI image the app is the instance's init, so isb writes
+the files into a new instance before its first start: the app finds them as it
+starts. An OCI instance already running without them gets them, and isb
+restarts its app once so it reads them; files already in place (a daemon restart) restart nothing. The values never appear in instance
 config or in `isb config`.
 A new version of a secret reaches a stack's replicas per its
 [`on_change`](#on_change): by default it is part of the revision, and a

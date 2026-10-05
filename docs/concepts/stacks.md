@@ -111,8 +111,9 @@ that service's instances, in batches of `update_config.parallelism`:
   slot serving.
 
 "Wait for it" means: readiness checks pass, then the healthcheck passes (or,
-with none, the app's unit is active), within `start_period + interval x
-retries + 30s` (at least a minute); then it must stay healthy for
+with none, the app's unit is active), within its startup grace + `interval
+x retries` + 30s (at least a minute; see [Health and
+restarts](#health-and-restarts)); then it must stay healthy for
 `update_config.monitor` (5 s). A failure deletes the new instance and applies
 `failure_action`: `pause` (default) stops the rollout and leaves the service
 as it is until the next deploy, `rollback` redeploys the previous version of
@@ -250,10 +251,22 @@ as the bare name.
 
 ## Health and restarts
 
-A replica's probe runs every `start_interval` until its first result, then
-every `interval`. Failures during `start_period` do not count. After
-`retries` consecutive failures it is unhealthy: out of rotation, and its app
-is restarted (the unit, or the OCI instance). `deploy.restart_policy` bounds
+The healthcheck is Kubernetes' readiness probe throughout, and its liveness
+probe once the replica has passed. A replica's probe runs every
+`start_interval` until its first result, then every `interval`. Each
+replica is in one of three states (`isb stack ps`):
+
+- `starting`: it has not passed since it (re)started. It is out of rotation,
+  and failing does not restart it until its **startup grace** is over:
+  `start_period` when set, else `interval x retries x 2`, at least 60s and at
+  most 5m (180s with the defaults). A slow first start (an app blocking on
+  OIDC discovery, migrations, a JVM) is not taken for a hang. After the grace,
+  `retries` consecutive failures make it unhealthy.
+- `healthy`: it passed; it is in rotation. From then on, failures after
+  `start_period` count.
+- `unhealthy`: `retries` consecutive counted failures. It is out of
+  rotation, and its app is restarted (the unit, or the OCI instance), which
+  makes it `starting` again with a new grace. `deploy.restart_policy` bounds
 this: `condition: none` never restarts, and `max_attempts` within `window`
 stops restarting once spent (the status says so). Under a stack, `restart`
 in the file is ignored, as swarm ignores it: the app is always supervised,

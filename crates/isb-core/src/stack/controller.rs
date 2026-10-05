@@ -36,8 +36,10 @@ use crate::spec::{
 use crate::supervise;
 
 mod dns;
+mod health;
 mod instances;
 pub use dns::{DnsScope, DnsScopeFn};
+use health::InstRt;
 use instances::instance_state;
 pub use instances::list_instances;
 
@@ -1007,27 +1009,6 @@ impl Inst {
     }
 }
 
-/// Per-instance memory of a worker.
-#[derive(Debug, Default)]
-struct InstRt {
-    /// The init pid secrets and the unit were last set up for.
-    pid: i64,
-    /// When that pid was first seen: the start of `start_period`.
-    since: Option<Instant>,
-    ip: Option<IpAddr>,
-    failures: u32,
-    healthy: Option<bool>,
-    next_probe: Option<Instant>,
-    last_probe: String,
-    /// App restarts for failing health, since it was last healthy.
-    unhealthy_restarts: u32,
-    /// Restarts counted against `restart_policy.max_attempts`.
-    restarts: VecDeque<Instant>,
-    in_rotation: bool,
-    /// The `none` secret versions whose files were last delivered live.
-    delivered: BTreeMap<String, u64>,
-}
-
 /// A service's worker.
 struct Worker {
     inner: Arc<Inner>,
@@ -1728,9 +1709,7 @@ impl Worker {
             // from an older isb. Probing starts over.
             let restarted = rt.pid != 0;
             rt.pid = pid;
-            rt.since = Some(Instant::now());
-            rt.failures = 0;
-            rt.healthy = None;
+            rt.started(Instant::now());
             rt.next_probe = None;
             let r = self.setup(def, &sb, spec, oci);
             if let Err(e) = r {
@@ -1754,22 +1733,14 @@ impl Worker {
             None => alive,
             Some(p) => {
                 let rt = self.rt.get_mut(&i.name).unwrap();
-                let since = rt.since.unwrap_or_else(Instant::now);
-                let in_start = since.elapsed() < p.start_period;
+                if rt.since.is_none() {
+                    rt.since = Some(Instant::now());
+                }
                 if rt.next_probe.is_none_or(|t| Instant::now() >= t) {
                     let r = supervise::probe(&sb, p);
                     let rt = self.rt.get_mut(&i.name).unwrap();
                     rt.last_probe = r.output.clone();
-                    if r.ok {
-                        rt.failures = 0;
-                        rt.healthy = Some(true);
-                        rt.unhealthy_restarts = 0;
-                    } else if !in_start {
-                        rt.failures += 1;
-                        if rt.failures >= p.retries {
-                            rt.healthy = Some(false);
-                        }
-                    }
+                    rt.record_probe(r.ok, p, Instant::now());
                     let wait = if rt.healthy.is_none() {
                         p.start_interval
                     } else {
@@ -1815,9 +1786,7 @@ impl Worker {
             self.count_restart(&i.name);
             let rt = self.rt.get_mut(&i.name).unwrap();
             rt.unhealthy_restarts += 1;
-            rt.failures = 0;
-            rt.healthy = None;
-            rt.since = Some(Instant::now());
+            rt.started(Instant::now());
             supervise::restart_app(&sb, &self.service, oci)?;
             if !oci {
                 // The unit restarts within the same instance; it reads the
@@ -1858,7 +1827,7 @@ impl Worker {
                 sb,
                 &self.service,
                 &s,
-                !spec.secrets.is_empty(),
+                spec.has_secret_files(),
                 &env,
                 env_restarts,
             )?;
@@ -1945,6 +1914,22 @@ impl Worker {
         } else {
             BTreeMap::new()
         };
+        // An OCI app reads its files as it starts: write them into the new
+        // instance before its first start, rather than restarting it after.
+        let before_start = if oci && spec.has_secret_files() {
+            let values = super::secrets::values(
+                &self.inner.secrets,
+                &def.org,
+                &def.secrets,
+                spec.secret_keys(),
+            )?;
+            let spec = spec.clone();
+            Some(crate::plan::BeforeStart(Arc::new(move |c, n| {
+                supervise::push_secret_files(c, n, &spec, &values).map(|_| ())
+            })))
+        } else {
+            None
+        };
         if let (Some(o), UpdateOrder::StopFirst) = (old, order) {
             self.log(&format!("slot {slot}: replacing {o} (stop-first)"));
             self.slot_state(def, slot, Some("draining"), None, None);
@@ -1958,7 +1943,8 @@ impl Worker {
         s.name = Some(name.clone());
         // `env.secrets` stays set, so the values are redacted in reports.
         s.env.vars.extend(secret_env);
-        let d = crate::sandbox::resolve(self.client(), &s, &def.file.volumes, &def.base_dir)?;
+        let mut d = crate::sandbox::resolve(self.client(), &s, &def.file.volumes, &def.base_dir)?;
+        d.before_start = before_start;
         let stack = self.q.clone();
         let mut report = |m: &str| eprintln!("isb serve: {stack}: {m}");
         let created =
@@ -2011,8 +1997,14 @@ impl Worker {
         probe: Option<&HealthProbe>,
         monitor: Duration,
     ) -> Result<()> {
+        // Through the startup grace (a starting replica is not failed), then
+        // `retries` counted failures, then a margin.
         let deadline = match probe {
-            Some(p) => p.start_period + p.interval * p.retries + Duration::from_secs(30),
+            Some(p) => {
+                p.startup_grace.max(p.start_period)
+                    + p.interval * p.retries
+                    + Duration::from_secs(30)
+            }
             None => Duration::from_secs(60),
         }
         .max(Duration::from_secs(60));

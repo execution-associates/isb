@@ -8,7 +8,6 @@ crates/isb-apps/src/backup.rs 1675
 crates/isb-apps/src/build/mod.rs 1094
 crates/isb-apps/src/notify/mod.rs 1263
 crates/isb-apps/src/s3.rs 1263
-crates/isb-core/src/compose.rs 1244
 crates/isb-core/src/ingress/caddy.rs 1130
 crates/isb-core/src/machine.rs 1097
 crates/isb-core/src/metrics_history.rs 1024

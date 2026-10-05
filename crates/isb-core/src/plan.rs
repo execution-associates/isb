@@ -326,27 +326,8 @@ fn oci_reference(r: &str, docker_hub: bool) -> Result<String> {
     Ok(r)
 }
 
-/// Quote argv for `oci.entrypoint`, which incus splits on whitespace with
-/// quotes grouping. There is no escape character, so an argument may not
-/// contain both kinds of quote.
-pub fn oci_command_line(argv: &[String]) -> std::result::Result<String, String> {
-    argv.iter()
-        .map(|a| {
-            if !a.is_empty() && !a.contains(|c: char| c.is_whitespace() || c == '"' || c == '\'') {
-                Ok(a.clone())
-            } else if !a.contains('"') {
-                Ok(format!("\"{a}\""))
-            } else if !a.contains('\'') {
-                Ok(format!("'{a}'"))
-            } else {
-                Err(format!(
-                    "argument {a:?} has both ' and \" in it, which an OCI command line cannot carry; use a script"
-                ))
-            }
-        })
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map(|v| v.join(" "))
-}
+mod oci;
+pub use oci::{BeforeStart, oci_command_line};
 
 /// A spec resolved against the host: exactly what incus should hold.
 #[derive(Debug, Clone, Serialize)]
@@ -376,6 +357,11 @@ pub struct Desired {
     /// The egress plumbing the spec asks for (`egress:`).
     #[serde(skip)]
     pub egress: Option<crate::egress::Plumbing>,
+    /// Run on an instance this apply created, before its first start: an
+    /// OCI app reads its secret files as it starts, and a container's files
+    /// can be written while it is stopped.
+    #[serde(skip)]
+    pub before_start: Option<BeforeStart>,
 }
 
 /// Named-volume definitions available to a sandbox (from a compose file's
@@ -662,6 +648,10 @@ pub fn resolve(
     }
     for (k, v) in &spec.env {
         config.insert(format!("environment.{k}"), v.clone());
+    }
+    // `as: file` secrets: only the path is config; the value is a file.
+    for (k, v) in spec.env.file_vars() {
+        config.insert(format!("environment.{k}"), v);
     }
     if let Some(r) = spec.restart {
         // incus' default (no boot.autostart) already restores the state the
@@ -968,6 +958,7 @@ pub fn resolve(
             .map(|k| format!("environment.{k}"))
             .collect(),
         egress,
+        before_start: None,
     })
 }
 
