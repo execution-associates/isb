@@ -205,8 +205,9 @@ pub(crate) struct ServeArgs {
 
 #[derive(Subcommand)]
 pub(crate) enum ServeAction {
-    /// Install (or update) `isb serve` as a systemd user service and start it.
-    /// On macOS, where the daemon runs in the isb machine, install a
+    /// Install (or update) `isb serve` as a systemd user service and start it,
+    /// first running `isb host setup` through sudo on a host that has not had
+    /// it. On macOS, where the daemon runs in the isb machine, install a
     /// LaunchAgent that starts the machine at login instead.
     Install {
         /// The loopback address to serve on (default: the env file's, else 127.0.0.1:8092).
@@ -215,6 +216,9 @@ pub(crate) enum ServeAction {
         /// macOS: the machine the LaunchAgent starts.
         #[arg(long, default_value = isb::machine::DEFAULT_NAME)]
         machine: String,
+        /// Do not run `isb host setup` (it needs sudo).
+        #[arg(long)]
+        no_host_setup: bool,
     },
 }
 
@@ -225,7 +229,10 @@ pub(crate) enum ServeAction {
 pub(crate) fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
     use isb::daemon::{ServeConfig, policy::RemotePolicy};
     if cfg!(target_os = "macos") {
-        let Some(ServeAction::Install { listen, machine }) = a.action else {
+        let Some(ServeAction::Install {
+            listen, machine, ..
+        }) = a.action
+        else {
             return Err(Error::Invalid(
                 "on macOS, isb serve runs inside the isb machine, next to incus: create it with \
                  `isb machine init` (`isb machine status` shows its socket), and run \
@@ -250,7 +257,17 @@ pub(crate) fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
         println!("healthy at {}", r.health_url);
         return Ok(0);
     }
-    if let Some(ServeAction::Install { listen, .. }) = a.action {
+    if let Some(ServeAction::Install {
+        listen,
+        no_host_setup,
+        ..
+    }) = a.action
+    {
+        if crate::host::host_is_set_up() {
+            println!("host setup: done before (`sudo isb host setup` redoes it)");
+        } else if !no_host_setup {
+            crate::host::host_setup_with_sudo()?;
+        }
         let r =
             isb::server::service::install_user_service(&isb::server::service::ServiceOptions {
                 listen,
