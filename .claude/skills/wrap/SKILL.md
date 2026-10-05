@@ -157,11 +157,16 @@ SHA=$(gh pr view --json mergeCommit -q .mergeCommit.oid)
 gh run list --branch main --commit "$SHA" --json name,status,conclusion
 ```
 
-Wait for every run (CI, Build health, Python SDK, SDK (TypeScript)) to
-complete green. A red main is fixed forward with a new PR, never by tagging
-anyway.
+Wait for every run (CI, Build health, Python SDK, SDK (TypeScript), Release
+binaries) to complete green. Release binaries builds the four release
+tarballs (Linux and macOS, x86_64 and aarch64) for this commit and keeps them
+as artifacts for 30 days; it is the long pole, about 10 minutes (the macOS
+x86_64 build). A red main is
+fixed forward with a new PR, never by tagging anyway.
 
 ## 6. Tag
+
+Tag as soon as step 5 is green:
 
 ```bash
 git fetch origin
@@ -170,7 +175,13 @@ git push origin "v$VER"
 ```
 
 The tag push is the only thing that starts a release, and nothing pushes it
-for you.
+for you. It promotes what main built and checked rather than redoing it:
+each tag workflow first checks that CI passed on main for `$SHA` and refuses
+to publish otherwise; Release then signs and publishes Release binaries'
+tarballs for `$SHA`, and the SDK workflows skip their `check` job when they
+already passed on main. If main has no release binaries for `$SHA` (that run
+failed or its artifacts expired), Release builds them itself, which adds
+about 10 minutes.
 
 ## 7. Wait for the release and the registries
 
@@ -179,7 +190,8 @@ gh run list --commit "$SHA" --json name,status,conclusion   # Release, Python SD
 gh release view "v$VER" --json assets -q '.assets[].name'   # tarballs, SHA256SUMS, SHA256SUMS.sig, install.sh
 ```
 
-All three workflows must be green. Release signs SHA256SUMS (an unsigned
+All three workflows must be green, usually within about 6 minutes of the
+tag. Release signs SHA256SUMS (an unsigned
 release can't be installed by `isb update`), publishes the crates in
 dependency order, and its `install` job runs the published install.sh on
 Linux and macOS. Each publish step skips a version the registry already has,

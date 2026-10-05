@@ -6,6 +6,9 @@ name: Python SDK
 # (secret PYPI_TOKEN; files already on PyPI are skipped, so a failed run can
 # be re-run). The bundled binary is the tag's signed release binary, fetched
 # and verified by scripts/release-binary.sh once release.yml has published it.
+# A tag promotes what main checked: the gate refuses a commit that has not
+# passed main's CI, and skips `check` when this workflow already passed on
+# main for the commit (it runs `check` when main had no run of it).
 
 on:
   push:
@@ -39,8 +42,43 @@ defaults:
     working-directory: sdk/python
 
 jobs:
+  gate:
+    name: main CI passed
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      passed: ${{ steps.self.outputs.passed }}
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/main-run.sh
+          sparse-checkout-cone-mode: false
+      - name: CI passed on main for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/main-run.sh ci.yml "$GITHUB_SHA"
+      - name: this workflow passed on main for this commit
+        id: self
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if scripts/main-run.sh sdk-python.yml "$GITHUB_SHA" --optional >/dev/null; then
+            echo "passed=true" >> "$GITHUB_OUTPUT"
+          else
+            rc=$?
+            [ "$rc" = 3 ] || exit "$rc"
+          fi
+
   check:
     name: lint, types, unit tests (py${{ matrix.python }})
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.result != 'failure' && needs.gate.outputs.passed != 'true' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -69,8 +107,12 @@ jobs:
 
   sdist:
     name: sdist and pure wheel
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: check
+    needs: [gate, check]
+    if: >-
+      ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v')
+      && needs.gate.result == 'success'
+      && (needs.check.result == 'success'
+      || (needs.check.result == 'skipped' && needs.gate.outputs.passed == 'true')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -88,8 +130,12 @@ jobs:
 
   wheels:
     name: wheel ${{ matrix.target }}
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: check
+    needs: [gate, check]
+    if: >-
+      ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v')
+      && needs.gate.result == 'success'
+      && (needs.check.result == 'success'
+      || (needs.check.result == 'skipped' && needs.gate.outputs.passed == 'true')) }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: true

@@ -1,10 +1,15 @@
 name: Release
 
-# Static (musl) Linux binaries for x86_64 and aarch64, and macOS binaries for
-# both (linked only against the system libraries), published as release
-# assets with SHA256SUMS when a v* tag is pushed, together with install.sh,
-# the installer (`curl -fsSL .../releases/latest/download/install.sh | sh`),
+# Publishes a v* tag: the static (musl) Linux and macOS tarballs that
+# release-binaries.yml built on main for the tag's commit, with SHA256SUMS,
+# and install.sh, the installer (`curl -fsSL .../releases/latest/download/install.sh | sh`),
 # so hosts never build isb themselves.
+# The tag promotes main's work rather than redoing it. The gate job refuses a
+# tag whose commit has not passed main's CI (ci.yml on the push to main), then
+# looks up release-binaries.yml's successful push-to-main run for the commit,
+# and the release job downloads that run's artifacts. When there is no such
+# run (it failed, or its artifacts expired after 30 days), the build job calls
+# release-binaries.yml here instead, so a release is never blocked on it.
 # SHA256SUMS is signed (SHA256SUMS.sig, raw Ed25519) with the secret
 # ISB_RELEASE_SIGNING_KEY, whose public key isb compiles in (RELEASE_KEYS in
 # crates/isb-core/src/self_update.rs): `isb update`, `isb machine init` and
@@ -14,8 +19,8 @@ name: Release
 # install job then runs the published installer on Linux and macOS.
 # After the release, the seven crates go to crates.io (secret
 # CARGO_REGISTRY_TOKEN); a crate version that is already there is skipped, so a
-# failed run can be re-run. Run it by hand (workflow_dispatch) to build the
-# artifacts without releasing. Tag only after main's CI is green.
+# failed run can be re-run. Run it by hand (workflow_dispatch) on a branch to
+# build the artifacts without releasing. Tag only after main's CI is green.
 
 on:
   push:
@@ -29,80 +34,63 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    name: build ${{ matrix.target }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-musl
-            runner: ubuntu-24.04
-          - target: aarch64-unknown-linux-musl
-            runner: ubuntu-24.04-arm
-          - target: aarch64-apple-darwin
-            runner: macos-15
-          - target: x86_64-apple-darwin
-            runner: macos-15-intel
+  gate:
+    name: main CI passed
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      build_run: ${{ steps.binaries.outputs.run }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            Cargo.toml
+            scripts/main-run.sh
+          sparse-checkout-cone-mode: false
       - name: tag matches Cargo.toml version
-        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           want="v$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
           [ "$GITHUB_REF_NAME" = "$want" ] || { echo "tag $GITHUB_REF_NAME != Cargo.toml $want"; exit 1; }
-      - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      # The web UI is embedded at build time (build.rs); ISB_WEB_REQUIRED
-      # makes a missing web/dist a build error, so a release never ships
-      # the placeholder page.
-      - uses: oven-sh/setup-bun@v2
-      - name: build the web UI
-        working-directory: web
-        run: bun install --frozen-lockfile && bun run build
-      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: CI passed on main for this commit
         env:
-          ISB_WEB_REQUIRED: "1"
-      - name: check the binary is static and runs
-        if: runner.os == 'Linux'
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/main-run.sh ci.yml "$GITHUB_SHA"
+      - name: main's release binaries for this commit
+        id: binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          bin=target/${{ matrix.target }}/release/isb
-          file "$bin"
-          file "$bin" | grep -qE 'statically linked|static-pie linked'
-          "$bin" --version
-      # macOS has no static linking: allow only the system libraries.
-      - name: check the binary links only system libraries and runs
-        if: runner.os == 'macOS'
-        run: |
-          bin=target/${{ matrix.target }}/release/isb
-          file "$bin"
-          otool -L "$bin"
-          if otool -L "$bin" | tail -n +2 | grep -vE '^\s+/(usr/lib|System/Library)/'; then
-            echo "links a non-system library"; exit 1
+          if run=$(scripts/main-run.sh release-binaries.yml "$GITHUB_SHA" --optional); then
+            echo "run=$run" >> "$GITHUB_OUTPUT"
+          else
+            rc=$?
+            [ "$rc" = 3 ] || exit "$rc"
+            echo "no release binaries on main for $GITHUB_SHA: building them in this run"
           fi
-          "$bin" --version
-      - name: package
-        run: |
-          name="isb-${GITHUB_REF_NAME}-${{ matrix.target }}"
-          mkdir -p "dist/$name"
-          cp target/${{ matrix.target }}/release/isb LICENSE README.md "dist/$name/"
-          tar -C dist -czf "dist/$name.tar.gz" "$name"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.target }}
-          path: dist/*.tar.gz
-          if-no-files-found: error
+
+  # Only when main has no binaries for the commit, and on workflow_dispatch.
+  build:
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.result != 'failure' && needs.gate.outputs.build_run == '' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release-binaries.yml
 
   release:
     name: publish release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [gate, build]
+    if: >-
+      ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v')
+      && needs.gate.result == 'success'
+      && (needs.build.result == 'success'
+      || (needs.build.result == 'skipped' && needs.gate.outputs.build_run != '')) }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      actions: read
       id-token: write
       attestations: write
     steps:
@@ -112,11 +100,37 @@ jobs:
             crates/isb-core/src/self_update.rs
             install.sh
           sparse-checkout-cone-mode: false
-      - uses: actions/download-artifact@v4
+      - name: main's binaries for this commit
+        if: needs.gate.outputs.build_run != ''
+        uses: actions/download-artifact@v4
         with:
+          pattern: isb-*
           path: dist
           merge-multiple: true
-      - run: cp install.sh dist/ && cd dist && sha256sum *.tar.gz install.sh > SHA256SUMS && cat SHA256SUMS
+          run-id: ${{ needs.gate.outputs.build_run }}
+          github-token: ${{ github.token }}
+      - name: the binaries built in this run
+        if: needs.gate.outputs.build_run == ''
+        uses: actions/download-artifact@v4
+        with:
+          pattern: isb-*
+          path: dist
+          merge-multiple: true
+      # Exactly the four tarballs install.sh asks for, named by the tag, and
+      # the one this runner can execute reports the tag's version.
+      - name: the tarballs are this version's
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          ls -l dist
+          set -- dist/*.tar.gz
+          [ $# = 4 ] || { echo "want exactly 4 tarballs, got $#"; exit 1; }
+          for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl aarch64-apple-darwin x86_64-apple-darwin; do
+            [ -f "dist/isb-v$v-$t.tar.gz" ] || { echo "missing isb-v$v-$t.tar.gz"; exit 1; }
+          done
+          tar -xzf "dist/isb-v$v-x86_64-unknown-linux-musl.tar.gz" -C "$RUNNER_TEMP"
+          got=$("$RUNNER_TEMP/isb-v$v-x86_64-unknown-linux-musl/isb" --version)
+          [ "$got" = "isb $v" ] || { echo "binary reports $got, want isb $v"; exit 1; }
+      - run: cp install.sh dist/ && cd dist && sha256sum -- *.tar.gz install.sh > SHA256SUMS && cat SHA256SUMS
       # Refuse to publish a release this version's isb could not verify: the
       # secret's public key must be one of the keys compiled in.
       - name: sign SHA256SUMS
@@ -149,7 +163,6 @@ jobs:
   # The installer as users run it, from the release just published.
   install:
     name: install.sh on ${{ matrix.runner }}
-    if: startsWith(github.ref, 'refs/tags/v')
     needs: release
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -163,9 +176,11 @@ jobs:
           ISB_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh "$v"
           [ "$("$RUNNER_TEMP/bin/isb" --version)" = "isb $v" ]
 
+  # --no-verify: main's CI already ran `cargo package` (which builds every
+  # crate as packaged) on this commit, and the gate refuses a commit it did
+  # not pass, so compiling all seven again here would only add minutes.
   crates:
     name: publish to crates.io
-    if: startsWith(github.ref, 'refs/tags/v')
     needs: release
     runs-on: ubuntu-24.04
     steps:
@@ -183,5 +198,5 @@ jobs:
             code=$(curl -s -o /dev/null -w '%{http_code}' -A "isb-release (github.com/$GITHUB_REPOSITORY)" \
               "https://crates.io/api/v1/crates/$c/$v")
             if [ "$code" = 200 ]; then echo "$c $v is already on crates.io"; continue; fi
-            cargo publish --locked -p "$c"
+            cargo publish --locked --no-verify -p "$c"
           done
