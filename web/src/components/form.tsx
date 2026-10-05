@@ -76,7 +76,10 @@ export function Field({
   const id = useId();
   const hid = `${id}-hint`;
   return (
-    <div className={cn("grid gap-2", className)}>
+    // content-start: in a multi-column grid a row is as tall as its tallest
+    // field, and a stretched grid would spread that slack between label and
+    // input, so inputs in the same row would not line up.
+    <div className={cn("grid content-start gap-2", className)}>
       <div className="flex items-center justify-between gap-2">
         <Label htmlFor={id}>{label}</Label>
         {aside}
