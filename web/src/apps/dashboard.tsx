@@ -1,5 +1,6 @@
 // The org overview: stat tiles, projects with their health, recent
-// deployments and the activity feed.
+// deployments and the activity feed. Apps and compose stacks count alike: a
+// project may run either, and an org of compose stacks is not an empty one.
 import { useQueries, useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
@@ -26,11 +27,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { canWrite } from "@/lib/admin";
 import { relativeTime } from "@/lib/format";
 import { useMe } from "@/lib/session";
+import { LIVE_POLL } from "@/lib/freshness";
 import { DEPLOYMENT_TONE, inProgress, type Tone } from "@/lib/status";
 import { cn } from "@/lib/utils";
-import { type App, type AppState, appState, type Deployment, keys, type Project, serviceOf, type StackDetail, useApps, useProjects } from "./api";
+import { asDeployment, composePath, composeStacks, fetchStackDeployments, type StackOwner, stackKeys } from "@/stacks/api";
+import { type App, type AppState, appState, type Deployment, finished, keys, type Project, serviceOf, type StackDetail, useApps, useProjects } from "./api";
 import { DeploymentBadge, Dot, EmptyState, QueryError, ToneBadge } from "./components";
-import { HEALTH_LABEL, HEALTH_TONE, parseSize, projectHealth, usageOf, useOrgOverview } from "./health";
+import { type Health, HEALTH_LABEL, HEALTH_TONE, parseSize, projectHealth, stackHealth, usageOf, useOrgOverview } from "./health";
 import { OrgActivity, actorLabel } from "./overview-activity";
 import { NewProjectDialog } from "./project-dialogs";
 import { bytes, duration, shortSha } from "./util";
@@ -62,6 +65,44 @@ export function appStates(apps: App[], stacks: StackDetail[], deps: Map<string, 
   return m;
 }
 
+/**
+ * The last `limit` deployments of each compose stack, as app deployments
+ * (asDeployment: `app` is the stack's name). Shares useStackDeployments' cache.
+ */
+export function useComposeDeployments(org: string, stacks: string[], limit = 30) {
+  return useQueries({
+    queries: stacks.map((name) => ({
+      queryKey: [...stackKeys.deployments(org, name), limit],
+      queryFn: () => fetchStackDeployments(org, name, limit),
+      // Stack deployments are not under the org's event-refetched keys.
+      refetchInterval: LIVE_POLL,
+    })),
+    combine: (rs) => {
+      const m = new Map<string, Deployment[]>();
+      rs.forEach((r, i) => m.set(stacks[i], (r.data?.deployments ?? []).map((d) => asDeployment(stacks[i], d))));
+      return { byStack: m, loading: rs.some((r) => r.isLoading) };
+    },
+  });
+}
+
+const HEALTH_STATE: Record<Health, AppState> = {
+  healthy: "running",
+  degraded: "degraded",
+  failing: "failing",
+  updating: "updating",
+  idle: "stopped",
+};
+
+/** Each compose stack's state, as an app's: from its status and its latest deployment. */
+export function composeStates(names: string[], stacks: StackDetail[], deps: Map<string, Deployment[]>): Map<string, AppState> {
+  const m = new Map<string, AppState>();
+  for (const n of names) {
+    const latest = deps.get(n)?.[0];
+    m.set(n, latest && !finished(latest.status) ? "deploying" : HEALTH_STATE[stackHealth(stacks.find((s) => s.name === n))]);
+  }
+  return m;
+}
+
 const UP: AppState[] = ["running", "degraded", "updating"];
 const TROUBLE: AppState[] = ["failing", "failed", "degraded"];
 
@@ -81,10 +122,15 @@ export function OrgDashboard({ org }: { org: string }) {
     org,
     appList.map((a) => a.name),
   );
+  const list = projects.data ?? [];
+  const compose = composeStacks(list);
+  const composeDeps = useComposeDeployments(
+    org,
+    compose.map((c) => c.name),
+  );
   const [newProject, setNewProject] = useState(false);
   const stacks = overview.data ?? [];
-  const states = appStates(appList, stacks, deps.byApp);
-  const list = projects.data ?? [];
+  const states = [...appStates(appList, stacks, deps.byApp).values(), ...composeStates(compose.map((c) => c.name), stacks, composeDeps.byStack).values()];
 
   if (projects.error) return <QueryError error={projects.error} />;
 
@@ -97,10 +143,9 @@ export function OrgDashboard({ org }: { org: string }) {
       ) : (
         <StatTiles
           loading={projects.isLoading || apps.isLoading}
-          apps={appList}
           states={states}
-          deps={deps.byApp}
-          depsLoading={deps.loading}
+          deps={[...deps.byApp.values(), ...composeDeps.byStack.values()].flat()}
+          depsLoading={deps.loading || composeDeps.loading}
           projects={list}
           stacks={stacks}
           usageLoading={overview.isLoading}
@@ -115,8 +160,15 @@ export function OrgDashboard({ org }: { org: string }) {
       ) : (
         <div className="mt-6 grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
           <div className="grid min-w-0 gap-6">
-            <ProjectsCard org={org} projects={list} loading={projects.isLoading} stacks={stacks} deps={deps.byApp} apps={appList} />
-            <RecentDeployments org={org} apps={appList} deps={deps.byApp} loading={apps.isLoading || deps.loading} />
+            <ProjectsCard org={org} projects={list} loading={projects.isLoading} stacks={stacks} deps={deps.byApp} composeDeps={composeDeps.byStack} apps={appList} />
+            <RecentDeployments
+              org={org}
+              apps={appList}
+              deps={deps.byApp}
+              compose={compose}
+              composeDeps={composeDeps.byStack}
+              loading={apps.isLoading || deps.loading || composeDeps.loading}
+            />
           </div>
           <OrgActivity org={org} className="xl:sticky xl:top-20" />
         </div>
@@ -168,8 +220,7 @@ function Hint({ tone, children }: { tone: Tone; children: ReactNode }) {
 
 function StatTiles({
   loading,
-  apps,
-  states,
+  states: s,
   deps,
   depsLoading,
   projects,
@@ -178,21 +229,21 @@ function StatTiles({
   info,
 }: {
   loading: boolean;
-  apps: App[];
-  states: Map<string, AppState>;
-  deps: Map<string, Deployment[]>;
+  /** Every app's and compose stack's state. */
+  states: AppState[];
+  /** Every app's and compose stack's recent deployments. */
+  deps: Deployment[];
   depsLoading: boolean;
   projects: Project[];
   stacks: StackDetail[];
   usageLoading: boolean;
   info: OrgView | undefined;
 }) {
-  const s = [...states.values()];
   const up = s.filter((x) => UP.includes(x)).length;
   const trouble = s.filter((x) => TROUBLE.includes(x)).length;
   const deploying = s.filter((x) => x === "deploying" || x === "updating").length;
   const now = Date.now();
-  const day = [...deps.values()].flat().filter((d) => now - d.created_at < DAY);
+  const day = deps.filter((d) => now - d.created_at < DAY);
   const failed = day.filter((d) => d.status === "failed").length;
   const envs = projects.reduce((n, p) => n + p.environments.length, 0);
   const use = usageOf(stacks);
@@ -204,23 +255,23 @@ function StatTiles({
   return (
     <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
       <Tile
-        label="Apps running"
+        label="Running"
         icon={Boxes}
         foot={
-          loading ? null : apps.length === 0 ? (
-            <Hint tone="muted">No apps yet</Hint>
+          loading ? null : s.length === 0 ? (
+            <Hint tone="muted">No apps or compose yet</Hint>
           ) : trouble > 0 ? (
             <Hint tone="danger">{trouble} need attention</Hint>
           ) : deploying > 0 ? (
             <Hint tone="info">{deploying} deploying</Hint>
-          ) : up === apps.length ? (
+          ) : up === s.length ? (
             <Hint tone="success">All healthy</Hint>
           ) : (
-            <Hint tone="neutral">{apps.length - up} not running</Hint>
+            <Hint tone="neutral">{s.length - up} not running</Hint>
           )
         }
       >
-        {loading ? sk : <Big of={`/ ${apps.length}`}>{up}</Big>}
+        {loading ? sk : <Big of={`/ ${s.length}`}>{up}</Big>}
       </Tile>
       <Tile
         label="Deploys, last 24 h"
@@ -327,13 +378,15 @@ function DayBars({ deps, now }: { deps: Deployment[]; now: number }) {
 
 // ---- Projects ----
 
-function lastDeployOf(p: Project, deps: Map<string, Deployment[]>): Deployment | undefined {
+function lastDeployOf(p: Project, deps: Map<string, Deployment[]>, composeDeps: Map<string, Deployment[]>): Deployment | undefined {
   let best: Deployment | undefined;
-  for (const e of p.environments)
-    for (const a of e.apps) {
-      const d = deps.get(a)?.[0];
-      if (d && (!best || d.created_at > best.created_at)) best = d;
-    }
+  const consider = (d: Deployment | undefined) => {
+    if (d && (!best || d.created_at > best.created_at)) best = d;
+  };
+  for (const e of p.environments) {
+    for (const a of e.apps) consider(deps.get(a)?.[0]);
+    for (const c of e.compose) consider(composeDeps.get(c.name)?.[0]);
+  }
   return best;
 }
 
@@ -343,6 +396,7 @@ function ProjectsCard({
   loading,
   stacks,
   deps,
+  composeDeps,
   apps,
 }: {
   org: string;
@@ -350,6 +404,7 @@ function ProjectsCard({
   loading: boolean;
   stacks: StackDetail[];
   deps: Map<string, Deployment[]>;
+  composeDeps: Map<string, Deployment[]>;
   apps: App[];
 }) {
   const o = encodeURIComponent(org);
@@ -372,7 +427,7 @@ function ProjectsCard({
           {shown.map((p) => {
             const h = projectHealth(p, stacks, org);
             const n = p.environments.reduce((k, e) => k + e.apps.length, 0);
-            const last = lastDeployOf(p, deps);
+            const last = lastDeployOf(p, deps, composeDeps);
             const dbs = apps.filter((a) => a.project === p.name && "database" in a.source).length;
             const nc = p.environments.reduce((k, e) => k + e.compose.length, 0);
             return (
@@ -425,12 +480,28 @@ function triggerOf(d: Deployment): [typeof Boxes, string] {
   return TRIGGER[d.trigger] ?? [Rocket, d.trigger];
 }
 
-function RecentDeployments({ org, apps, deps, loading }: { org: string; apps: App[]; deps: Map<string, Deployment[]>; loading: boolean }) {
+function RecentDeployments({
+  org,
+  apps,
+  deps,
+  compose,
+  composeDeps,
+  loading,
+}: {
+  org: string;
+  apps: App[];
+  deps: Map<string, Deployment[]>;
+  compose: (StackOwner & { name: string })[];
+  composeDeps: Map<string, Deployment[]>;
+  loading: boolean;
+}) {
   const o = encodeURIComponent(org);
-  const info = new Map(apps.map((a) => [a.name, a]));
-  const recent = [...deps.values()]
-    .flat()
-    .toSorted((a, b) => b.created_at - a.created_at)
+  const owners = new Map<string, StackOwner>(apps.map((a) => [a.name, a]));
+  const recent = [
+    ...[...deps.values()].flat().map((d) => ({ d, to: `/orgs/${o}/apps/${d.app}/deployments/${d.id}`, owner: owners.get(d.app) })),
+    ...compose.flatMap((c) => (composeDeps.get(c.name) ?? []).map((d) => ({ d, to: `${composePath(org, c, c.name, "deployments")}/${d.id}`, owner: c as StackOwner | undefined }))),
+  ]
+    .toSorted((a, b) => b.d.created_at - a.d.created_at)
     .slice(0, 8);
   return (
     <Card className="gap-0 overflow-hidden py-0">
@@ -441,19 +512,18 @@ function RecentDeployments({ org, apps, deps, loading }: { org: string; apps: Ap
         <RowSkeletons n={3} />
       ) : recent.length === 0 ? (
         <EmptyState icon={History} title="Nothing deployed yet" compact>
-          Every app's deployments show up here, newest first.
+          Every app's and compose stack's deployments show up here, newest first.
         </EmptyState>
       ) : (
         <ul className="divide-y">
-          {recent.map((d) => {
-            const a = info.get(d.app);
+          {recent.map(({ d, to, owner: a }) => {
             const [TIcon, tlabel] = triggerOf(d);
             const who = actorLabel(d.by);
             const took = d.finished_at && d.started_at ? duration(d.finished_at - d.started_at) : "";
             return (
-              <li key={`${d.app}-${d.id}`}>
+              <li key={to}>
                 <Link
-                  to={`/orgs/${o}/apps/${d.app}/deployments/${d.id}`}
+                  to={to}
                   className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none"
                 >
                   <StatusDot tone={DEPLOYMENT_TONE[d.status]} pulse={inProgress(d.status)} className="hidden sm:inline-flex" />
