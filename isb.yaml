@@ -14,11 +14,15 @@ services:
     cpus: 8
     mem_limit: 16g
     labels: { owner: isb-preview }
+    # The firmware refuses this image's bootloader under secure boot
+    # ("prohibited by secure boot policy"), so the VM never boots.
+    raw_config: { security.secureboot: false }
     raw_devices:
       root: { size: 60GiB }
     volumes:
       - ./:/src:ro
       - ./web:/src/web
     ready: [running, agent, default_route]
+    ready_timeout: 3m             # a good boot takes ~2m; past that it has hung
     user: "1000"                  # the cloud image's ubuntu user
     working_dir: /src
