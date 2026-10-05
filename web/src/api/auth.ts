@@ -34,10 +34,12 @@ export type AdminUser = S["AdminUser"];
 export type SuperadminVia =
   | { kind: "token"; id: number; name: string }
   | { kind: "tailnet"; login: string; node: string; tags?: string[] }
-  | { kind: "access"; name: string; service_token?: boolean };
+  | { kind: "access"; name: string; service_token?: boolean }
+  /** `ISB_DEV_SUPERADMIN`, a debug build's switch for developing isb. */
+  | { kind: "dev"; email: string };
 
 export interface Superadmin {
-  /** `token:<name>`, `tailnet:<login>` or `access:<name>`. */
+  /** `token:<name>`, `tailnet:<login>`, `access:<name>` or `dev:<email>`. */
   source: string;
   via: SuperadminVia;
   /** Has an isb account of its own (sessions, passkeys, tokens). */

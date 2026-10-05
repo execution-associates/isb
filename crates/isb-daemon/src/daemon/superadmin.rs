@@ -1,7 +1,8 @@
 //! Who is a superadmin ([`crate::auth::superadmin`]) on this daemon: a
-//! superadmin token, a tailnet identity on `--superadmin-tailnet`, or a
-//! verified Cloudflare Access identity on `--superadmin-access`. Nothing
-//! else grants it. One gate serves the tool endpoints (through the authn
+//! superadmin token, a tailnet identity on `--superadmin-tailnet`, a
+//! verified Cloudflare Access identity on `--superadmin-access`, or, in a
+//! debug build, any credential-less loopback request under
+//! `ISB_DEV_SUPERADMIN` ([`crate::auth::dev`]). Nothing else grants it. One gate serves the tool endpoints (through the authn
 //! hook) and the identity endpoints (`/api/v1/auth/*`).
 
 use std::sync::Arc;
@@ -87,6 +88,10 @@ pub struct Gate {
     /// The Access validator of the loopback listeners, the allow list, and
     /// the `Host` names an Access superadmin's request may carry.
     access: Option<(Arc<AccessValidator>, AccessAllowList, Vec<String>)>,
+    /// `ISB_DEV_SUPERADMIN`: the email a loopback request with no
+    /// credential is signed in as.
+    #[cfg(debug_assertions)]
+    dev: Option<String>,
 }
 
 impl Gate {
@@ -107,7 +112,17 @@ impl Gate {
             tailnet_listens: Vec::new(),
             access_agents: None,
             access,
+            #[cfg(debug_assertions)]
+            dev: None,
         }
+    }
+
+    /// Sign every loopback request with no credential in as a superadmin
+    /// acting as `email` ([`crate::auth::dev`]).
+    #[cfg(debug_assertions)]
+    pub fn with_dev(mut self, email: Option<String>) -> Gate {
+        self.dev = email;
+        self
     }
 
     /// Let orgs' tailnet and Access agent identities in
@@ -266,7 +281,8 @@ impl Gate {
 
     /// `id` is the Access identity the listener already verified, if any.
     /// A bearer superadmin token decides alone; any other bearer token is
-    /// not this gate's. Then Access, then the tailnet.
+    /// not this gate's. Then Access, then the tailnet, then (debug builds)
+    /// `ISB_DEV_SUPERADMIN`.
     pub fn resolve(&self, req: &Request, id: Option<&Identity>) -> Resolved {
         if let Some(a) = req.header("authorization") {
             let token = a
@@ -309,7 +325,30 @@ impl Gate {
             };
             return Resolved::Superadmin(Arc::new(self.acting_as(source, as_user)));
         }
+        #[cfg(debug_assertions)]
+        if let Some(s) = self.dev_superadmin(req, id) {
+            return Resolved::Superadmin(s);
+        }
         Resolved::None
+    }
+
+    /// A loopback TCP request with no credential of any kind: no bearer
+    /// token (judged above), session cookie or Access assertion. The unix
+    /// socket is its own caller.
+    #[cfg(debug_assertions)]
+    fn dev_superadmin(&self, req: &Request, id: Option<&Identity>) -> Option<Arc<Superadmin>> {
+        let email = self.dev.as_deref()?;
+        let loopback = matches!(&req.peer, Peer::Tcp(a) if a.ip().is_loopback());
+        let credential = id.is_some()
+            || req.header(ASSERTION_HEADER).is_some()
+            || crate::auth::http::cookie(req, crate::auth::http::COOKIE).is_some();
+        if !loopback || credential {
+            return None;
+        }
+        let source = SuperadminSource::Dev {
+            email: email.to_string(),
+        };
+        Some(Arc::new(self.acting_as(source, Some(email))))
     }
 
     /// Only from a verified assertion, on the loopback listeners Access
@@ -439,7 +478,42 @@ pub fn gate(
         }
     };
     let listens = tailnet_listens.iter().map(|a| a.to_string()).collect();
-    Ok(Gate::new(store, tailnet, access).with_agents(listens, agent_access))
+    let gate = Gate::new(store, tailnet, access).with_agents(listens, agent_access);
+    #[cfg(debug_assertions)]
+    let gate = gate.with_dev(dev_superadmin(cfg)?);
+    #[cfg(not(debug_assertions))]
+    if cfg.dev_superadmin.is_some() {
+        return Err(Error::invalid(format!(
+            "{} works only in debug builds: unset it",
+            crate::auth::dev::SUPERADMIN_ENV
+        )));
+    }
+    Ok(gate)
+}
+
+/// `ISB_DEV_SUPERADMIN`, refused unless every `--listen` address is
+/// loopback: it signs in anyone who can connect.
+#[cfg(debug_assertions)]
+fn dev_superadmin(cfg: &super::ServeConfig) -> Result<Option<String>> {
+    use std::net::ToSocketAddrs;
+    let Some(email) = cfg.dev_superadmin.clone() else {
+        return Ok(None);
+    };
+    let env = crate::auth::dev::SUPERADMIN_ENV;
+    let loopback = |a: &String| {
+        a.to_socket_addrs()
+            .is_ok_and(|mut it| it.all(|s| s.ip().is_loopback()))
+    };
+    if cfg.listen.is_empty() || !cfg.listen.iter().all(loopback) {
+        return Err(Error::invalid(format!(
+            "{env} signs every request without a credential in as a superadmin: --listen must be loopback only (it is {:?})",
+            cfg.listen
+        )));
+    }
+    eprintln!(
+        "isb serve: WARNING: {env}={email}: every HTTP request without a credential is superadmin dev:{email}; for developing isb only"
+    );
+    Ok(Some(email))
 }
 
 /// What `host_policy` reports of the configuration (never a secret).
@@ -490,6 +564,13 @@ pub fn announce(cfg: &super::ServeConfig, gate: &Gate, store: &AuthStore) {
         v.push(format!(
             "Cloudflare Access identities {}",
             a.entries().join(", ")
+        ));
+    }
+    #[cfg(debug_assertions)]
+    if let Some(e) = &gate.dev {
+        v.push(format!(
+            "every loopback request without a credential, as {e} ({})",
+            crate::auth::dev::SUPERADMIN_ENV
         ));
     }
     eprintln!("isb serve: superadmins: {}", v.join("; "));

@@ -45,6 +45,7 @@ mod secret_hooks;
 pub mod secrets;
 mod servers;
 mod ssh;
+mod stack_deploy;
 pub mod superadmin;
 pub mod templates;
 mod terminal;
@@ -69,10 +70,13 @@ use crate::error::{Error, Result};
 use crate::exec::{ExecOptions, Stdin};
 use crate::sandbox::{EnsureOptions, Sandbox, SandboxInfo};
 use crate::server::{AccessValidator, Caller, Listener, Registry, Tool, ToolPolicy};
-use crate::spec::{ComposeFile, SandboxSpec};
-use crate::stack::{Controller, StackDef, Store, now_secs};
+use crate::spec::SandboxSpec;
+use crate::stack::{Controller, Store, now_secs};
 use authorize::{CROSS_ORG_READS, PLATFORM_TOOLS, arg_org, authorize_class, tool_listed};
 use policy::RemotePolicy;
+use stack_deploy::{DeployArgs, How, deploy, stack_deploy};
+#[cfg(test)]
+use stack_deploy::{reused_note, stack_owner};
 use tools::Ann;
 
 /// Marks an instance a remote caller created with `sandbox_create`.
@@ -137,6 +141,9 @@ pub struct ServeConfig {
     /// `--superadmin-access`: Access emails and service token client ids
     /// with the unix socket's reach.
     pub superadmin_access: Option<superadmin::AccessAllowList>,
+    /// `ISB_DEV_SUPERADMIN` ([`crate::auth::dev`]; debug builds only):
+    /// every loopback request with no credential is this superadmin.
+    pub dev_superadmin: Option<String>,
     /// `--heartbeat-url`: a dead man's switch pinged every interval.
     pub heartbeat: Option<crate::monitor::heartbeat::Heartbeat>,
     /// `--egress-pin NAME=IP[:PORT]`: names the egress proxy connects to
@@ -251,6 +258,8 @@ struct Daemon {
     public_url: Option<String>,
     /// One proxy per egress network (docs/guides/egress.md).
     egress: Arc<isb_egress::Manager>,
+    /// Compose stacks' environments, managed domains and deployments.
+    meta: crate::stack::deployments::StackMeta,
 }
 
 /// Run the daemon until SIGINT/SIGTERM. Apps keep running when it stops.
@@ -371,6 +380,22 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         m.start(ctl.clone())?;
     }
     let apps = crate::app::Apps::new(&cfg.state_dir, client.clone(), ctl.clone(), secrets.clone());
+    // Every compose stack belongs to a project environment: stacks from
+    // before that (or whose adoption failed last time) get one now. Only
+    // records change; nothing is redeployed.
+    let stacks: Vec<(crate::org::OrgId, String)> = ctl
+        .definitions()
+        .iter()
+        .map(|d| (d.org.clone(), d.name.clone()))
+        .collect();
+    for r in apps.adopt_compose_stacks(&stacks) {
+        match r {
+            Ok(m) => eprintln!("isb serve: {m}"),
+            Err(e) => eprintln!("isb serve: WARNING: {e}"),
+        }
+    }
+    // Services of those stacks are named in their environment too.
+    ctl.set_dns_scope(apps.scope_fn());
     // Notifications follow the event feed from the start of this run.
     let ra = apps.clone();
     let resolve: crate::notify::Resolve = Arc::new(move |org, stack, service| {
@@ -423,6 +448,8 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     );
     workspaces.previews.set_base(cfg.preview_domain.clone());
     let (egress, stop_egress) = egress::start(&cfg, &client, &secrets)?;
+    let meta = crate::stack::deployments::StackMeta::new(&cfg.state_dir);
+    meta.recover();
     let d = Arc::new(Daemon {
         client,
         ctl: ctl.clone(),
@@ -449,6 +476,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         workspaces: workspaces.clone(),
         public_url: cfg.public_url.clone(),
         egress,
+        meta,
     });
     if let Some(s) = &servers {
         s.start(ctl.clone());
@@ -911,154 +939,6 @@ impl Daemon {
         std::fs::create_dir_all(&p)?;
         Ok(p)
     }
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct DeployArgs {
-    name: String,
-    #[serde(default)]
-    org: Option<String>,
-    /// YAML text (remote callers, and anything not pre-resolved).
-    #[serde(default)]
-    compose: Option<String>,
-    /// A compose file already resolved by the local CLI (no interpolation).
-    #[serde(default)]
-    file: Option<ComposeFile>,
-    #[serde(default)]
-    vars: BTreeMap<String, String>,
-    #[serde(default)]
-    secrets: BTreeMap<String, String>,
-    #[serde(default)]
-    base_dir: Option<PathBuf>,
-    #[serde(default)]
-    wait: bool,
-    #[serde(default)]
-    dry_run: bool,
-    #[serde(default)]
-    timeout: Option<String>,
-}
-
-#[expect(
-    clippy::too_many_lines,
-    reason = "predates the lint ratchet; split it when next changed"
-)]
-fn stack_deploy(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
-    let a: DeployArgs = args(a)?;
-    crate::stack::validate_stack_name(&a.name)?;
-    if a.name == crate::ingress::cloudflare::TUNNEL_STACK {
-        return Err(Error::invalid(format!(
-            "stack name {} is isb's (an org's cloudflared)",
-            a.name
-        )));
-    }
-    let base = match &a.base_dir {
-        Some(b) => {
-            if !b.is_absolute() {
-                return Err(Error::invalid("base_dir must be absolute"));
-            }
-            if !c.is_trusted() {
-                d.policy.check_base_dir(b)?;
-            }
-            b.clone()
-        }
-        None => d.files_dir(&a.name)?,
-    };
-    let file = match (a.file, a.compose) {
-        (Some(_), _) if !c.is_trusted() => {
-            return Err(Error::invalid("remote callers send `compose` as YAML text"));
-        }
-        (Some(f), None) => f,
-        (None, Some(text)) => {
-            // The daemon's own environment is never consulted.
-            let vars = a.vars.clone();
-            let lookup = move |k: &str| vars.get(k).cloned();
-            crate::compose::load_docs(
-                &[(PathBuf::from("compose.yaml"), text)],
-                &base,
-                Some(&a.name),
-                &lookup,
-            )?
-            .file
-        }
-        _ => return Err(Error::invalid("pass exactly one of compose or file")),
-    };
-    if !c.is_trusted() {
-        d.policy.check_file(&file, &base)?;
-    }
-    let org = match &a.org {
-        Some(o) => crate::org::OrgId::new(o.clone())?,
-        None => crate::org::OrgId::default_org(),
-    };
-    // Values for `file:`/`environment:` secrets: given directly, or from
-    // `vars` for `environment:` ones. The rest come from the org's store.
-    let mut given: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-    for key in crate::stack::secrets::used_keys(&file) {
-        let Some(def) = file.secrets.get(&key) else {
-            continue;
-        };
-        if !def.is_client_side() {
-            continue;
-        }
-        let v = a.secrets.get(&key).cloned().or_else(|| {
-            def.environment
-                .as_ref()
-                .and_then(|e| a.vars.get(e).cloned())
-        });
-        if let Some(v) = v {
-            given.insert(key, v.into_bytes());
-        }
-    }
-    let mut def = StackDef {
-        name: a.name.clone(),
-        org: org.clone(),
-        file,
-        base_dir: base,
-        secrets: BTreeMap::new(),
-        force: BTreeMap::new(),
-        images: BTreeMap::new(),
-        deployed_at: now_secs(),
-        deployed_by: caller_name(c),
-        previous: None,
-    };
-    // Checked before any value is stored, so a deploy that cannot happen bumps no secret's version.
-    d.ctl.validate(&def)?;
-    if let Some(m) = &d.ingress {
-        m.check(&def)?;
-    }
-    def.secrets =
-        crate::stack::secrets::bind(&d.secrets, &org, &a.name, &def.file, &given, a.dry_run)?;
-    if a.dry_run {
-        return Ok(json!({"changes": d.ctl.plan(&def)?, "dry_run": true}));
-    }
-    let who = def.deployed_by.clone();
-    let changes = d.ctl.deploy(def)?;
-    let summary: Vec<String> = changes
-        .iter()
-        .filter(|c| c.change != "unchanged")
-        .map(|c| format!("{} {}", c.service, c.change))
-        .collect();
-    d.ctl.note(
-        "info",
-        &crate::stack::qualified(&org, &a.name),
-        format!(
-            "deployed by {who}: {}",
-            if summary.is_empty() {
-                "no changes".to_string()
-            } else {
-                summary.join(", ")
-            }
-        ),
-    );
-    if !a.wait {
-        return Ok(json!({"changes": changes}));
-    }
-    let timeout = match &a.timeout {
-        Some(t) => crate::flex::parse_duration(t).map_err(Error::invalid)?,
-        None => Duration::from_secs(600),
-    };
-    let st = wait_settled(&d.ctl, &crate::stack::qualified(&org, &a.name), timeout)?;
-    Ok(json!({"changes": changes, "status": st}))
 }
 
 /// Poll until every service is converged, or one is paused or failing (its

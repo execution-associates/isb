@@ -1,6 +1,6 @@
 // The Deployments tab: history, newest first, with rollback.
 import { ArrowRight, ChevronRight, CircleCheck, GitCommitHorizontal, History, Package, RotateCcw, Terminal, User, Webhook } from "lucide-react";
-import { useEffect, useMemo, useReducer, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useReducer, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { StatusDot } from "@/components/status";
 import { Button } from "@/components/ui/button";
@@ -21,11 +21,17 @@ import { duration, imageName, shortDigest, shortSha } from "./util";
 export const TRIGGER_LABEL: Record<Deployment["trigger"], string> = { manual: "CLI", api: "Manual", webhook: "Webhook" };
 const TRIGGER_ICON: Record<Deployment["trigger"], typeof User> = { manual: Terminal, api: User, webhook: Webhook };
 
-/** Elapsed time of a deployment: until it finished, or until now. */
+/** Elapsed time of a deployment: until it finished, or until now; null when it finished at a time not recorded. */
 export function elapsed(d: Deployment, now = Date.now()): number | null {
   const start = d.started_at ?? d.created_at;
   if (!start) return null;
-  return (d.finished_at ?? (finished(d.status) ? start : now)) - start;
+  if (d.finished_at === undefined && finished(d.status)) return null;
+  return (d.finished_at ?? now) - start;
+}
+
+/** A duration for a list or a header; `coarse` when the times are whole seconds, so under one is "<1s". */
+export function elapsedText(ms: number, coarse?: boolean): string {
+  return coarse && ms < 1000 ? "<1s" : duration(ms);
 }
 
 export function DeploymentsTab({ org, app }: { org: string; app: App }) {
@@ -102,7 +108,7 @@ export function DeploymentsTab({ org, app }: { org: string; app: App }) {
         ) : (
           <ul className="divide-y">
             {list.map((d) => (
-              <Row
+              <DeploymentRow
                 key={d.id}
                 d={d}
                 to={`/orgs/${o}/apps/${encodeURIComponent(app.name)}/deployments/${d.id}`}
@@ -154,7 +160,30 @@ function CurrentChip({ className }: { className?: string }) {
   );
 }
 
-function Row({ d, to, current, onRollback }: { d: Deployment; to: string; current: boolean; onRollback?: () => void }) {
+/**
+ * One deployment in a history list: status, what was deployed and by whom,
+ * when, and Roll back. `summary` replaces the what-was-deployed line (a
+ * compose stack's deployment names its services, not an image), and
+ * `action` the how line (a compose stack's environment or domains change).
+ */
+export function DeploymentRow({
+  d,
+  to,
+  current,
+  onRollback,
+  summary,
+  action,
+  coarse,
+}: {
+  d: Deployment;
+  to: string;
+  current: boolean;
+  onRollback?: () => void;
+  summary?: ReactNode;
+  action?: string;
+  /** Its times are whole seconds. */
+  coarse?: boolean;
+}) {
   const live = inProgress(d.status);
   const ms = elapsed(d);
   const TriggerIcon = TRIGGER_ICON[d.trigger];
@@ -178,9 +207,9 @@ function Row({ d, to, current, onRollback }: { d: Deployment; to: string; curren
         </div>
         <span className="pl-[18px] text-xs text-muted-foreground tabular-nums">
           {live ? (
-            <span className="font-medium text-info">{ms !== null ? duration(ms) : "Starting"}</span>
-          ) : ms ? (
-            duration(ms)
+            <span className="font-medium text-info">{ms !== null ? elapsedText(ms, coarse) : "Starting"}</span>
+          ) : ms !== null && (ms || coarse) ? (
+            elapsedText(ms, coarse)
           ) : (
             "–"
           )}
@@ -189,7 +218,7 @@ function Row({ d, to, current, onRollback }: { d: Deployment; to: string; curren
 
       {/* What was deployed, and who started it. */}
       <div className="col-span-2 row-start-2 min-w-0 space-y-1 pl-[18px] sm:col-span-1 sm:row-start-auto sm:pl-0">
-        {d.commit ? (
+        {summary ?? (d.commit ? (
           <p className="flex min-w-0 items-center gap-1.5 text-sm">
             <GitCommitHorizontal className="size-3.5 shrink-0 text-muted-foreground" />
             <span className="shrink-0 font-mono text-xs text-muted-foreground">{shortSha(d.commit.sha)}</span>
@@ -203,11 +232,11 @@ function Row({ d, to, current, onRollback }: { d: Deployment; to: string; curren
           </p>
         ) : (
           <p className="text-sm text-muted-foreground">{d.status === "queued" ? "Waiting to start" : "No image recorded"}</p>
-        )}
+        ))}
         <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
           {d.rollback_of ? <RotateCcw className="size-3.5 shrink-0" /> : <TriggerIcon className="size-3.5 shrink-0" />}
           <span className="truncate">
-            {d.rollback_of ? `Rollback to #${d.rollback_of}` : TRIGGER_LABEL[d.trigger]} by {d.by}
+            {action ?? (d.rollback_of ? `Rollback to #${d.rollback_of}` : TRIGGER_LABEL[d.trigger])} by {d.by}
           </span>
         </p>
         {d.status === "failed" && d.error && <p className="line-clamp-2 text-xs break-words text-destructive">{d.error}</p>}

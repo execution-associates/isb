@@ -1,0 +1,24 @@
+# The preview: isb running inside an isb VM, with its web UI served by vite
+# for hot reload. `mise run preview` brings it up; see mise.toml.
+#
+# A VM, not a container: the isb inside runs its own incusd, bridges and
+# firewall rules, which want their own kernel. The checkout is mounted
+# read-only (so nothing inside can write a git hook or touch the Rust
+# sources), with web/ mounted writable over it for node_modules.
+name: isb-preview
+services:
+  preview:
+    container_name: isb-preview-${USER}
+    type: vm
+    image: images:ubuntu/24.04/cloud
+    cpus: 8
+    mem_limit: 16g
+    labels: { owner: isb-preview }
+    raw_devices:
+      root: { size: 60GiB }
+    volumes:
+      - ./:/src:ro
+      - ./web:/src/web
+    ready: [running, agent, default_route]
+    user: "1000"                  # the cloud image's ubuntu user
+    working_dir: /src

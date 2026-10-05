@@ -11,6 +11,10 @@ export interface EnvironmentInfo {
   /** `<project>-<env>` */
   stack: string;
   apps: string[];
+  /** The compose stacks deployed into this environment. */
+  compose: { name: string; services: string[] }[];
+  /** Service names more than one stack here answers to, and which one the name reaches. */
+  conflicts?: { service: string; stack: string; winner: string }[];
 }
 
 export interface Project {

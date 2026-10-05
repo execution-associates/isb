@@ -846,6 +846,8 @@ mod tests {
         )
         .unwrap();
         let def = crate::stack::StackDef {
+            source: None,
+            domains: Default::default(),
             name: "shop-production".into(),
             org: OrgId::default_org(),
             file,

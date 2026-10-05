@@ -1,25 +1,18 @@
-// The Advanced tab: volumes, published ports, and deleting the app.
-import { useQueryClient } from "@tanstack/react-query";
-import { HardDrive, Network, Plus, Trash2, X } from "lucide-react";
+// The Advanced tab: volumes and published ports. Deleting the app is on General.
+import { HardDrive, Network, Plus, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
-import { toast } from "sonner";
-import { callTool } from "@/api/tools";
 import { FormError } from "@/components/form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { canWrite } from "@/lib/admin";
 import { useMe } from "@/lib/session";
-import { type App, keys } from "./api";
-import { ConfirmDialog, EmptyState, Section } from "./components";
+import type { App } from "./api";
+import { EmptyState, Section } from "./components";
 import { useAppUpdate } from "./save";
 import { SaveFooter } from "./save-footer";
 import { portProblem, volumeProblem } from "./util";
 
 export function AdvancedTab({ org, app }: { org: string; app: App }) {
-  const [del, setDel] = useState(false);
-  const qc = useQueryClient();
-  const navigate = useNavigate();
   const writer = canWrite(useMe().data!, org);
   return (
     <div className="grid gap-6">
@@ -59,34 +52,6 @@ export function AdvancedTab({ org, app }: { org: string; app: App }) {
         }
         placeholder="127.0.0.1:8080:80"
         check={portProblem}
-      />
-      {writer && (
-        <Section title="Delete this app" className="border-destructive/30">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-[13px] leading-relaxed text-muted-foreground">
-              Its service leaves the stack, and its deployments, checkout, webhook secret and deploy key go. Named volumes are kept.
-            </p>
-            <Button variant="destructive" className="shrink-0 self-start sm:self-auto" onClick={() => setDel(true)}>
-              <Trash2 />
-              Delete {app.name}
-            </Button>
-          </div>
-        </Section>
-      )}
-      <ConfirmDialog
-        open={del}
-        onOpenChange={setDel}
-        title={`Delete ${app.name}?`}
-        description={`It stops serving now. This cannot be undone; ${app.volumes?.length ? "its volumes are kept." : "it has no volumes."}`}
-        confirmLabel="Delete app"
-        typed={app.name}
-        onConfirm={async () => {
-          await callTool("app_delete", { name: app.name }, org);
-          qc.removeQueries({ queryKey: keys.app(org, app.name) });
-          await qc.invalidateQueries({ queryKey: keys.org(org) });
-          toast.success(`${app.name} deleted`);
-          navigate(`/orgs/${encodeURIComponent(org)}/projects/${app.project}/${app.environment}`);
-        }}
       />
     </div>
   );

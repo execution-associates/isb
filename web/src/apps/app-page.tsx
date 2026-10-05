@@ -1,12 +1,11 @@
 // /orgs/:org/apps/:app/:tab: one app, with its header (state, Deploy, Stop)
 // and tabs. Deployment logs live under the Deployments tab.
 import { useQueryClient } from "@tanstack/react-query";
-import { Activity, ArrowRight, ArrowUpRight, Boxes, CalendarClock, Database, DatabaseBackup, FileCode2, GitBranch, GitPullRequest, Globe, History, Loader2, Package, Play, Rocket, ScrollText, Server, Settings2, SlidersHorizontal, Square, TerminalSquare, Variable } from "lucide-react";
-import { lazy, Suspense, useEffect, useReducer, useState } from "react";
+import { ArrowUpRight, Boxes, Database, GitBranch, Globe, Loader2, Package, Play, Rocket, Server, Square } from "lucide-react";
+import { lazy, Suspense, useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
-import { PageHeader } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,42 +21,16 @@ import { GeneralTab } from "./app-general";
 import { LogsTab } from "./app-logs";
 import { MonitoringTab } from "./app-monitoring";
 import { YamlTab } from "./app-yaml";
-import { AppStateBadge, ConfirmDialog, Crumbs, EmptyState, QueryError, TabLinks } from "./components";
+import { AppStateBadge, ConfirmDialog, Crumbs, EmptyState, QueryError } from "./components";
+import { DeploymentBanner, ServiceHeader, ServiceTabBar } from "./service-page";
 import { DeploymentPage } from "./deployment-page";
-import { DeploymentsTab, elapsed } from "./deployments-tab";
+import { DeploymentsTab } from "./deployments-tab";
 import { splitStack, useLiveEvents, useOrgLive } from "./live";
 import { deploymentLine, stripAnsi } from "./logstream";
 import { engineLabel, isDatabase } from "@/data/api";
 import { deploymentPath, useDeploy } from "./use-deploy";
-import { duration, imageName } from "./util";
-import { DEPLOYMENT_LABEL } from "@/lib/status";
-
-const TABS = [
-  { id: "database", label: "Database", icon: Database },
-  { id: "backups", label: "Backups", icon: DatabaseBackup },
-  { id: "general", label: "General", icon: Settings2 },
-  { id: "environment", label: "Environment", icon: Variable },
-  { id: "domains", label: "Domains", icon: Globe },
-  { id: "deployments", label: "Deployments", icon: History },
-  { id: "previews", label: "Previews", icon: GitPullRequest },
-  { id: "logs", label: "Logs", icon: ScrollText },
-  { id: "monitoring", label: "Monitoring", icon: Activity },
-  { id: "jobs", label: "Jobs", icon: CalendarClock },
-  { id: "terminal", label: "Terminal", icon: TerminalSquare },
-  { id: "yaml", label: "YAML", icon: FileCode2 },
-  { id: "advanced", label: "Advanced", icon: SlidersHorizontal },
-] as const;
-
-/** The tabs an app has: a database has no General or Domains; previews need git. */
-function tabsOf(a: App) {
-  const db = isDatabase(a);
-  return TABS.filter((t) => {
-    if (t.id === "database" || t.id === "backups") return db;
-    if (t.id === "general" || t.id === "domains") return !db;
-    if (t.id === "previews") return isGit(a.source);
-    return true;
-  });
-}
+import { activeServiceTab, serviceTabs } from "./service-tabs";
+import { imageName } from "./util";
 
 // xterm.js is loaded only when the Terminal tab opens; the day-2 tabs too.
 const TerminalTab = lazy(() => import("./app-terminal"));
@@ -66,10 +39,8 @@ const BackupsTab = lazy(() => import("@/data/backups-tab").then((m) => ({ defaul
 const JobsTab = lazy(() => import("@/jobs/jobs-tab").then((m) => ({ default: m.JobsTab })));
 const PreviewsTab = lazy(() => import("@/previews/previews-tab").then((m) => ({ default: m.PreviewsTab })));
 
-export type TabId = (typeof TABS)[number]["id"];
-
 export function AppPage() {
-  const { org = "", app: name = "", tab = "general", id } = useParams();
+  const { org = "", app: name = "", tab, id } = useParams();
   const app = useApp(org, name);
   useOrgLive(org);
   const o = encodeURIComponent(org);
@@ -111,8 +82,8 @@ export function AppPage() {
     );
   }
   const a = app.data;
-  const tabs = tabsOf(a).filter((t) => writer || t.id !== "terminal");
-  const active = (tabs.some((t) => t.id === tab) ? tab : tabs[0].id) as TabId;
+  const tabs = serviceTabs({ database: isDatabase(a), git: isGit(a.source), writer });
+  const active = activeServiceTab(tab, tabs);
   return (
     <>
       <Crumbs
@@ -124,12 +95,13 @@ export function AppPage() {
         ]}
       />
       <AppHeader org={org} app={a} writer={writer} viewing={active === "deployments" && id ? Number(id) : undefined} />
-      <TabLinks active={active} tabs={tabs.map((t) => ({ ...t, to: `/orgs/${o}/apps/${a.name}/${t.id}` }))} />
+      <ServiceTabBar tabs={tabs} active={active} to={(t) => `/orgs/${o}/apps/${a.name}/${t}`} />
+      {active === "yaml" && <YamlTab org={org} app={a} />}
       <Suspense fallback={<Skeleton className="h-64" />}>
         {active === "database" && <DatabaseTab org={org} app={a} />}
         {active === "backups" && <BackupsTab org={org} app={a} />}
         {active === "previews" && <PreviewsTab org={org} app={a} />}
-        {active === "jobs" && <JobsTab org={org} app={a} />}
+        {active === "jobs" && <JobsTab org={org} target={{ app: a.name }} />}
       </Suspense>
       {active === "general" && <GeneralTab org={org} app={a} />}
       {active === "environment" && <EnvironmentTab org={org} app={a} />}
@@ -142,7 +114,6 @@ export function AppPage() {
           <TerminalTab org={org} app={a} />
         </Suspense>
       )}
-      {active === "yaml" && <YamlTab org={org} app={a} />}
       {active === "advanced" && <AdvancedTab org={org} app={a} />}
     </>
   );
@@ -185,20 +156,12 @@ function AppHeader({ org, app, writer, viewing }: { org: string; app: App; write
 
   return (
     <>
-      <PageHeader
-        icon={
-          <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border bg-gradient-to-b from-background to-muted shadow-xs">
-            {db ? <Database className="size-5 text-muted-foreground" /> : <Boxes className="size-5 text-muted-foreground" />}
-          </span>
-        }
-        title={
+      <ServiceHeader
+        icon={db ? Database : Boxes}
+        name={app.name}
+        state={loading ? <Skeleton className="h-5 w-20 rounded-full" /> : <AppStateBadge state={state} />}
+        details={
           <>
-            <span className="truncate">{app.name}</span>
-            {loading ? <Skeleton className="h-5 w-20 rounded-full" /> : <AppStateBadge state={state} />}
-          </>
-        }
-        description={
-          <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
             <span className="flex min-w-0 items-center gap-1.5">
               <SourceIcon className="size-3.5 shrink-0" />
               <span className="truncate font-mono text-xs">{src}</span>
@@ -219,7 +182,7 @@ function AppHeader({ org, app, writer, viewing }: { org: string; app: App; write
                 <ArrowUpRight className="size-3.5 shrink-0" />
               </a>
             )}
-          </span>
+          </>
         }
         actions={
           writer && (
@@ -262,38 +225,13 @@ function AppHeader({ org, app, writer, viewing }: { org: string; app: App; write
   );
 }
 
-/**
- * A deployment in progress while you are on another tab (or it came from a
- * webhook): its stage, clock and newest log line, one click from its log.
- */
+/** The app's deployment in progress, with the newest line of its log. */
 function ActiveDeployment({ org, app, d }: { org: string; app: string; d: Deployment }) {
   const [line, setLine] = useState("");
-  const [, tick] = useReducer((n: number) => n + 1, 0);
   useLiveEvents((e) => {
     if (e.service !== app || splitStack(e.stack).org !== org) return;
     const l = deploymentLine(e.message, app, d.id);
     if (l !== null) setLine(stripAnsi(l));
   });
-  useEffect(() => {
-    const t = setInterval(tick, 1000);
-    return () => clearInterval(t);
-  }, []);
-  const ms = elapsed(d);
-  return (
-    <Link
-      to={deploymentPath(org, app, d.id)}
-      className="group mb-5 flex animate-fade-up items-center gap-3 rounded-xl border border-info/25 bg-info/[0.06] px-4 py-3 text-sm transition-colors hover:border-info/40 hover:bg-info/10"
-    >
-      <Loader2 className="size-4 shrink-0 animate-spin text-info" />
-      <span className="shrink-0 font-medium">
-        Deployment <span className="font-mono">#{d.id}</span> · {DEPLOYMENT_LABEL[d.status]}
-      </span>
-      <span className="hidden min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground sm:block">{line}</span>
-      <span className="ml-auto shrink-0 font-mono text-xs text-muted-foreground tabular-nums sm:ml-0">{ms !== null ? duration(ms) : ""}</span>
-      <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-info">
-        <span className="hidden sm:inline">View log</span>
-        <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
-      </span>
-    </Link>
-  );
+  return <DeploymentBanner d={d} to={deploymentPath(org, app, d.id)} line={line} />;
 }

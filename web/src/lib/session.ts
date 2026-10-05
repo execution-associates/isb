@@ -118,10 +118,11 @@ export function roleIn(me: Me, org: string): string | null {
 }
 
 /** Signed in by where the request comes from (a tailnet or Access
- * identity), not by a session: signing out changes nothing. */
+ * identity, or a dev build's ISB_DEV_SUPERADMIN), not by a session:
+ * signing out changes nothing. */
 export function ambientSuperadmin(me: Me): boolean {
   const k = me.superadmin?.via.kind;
-  return k === "tailnet" || k === "access";
+  return k === "tailnet" || k === "access" || k === "dev";
 }
 
 /** How a superadmin is signed in, in a few words. */
@@ -135,6 +136,8 @@ export function superadminVia(me: Me): string | null {
       return s.via.tags?.length ? `tailnet node ${s.via.node} (${s.via.tags.join(", ")})` : `tailnet login ${s.via.login}`;
     case "access":
       return s.via.service_token ? `Access service token ${s.via.name}` : `Cloudflare Access as ${s.via.name}`;
+    case "dev":
+      return `ISB_DEV_SUPERADMIN as ${s.via.email}`;
   }
 }
 

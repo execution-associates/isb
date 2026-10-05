@@ -97,6 +97,8 @@ fn def(
     )
     .unwrap();
     StackDef {
+        source: None,
+        domains: Default::default(),
         name: name.into(),
         org: org.clone(),
         file: p.file,

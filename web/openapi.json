@@ -388,7 +388,8 @@
                         "enum": [
                           "token",
                           "tailnet",
-                          "access"
+                          "access",
+                          "dev"
                         ],
                         "type": "string"
                       }
@@ -847,7 +848,7 @@
   "info": {
     "description": "isb serve's HTTP surface: the tools (also MCP), the workspace resource, the identity endpoints, streams, websockets and webhooks. docs/reference/http-api.md.",
     "title": "isb",
-    "version": "1.0.0"
+    "version": "1.2.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -6849,7 +6850,7 @@
     },
     "/api/v1/tools/environment_delete": {
       "post": {
-        "description": "Remove an environment that has no apps left from a project.",
+        "description": "Remove an environment that has no apps and no compose stacks left from a project.",
         "operationId": "environment_delete",
         "requestBody": {
           "content": {
@@ -10332,6 +10333,13 @@
                     "description": "Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. Same as placement {\"server\": NAME}.",
                     "type": "string"
                   },
+                  "udp": {
+                    "description": "UDP ports the org's stacks may publish on the host, IP:PORT each (a specific host address, e.g. 203.0.113.7:10000), forwarded by incus to the service's one replica with the client's address kept (docs/concepts/stacks.md). Replaces the list; [] clears it.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
                   "wait": {
                     "description": "With a dedicated VM: wait until it is made and the org created (default true; minutes). false answers at once with `provision`; follow it with server_provision_get (name vm-<org>).",
                     "type": "boolean"
@@ -10627,7 +10635,7 @@
     },
     "/api/v1/tools/org_update": {
       "post": {
-        "description": "Platform admins: change an org's limits, per-instance defaults or egress exceptions. Fields left out keep their value; `egress` replaces the list. A limit cannot be lifted once set (as with `isb org create`).",
+        "description": "Platform admins: change an org's limits, per-instance defaults, egress exceptions or the UDP ports its stacks may publish. Fields left out keep their value; `egress` and `udp` replace their lists. A limit cannot be lifted once set (as with `isb org create`).",
         "operationId": "org_update",
         "requestBody": {
           "content": {
@@ -10727,6 +10735,13 @@
                   "server": {
                     "description": "Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. Same as placement {\"server\": NAME}.",
                     "type": "string"
+                  },
+                  "udp": {
+                    "description": "UDP ports the org's stacks may publish on the host, IP:PORT each (a specific host address, e.g. 203.0.113.7:10000), forwarded by incus to the service's one replica with the client's address kept (docs/concepts/stacks.md). Replaces the list; [] clears it.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
                   },
                   "wait": {
                     "description": "With a dedicated VM: wait until it is made and the org created (default true; minutes). false answers at once with `provision`; follow it with server_provision_get (name vm-<org>).",
@@ -11270,7 +11285,7 @@
     },
     "/api/v1/tools/project_delete": {
       "post": {
-        "description": "Delete a project that has no apps left.",
+        "description": "Delete a project that has no apps and no compose stacks left.",
         "operationId": "project_delete",
         "requestBody": {
           "content": {
@@ -11332,7 +11347,7 @@
     },
     "/api/v1/tools/project_list": {
       "post": {
-        "description": "An org's projects, each with its environments and the apps in each.",
+        "description": "An org's projects, each with its environments and, in each, its apps and its compose stacks (`compose`: name, services and `deployed_at`, unix seconds) and `conflicts`: a compose service that does not get the environment's name `<service>.<project>-<env>` because `winner` (a stack; `<project>-<env>` for an app) holds it.",
         "operationId": "project_list",
         "requestBody": {
           "content": {
@@ -13404,7 +13419,7 @@
     },
     "/api/v1/tools/stack_config": {
       "post": {
-        "description": "The compose file a stack was deployed with, resolved, and its secrets as references (store name, driver, version; never values).",
+        "description": "The compose file a stack runs, as it resolved at its last deploy: `${VAR}` filled from the deploy's vars and the stack's environment, a secret variable as a `{secret}` reference, and the stack's managed domains merged into its services (`domains`: those, per service). Also the compose text it was deployed from when the daemon kept it as written (`source`, as stack_export gives it; null for a resolved deploy), and its secrets as references (store name, driver, version; never values).",
         "operationId": "stack_config",
         "requestBody": {
           "content": {
@@ -13466,7 +13481,7 @@
     },
     "/api/v1/tools/stack_deploy": {
       "post": {
-        "description": "Deploy or update a stack from a docker-compose-style file (isb's format: docs/reference/compose.md). Each service runs `deploy.replicas` incus instances, supervised inside their guests so they survive restarts of this server and of the host. Published ports are load-balanced over healthy replicas. A changed service is rolled out per `deploy.update_config` (stop-first by default; `order: start-first` for no downtime). Returns the change per service; pass wait=true to block until the rollout settles.",
+        "description": "Deploy or update a stack from a docker-compose-style file (isb's format: docs/reference/compose.md). Each service runs `deploy.replicas` incus instances, supervised inside their guests so they survive restarts of this server and of the host. Published ports are load-balanced over healthy replicas. A changed service is rolled out per `deploy.update_config` (stop-first by default; `order: start-first` for no downtime). Every stack belongs to one project environment (`project`, `environment`; a new stack's default is the project named like it, made if needed), and its services are also named `<service>.<project>-<env>` there; a service name the environment already gives an app or another stack's service is refused. The stack's managed domains (stack_domains_set) are merged into its services. Returns the change per service, the `owner`, the `deployment` it recorded (stack_deployments), and `reused_secrets` (only when there are some): the `file:`/`environment:` secrets given no value that deployed the value an earlier deploy stored, also logged as a warn event; pass wait=true to block until the rollout settles.",
         "operationId": "stack_deploy",
         "requestBody": {
           "content": {
@@ -13479,12 +13494,16 @@
                     "type": "string"
                   },
                   "compose": {
-                    "description": "The compose file, as YAML text. ${VAR} is filled from `vars` only.",
+                    "description": "The compose file, as YAML text. ${VAR} is filled from `vars`, then the stack's environment (stack_env_set); an undefined one fails the deploy. Kept as written (stack_export) when it needs no `vars`.",
                     "type": "string"
                   },
                   "dry_run": {
                     "description": "Only report what would change.",
                     "type": "boolean"
+                  },
+                  "environment": {
+                    "description": "The project's environment (with project). Default: production, else the project's first.",
+                    "type": "string"
                   },
                   "name": {
                     "description": "Stack name: [a-z0-9-], starts with a letter, at most 30 characters.",
@@ -13493,6 +13512,14 @@
                   "org": {
                     "description": "The org to act in (default: default).",
                     "type": "string"
+                  },
+                  "project": {
+                    "description": "The project a new stack belongs to (made if it does not exist). Default: the project named like the stack, else a new one of that name. A stack's project never changes.",
+                    "type": "string"
+                  },
+                  "reuse_secrets": {
+                    "description": "A `file:`/`environment:` secret given no value (in `secrets`, `vars` or the stack's environment) deploys the value an earlier deploy stored, and the result names it in `reused_secrets` (default true). false fails the deploy instead, so a rotated value that did not arrive is never replaced by the old one.",
+                    "type": "boolean"
                   },
                   "secrets": {
                     "additionalProperties": {
@@ -13509,7 +13536,7 @@
                     "additionalProperties": {
                       "type": "string"
                     },
-                    "description": "Variables for ${VAR} and for secrets with `environment:`.",
+                    "description": "Variables for ${VAR} and for secrets with `environment:`, over the stack's environment.",
                     "type": "object"
                   },
                   "wait": {
@@ -13562,9 +13589,416 @@
         "x-isb-tool": "stack_deploy"
       }
     },
+    "/api/v1/tools/stack_deployment_get": {
+      "post": {
+        "description": "One deployment of a compose stack: its record (as stack_deployments lists it), the compose text it deployed (`source`, as stack_export gave it), the stack's environment (`env`, secret references only) and managed domains (`domains`) at the time, and its log: the stack's events while it ran, as `events` [{at (unix ms), level, service, message}] and as `log` text. Poll until `finished`. stack_rollback with `to` deploys it again.",
+        "operationId": "stack_deployment_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "A stack deployment",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "stack_deployment_get"
+      }
+    },
+    "/api/v1/tools/stack_deployments": {
+      "post": {
+        "description": "A compose stack's deployments, newest first (the last 30 are kept): id, trigger (manual: the local CLI; api), action (deploy, rollback, env, domains), actor, status (deploying, done, failed, superseded), rollback_of, services (the ones it created, changed, scaled or removed), reused_secrets (only when there are some: `file:`/`environment:` secrets given no value that deployed the value an earlier deploy stored), error, created_at, started_at, finished_at (unix seconds). `current` is the newest that finished done. stack_deployment_get has one's file and log.",
+        "operationId": "stack_deployments",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "limit": {
+                    "maximum": 100,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List a stack's deployments",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "stack_deployments"
+      }
+    },
+    "/api/v1/tools/stack_domains_get": {
+      "post": {
+        "description": "A compose stack's domains per service: {services: {SERVICE: {managed, file}}}. `managed` are the stack's own domain records (stack_domains_set; the web UI's Domains tab edits them), `file` the ones its compose file gives under `domains:` (change those in the file). Each is [{host, path?, port?, https?, redirect?, strip_prefix?, www_redirect?}]. A deploy serves both.",
+        "operationId": "stack_domains_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Get a stack's domains",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "stack_domains_get"
+      }
+    },
+    "/api/v1/tools/stack_domains_set": {
+      "post": {
+        "description": "Replace the managed domains of one service of a compose stack: domain records kept beside its compose file (which is not changed) and merged into the service at each deploy. Same shape as an app's domains. A hostname the file already gives a service, or given twice, is refused. Takes effect at the next deploy (deploy=true redeploys the stack's file now, answering its changes, `deployment` and `reused_secrets` as stack_deploy does; a domain change replaces no instance). Answers the stack's domains as stack_domains_get does.",
+        "operationId": "stack_domains_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "deploy": {
+                    "description": "Redeploy the stack's file with them now.",
+                    "type": "boolean"
+                  },
+                  "domains": {
+                    "description": "[{host, path?, port?, https?, redirect?, strip_prefix?, www_redirect?}]: host `auto` for a generated name; port is the one the service listens on (not needed with redirect). [] removes them.",
+                    "items": {
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "service": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "service",
+                  "domains"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Set a service's domains",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "stack_domains_set"
+      }
+    },
+    "/api/v1/tools/stack_env_get": {
+      "post": {
+        "description": "A compose stack's environment as .env text (KEY=value lines, comments kept): the variables its compose file's ${VAR} resolves against at each deploy. Secret references read KEY=${{secret.NAME}}; their values are never shown.",
+        "operationId": "stack_env_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Get a stack's environment",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "stack_env_get"
+      }
+    },
+    "/api/v1/tools/stack_env_set": {
+      "post": {
+        "description": "Replace a compose stack's environment with .env text: KEY=value lines (quotes and # comments as in docker compose; comments are kept), KEY=${{secret.NAME}} for an org secret. The daemon resolves the compose file's ${VAR} against it at every deploy (a deploy's `vars` win). A secret variable may only be the whole value of a service's environment variable (`KEY: ${VAR}`), where it is delivered as the secret; anywhere else the deploy is refused, so a value never enters the stored file. A stack not yet deployed may have one, for its first deploy. Takes effect at the next deploy (deploy=true redeploys the stack's file now, answering its changes, `deployment` and `reused_secrets` as stack_deploy does).",
+        "operationId": "stack_env_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "deploy": {
+                    "description": "Redeploy the stack's file with it now.",
+                    "type": "boolean"
+                  },
+                  "env": {
+                    "description": "The .env text.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "env"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Set a stack's environment",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "stack_env_set"
+      }
+    },
     "/api/v1/tools/stack_export": {
       "post": {
-        "description": "The compose file a stack runs from, as YAML text ready for stack_deploy (the web UI's stack editor shows it): resolved (no ${VAR}), with secrets that came from a file or environment variable named as `external` store secrets, so it deploys again without their values. Also says whether the stack belongs to a project's apps (`managed_by: apps`), in which case change it through the apps, not this file.",
+        "description": "The compose file a stack runs from, as YAML text ready for stack_deploy (the web UI's stack editor shows it). A file deployed as text that needed no `vars` from its caller comes back as written (`resolved: false`): comments kept and `${VAR}` unresolved, which the stack's environment fills at each deploy (stack_env_set). Otherwise (`resolved: true`) it is the file as it resolved, with secrets that came from a file or environment variable named as `external` store secrets, so it deploys again without their values. Either way the stack's managed domains (stack_domains_set) are not in it; stack_config shows the file with them. Also says whether the stack belongs to a project's apps (`managed_by: apps`), in which case change it through the apps, not this file, and which project environment a compose stack belongs to (`project`, `environment`).",
         "operationId": "stack_export",
         "requestBody": {
           "content": {
@@ -13626,7 +14060,7 @@
     },
     "/api/v1/tools/stack_list": {
       "post": {
-        "description": "List deployed stacks with each service's replica, health and rollout state.",
+        "description": "List deployed stacks with each service's replica, health and rollout state, and the project environment each compose stack belongs to (`project`, `environment`).",
         "operationId": "stack_list",
         "requestBody": {
           "content": {
@@ -13891,7 +14325,7 @@
     },
     "/api/v1/tools/stack_rollback": {
       "post": {
-        "description": "Go back to the stack's previous deployment. A second rollback undoes the first.",
+        "description": "Go back to the stack's previous deployment (a second rollback undoes the first), or with `to`, deploy a kept deployment's compose file and managed domains again (stack_deployments lists them), resolved with the stack's environment as it is now. Answers the changes and the `deployment` it started, and with `to`, `reused_secrets` (only when there are some): the `file:`/`environment:` secrets that deployed the value an earlier deploy stored.",
         "operationId": "stack_rollback",
         "requestBody": {
           "content": {
@@ -13905,6 +14339,11 @@
                   "org": {
                     "description": "The org to act in (default: default).",
                     "type": "string"
+                  },
+                  "to": {
+                    "description": "A deployment id (stack_deployments).",
+                    "minimum": 1,
+                    "type": "integer"
                   }
                 },
                 "required": [
@@ -14087,7 +14526,7 @@
     },
     "/api/v1/tools/stack_validate": {
       "post": {
-        "description": "A dry run of stack_deploy for an editor: parses the compose YAML, checks it the way a deploy would (services, secrets, ports, ingress) and says what would change, without deploying or storing anything. Answers {valid, errors: [{line, column, message}], changes (per service), exists, managed_by, diff (a unified diff from the deployed file, stack_export's text, to this one)}; a bad file is an answer, not a failed call.",
+        "description": "A dry run of stack_deploy for an editor: parses the compose YAML, checks it the way a deploy would (services, secrets, ports, ingress) and says what would change, without deploying or storing anything, including the project environment it goes in and whether its service names are free there. Answers {valid, errors: [{line, column, message}], changes (per service), exists, managed_by, project, environment (where it belongs, or would), diff (a unified diff from stack_export's text to this one)}; a bad file is an answer, not a failed call.",
         "operationId": "stack_validate",
         "requestBody": {
           "content": {
@@ -14099,12 +14538,20 @@
                     "description": "The compose file, as YAML text.",
                     "type": "string"
                   },
+                  "environment": {
+                    "description": "As stack_deploy's.",
+                    "type": "string"
+                  },
                   "name": {
                     "description": "The stack's name; an unused one is a new stack.",
                     "type": "string"
                   },
                   "org": {
                     "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "project": {
+                    "description": "As stack_deploy's.",
                     "type": "string"
                   },
                   "vars": {

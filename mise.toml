@@ -1,0 +1,65 @@
+# Tasks for working on isb.
+#
+# `mise run preview` runs isb inside an isb VM (isb.yaml) and serves its web
+# UI, with hot reload, on this host's tailnet over https. The tasks run on
+# the host and only drive isb and tailscale; everything they build or install
+# happens inside the VM, so this file pins no toolchains for the host.
+
+[env]
+PREVIEW_PORT = "8510"
+# Every browser is signed in as superadmin dev@dev.com, with no sign-in page.
+# `PREVIEW_AUTH=password mise run preview` exercises the sign-in page instead.
+PREVIEW_AUTH = "superadmin"
+
+[tasks.preview]
+description = "Create or update the preview VM and serve its UI on the tailnet"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+host=$(tailscale status --self --json | jq -r '.Self.DNSName | rtrimstr(".")')
+url="https://$host:$PREVIEW_PORT"
+# A login session, so ubuntu has the incus-admin group provision.sh added.
+as_ubuntu() { isb exec -u root preview -- sudo -iu ubuntu "$@"; }
+mkdir -p web/node_modules   # the mount point node-modules.sh needs
+isb up -d
+isb exec -u root preview -- bash /src/scripts/preview/provision.sh
+as_ubuntu bash /src/scripts/preview/build.sh
+isb exec -u root preview -- /home/ubuntu/.local/bin/isb host setup --user ubuntu
+as_ubuntu env PREVIEW_URL="$url" PREVIEW_AUTH="$PREVIEW_AUTH" bash /src/scripts/preview/serve.sh
+# The uplink's address: the isb inside adds bridges of its own.
+ip=$(incus query "/1.0/instances/isb-preview-$USER/state" </dev/null |
+  jq -r '.network.enp5s0.addresses[] | select(.family == "inet") | .address')
+tailscale serve --bg --https="$PREVIEW_PORT" "http://$ip:5173" >/dev/null
+echo "preview: $url"
+'''
+
+[tasks."preview:rebuild"]
+description = "Rebuild isb in the preview VM and restart its daemon (the UI hot-reloads on its own)"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+isb exec -u root preview -- sudo -iu ubuntu bash /src/scripts/preview/build.sh
+isb exec -u root preview -- sudo -iu ubuntu env XDG_RUNTIME_DIR=/run/user/1000 systemctl --user restart isb.service
+'''
+
+[tasks."preview:seed"]
+description = "Make the preview's login, dev@dev.com / password, and a demo org"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+isb exec -u root preview -- sudo -iu ubuntu bash /src/scripts/preview/seed.sh
+echo "sign in as dev@dev.com with password"
+'''
+
+[tasks."preview:logs"]
+description = "Follow the preview's daemon and vite logs"
+run = "isb exec -u root preview -- journalctl --user-unit isb --user-unit isb-web -f"
+
+[tasks."preview:down"]
+description = "Stop serving the preview and delete its VM"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+tailscale serve --https="$PREVIEW_PORT" off || true
+isb down
+'''

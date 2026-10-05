@@ -144,6 +144,8 @@ mod tests {
         .unwrap();
         store
             .save(&crate::stack::StackDef {
+                source: None,
+                domains: Default::default(),
                 name: "jobs".into(),
                 org: org.clone(),
                 file,

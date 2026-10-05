@@ -1,13 +1,14 @@
 // /orgs/:org/projects/:project/:env: a project, its environments as tabs, and
-// the services (apps and databases) of the one selected, as cards.
+// the services (apps, databases and compose stacks) of the one selected, as cards.
 import { useQueryClient } from "@tanstack/react-query";
-import { Box, Boxes, Database, GitBranch, Globe, LayoutTemplate, MoreHorizontal, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Box, Boxes, ChevronDown, Database, GitBranch, Globe, Layers, LayoutTemplate, MoreHorizontal, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
-import { callTool } from "@/api/tools";
+import { callTool, type StackStatus } from "@/api/tools";
 import { PageHeader } from "@/components/app-shell";
 import { StatusDot } from "@/components/status";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -40,8 +41,10 @@ import {
   useProjects,
   useStack,
 } from "./api";
-import { AppStateBadge, ConfirmDialog, Crumbs, DeploymentBadge, EmptyState, QueryError, TabLinks } from "./components";
+import { composePath } from "@/stacks/api";
+import { AppStateBadge, ConfirmDialog, Crumbs, DeploymentBadge, EmptyState, QueryError, TabLinks, ToneBadge } from "./components";
 import { autoHostLabel, ingressOff } from "./domains";
+import { HEALTH_LABEL, HEALTH_TONE, stackHealth, useStackList } from "./health";
 import { useOrgLive } from "./live";
 import { NewAppDialog } from "./new-app-dialog";
 import { NewEnvironmentDialog } from "./project-dialogs";
@@ -64,6 +67,7 @@ export function ProjectPage() {
   const p = projects.data?.find((x) => x.name === project);
   const environment = p?.environments.find((e) => e.name === env);
   const stack = useStack(org, environment?.stack);
+  const stacks = useStackList();
   const envApps = (apps.data ?? []).filter((a) => a.project === project && a.environment === env);
   const latest = useLatestDeployments(
     org,
@@ -90,9 +94,12 @@ export function ProjectPage() {
   }
   if (!environment) return <Navigate to={`/orgs/${o}/projects/${project}/${p.environments[0]?.name ?? ""}`} replace />;
 
-  const totalApps = p.environments.reduce((n, e) => n + e.apps.length, 0);
+  const total = p.environments.reduce((n, e) => n + e.apps.length + e.compose.length, 0);
   const templateLink = `/orgs/${o}/templates?project=${encodeURIComponent(project)}&env=${encodeURIComponent(environment.name)}`;
-  const svcs = stack.data?.services ?? [];
+  const composeLink = `/orgs/${o}/projects/${encodeURIComponent(project)}/${encodeURIComponent(environment.name)}/compose/new`;
+  const compose = environment.compose.map((c) => ({ ...c, status: (stacks.data?.stacks ?? []).find((s) => s.org === org && s.name === c.name) }));
+  const nServices = envApps.length + compose.length;
+  const svcs = [...(stack.data?.services ?? []), ...compose.flatMap((c) => c.status?.services ?? [])];
   const replicas = svcs.reduce((n, s) => n + s.replicas, 0);
   const healthy = svcs.reduce((n, s) => n + s.healthy, 0);
 
@@ -105,14 +112,38 @@ export function ProjectPage() {
         actions={
           writer && (
             <>
-              <Button onClick={() => setNewApp(true)}>
-                <Plus />
-                New app
-              </Button>
-              <Button variant="outline" onClick={() => setNewDb(true)} className="hidden sm:inline-flex">
-                <Database />
-                New database
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button>
+                    <Plus />
+                    Create service
+                    <ChevronDown className="opacity-70" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuItem onSelect={() => setNewApp(true)}>
+                    <Box />
+                    App
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setNewDb(true)}>
+                    <Database />
+                    Database
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to={composeLink}>
+                      <Layers />
+                      Compose
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Link to={templateLink}>
+                      <LayoutTemplate />
+                      From a template
+                    </Link>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="icon" aria-label="Project actions">
@@ -120,27 +151,16 @@ export function ProjectPage() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuItem onSelect={() => setNewDb(true)} className="sm:hidden">
-                    <Database />
-                    New database
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <Link to={templateLink}>
-                      <LayoutTemplate />
-                      From a template
-                    </Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
                   <DropdownMenuItem onSelect={() => setNewEnv(true)}>
                     <Plus />
                     Add environment
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem variant="destructive" disabled={environment.apps.length > 0 || p.environments.length < 2} onSelect={() => setDelEnv(true)}>
+                  <DropdownMenuItem variant="destructive" disabled={environment.apps.length + environment.compose.length > 0 || p.environments.length < 2} onSelect={() => setDelEnv(true)}>
                     <Trash2 />
                     Delete {environment.name}
                   </DropdownMenuItem>
-                  <DropdownMenuItem variant="destructive" disabled={totalApps > 0} onSelect={() => setDelProject(true)}>
+                  <DropdownMenuItem variant="destructive" disabled={total > 0} onSelect={() => setDelProject(true)}>
                     <Trash2 />
                     Delete project
                   </DropdownMenuItem>
@@ -152,17 +172,33 @@ export function ProjectPage() {
       />
       <TabLinks
         active={environment.name}
-        tabs={p.environments.map((e) => ({ id: e.name, label: `${e.name} · ${e.apps.length}`, to: `/orgs/${o}/projects/${project}/${e.name}` }))}
+        tabs={p.environments.map((e) => ({ id: e.name, label: `${e.name} · ${e.apps.length + e.compose.length}`, to: `/orgs/${o}/projects/${project}/${e.name}` }))}
       />
+      {(environment.conflicts?.length ?? 0) > 0 && (
+        <Alert role="status" className="mb-5 border-warning/40 bg-warning/5">
+          <AlertTriangle />
+          <AlertTitle>Service names clash in {environment.name}</AlertTitle>
+          <AlertDescription>
+            <ul className="grid gap-0.5">
+              {environment.conflicts?.map((c) => (
+                <li key={`${c.stack}/${c.service}`}>
+                  <span className="font-mono">{c.service}</span> in <span className="font-mono">{c.stack}</span> is shadowed: the name reaches{" "}
+                  <span className="font-mono">{c.winner}</span>.
+                </li>
+              ))}
+            </ul>
+          </AlertDescription>
+        </Alert>
+      )}
       {apps.isLoading ? (
         <CardsSkeleton />
       ) : apps.error ? (
         <QueryError error={apps.error} />
-      ) : envApps.length === 0 ? (
+      ) : nServices === 0 ? (
         <Card className="py-0">
           <EmptyState
             icon={Boxes}
-            title={`No apps in ${environment.name} yet`}
+            title={`Nothing in ${environment.name} yet`}
             action={
               writer && (
                 <>
@@ -175,6 +211,12 @@ export function ProjectPage() {
                     New database
                   </Button>
                   <Button asChild variant="outline">
+                    <Link to={composeLink}>
+                      <Layers />
+                      New compose
+                    </Link>
+                  </Button>
+                  <Button asChild variant="outline">
                     <Link to={templateLink}>
                       <LayoutTemplate />
                       From a template
@@ -184,15 +226,15 @@ export function ProjectPage() {
               )
             }
           >
-            Deploy a container image, build one from a git repository, or start a database. Everything here runs as the stack{" "}
-            <span className="font-mono text-foreground/80">{environment.stack}</span>.
+            Deploy a container image, build one from a git repository, start a database, or paste a compose file. Apps and databases here run as the
+            stack <span className="font-mono text-foreground/80">{environment.stack}</span>.
           </EmptyState>
         </Card>
       ) : (
         <>
           <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <span>
-              {envApps.length} service{envApps.length === 1 ? "" : "s"}
+              {nServices} service{nServices === 1 ? "" : "s"}
             </span>
             <span aria-hidden>·</span>
             <span>
@@ -211,12 +253,15 @@ export function ProjectPage() {
             {envApps.map((a) => (
               <ServiceCard key={a.name} org={org} app={a} stack={stack.data} deployments={latest.get(a.name) ?? []} />
             ))}
+            {compose.map((c) => (
+              <ComposeCard key={c.name} to={composePath(org, { project, environment: environment.name }, c.name)} name={c.name} services={c.services} status={c.status} />
+            ))}
           </div>
         </>
       )}
-      {writer && (totalApps > 0 || p.environments.length < 2) && (
+      {writer && (total > 0 || p.environments.length < 2) && (
         <p className="mt-6 text-xs text-muted-foreground">
-          {totalApps > 0 ? "A project or environment can be deleted once its apps are." : "A project keeps at least one environment."}
+          {total > 0 ? "A project or environment can be deleted once its services are." : "A project keeps at least one environment."}
         </p>
       )}
 
@@ -227,7 +272,7 @@ export function ProjectPage() {
         open={delEnv}
         onOpenChange={setDelEnv}
         title={`Delete environment ${environment.name}?`}
-        description={`It has no apps; this removes it from ${project}.`}
+        description={`It has no services; this removes it from ${project}.`}
         confirmLabel="Delete environment"
         onConfirm={async () => {
           await callTool("environment_delete", { project, name: environment.name }, org);
@@ -240,9 +285,8 @@ export function ProjectPage() {
         open={delProject}
         onOpenChange={setDelProject}
         title={`Delete project ${project}?`}
-        description="It has no apps left. Its environments go with it."
+        description="It has no services left. Its environments go with it."
         confirmLabel="Delete project"
-        typed={project}
         onConfirm={async () => {
           await callTool("project_delete", { name: project }, org);
           await qc.invalidateQueries({ queryKey: keys.projects(org) });
@@ -360,6 +404,62 @@ function ServiceCard({ org, app: a, stack, deployments }: { org: string; app: Ap
     </Card>
   );
 }
+
+/** A compose stack in the environment: its services and how they are doing. */
+function ComposeCard({ to, name, services, status }: { to: string; name: string; services: string[]; status: StackStatus | undefined }) {
+  const h = stackHealth(status);
+  const replicas = status?.services.reduce((n, s) => n + s.replicas, 0) ?? 0;
+  const healthy = status?.services.reduce((n, s) => n + s.healthy, 0) ?? 0;
+  return (
+    <Card className="group relative h-full gap-0 py-0 transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-md has-[a.card-link:focus-visible]:ring-[3px] has-[a.card-link:focus-visible]:ring-ring/50">
+      <div className="flex items-start gap-3 px-5 pt-4 pb-3">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-gradient-to-b from-muted/30 to-muted text-muted-foreground">
+          <Layers className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <Link to={to} className="card-link truncate text-[15px] font-semibold tracking-tight after:absolute after:inset-0 after:rounded-xl focus-visible:outline-none">
+              {name}
+            </Link>
+            <ToneBadge tone={HEALTH_TONE[h]} pulse={h === "updating"}>
+              {HEALTH_LABEL[h]}
+            </ToneBadge>
+          </div>
+          <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+            COMPOSE · {services.length} service{services.length === 1 ? "" : "s"}
+          </p>
+        </div>
+      </div>
+      <div className="flex min-h-6 items-center gap-1.5 px-5 pb-3 text-xs text-muted-foreground">
+        <Boxes className="size-3.5 shrink-0" />
+        <span className="truncate" title={services.join(", ")}>
+          {services.join(", ") || "No services"}
+        </span>
+      </div>
+      <div className="mt-auto flex items-center justify-between gap-3 border-t px-5 py-2.5 text-xs text-muted-foreground">
+        <span className="inline-flex items-center gap-1.5 tabular-nums">
+          <StatusDot tone={HEALTH_DOT[h]} className="size-1.5" />
+          {status ? `${healthy}/${replicas} healthy` : "Not running"}
+        </span>
+        {status ? (
+          <span className="truncate tabular-nums" title={new Date(status.deployed_at * 1000).toLocaleString()}>
+            {relativeTime(status.deployed_at)}
+          </span>
+        ) : (
+          <span>Never deployed</span>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+const HEALTH_DOT: Record<keyof typeof HEALTH_TONE, Tone> = {
+  healthy: "success",
+  degraded: "warning",
+  failing: "danger",
+  updating: "info",
+  idle: "muted",
+};
 
 function CardsSkeleton() {
   return (

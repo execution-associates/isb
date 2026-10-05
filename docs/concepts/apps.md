@@ -27,6 +27,33 @@ org → project → environment → app
 - An **app** is a source plus settings. Deploying it replaces its own service
   in the stack and nothing else: revisions are per service, so only that app
   rolls.
+- An environment also holds **compose stacks**: stacks deployed from a
+  compose file you write ([below](#compose-stacks-in-an-environment)).
+
+## Compose stacks in an environment
+
+Every compose stack belongs to exactly one project environment, as in
+Dokploy. `stack_deploy` (or `isb stack deploy --project P --env E`) puts a new
+stack where you say, making the project if it does not exist; with neither,
+it goes to the project named like the stack (its `production` environment,
+else its first), made with a `production` environment when there is none. A
+stack's owner never changes: to move one, remove it and deploy it again.
+
+Belonging is a record on the project and nothing more. The stack keeps its
+name, its services keep their names (`<service>.<stack>`), and nothing is
+redeployed; what it gains is the environment's names,
+`<service>.<project>-<env>`, so its services and the environment's apps reach
+each other the same way. A name in an environment has one holder: a deploy
+or an app that would take one already held is refused
+([Service discovery](stacks.md#service-discovery) has the rule for names
+held twice from before).
+
+A stack with no owner when the daemon starts is adopted the same way, a
+stack whose name does not fit a project name going to one made from its first
+19 characters (numbered `-2`, `-3`, ... when that is taken). Removing a stack
+(`isb stack rm`) takes it out of its environment. A project or environment
+with compose stacks cannot be deleted, and an environment cannot be named so
+that `<project>-<env>` is a compose stack's name.
 
 ## Sources
 

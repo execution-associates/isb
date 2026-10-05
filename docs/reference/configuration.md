@@ -217,6 +217,16 @@ Read by the daemon.
 See [Developing the web UI](../contributing/web-ui.md). The variables isb's
 own tests read are in [Developing isb](../contributing/index.md).
 
+### Developing isb
+
+Only debug builds (`cargo build`) honour these; a release build refuses to
+run with either one set.
+
+| Variable | Read by | |
+|---|---|---|
+| `ISB_DEV_WEAK_PASSWORDS` | `isb user`, the daemon | `1`: passwords of any length (not empty), so a dev daemon can have `dev@dev.com` / `password` |
+| `ISB_DEV_SUPERADMIN` | the daemon | an email: every HTTP request with no credential (no session cookie, token or Access assertion) is a superadmin acting as that isb user (synthetic if there is none), audited as `dev:<email>`. The daemon refuses to start unless every `--listen` address is loopback |
+
 ## Variables isb sets
 
 What isb puts in a guest's environment, for scripts to read:

@@ -13,11 +13,14 @@ use crate::app::manifest::{self, Problem};
 use crate::spec::SecretDef;
 use crate::stack::StackDef;
 
-/// The YAML a stack was deployed from. Secrets that were read where the
-/// deployer stood (`file:`, `environment:`) were stored in the org's store
-/// when it deployed, so the document names them as `external` secrets and
-/// can be deployed again without their values.
-fn export_yaml(def: &StackDef) -> Result<String> {
+/// The YAML a stack was deployed from, as its file resolved. Secrets that
+/// were read where the deployer stood (`file:`, `environment:`) were stored
+/// in the org's store when it deployed, so the document names them as
+/// `external` secrets (keeping their `on_change` and `rotate`) and can be
+/// deployed again without their values. The stack's managed domains are
+/// left out (a deploy merges them in again), and a `$` is written `$$`, so
+/// deploying the text gives the same file.
+pub(in crate::daemon) fn export_yaml(def: &StackDef) -> Result<String> {
     let mut file = def.file.clone();
     for (key, s) in file.secrets.iter_mut() {
         if !s.is_client_side() {
@@ -27,32 +30,66 @@ fn export_yaml(def: &StackDef) -> Result<String> {
             Some(b) => b.name.clone(),
             None => crate::stack::secrets::owned_name(&def.name, key)?,
         };
+        // What a new version does (`on_change`, `rotate`) is the file's,
+        // not the value's: it goes with the reference.
         *s = SecretDef {
             external: true,
             name: Some(store),
+            on_change: s.on_change,
+            rotate: s.rotate.take(),
             ..SecretDef::default()
         };
     }
-    serde_yaml_ng::to_string(&file).map_err(|e| Error::invalid(e.to_string()))
+    for (svc, ds) in crate::stack::source::file_domains(&def.file, &def.domains) {
+        if let Some(s) = file.services.get_mut(&svc) {
+            s.domains = ds;
+        }
+    }
+    let mut v = serde_yaml_ng::to_value(&file).map_err(|e| Error::invalid(e.to_string()))?;
+    escape_dollars(&mut v);
+    serde_yaml_ng::to_string(&v).map_err(|e| Error::invalid(e.to_string()))
 }
 
-/// What owns a stack besides its file: the apps of a project environment
-/// (`<project>-<env>`, and a pull request's `<project>-<env>-pr-<n>`), or
-/// the org's ingress tunnel.
-fn managed_by(d: &Daemon, org: &crate::org::OrgId, stack: &str) -> Option<&'static str> {
-    if stack == crate::ingress::cloudflare::TUNNEL_STACK {
-        return Some("ingress");
+/// `$` as `$$` in every string and key, so interpolation gives it back.
+fn escape_dollars(v: &mut serde_yaml_ng::Value) {
+    use serde_yaml_ng::Value as Y;
+    match v {
+        Y::String(s) if s.contains('$') => *s = s.replace('$', "$$"),
+        Y::Sequence(seq) => seq.iter_mut().for_each(escape_dollars),
+        Y::Mapping(m) => {
+            let old = std::mem::take(m);
+            for (mut k, mut x) in old {
+                escape_dollars(&mut k);
+                escape_dollars(&mut x);
+                m.insert(k, x);
+            }
+        }
+        Y::Tagged(t) => escape_dollars(&mut t.value),
+        _ => {}
     }
-    let projects = d.apps.project_list(org).ok()?;
-    projects
-        .iter()
-        .flat_map(|p| {
-            p.environments
-                .iter()
-                .map(move |e| format!("{}-{e}", p.name))
-        })
-        .any(|s| stack == s || stack.strip_prefix(&format!("{s}-pr-")).is_some())
-        .then_some("apps")
+}
+
+/// The compose text a stack runs from: as written when the daemon kept it,
+/// else [`export_yaml`].
+pub(in crate::daemon) fn source_text(def: &StackDef) -> Result<String> {
+    match &def.source {
+        Some(s) => Ok(s.clone()),
+        None => export_yaml(def),
+    }
+}
+
+/// What owns a stack besides its file ([`crate::app::Apps::managed_by`]).
+fn managed_by(d: &Daemon, org: &crate::org::OrgId, stack: &str) -> Option<&'static str> {
+    d.apps.managed_by(org, stack)
+}
+
+/// The project environment a compose stack belongs to: `(project,
+/// environment)`, null when it has none.
+fn owner_json(d: &Daemon, org: &crate::org::OrgId, stack: &str) -> (Value, Value) {
+    match d.apps.compose_owner(org, stack) {
+        Some(o) => (json!(o.project), json!(o.environment)),
+        None => (Value::Null, Value::Null),
+    }
 }
 
 fn org_id(org: &Option<String>) -> Result<crate::org::OrgId> {
@@ -73,7 +110,7 @@ fn stack_export_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()>
         d,
         "stack_export",
         "Export a stack as YAML",
-        "The compose file a stack runs from, as YAML text ready for stack_deploy (the web UI's stack editor shows it): resolved (no ${VAR}), with secrets that came from a file or environment variable named as `external` store secrets, so it deploys again without their values. Also says whether the stack belongs to a project's apps (`managed_by: apps`), in which case change it through the apps, not this file.",
+        "The compose file a stack runs from, as YAML text ready for stack_deploy (the web UI's stack editor shows it). A file deployed as text that needed no `vars` from its caller comes back as written (`resolved: false`): comments kept and `${VAR}` unresolved, which the stack's environment fills at each deploy (stack_env_set). Otherwise (`resolved: true`) it is the file as it resolved, with secrets that came from a file or environment variable named as `external` store secrets, so it deploys again without their values. Either way the stack's managed domains (stack_domains_set) are not in it; stack_config shows the file with them. Also says whether the stack belongs to a project's apps (`managed_by: apps`), in which case change it through the apps, not this file, and which project environment a compose stack belongs to (`project`, `environment`).",
         obj(json!({"name": {"type": "string"}}), &["name"]),
         ann.ro,
         |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
@@ -86,9 +123,13 @@ fn stack_export_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()>
             }
             let a: A = args(a)?;
             let def = d.ctl.definition(&qname(&a.org, &a.name)?)?;
+            let (project, environment) = owner_json(d, &def.org, &def.name);
             Ok(json!({
+                "project": project,
+                "environment": environment,
                 "name": def.name,
-                "yaml": export_yaml(&def)?,
+                "yaml": source_text(&def)?,
+                "resolved": def.source.is_none(),
                 "services": def.file.services.keys().collect::<Vec<_>>(),
                 "managed_by": managed_by(d, &def.org, &def.name),
                 "deployed_at": def.deployed_at,
@@ -105,12 +146,14 @@ fn stack_validate_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<(
         d,
         "stack_validate",
         "Check a compose file",
-        "A dry run of stack_deploy for an editor: parses the compose YAML, checks it the way a deploy would (services, secrets, ports, ingress) and says what would change, without deploying or storing anything. Answers {valid, errors: [{line, column, message}], changes (per service), exists, managed_by, diff (a unified diff from the deployed file, stack_export's text, to this one)}; a bad file is an answer, not a failed call.",
+        "A dry run of stack_deploy for an editor: parses the compose YAML, checks it the way a deploy would (services, secrets, ports, ingress) and says what would change, without deploying or storing anything, including the project environment it goes in and whether its service names are free there. Answers {valid, errors: [{line, column, message}], changes (per service), exists, managed_by, project, environment (where it belongs, or would), diff (a unified diff from stack_export's text to this one)}; a bad file is an answer, not a failed call.",
         obj(
             json!({
                 "name": {"type": "string", "description": "The stack's name; an unused one is a new stack."},
                 "compose": {"type": "string", "description": "The compose file, as YAML text."},
-                "vars": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Variables for ${VAR}."}
+                "vars": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Variables for ${VAR}."},
+                "project": {"type": "string", "description": "As stack_deploy's."},
+                "environment": {"type": "string", "description": "As stack_deploy's."}
             }),
             &["name", "compose"]
         ),
@@ -125,14 +168,19 @@ fn stack_validate_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<(
                 vars: BTreeMap<String, String>,
                 #[serde(default)]
                 org: Option<String>,
+                #[serde(default)]
+                project: Option<String>,
+                #[serde(default)]
+                environment: Option<String>,
             }
             let a: A = args(a)?;
             let org = org_id(&a.org)?;
+            let (project, environment) = owner_json(d, &org, &a.name);
             let current = d
                 .ctl
                 .definition(&qname(&a.org, &a.name)?)
                 .ok()
-                .map(|def| export_yaml(&def))
+                .map(|def| source_text(&def))
                 .transpose()?;
             let managed = managed_by(d, &org, &a.name);
             let dry = stack_deploy(
@@ -140,12 +188,15 @@ fn stack_validate_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<(
                 json!({
                     "name": a.name, "org": a.org, "compose": a.compose,
                     "vars": a.vars, "dry_run": true,
+                    "project": a.project, "environment": a.environment,
                 }),
                 c,
             );
             let mut out = json!({
                 "exists": current.is_some(),
                 "managed_by": managed,
+                "project": project,
+                "environment": environment,
                 "diff": manifest::unified_diff(current.as_deref().unwrap_or(""), &a.compose),
             });
             match dry {
@@ -153,6 +204,8 @@ fn stack_validate_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<(
                     out["valid"] = json!(true);
                     out["errors"] = json!([]);
                     out["changes"] = v["changes"].clone();
+                    out["project"] = v["owner"]["project"].clone();
+                    out["environment"] = v["owner"]["environment"].clone();
                 }
                 Err(e @ (Error::Forbidden(_) | Error::NotFound(_))) => return Err(e),
                 Err(e) => {
@@ -179,7 +232,7 @@ mod tests {
 
     const COMPOSE: &str = r#"
 secrets:
-  db_password: {environment: DB_PASSWORD}
+  db_password: {environment: DB_PASSWORD, on_change: restart}
   api_key: {external: true}
 services:
   api:
@@ -206,6 +259,8 @@ volumes:
 
     fn def(text: &str) -> StackDef {
         StackDef {
+            source: None,
+            domains: Default::default(),
             name: "shop".into(),
             org: crate::org::OrgId::default_org(),
             file: load(text, "shop").file,
@@ -232,12 +287,46 @@ volumes:
         assert_eq!(again.file.services, d.file.services);
         assert_eq!(again.file.volumes, d.file.volumes);
         assert!(again.file.secrets["db_password"].external);
+        assert_eq!(
+            again.file.secrets["db_password"].on_change,
+            Some(crate::spec::OnChange::Restart)
+        );
         assert_eq!(again.file.secrets["api_key"], d.file.secrets["api_key"]);
         // And exporting that is a fixed point.
         let e2 = StackDef {
+            source: None,
+            domains: Default::default(),
             file: again.file,
             ..d
         };
         assert_eq!(export_yaml(&e2).unwrap(), yaml);
+    }
+
+    #[test]
+    fn the_export_leaves_managed_domains_out_and_keeps_dollars() {
+        let text = "services:\n  web:\n    image: dev-base\n    command: [sh, -c, 'echo $$HOME']\n    domains: [{host: a.example.com, port: 80}]\n";
+        let mut d = def(text);
+        let managed = crate::spec::DomainSpec {
+            host: "b.example.com".into(),
+            port: Some(80),
+            ..Default::default()
+        };
+        d.domains = BTreeMap::from([("web".to_string(), vec![managed.clone()])]);
+        d.file
+            .services
+            .get_mut("web")
+            .unwrap()
+            .domains
+            .push(managed);
+        let yaml = export_yaml(&d).unwrap();
+        assert!(!yaml.contains("b.example.com"), "{yaml}");
+        let again = load(&yaml, "shop");
+        let web = &again.file.services["web"];
+        assert_eq!(web.domains.len(), 1);
+        assert_eq!(web.domains[0].host, "a.example.com");
+        assert_eq!(web.command, d.file.services["web"].command);
+        // As written, when the daemon kept it.
+        d.source = Some(text.into());
+        assert_eq!(source_text(&d).unwrap(), text);
     }
 }

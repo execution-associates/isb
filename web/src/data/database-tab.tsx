@@ -1,10 +1,12 @@
 // A database app's Database tab: how to connect (database_get), the env
-// line for apps, and Reveal for the password (members; hidden after 30 s).
+// line for apps, Reveal for the password (members; hidden after 30 s), and
+// deleting the database (its General tab, since a database has none).
 import { Check, Copy, Database as DatabaseIcon, Eye, EyeOff, HardDrive, KeyRound, Loader2 } from "lucide-react";
 import { type ReactNode, useEffect, useReducer, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
+import { DeleteAppSection } from "@/apps/app-delete";
 import { QueryError, Section } from "@/apps/components";
 import { serviceOf, useStack } from "@/apps/api";
 import { StatusBadge } from "@/components/status";
@@ -200,6 +202,7 @@ export function DatabaseTab({ org, app }: { org: string; app: { name: string; st
           </div>
         </dl>
       </Section>
+      {canWrite && <DeleteAppSection org={org} app={{ name: app.name, project: d.project, environment: d.environment }} database={{ volume: c.volume }} />}
     </div>
   );
 }

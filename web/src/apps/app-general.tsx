@@ -1,4 +1,5 @@
-// The General tab: source, build, webhook, scale and runtime settings.
+// The General tab: source, build, webhook, scale and runtime settings, and
+// deleting the app.
 import { useQueryClient } from "@tanstack/react-query";
 import { Eye, KeyRound, Loader2, Minus, Plus, RefreshCw, RotateCw, TerminalSquare } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -19,6 +20,7 @@ import { useMe } from "@/lib/session";
 import type { Tone } from "@/lib/status";
 import { type App, type AppSource, type Builder, type BuildSettings, type GitAuth, type InstanceDetail, isGit, keys, serviceOf, useStack } from "./api";
 import { ConfirmDialog, Section } from "./components";
+import { DeleteAppSection } from "./app-delete";
 import { gitUrlProblem } from "./new-app-dialog";
 import { useAppUpdate } from "./save";
 import { SaveFooter } from "./save-footer";
@@ -35,6 +37,7 @@ export function GeneralTab({ org, app }: { org: string; app: App }) {
       <RuntimeSection org={org} app={app} writer={writer} />
       <HealthSection org={org} app={app} writer={writer} />
       <WebhookSection org={org} app={app} writer={writer} />
+      {writer && <DeleteAppSection org={org} app={app} />}
     </div>
   );
 }

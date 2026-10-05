@@ -1,5 +1,5 @@
 // The org overview: stat tiles, projects with their health, recent
-// deployments, other stacks and the activity feed.
+// deployments and the activity feed.
 import { useQueries, useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
@@ -10,7 +10,6 @@ import {
   FolderKanban,
   History,
   LayoutTemplate,
-  Layers,
   MousePointerClick,
   Plus,
   Rocket,
@@ -31,7 +30,7 @@ import { DEPLOYMENT_TONE, inProgress, type Tone } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { type App, type AppState, appState, type Deployment, keys, type Project, serviceOf, type StackDetail, useApps, useProjects } from "./api";
 import { DeploymentBadge, Dot, EmptyState, QueryError, ToneBadge } from "./components";
-import { HEALTH_LABEL, HEALTH_TONE, type Health, parseSize, stackHealth, usageOf, useOrgOverview, worst } from "./health";
+import { HEALTH_LABEL, HEALTH_TONE, parseSize, projectHealth, usageOf, useOrgOverview } from "./health";
 import { useOrgLive } from "./live";
 import { OrgActivity, actorLabel } from "./overview-activity";
 import { NewProjectDialog } from "./project-dialogs";
@@ -92,8 +91,6 @@ export function OrgDashboard({ org }: { org: string }) {
   if (projects.error) return <QueryError error={projects.error} />;
 
   const fresh = !projects.isLoading && list.length === 0;
-  const projectStacks = new Set(list.flatMap((p) => p.environments.map((e) => e.stack)));
-  const others = overview.isSuccess ? stacks.filter((s) => !projectStacks.has(s.name)) : [];
 
   return (
     <>
@@ -115,7 +112,6 @@ export function OrgDashboard({ org }: { org: string }) {
 
       {fresh ? (
         <div className="mt-6 grid gap-6">
-          {others.length > 0 && <OtherStacks stacks={others} />}
           <OrgActivity org={org} />
         </div>
       ) : (
@@ -123,7 +119,6 @@ export function OrgDashboard({ org }: { org: string }) {
           <div className="grid min-w-0 gap-6">
             <ProjectsCard org={org} projects={list} loading={projects.isLoading} stacks={stacks} deps={deps.byApp} apps={appList} />
             <RecentDeployments org={org} apps={appList} deps={deps.byApp} loading={apps.isLoading || deps.loading} />
-            {others.length > 0 && <OtherStacks stacks={others} />}
           </div>
           <OrgActivity org={org} className="xl:sticky xl:top-20" />
         </div>
@@ -344,10 +339,6 @@ function lastDeployOf(p: Project, deps: Map<string, Deployment[]>): Deployment |
   return best;
 }
 
-export function projectHealthOf(p: Project, stacks: StackDetail[]): Health {
-  return worst(p.environments.map((e) => stackHealth(stacks.find((s) => s.name === e.stack))));
-}
-
 function ProjectsCard({
   org,
   projects,
@@ -381,10 +372,11 @@ function ProjectsCard({
       ) : (
         <ul className="divide-y">
           {shown.map((p) => {
-            const h = projectHealthOf(p, stacks);
+            const h = projectHealth(p, stacks, org);
             const n = p.environments.reduce((k, e) => k + e.apps.length, 0);
             const last = lastDeployOf(p, deps);
             const dbs = apps.filter((a) => a.project === p.name && "database" in a.source).length;
+            const nc = p.environments.reduce((k, e) => k + e.compose.length, 0);
             return (
               <li key={p.name}>
                 <Link
@@ -402,6 +394,7 @@ function ProjectsCard({
                     <span className="block truncate text-xs text-muted-foreground">
                       {p.environments.map((e) => e.name).join(", ")} · {n - dbs} app{n - dbs === 1 ? "" : "s"}
                       {dbs > 0 && `, ${dbs} database${dbs === 1 ? "" : "s"}`}
+                      {nc > 0 && `, ${nc} compose`}
                     </span>
                   </span>
                   <span className="hidden shrink-0 text-right text-xs text-muted-foreground sm:block">
@@ -500,40 +493,6 @@ function RecentDeployments({ org, apps, deps, loading }: { org: string; apps: Ap
           })}
         </ul>
       )}
-    </Card>
-  );
-}
-
-// ---- Stacks outside projects (deployed from compose files) ----
-
-function OtherStacks({ stacks }: { stacks: StackDetail[] }) {
-  return (
-    <Card className="gap-0 overflow-hidden py-0">
-      <CardHeader className="border-b px-5 py-3 [.border-b]:pb-3">
-        <CardTitle className="flex h-8 items-center text-[15px] font-semibold tracking-tight">Compose stacks</CardTitle>
-      </CardHeader>
-      <ul className="divide-y">
-        {stacks.map((s) => {
-          const h = stackHealth(s);
-          const r = s.services.reduce((n, x) => n + x.replicas, 0);
-          const ok = s.services.reduce((n, x) => n + x.healthy, 0);
-          return (
-            <li key={s.name} className="flex items-center gap-3 px-5 py-3">
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-muted/50">
-                <Layers className="size-4 text-muted-foreground" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold">{s.name}</span>
-                <span className="block truncate text-xs text-muted-foreground">{s.services.map((x) => x.service).join(", ")}</span>
-              </span>
-              <span className="hidden text-xs text-muted-foreground tabular-nums sm:block">
-                {ok}/{r} healthy
-              </span>
-              <ToneBadge tone={HEALTH_TONE[h]}>{HEALTH_LABEL[h]}</ToneBadge>
-            </li>
-          );
-        })}
-      </ul>
     </Card>
   );
 }

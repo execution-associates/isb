@@ -80,6 +80,46 @@ fn tokens_decide_alone() {
     ));
 }
 
+/// `ISB_DEV_SUPERADMIN`: a loopback request with no credential, as the isb
+/// user when there is one; anything with a credential, or not on loopback,
+/// is judged as before. Off, the same request is nobody.
+#[cfg(debug_assertions)]
+#[test]
+fn dev_superadmin_signs_in_bare_loopback_requests() {
+    let s = store();
+    let bare = req("127.0.0.1:1", &[]);
+    let off = Gate::new(s.clone(), None, None);
+    assert!(matches!(off.resolve(&bare, None), Resolved::None));
+    let g = Gate::new(s.clone(), None, None).with_dev(Some("dev@dev.com".into()));
+    match g.resolve(&bare, None) {
+        Resolved::Superadmin(sa) => {
+            assert_eq!(sa.label(), "dev:dev@dev.com");
+            assert!(!sa.has_account());
+            assert!(sa.source.is_ambient());
+        }
+        _ => panic!("no dev superadmin"),
+    }
+    let dev = s.create_user("dev@dev.com", "Dev", None, false).unwrap();
+    match g.resolve(&bare, None) {
+        Resolved::Superadmin(sa) => assert_eq!(sa.principal.user.id, dev.id),
+        _ => panic!("no dev superadmin"),
+    }
+    for creds in [
+        &[("Cookie", "isb_session=isb_sess_x")][..],
+        &[("Authorization", "Bearer isb_tok_x")],
+        &[(ASSERTION_HEADER, "x")],
+    ] {
+        assert!(matches!(
+            g.resolve(&req("127.0.0.1:1", creds), None),
+            Resolved::None
+        ));
+    }
+    assert!(matches!(
+        g.resolve(&req("10.0.0.5:1", &[]), None),
+        Resolved::None
+    ));
+}
+
 #[test]
 fn access_needs_a_verified_listed_identity_and_this_host() {
     let s = store();

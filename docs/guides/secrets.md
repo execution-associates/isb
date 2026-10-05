@@ -258,7 +258,13 @@ store (or a driver's reference), the driver, and the version deployed
 - `file:` and `environment:` are read by the client running `isb stack
   deploy`, which sends the values; the daemon stores each as a `local` secret
   named `<stack>_<key>` in the org, as swarm does. A value equal to the stored
-  one keeps its version.
+  one keeps its version. A deploy that sends none reuses the stored value
+  and says so (`reused_secrets`, a `warn` event, a warning from the CLI),
+  unless it passes `reuse_secrets: false` (`--no-reuse-secrets`), which
+  fails it ([Stacks](../concepts/stacks.md)). A reused value keeps its
+  version (the current one, after any `isb secret set <stack>_<key>`), so
+  nothing cycles; a new value is a new version, and each service using it
+  acts per its `on_change`, as for `isb secret set`.
 - `age:` is decrypted by the daemon and stored the same way.
 - `driver: X, name: REF` is read through driver X.
 

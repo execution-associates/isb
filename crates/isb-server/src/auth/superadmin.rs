@@ -8,10 +8,12 @@
 //!   [`crate::server::tailnet`] check), judged from the real socket peer;
 //! - a **Cloudflare Access identity** on `isb serve --superadmin-access`: a
 //!   verified `Cf-Access-Jwt-Assertion` whose email (or service token
-//!   client id) is on the list.
+//!   client id) is on the list;
+//! - in a debug build, `ISB_DEV_SUPERADMIN` ([`super::dev`]): any loopback
+//!   request with no credential, for developing isb.
 //!
-//! A superadmin acts as an isb user when its tailnet login or Access email is
-//! one, else as a synthetic principal (user id 0) named after the source.
+//! A superadmin acts as an isb user when its tailnet login, Access email or
+//! dev email is one, else as a synthetic principal (user id 0) named after the source.
 
 use std::time::Duration;
 
@@ -43,11 +45,16 @@ pub enum SuperadminSource {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         service_token: bool,
     },
+    /// `ISB_DEV_SUPERADMIN` ([`super::dev`]; debug builds): any loopback
+    /// request with no credential.
+    Dev {
+        email: String,
+    },
 }
 
 impl SuperadminSource {
-    /// `token:<name>` or `tailnet:<login>` (a tagged node: `tailnet:<node>`),
-    /// as audit rows and `isb.owner` labels name it.
+    /// `token:<name>`, `tailnet:<login>` (a tagged node: `tailnet:<node>`),
+    /// `access:<name>` or `dev:<email>`, as audit rows and `isb.owner` labels name it.
     pub fn label(&self) -> String {
         match self {
             SuperadminSource::Token { name, .. } => format!("token:{name}"),
@@ -59,15 +66,19 @@ impl SuperadminSource {
                 }
             }
             SuperadminSource::Access { name, .. } => format!("access:{name}"),
+            SuperadminSource::Dev { email } => format!("dev:{email}"),
         }
     }
 
     /// Sent by the browser on its own (a tailnet connection; Access's
-    /// `CF_Authorization` cookie): writes need the CSRF defences.
+    /// `CF_Authorization` cookie; no credential at all, for dev): writes
+    /// need the CSRF defences.
     pub fn is_ambient(&self) -> bool {
         matches!(
             self,
-            SuperadminSource::Tailnet { .. } | SuperadminSource::Access { .. }
+            SuperadminSource::Tailnet { .. }
+                | SuperadminSource::Access { .. }
+                | SuperadminSource::Dev { .. }
         )
     }
 }
@@ -357,6 +368,11 @@ mod tests {
         };
         assert_eq!(access.label(), "access:a@example.com");
         assert!(access.is_ambient());
+        let dev = SuperadminSource::Dev {
+            email: "dev@dev.com".into(),
+        };
+        assert_eq!(dev.label(), "dev:dev@dev.com");
+        assert!(dev.is_ambient());
         let s = Superadmin::synthetic(tagged);
         assert!(!s.has_account());
         assert!(s.principal.platform_admin);

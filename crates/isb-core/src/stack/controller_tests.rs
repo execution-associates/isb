@@ -4,6 +4,8 @@ use super::*;
 
 fn def(y: &str) -> StackDef {
     StackDef {
+        source: None,
+        domains: Default::default(),
         name: "app".into(),
         org: crate::org::OrgId::default_org(),
         file: serde_yaml_ng::from_str(y).unwrap(),
@@ -386,4 +388,57 @@ fn onepassword_stacks(
     // The controller outlives this function; so must its state.
     std::mem::forget(dir);
     (ctl, due)
+}
+
+#[test]
+fn a_scope_change_rewrites_the_service_name_and_nothing_else_does() {
+    let ctl = quiet_controller();
+    let d = org_def("wiki", "lab");
+    let mut w = failing_worker(&ctl, &d);
+    w.rt.insert(
+        "wiki-web-1".into(),
+        InstRt {
+            ip: Some("10.0.0.2".parse().unwrap()),
+            in_rotation: true,
+            ..Default::default()
+        },
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("wiki.web");
+    let read = || std::fs::read_to_string(&file).unwrap();
+    // No scope answerer: today's names.
+    w.sync_dns_in(dir.path());
+    assert_eq!(read(), "10.0.0.2 web.wiki.lab.isb web.wiki\n");
+    // Nothing changed: not written again.
+    std::fs::remove_file(&file).unwrap();
+    w.sync_dns_in(dir.path());
+    assert!(!file.exists());
+    // The stack joins wiki/production: the names follow on the next pass.
+    let scope = Arc::new(Mutex::new(None::<DnsScope>));
+    let s2 = scope.clone();
+    ctl.set_dns_scope(Arc::new(move |org: &crate::org::OrgId, stack: &str| {
+        assert_eq!((org.as_str(), stack), ("lab", "wiki"));
+        s2.lock().unwrap().clone()
+    }));
+    *scope.lock().unwrap() = Some(DnsScope {
+        name: "wiki-production".into(),
+        alias: ["web".to_string()].into(),
+    });
+    w.sync_dns_in(dir.path());
+    assert_eq!(
+        read(),
+        "10.0.0.2 web.wiki.lab.isb web.wiki web.wiki-production.lab.isb web.wiki-production\n"
+    );
+    std::fs::remove_file(&file).unwrap();
+    w.sync_dns_in(dir.path());
+    assert!(!file.exists(), "the same scope writes nothing");
+    // A scope without this service (it lost a collision): back to today's.
+    *scope.lock().unwrap() = Some(DnsScope {
+        name: "wiki-production".into(),
+        alias: BTreeSet::new(),
+    });
+    w.sync_dns_in(dir.path());
+    assert_eq!(read(), "10.0.0.2 web.wiki.lab.isb web.wiki\n");
+    // republish_dns wakes the org's workers (none here): no panic, no lock held.
+    ctl.republish_dns(&crate::org::OrgId::new("lab").unwrap());
 }

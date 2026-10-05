@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::git::{self, Credentials, GitAuth};
-use super::{App, AppSpec, Project, Rendered, Source, webhook};
+use super::{App, AppSpec, Rendered, Source, webhook};
 use crate::build::{BuildRequest, BuiltImage};
 use crate::client::Client;
 use crate::error::{Error, Result};
@@ -189,6 +189,8 @@ pub(super) struct Inner {
     /// database's URL secrets, written at deploy), for what stacks don't
     /// cover: the workspaces.
     pub(super) secret_hook: OnceLock<SecretHook>,
+    /// Compose stack owners per org, read from the project records.
+    pub(super) owners: Mutex<BTreeMap<OrgId, Arc<super::compose::Owners>>>,
 }
 
 /// Called with an org and a secret's name after it got a new value.
@@ -220,6 +222,7 @@ impl Apps {
                 queues: Mutex::new(BTreeMap::new()),
                 deliveries: Mutex::new(VecDeque::new()),
                 secret_hook: OnceLock::new(),
+                owners: Mutex::new(BTreeMap::new()),
             }),
         };
         a.recover();
@@ -255,10 +258,6 @@ impl Apps {
         super::org_root(&self.inner.state, org).join("apps")
     }
 
-    fn projects_dir(&self, org: &OrgId) -> PathBuf {
-        self.apps_dir(org).join("projects")
-    }
-
     pub(super) fn app_dir(&self, org: &OrgId, app: &str) -> PathBuf {
         self.apps_dir(org).join(app)
     }
@@ -272,139 +271,6 @@ impl Apps {
         super::org_root(&self.inner.state, org)
             .join("sources")
             .join(app)
-    }
-
-    // --- projects --------------------------------------------------------
-
-    pub fn project_create(
-        &self,
-        org: &OrgId,
-        name: &str,
-        description: &str,
-        environments: &[String],
-    ) -> Result<Project> {
-        super::validate_part("project", name)?;
-        let envs: Vec<String> = if environments.is_empty() {
-            vec![super::DEFAULT_ENVIRONMENT.into()]
-        } else {
-            environments.to_vec()
-        };
-        for e in &envs {
-            super::validate_part("environment", e)?;
-            super::stack_name(name, e)?;
-        }
-        let _g = self.inner.edit.lock().unwrap();
-        let p = self.projects_dir(org).join(format!("{name}.json"));
-        if p.exists() {
-            return Err(Error::AlreadyExists(format!("project {name}")));
-        }
-        let mut envs = envs;
-        envs.dedup();
-        let proj = Project {
-            name: name.into(),
-            description: description.into(),
-            environments: envs,
-            created_at: crate::stack::now_secs(),
-        };
-        super::write_atomic(&p, &serde_json::to_vec_pretty(&proj)?)?;
-        Ok(proj)
-    }
-
-    pub fn project_get(&self, org: &OrgId, name: &str) -> Result<Project> {
-        super::validate_part("project", name)?;
-        let p = self.projects_dir(org).join(format!("{name}.json"));
-        match std::fs::read(&p) {
-            Ok(b) => Ok(serde_json::from_slice(&b)?),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                Err(Error::NotFound(format!("project {name} in org {org}")))
-            }
-            Err(e) => Err(e.into()),
-        }
-    }
-
-    pub fn project_list(&self, org: &OrgId) -> Result<Vec<Project>> {
-        let mut out = Vec::new();
-        let Ok(rd) = std::fs::read_dir(self.projects_dir(org)) else {
-            return Ok(out);
-        };
-        for e in rd.flatten() {
-            let p = e.path();
-            if p.extension().is_some_and(|x| x == "json") {
-                match serde_json::from_slice::<Project>(&std::fs::read(&p)?) {
-                    Ok(pr) => out.push(pr),
-                    Err(e) => eprintln!("isb serve: skipping {}: {e}", p.display()),
-                }
-            }
-        }
-        out.sort_by(|a, b| a.name.cmp(&b.name));
-        Ok(out)
-    }
-
-    /// Delete an empty project (its apps go first).
-    pub fn project_delete(&self, org: &OrgId, name: &str) -> Result<()> {
-        let _g = self.inner.edit.lock().unwrap();
-        self.project_get(org, name)?;
-        let apps: Vec<String> = self
-            .list(org)?
-            .into_iter()
-            .filter(|a| a.spec.project == name)
-            .map(|a| a.spec.name)
-            .collect();
-        if !apps.is_empty() {
-            return Err(Error::invalid(format!(
-                "project {name} still has apps: {}; delete them first",
-                apps.join(", ")
-            )));
-        }
-        std::fs::remove_file(self.projects_dir(org).join(format!("{name}.json")))?;
-        Ok(())
-    }
-
-    pub fn environment_create(&self, org: &OrgId, project: &str, env: &str) -> Result<Project> {
-        super::validate_part("environment", env)?;
-        super::stack_name(project, env)?;
-        let _g = self.inner.edit.lock().unwrap();
-        let mut p = self.project_get(org, project)?;
-        if p.environments.iter().any(|e| e == env) {
-            return Err(Error::AlreadyExists(format!(
-                "environment {env} in project {project}"
-            )));
-        }
-        p.environments.push(env.into());
-        self.save_project(org, &p)?;
-        Ok(p)
-    }
-
-    pub fn environment_delete(&self, org: &OrgId, project: &str, env: &str) -> Result<Project> {
-        let _g = self.inner.edit.lock().unwrap();
-        let mut p = self.project_get(org, project)?;
-        if !p.environments.iter().any(|e| e == env) {
-            return Err(Error::NotFound(format!(
-                "environment {env} in project {project}"
-            )));
-        }
-        let apps: Vec<String> = self
-            .list(org)?
-            .into_iter()
-            .filter(|a| a.spec.project == project && a.spec.environment == env)
-            .map(|a| a.spec.name)
-            .collect();
-        if !apps.is_empty() {
-            return Err(Error::invalid(format!(
-                "environment {env} still has apps: {}; delete them first",
-                apps.join(", ")
-            )));
-        }
-        p.environments.retain(|e| e != env);
-        self.save_project(org, &p)?;
-        Ok(p)
-    }
-
-    fn save_project(&self, org: &OrgId, p: &Project) -> Result<()> {
-        super::write_atomic(
-            &self.projects_dir(org).join(format!("{}.json", p.name)),
-            &serde_json::to_vec_pretty(p)?,
-        )
     }
 
     // --- apps ------------------------------------------------------------
@@ -466,6 +332,7 @@ impl Apps {
         if self.app_dir(org, &spec.name).join("app.json").exists() {
             return Err(Error::AlreadyExists(format!("app {}", spec.name)));
         }
+        self.check_app_name_free(org, &spec.project, &spec.environment, &spec.name)?;
         self.check_secrets(org, &spec)?;
         let now = crate::stack::now_secs();
         let app = App {
@@ -1072,6 +939,8 @@ impl Apps {
             false,
         )?;
         Ok(StackDef {
+            source: None,
+            domains: Default::default(),
             name: stack.into(),
             org: org.clone(),
             file,

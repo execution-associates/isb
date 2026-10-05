@@ -10,6 +10,11 @@
 //! 10.64.3.18 web.shop.acme.isb web.shop
 //! ```
 //!
+//! A compose stack that belongs to a project environment also names its
+//! services in that environment, as its apps are named: the line goes on
+//! with `<service>.<project>-<env>.<org>.isb <service>.<project>-<env>`.
+//! The file is the same one, so the names come and go together.
+//!
 //! Every in-rotation replica's address is a record of the same name (DNS
 //! round-robin, like swarm's `dnsrr`). A service with none has no file, so
 //! the name does not resolve. dnsmasq skips dotfiles, which is where a file
@@ -128,24 +133,44 @@ pub fn fqdn(org: &OrgId, stack: &str, service: &str) -> String {
 }
 
 /// The hosts file for a service: one line per address, sorted, with both the
-/// full name and the short `<service>.<stack>`.
-pub fn render(org: &OrgId, stack: &str, service: &str, ips: &[IpAddr]) -> String {
+/// full name and the short `<service>.<stack>`, then the same two in
+/// `extra` (a project environment, `<project>-<env>`) when there is one.
+pub fn render(
+    org: &OrgId,
+    stack: &str,
+    service: &str,
+    ips: &[IpAddr],
+    extra: Option<&str>,
+) -> String {
     let mut ips = ips.to_vec();
     ips.sort();
     ips.dedup();
-    let full = fqdn(org, stack, service);
-    let short = format!("{}.{stack}", label(service));
+    let mut names = format!("{} {}.{stack}", fqdn(org, stack, service), label(service));
+    if let Some(x) = extra {
+        names.push_str(&format!(
+            " {} {}.{x}",
+            fqdn(org, x, service),
+            label(service)
+        ));
+    }
     let mut out = String::new();
     for ip in ips {
-        out.push_str(&format!("{ip} {full} {short}\n"));
+        out.push_str(&format!("{ip} {names}\n"));
     }
     out
 }
 
 /// Publish a service's in-rotation addresses into `dir`: write a dotfile and
 /// rename it over the service's file (dnsmasq sees the rename), or remove the
-/// file when there are none.
-pub fn publish(dir: &Path, org: &OrgId, stack: &str, service: &str, ips: &[IpAddr]) -> Result<()> {
+/// file when there are none. `extra` is [`render`]'s.
+pub fn publish(
+    dir: &Path,
+    org: &OrgId,
+    stack: &str,
+    service: &str,
+    ips: &[IpAddr],
+    extra: Option<&str>,
+) -> Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     let name = file_name(stack, service);
@@ -168,7 +193,7 @@ pub fn publish(dir: &Path, org: &OrgId, stack: &str, service: &str, ips: &[IpAdd
         .mode(mode)
         .open(&tmp)
         .map_err(step)?;
-    f.write_all(render(org, stack, service, ips).as_bytes())
+    f.write_all(render(org, stack, service, ips, extra).as_bytes())
         .map_err(step)?;
     drop(f);
     // The umask may have narrowed the mode.
@@ -209,12 +234,13 @@ mod tests {
             "shop",
             "web",
             &[ip("10.64.3.18"), ip("10.64.3.17"), ip("10.64.3.18")],
+            None,
         );
         assert_eq!(
             t,
             "10.64.3.17 web.shop.acme.isb web.shop\n10.64.3.18 web.shop.acme.isb web.shop\n"
         );
-        assert_eq!(render(&o, "shop", "web", &[]), "");
+        assert_eq!(render(&o, "shop", "web", &[], None), "");
         assert_eq!(fqdn(&o, "shop", "my_db"), "my-db.shop.acme.isb");
         assert_eq!(file_name("shop", "my_db"), "shop.my-db");
     }
@@ -223,7 +249,7 @@ mod tests {
     fn publish_renames_and_removes() {
         let d = tempfile::tempdir().unwrap();
         let o = OrgId::new("acme").unwrap();
-        publish(d.path(), &o, "shop", "web", &[ip("10.0.0.2")]).unwrap();
+        publish(d.path(), &o, "shop", "web", &[ip("10.0.0.2")], None).unwrap();
         let p = d.path().join("shop.web");
         assert_eq!(
             std::fs::read_to_string(&p).unwrap(),
@@ -234,14 +260,42 @@ mod tests {
         assert_eq!(m & 0o640, 0o640, "{m:o}");
         // Nothing left behind but the file itself.
         assert_eq!(std::fs::read_dir(d.path()).unwrap().count(), 1);
-        publish(d.path(), &o, "shop", "web", &[]).unwrap();
+        publish(d.path(), &o, "shop", "web", &[], None).unwrap();
         assert!(!p.exists());
-        publish(d.path(), &o, "shop", "web", &[]).unwrap();
+        publish(d.path(), &o, "shop", "web", &[], None).unwrap();
 
-        publish(d.path(), &o, "shop", "web", &[ip("10.0.0.2")]).unwrap();
-        publish(d.path(), &o, "old", "db", &[ip("10.0.0.3")]).unwrap();
+        publish(d.path(), &o, "shop", "web", &[ip("10.0.0.2")], None).unwrap();
+        publish(d.path(), &o, "old", "db", &[ip("10.0.0.3")], None).unwrap();
         prune(d.path(), &[("shop".into(), "web".into())]);
         assert!(p.exists());
         assert!(!d.path().join("old.db").exists());
+    }
+
+    #[test]
+    fn an_environment_adds_names_and_leaves_the_rest_as_it_was() {
+        let o = OrgId::new("fiftytwolabs").unwrap();
+        let ips = [ip("10.64.3.18"), ip("10.64.3.17")];
+        // Without an environment, byte for byte what live orgs resolve today.
+        assert_eq!(
+            render(&o, "chat-production", "chat-postgres", &ips, None),
+            concat!(
+                "10.64.3.17 chat-postgres.chat-production.fiftytwolabs.isb chat-postgres.chat-production\n",
+                "10.64.3.18 chat-postgres.chat-production.fiftytwolabs.isb chat-postgres.chat-production\n",
+            )
+        );
+        assert_eq!(
+            render(&o, "wiki", "redis", &ips[..1], None),
+            "10.64.3.18 redis.wiki.fiftytwolabs.isb redis.wiki\n"
+        );
+        // With one, the same line goes on with the environment's names.
+        assert_eq!(
+            render(&o, "wiki", "my_redis", &ips[..1], Some("wiki-production")),
+            "10.64.3.18 my-redis.wiki.fiftytwolabs.isb my-redis.wiki my-redis.wiki-production.fiftytwolabs.isb my-redis.wiki-production\n"
+        );
+        // Same file name either way.
+        let d = tempfile::tempdir().unwrap();
+        publish(d.path(), &o, "wiki", "redis", &ips, Some("wiki-production")).unwrap();
+        let t = std::fs::read_to_string(d.path().join("wiki.redis")).unwrap();
+        assert!(t.ends_with("redis.wiki-production\n"), "{t}");
     }
 }

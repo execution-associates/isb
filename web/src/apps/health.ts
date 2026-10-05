@@ -1,7 +1,7 @@
 // Health of environments and projects, from the org's stacks.
 import { useQuery } from "@tanstack/react-query";
 import { callTool, type StackList, type StackStatus } from "@/api/tools";
-import { keys, type Project, type StackDetail } from "./api";
+import { type EnvironmentInfo, keys, type Project, type StackDetail } from "./api";
 
 export type Health = "healthy" | "degraded" | "failing" | "updating" | "idle";
 
@@ -32,8 +32,18 @@ export function worst(hs: Health[]): Health {
   return "idle";
 }
 
-export function projectHealth(p: Project, stacks: StackStatus[], org: string): Health {
-  return worst(p.environments.map((e) => stackHealth(stacks.find((s) => s.org === org && s.name === e.stack))));
+/** The stacks an environment runs: its apps' stack and its compose stacks. */
+export function envStacks(e: EnvironmentInfo): string[] {
+  return [e.stack, ...e.compose.map((c) => c.name)];
+}
+
+/** An environment's health: the worst of its apps' stack and its compose stacks. */
+export function envHealth(e: EnvironmentInfo, stacks: Pick<StackStatus, "name" | "org" | "services">[], org: string): Health {
+  return worst(envStacks(e).map((n) => stackHealth(stacks.find((s) => s.org === org && s.name === n))));
+}
+
+export function projectHealth(p: Project, stacks: Pick<StackStatus, "name" | "org" | "services">[], org: string): Health {
+  return worst(p.environments.map((e) => envHealth(e, stacks, org)));
 }
 
 export const HEALTH_TONE = {

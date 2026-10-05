@@ -1157,6 +1157,29 @@ fn test_secrets(state: &std::path::Path) -> std::sync::Arc<isb::secrets::Secrets
     )))
 }
 
+/// A stack as the tests deploy it: `file` with no secrets, by `test`.
+fn test_def(
+    name: &str,
+    org: isb::org::OrgId,
+    file: isb::spec::ComposeFile,
+    base_dir: &std::path::Path,
+) -> isb::stack::StackDef {
+    isb::stack::StackDef {
+        source: None,
+        domains: Default::default(),
+        name: name.to_string(),
+        org,
+        file,
+        base_dir: base_dir.to_path_buf(),
+        secrets: Default::default(),
+        force: Default::default(),
+        images: Default::default(),
+        deployed_at: 0,
+        deployed_by: "test".into(),
+        previous: None,
+    }
+}
+
 /// The stack controller: replicas behind the balancer, a forced rolling
 /// redeploy with no failed request, scale down, remove.
 #[test]
@@ -1187,18 +1210,7 @@ fn stack_controller() {
         &|_| None,
     )
     .unwrap();
-    let def = isb::stack::StackDef {
-        name: stack.clone(),
-        org: isb::org::OrgId::default_org(),
-        file: p.file,
-        base_dir: state.path().to_path_buf(),
-        secrets: Default::default(),
-        force: Default::default(),
-        images: Default::default(),
-        deployed_at: 0,
-        deployed_by: "test".into(),
-        previous: None,
-    };
+    let def = test_def(&stack, isb::org::OrgId::default_org(), p.file, state.path());
     struct Rm(isb::stack::Controller, String);
     impl Drop for Rm {
         fn drop(&mut self) {
@@ -1451,18 +1463,7 @@ fn service_names() {
         &|_| None,
     )
     .unwrap();
-    let def = isb::stack::StackDef {
-        name: stack.clone(),
-        org: org.clone(),
-        file: p.file,
-        base_dir: state.path().to_path_buf(),
-        secrets: Default::default(),
-        force: Default::default(),
-        images: Default::default(),
-        deployed_at: 0,
-        deployed_by: "test".into(),
-        previous: None,
-    };
+    let def = test_def(&stack, org.clone(), p.file, state.path());
     let q = def.qualified();
     struct Rm(isb::stack::Controller, String);
     impl Drop for Rm {
@@ -1973,18 +1974,7 @@ fn ingress_routes_rolls_and_removes() {
         &|_| None,
     )
     .unwrap();
-    let def = isb::stack::StackDef {
-        name: stack.clone(),
-        org: isb::org::OrgId::default_org(),
-        file: p.file,
-        base_dir: state.path().to_path_buf(),
-        secrets: Default::default(),
-        force: Default::default(),
-        images: Default::default(),
-        deployed_at: 0,
-        deployed_by: "test".into(),
-        previous: None,
-    };
+    let def = test_def(&stack, isb::org::OrgId::default_org(), p.file, state.path());
     struct Rm(
         isb::stack::Controller,
         String,
