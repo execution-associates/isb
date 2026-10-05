@@ -183,7 +183,10 @@ replicas, job runs, builds and sandboxes; workspaces get 20GiB. The size is
 not part of a stack service's revision, so setting or lifting a limit never
 rolls a service, and an existing instance is never resized. isb puts no size
 on the org's default profile: incus applies a profile's size to every
-instance that takes its root disk from the profile.
+instance that takes its root disk from the profile. Custom volumes count too:
+a named volume whose `config` sets no `size` is created with 10GiB, and a
+build's cache volume with the build cache size (`ISB_BUILD_CACHE_SIZE`,
+default 20GiB).
 
 Setting a disk limit (`isb org update ORG --disk 100GiB`, `org_update`) on an
 org that has instances without a root size is refused up front, naming each

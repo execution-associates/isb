@@ -152,6 +152,26 @@ fn org_disk_limit_sizes_each_instance_not_the_profile() {
     let spec = isb::SandboxSpec::new("isb-test-disk-sb2", common::image());
     isb::Sandbox::create(&oc, &spec).unwrap();
     assert_eq!(root(&oc, "isb-test-disk-sb2")["size"], "10GiB");
+    // A custom volume without a size gets one; one with a size keeps it.
+    let pool = oc.get("/1.0/profiles/default").unwrap()["devices"]["root"]["pool"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    for (v, cfg, want) in [
+        ("isb-test-disk-vol", vec![], "10GiB"),
+        ("isb-test-disk-vol2", vec![("size", "2GiB")], "2GiB"),
+    ] {
+        let cfg = cfg
+            .into_iter()
+            .map(|(k, v): (&str, &str)| (k.to_string(), v.to_string()))
+            .collect();
+        isb::volume::ensure(&oc, &pool, v, &cfg).unwrap();
+        let got = oc
+            .get(&format!("/1.0/storage-pools/{pool}/volumes/custom/{v}"))
+            .unwrap();
+        let _ = isb::volume::remove(&oc, &pool, v);
+        assert_eq!(got["config"]["size"], want, "{got}");
+    }
 
     let state = tempfile::tempdir().unwrap();
     let store = isb::stack::Store::open(state.path()).unwrap();

@@ -455,11 +455,10 @@ fn ensure_cache(
     if oc.get_opt(&path)?.is_none() {
         log(&format!("creating build cache volume {name}"));
         let mut body = json!({"name": name, "type": "custom", "config": {}});
-        if vm {
-            body["content_type"] = json!("block");
+        body["content_type"] = json!(if vm { "block" } else { "filesystem" });
+        // A block volume needs a size; so does any volume under a disk limit.
+        if vm || crate::org::disk::disk_limited(oc) {
             body["config"]["size"] = json!(size);
-        } else {
-            body["content_type"] = json!("filesystem");
         }
         match oc.mutate(
             "POST",
