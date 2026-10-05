@@ -158,6 +158,10 @@ pub enum WorkspaceCmd {
         /// Idle timeout for sandboxes, e.g. 2h, or none.
         #[arg(long)]
         sandbox_idle: Option<String>,
+        /// How often secrets that are driver references (vault/item/field)
+        /// are checked for a new version, e.g. 1h (at least 10s).
+        #[arg(long)]
+        secret_refresh: Option<String>,
         /// Platform admins: new homes as a `volume` or a `host` folder
         /// ("" for the daemon's default).
         #[arg(long)]
@@ -654,6 +658,7 @@ pub fn workspace(org: &Option<String>, cmd: WorkspaceCmd) -> Result<u8> {
             max_workspaces,
             sandbox_expiry,
             sandbox_idle,
+            secret_refresh,
             home_kind,
             home_pool,
         } => {
@@ -663,6 +668,7 @@ pub fn workspace(org: &Option<String>, cmd: WorkspaceCmd) -> Result<u8> {
             opt(&mut a, "max_workspaces", max_workspaces);
             opt(&mut a, "sandbox_expiry", sandbox_expiry);
             opt(&mut a, "sandbox_idle", sandbox_idle);
+            opt(&mut a, "secret_refresh", secret_refresh);
             print_json(&c("workspace_settings", a, SHORT)?["settings"]);
             Ok(0)
         }

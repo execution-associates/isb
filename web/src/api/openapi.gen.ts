@@ -1723,7 +1723,7 @@ export interface paths {
         put?: never;
         /**
          * Create a database
-         * @description Create a database in a project's environment: Postgres, MySQL, MariaDB, MongoDB or Redis from the official image at `version`, its data on a named volume, one replica rolled out stop-first, with a health check. Credentials are generated and kept as org secrets (db.<name>.password; db.<name>.root-password for MySQL/MariaDB; db.<name>.url, the internal connection URL for apps: DATABASE_URL=${{secret.db.<name>.url}}). Other apps reach it at <name>.<project>-<env>. Not published outside the org unless `publish` is set. A database is an app: deploy, update, roll back and delete it with the app_* tools.
+         * @description Create a database in a project's environment: Postgres, MySQL, MariaDB, MongoDB or Redis from the official image at `version`, its data on a named volume, one replica rolled out stop-first, with a health check. Credentials are generated and kept as org secrets (db.<name>.password; db.<name>.root-password for MySQL/MariaDB; db.<name>.url, the internal connection URL for apps: DATABASE_URL=${{secret.db.<name>.url}}; `urls` keeps more such secrets with driver options). Setting db.<name>.password changes the password inside the running database first, then the URL secrets. Other apps reach it at <name>.<project>-<env>. Not published outside the org unless `publish` is set. A database is an app: deploy, update, roll back and delete it with the app_* tools.
          */
         post: operations["database_create"];
         delete?: never;
@@ -3283,7 +3283,7 @@ export interface paths {
         put?: never;
         /**
          * Refresh a secret
-         * @description Re-read an externally stored secret from its source now, and roll the stacks using it if its version moved (listed in `rolled`). `name` is a store name, or a stack's driver reference. A no-op for the local store.
+         * @description Re-read an externally stored secret from its source now; if its version moved, each stack service using it acts per its `on_change` (`services`, `rolled`, `skipped` as for secret_set). `name` is a store name, or a stack's driver reference. A no-op for the local store.
          */
         post: operations["secret_refresh"];
         delete?: never;
@@ -3323,7 +3323,7 @@ export interface paths {
         put?: never;
         /**
          * Set a secret
-         * @description Give a secret a new value (base64), bumping its version; creates it in the local store if missing. Stacks using it roll to the new version (listed in `rolled`).
+         * @description Give a secret a new value (base64), bumping its version; creates it in the local store if missing. Each stack service using it acts per its `on_change`: `roll` (default; a rolling update), `restart` (in place) or `none` (files updated, replicas stale until they next start). `services` lists what each service did, `rolled` the stacks that roll or restart, `skipped` what was not cycled and why (workspaces get the file, never a restart). A stack secret with a `rotate` command (a database app's password) is first changed where the old value is kept, in a running replica (`applied`); if that fails, nothing is stored. A database app's URL secret follows its password.
          */
         post: operations["secret_set"];
         delete?: never;
@@ -4663,7 +4663,7 @@ export interface paths {
         put?: never;
         /**
          * Workspace settings
-         * @description The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none). Without changes it reads them; org admins change the sandbox defaults.
+         * @description The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none); and secret_refresh (1h, at least 10s), how often the workspaces' secrets that are driver references (vault/item/field) are checked for a new version, which is written into running workspaces without a restart. Without changes it reads them; org admins change the sandbox defaults and secret_refresh.
          */
         post: operations["workspace_settings"];
         delete?: never;
@@ -5013,7 +5013,7 @@ export interface paths {
         };
         /**
          * Workspace settings
-         * @description The `workspace_settings` tool as a resource. The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none). Without changes it reads them; org admins change the sandbox defaults.
+         * @description The `workspace_settings` tool as a resource. The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none); and secret_refresh (1h, at least 10s), how often the workspaces' secrets that are driver references (vault/item/field) are checked for a new version, which is written into running workspaces without a restart. Without changes it reads them; org admins change the sandbox defaults and secret_refresh.
          */
         get: operations["workspace_resource_get_settings"];
         put?: never;
@@ -5023,7 +5023,7 @@ export interface paths {
         head?: never;
         /**
          * Workspace settings
-         * @description The `workspace_settings` tool as a resource. The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none). Without changes it reads them; org admins change the sandbox defaults.
+         * @description The `workspace_settings` tool as a resource. The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none); and secret_refresh (1h, at least 10s), how often the workspaces' secrets that are driver references (vault/item/field) are checked for a new version, which is written into running workspaces without a restart. Without changes it reads them; org admins change the sandbox defaults and secret_refresh.
          */
         patch: operations["workspace_resource_patch_settings"];
         trace?: never;
@@ -7188,6 +7188,11 @@ export interface operations {
                     /** @description Named volumes, NAME:/path[:ro]. No host paths. */
                     volumes?: string[];
                     working_dir?: string;
+                    /**
+                     * @description What a new version of a secret the app uses (env or files) does to its replicas: roll (default; a rolling update), restart (each replica's app restarted in place with the new value, one at a time, waiting until healthy) or none (files updated, replicas reported stale until they next start).
+                     * @enum {string}
+                     */
+                    secret_on_change?: "roll" | "restart" | "none";
                 };
             };
         };
@@ -7973,6 +7978,11 @@ export interface operations {
                     /** @description Named volumes, NAME:/path[:ro]. No host paths. */
                     volumes?: string[];
                     working_dir?: string;
+                    /**
+                     * @description What a new version of a secret the app uses (env or files) does to its replicas: roll (default; a rolling update), restart (each replica's app restarted in place with the new value, one at a time, waiting until healthy) or none (files updated, replicas reported stale until they next start).
+                     * @enum {string}
+                     */
+                    secret_on_change?: "roll" | "restart" | "none";
                 };
             };
         };
@@ -8836,6 +8846,10 @@ export interface operations {
                     resources?: Record<string, never>;
                     /** @description User created on first start (default: as database). Not Redis. */
                     user?: string;
+                    /** @description More secrets isb keeps holding the internal URL, each with a query string for a driver's options ({"dsn.main-db.web": "sslmode=disable\ */
+                    urls?: {
+                        [key: string]: string;
+                    };
                     /** @description Image tag (default: 17, 8.4, 11.4, 8.0, 7.4). */
                     version?: string;
                     /** @description Wait until it is up (default false). */
@@ -15128,6 +15142,8 @@ export interface operations {
                     sandbox_expiry?: string;
                     /** @description e.g. 2h, or none. */
                     sandbox_idle?: string;
+                    /** @description e.g. 1h, 5m; at least 10s. */
+                    secret_refresh?: string;
                 };
             };
         };
@@ -15985,6 +16001,8 @@ export interface operations {
                     sandbox_expiry?: string;
                     /** @description e.g. 2h, or none. */
                     sandbox_idle?: string;
+                    /** @description e.g. 1h, 5m; at least 10s. */
+                    secret_refresh?: string;
                 };
             };
         };

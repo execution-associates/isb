@@ -92,7 +92,7 @@ means every member of the org, *member* means members, admins and owners.
 |---|---|---|
 | `stack_deploy` | member | Deploy or update a stack from compose YAML (`name`, `compose`, `vars`, `secrets`, `base_dir`, `wait`, `timeout`, `dry_run`). Returns the change per service; `wait` blocks until it settles; `dry_run` returns the changes without deploying. |
 | `stack_list` | anyone signed in | Every stack in the caller's orgs with its services' replica, health and rollout state. |
-| `stack_status` | viewer | One stack in detail: per service its revision, state, message, every replica (status, health, IP, in rotation, restarts, last probe output), published ports with their backends, and each domain with its URL and certificate state. |
+| `stack_status` | viewer | One stack in detail: per service its revision, state, message, every replica (status, health, IP, in rotation, restarts, last probe output, the `stale_secrets` it runs an older version of), published ports with their backends, and each domain with its URL and certificate state. |
 | `stack_config` | viewer | The deployed compose file, and its secrets as references (store name, driver, version), never values. |
 | `stack_export` | viewer | The compose file a stack runs from as YAML text for `stack_deploy` (what the web UI's stack editor shows): resolved, with file/environment secrets named as `external` store secrets so no value is needed. Also `managed_by` (`apps` for a project environment's stack) and the services. |
 | `stack_validate` | viewer | A dry run of `stack_deploy` for an editor: `{valid, errors: [{line, column, message}], changes, exists, managed_by, diff}`, where `diff` is a unified diff from the deployed file. A bad file is an answer, not an error. Writes nothing. |
@@ -144,7 +144,7 @@ There is no `port-forward` tool: run `curl` with `app_exec`, or reach an instanc
 | `workspace_rebuild` | admin | A fresh machine from its image (or `image`), same home and token; `confirm`. |
 | `workspace_delete` | admin | The machine and its token, and the home unless `keep_home`; `confirm`. |
 | `workspace_token_rotate` | admin | A new token, delivered inside; the old one stops at once. |
-| `workspace_settings` | member reads, admin changes | `sandbox_expiry`, `sandbox_idle`; `max_workspaces`, `home_kind`, `home_pool` are for platform admins. |
+| `workspace_settings` | member reads, admin changes | `sandbox_expiry`, `sandbox_idle`, `secret_refresh` (how often workspaces' driver references are checked); `max_workspaces`, `home_kind`, `home_pool` are for platform admins. |
 | `workspace_setup_run` | admin | Run the first-boot script again, as root: now when running, else on the next start; outcome and output in the history (`workspace.setup`). |
 | `workspace_terminals` | member | The web terminal's mode (`herdr` or `shell`) and its herdr sessions. |
 | `workspace_terminal_update` | member | A herdr session: `rename`, or `end: true`. |
@@ -164,12 +164,12 @@ There is no `port-forward` tool: run `curl` with `app_exec`, or reach an instanc
 | Tool | Who | Does |
 |---|---|---|
 | `secret_create` | member | Create (`name`, `value`, optional `driver`, `labels`); fails if it exists. |
-| `secret_set` | member | A new value and version (creates it in the local store if missing); `rolled` lists the stacks rolling to it. |
+| `secret_set` | member | A new value and version (creates it in the local store if missing). A stack secret's `rotate` command (a database app's password) runs first, in a running replica (`applied`); if it fails nothing is stored. Each stack service using it acts per its `on_change`: `services` lists what each did (`roll`, `restart`, `none`), `rolled` the stacks that roll or restart, `skipped` what was not cycled and why (workspaces get the file, never a restart). |
 | `secret_get` | member | `{meta, value}`. A secret read: always audited. |
 | `secret_list` | viewer | Metadata, never values; `used_by` per secret, and `references`: the driver references stacks use. |
 | `secret_inspect` | viewer | One secret's metadata. |
 | `secret_delete` | member | Refused while a deployed stack uses it. |
-| `secret_refresh` | member | Re-read from an external source (a store name, or a stack's driver reference); `rolled` lists the stacks rolling. |
+| `secret_refresh` | member | Re-read from an external source (a store name, or a stack's driver reference); answers like `secret_set`. |
 | `secret_reencrypt` | member (platform admins for `all: true`) | Re-encrypt to the current recipients. |
 | `secret_recipients` | viewer | The public keys values are encrypted to: the daemon's, then the break-glass ones. |
 | `secret_resolve` | local callers only | The values of a compose file's `external`/`age`/`driver` secrets, for `isb up`. |
@@ -224,7 +224,7 @@ There is no `port-forward` tool: run `curl` with `app_exec`, or reach an instanc
 
 | Tool | Who | Does |
 |---|---|---|
-| `database_create` | member | A database app (`engine`, `version`, `database`, `user`, `publish`, `env`, `resources`), deployed unless `deploy: false` (`wait`). |
+| `database_create` | member | A database app (`engine`, `version`, `database`, `user`, `urls`, `publish`, `env`, `resources`), deployed unless `deploy: false` (`wait`). |
 | `database_list` | viewer | Databases with connection details, the password as a secret reference. |
 | `database_get` | viewer; member with `reveal` | One database; `reveal: true` adds the password and URL values (a secret read). |
 | `backup_destination_create` | member | An S3-compatible bucket; key pairs kept as org secrets; tested unless `test: false`. An endpoint on the daemon's own host (loopback, link-local) is for local callers and platform admins only. |

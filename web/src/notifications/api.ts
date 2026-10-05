@@ -129,6 +129,11 @@ export const EVENT_GROUPS: { subject: string; label: string; kinds: { kind: stri
     ],
   },
   {
+    subject: "secret",
+    label: "Secrets",
+    kinds: [{ kind: "secret.rotated", label: "Rotated" }],
+  },
+  {
     subject: "preview",
     label: "Previews",
     kinds: [

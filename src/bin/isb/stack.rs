@@ -222,11 +222,42 @@ pub(crate) fn stack(ctx: &Ctx, cmd: StackCmd) -> Result<u8> {
     }
 }
 
-/// A secret's version after set/refresh, and the stacks now rolling to it.
+/// A secret's version after set/refresh, and what each service using it
+/// does about it (its `on_change`), and what was not cycled.
 pub(crate) fn print_rolled(name: &str, m: &serde_json::Value) {
     eprintln!("{name}: version {}", m["version"]);
-    for s in m["rolled"].as_array().into_iter().flatten() {
-        eprintln!("{}: rolling to the new version", s.as_str().unwrap_or(""));
+    let services = m["services"].as_array().cloned().unwrap_or_default();
+    if services.is_empty() {
+        // An older daemon: stacks only.
+        for s in m["rolled"].as_array().into_iter().flatten() {
+            eprintln!("{}: rolling to the new version", s.as_str().unwrap_or(""));
+        }
+    }
+    for c in &services {
+        let what = match c["action"].as_str().unwrap_or("") {
+            "roll" => "rolling its replicas".to_string(),
+            "restart" => "restarting its replicas in place".to_string(),
+            _ => format!(
+                "not cycled (on_change: none): files updated, the app keeps v{} until it next starts",
+                c["from"]
+            ),
+        };
+        eprintln!(
+            "{}/{}: {} v{} -> v{}: {what}",
+            c["stack"].as_str().unwrap_or(""),
+            c["service"].as_str().unwrap_or(""),
+            c["key"].as_str().unwrap_or(""),
+            c["from"],
+            c["to"],
+        );
+    }
+    for s in m["skipped"].as_array().into_iter().flatten() {
+        eprintln!(
+            "{} {}: {}",
+            s["kind"].as_str().unwrap_or(""),
+            s["name"].as_str().unwrap_or(""),
+            s["reason"].as_str().unwrap_or("")
+        );
     }
 }
 

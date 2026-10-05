@@ -59,6 +59,13 @@ pub trait Driver: Send + Sync {
     /// The current version only: cheap, for polling.
     fn version(&self, org: &OrgId, name: &str) -> Result<u64>;
 
+    /// The current version of each name, in order: one polling round.
+    /// Drivers whose secrets share a version (every field of a 1Password
+    /// item) answer each group with one lookup.
+    fn versions(&self, org: &OrgId, names: &[&str]) -> Vec<Result<u64>> {
+        names.iter().map(|n| self.version(org, n)).collect()
+    }
+
     fn inspect(&self, org: &OrgId, name: &str) -> Result<SecretMeta>;
 
     /// Every secret in the org this driver holds: metadata, never values.
@@ -332,6 +339,39 @@ impl Secrets {
         self.set(org, name, value)
     }
 
+    /// The current version of each name, wherever it is held, in order: one
+    /// polling round. Store names are asked of `local`; references (names
+    /// with a `/`) of the external drivers in turn, all of a driver's names
+    /// at once, so one that shares versions (1Password items) answers each
+    /// group with one lookup.
+    pub fn versions(&self, org: &OrgId, names: &[&str]) -> Vec<Result<u64>> {
+        let mut out: Vec<Option<Result<u64>>> = names.iter().map(|_| None).collect();
+        for (i, n) in names.iter().enumerate() {
+            if !n.contains('/') {
+                out[i] = Some(self.version(org, n));
+            }
+        }
+        for d in self.drivers.iter().filter(|d| d.name() != local::DRIVER) {
+            let todo: Vec<usize> = (0..names.len())
+                .filter(|i| !matches!(out[*i], Some(Ok(_))))
+                .collect();
+            if todo.is_empty() {
+                break;
+            }
+            let asked: Vec<&str> = todo.iter().map(|i| names[*i]).collect();
+            for (i, r) in todo.into_iter().zip(d.versions(org, &asked)) {
+                // A name this driver does not hold may be another's.
+                if r.is_ok() || !matches!(out[i], Some(Err(_))) {
+                    out[i] = Some(r);
+                }
+            }
+        }
+        out.into_iter()
+            .zip(names)
+            .map(|(r, n)| r.unwrap_or_else(|| Err(not_found(org, n))))
+            .collect()
+    }
+
     /// A value read through a named driver, by that driver's reference
     /// (which need not be a store name: an `op://` path, say).
     pub fn get_in(&self, driver: &str, org: &OrgId, name: &str) -> Result<(Vec<u8>, u64)> {
@@ -343,11 +383,24 @@ impl Secrets {
         self.driver(driver)?.version(org, name)
     }
 
+    /// The current versions of several names in a named driver: one
+    /// polling round, deduplicated where the driver can.
+    pub fn versions_in(&self, driver: &str, org: &OrgId, names: &[&str]) -> Vec<Result<u64>> {
+        match self.driver(driver) {
+            Ok(d) => d.versions(org, names),
+            Err(e) => {
+                let msg = e.to_string();
+                names
+                    .iter()
+                    .map(|_| Err(Error::invalid(msg.clone())))
+                    .collect()
+            }
+        }
+    }
+
     /// Re-read from the source through a named driver.
     pub fn refresh_in(&self, driver: &str, org: &OrgId, name: &str) -> Result<u64> {
-        let d = self.driver(driver)?;
-        d.refresh(org, name)?;
-        d.version(org, name)
+        Ok(self.driver(driver)?.refresh(org, name)?.version)
     }
 
     pub fn inspect(&self, org: &OrgId, name: &str) -> Result<SecretMeta> {

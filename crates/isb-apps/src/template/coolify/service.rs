@@ -85,6 +85,7 @@ pub fn translate(
         files: v.files,
         user,
         working_dir,
+        secret_on_change: None,
         depends_on,
     })
 }

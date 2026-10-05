@@ -108,7 +108,8 @@ const APP_PROPS: &str = r#"{
   "previews": {"type": "object", "description": "Preview deployments per pull request (git sources): {enabled, branches (base branches; default the app's ref), max (default 3), env (.env text or {KEY: value | {secret: NAME}}), inherit_env (default false), domain (auto | *.suffix), port, replicas (default 1), resources, ttl (e.g. 7d), forks (default false; fork PRs build in a VM and get only fork_secrets), fork_secrets [NAME], status {token_secret, kind: github | gitea, api_url}}. See preview_list."},
   "files": {"type": "array", "items": {"type": "object"}, "description": "[{path, secret, mode?}]: an org secret's value as a file at an absolute path (config files, certificates)."},
   "user": {"type": "string", "description": "The user the app runs as; numeric (uid[:gid]) on an OCI image."},
-  "working_dir": {"type": "string"}
+  "working_dir": {"type": "string"},
+  "secret_on_change": {"type": "string", "enum": ["roll", "restart", "none"], "description": "What a new version of a secret the app uses (env or files) does to its replicas: roll (default; a rolling update), restart (each replica's app restarted in place with the new value, one at a time, waiting until healthy) or none (files updated, replicas reported stale until they next start)."}
 }"#;
 
 fn app_props() -> Value {

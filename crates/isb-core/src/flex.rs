@@ -99,6 +99,10 @@ pub(crate) enum EnvValue {
     Secret {
         /// A top-level secret's key.
         secret: String,
+        /// What a new version of the secret does to this service (overrides
+        /// the top-level secret's `on_change`).
+        #[serde(default)]
+        on_change: Option<crate::spec::OnChange>,
     },
 }
 

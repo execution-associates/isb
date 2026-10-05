@@ -92,7 +92,9 @@ updates.
 A service's revision is a hash of everything that shapes its instances: the
 service spec (minus replica count, rollout settings, dependencies and
 published ports), its secrets' references (store name and version, so `isb
-secret set` rolls it; see [Secrets](../guides/secrets.md#stacks)), and its
+secret set` rolls it, unless the secret's `on_change` says to restart it in
+place or leave it; see [When a secret
+changes](../guides/secrets.md#when-a-secret-changes)), and its
 named volumes' definitions. Deploying a file whose revision changed replaces
 that service's instances, in batches of `update_config.parallelism`:
 

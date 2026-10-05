@@ -257,3 +257,133 @@ fn deploy_diff() {
         "unchanged"
     );
 }
+
+/// The controller's polling round over every due 1Password binding, in
+/// every stack: one `op item get` per (org, vault, item), however many
+/// stacks, keys and fields use it; a bump moves only the bindings into that
+/// item, and the services using them act per their `on_change`.
+#[test]
+fn polling_asks_1password_once_per_item_across_stacks() {
+    let op = crate::secrets::onepassword::fake::FakeOp::new();
+    let (ctl, due) = onepassword_stacks(&op);
+    assert_eq!(due.len(), 72);
+    let before = op.calls().len();
+    ctl.poll(due.clone());
+    assert_eq!(op.calls().len() - before, 6, "{:?}", &op.calls()[before..]);
+
+    // smtp moves: still one ask per item and org, and only smtp's bindings
+    // move.
+    op.set_version("ops", "smtp", 2);
+    let before = op.calls().len();
+    let (seq, _) = ctl.events(0, 10_000);
+    ctl.poll(due.clone());
+    assert_eq!(op.calls().len() - before, 6);
+    for d in ctl.definitions() {
+        for (k, b) in &d.secrets {
+            let want = if matches!(k.as_str(), "d" | "e") {
+                2
+            } else {
+                1
+            };
+            assert_eq!(b.version, want, "{} {k}", d.name);
+        }
+    }
+    // Each service says what it does about it: web restarts for d (the
+    // strongest of d's restart and e's none), api leaves e stale.
+    let (_, evs) = ctl.events(seq, 10_000);
+    let rotated: Vec<&Event> = evs
+        .iter()
+        .filter(|e| e.kind.as_deref() == Some("secret.rotated"))
+        .collect();
+    assert_eq!(rotated.len(), 24, "{rotated:?}");
+    let find = |svc: &str| {
+        rotated
+            .iter()
+            .find(|e| e.stack == "alpha/s0" && e.service == svc)
+            .unwrap()
+    };
+    let web = find("web");
+    assert!(
+        web.message.contains("restarting its replicas in place"),
+        "{}",
+        web.message
+    );
+    assert!(
+        web.message.contains("ops/smtp/password v1 -> v2"),
+        "{}",
+        web.message
+    );
+    let api = find("api");
+    assert_eq!(api.level, "warn");
+    assert!(api.message.contains("on_change: none"), "{}", api.message);
+    // A forced refresh of one reference asks once, whatever uses it.
+    op.set_version("ops", "smtp", 3);
+    let before = op.calls().len();
+    let alpha = crate::org::OrgId::new("alpha").unwrap();
+    let (found, cycles) = ctl.refresh_secret(&alpha, "ops/smtp/password").unwrap();
+    assert_eq!(op.calls().len() - before, 1);
+    assert_eq!(found, [("onepassword".to_string(), 3)]);
+    assert_eq!(cycles.len(), 6, "{cycles:?}");
+    assert!(
+        cycles
+            .iter()
+            .all(|c| c.action == crate::spec::OnChange::Restart)
+    );
+    assert_eq!(crate::stack::secrets::cycled_stacks(&cycles).len(), 6);
+    ctl.shutdown();
+}
+
+/// 12 stacks in two orgs, each with 3 keys into the db item, 2 into smtp
+/// and 1 into api: 72 references, 3 items per org. Returns the controller
+/// and every (stack, key).
+fn onepassword_stacks(
+    op: &crate::secrets::onepassword::fake::FakeOp,
+) -> (Controller, Vec<(String, String)>) {
+    for i in ["db", "smtp", "api"] {
+        op.set_version("ops", i, 1);
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let k = crate::secrets::Keyring::new(age::x25519::Identity::generate(), vec![]);
+    let secrets = Arc::new(
+        Secrets::new(crate::secrets::LocalDriver::new(dir.path(), Arc::new(k)))
+            .with_driver(Arc::new(op.driver()))
+            .unwrap(),
+    );
+    let ctl = Controller::start(
+        Client::with_socket("/nonexistent/isb-test/incus.sock"),
+        Store::open(dir.path().join("stacks")).unwrap(),
+        Duration::from_secs(3600),
+        secrets.clone(),
+    )
+    .unwrap();
+    let yaml = concat!(
+        "secrets:\n",
+        "  a: {driver: onepassword, name: ops/db/password}\n",
+        "  b: {driver: onepassword, name: ops/db/login/user}\n",
+        "  c: {driver: onepassword, name: ops/db/host}\n",
+        "  d: {driver: onepassword, name: ops/smtp/password, on_change: restart}\n",
+        "  e: {driver: onepassword, name: ops/smtp/login/user, on_change: none}\n",
+        "  f: {driver: onepassword, name: ops/api/password}\n",
+        "services:\n",
+        "  web: {image: x, secrets: [a, b, c, d, e]}\n",
+        "  api: {image: x, environment: {K: {secret: f}, U: {secret: e}}}\n",
+    );
+    let mut due = Vec::new();
+    for n in 0..12 {
+        let org = if n % 2 == 0 { "alpha" } else { "beta" };
+        let mut d = def(yaml);
+        d.name = format!("s{n}");
+        d.org = crate::org::OrgId::new(org).unwrap();
+        d.secrets =
+            crate::stack::secrets::bind(&secrets, &d.org, &d.name, &d.file, &BTreeMap::new(), true)
+                .unwrap();
+        for key in d.secrets.keys() {
+            due.push((d.qualified(), key.clone()));
+        }
+        ctl.inner.store.save(&d).unwrap();
+        ctl.apply(Arc::new(d));
+    }
+    // The controller outlives this function; so must its state.
+    std::mem::forget(dir);
+    (ctl, due)
+}

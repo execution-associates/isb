@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::org::OrgId;
-use crate::spec::{ComposeFile, SandboxSpec};
+use crate::spec::{ComposeFile, OnChange, SandboxSpec};
 
 pub use controller::Controller;
 pub use secrets::SecretBinding;
@@ -102,14 +102,60 @@ impl StackDef {
     /// The service's revision: a hash of what shapes its instances. Replica
     /// count, rollout settings and dependencies are left out, so changing
     /// them never replaces an instance. A secret counts by its binding
-    /// (store name, driver, version), so a new version is a new revision.
+    /// (store name, driver, version), so a new version is a new revision,
+    /// unless its `on_change` for the service is `restart` or `none`: then
+    /// the version is left out, and a new one is delivered to the running
+    /// replicas instead ([`StackDef::live_secrets`]).
     pub fn revision(&self, service: &str) -> Result<String> {
         self.revision_with(service, &|key| {
             self.secrets
                 .get(key)
-                .map(|b| format!("{}\0{}\0{}", b.name, b.driver, b.version).into_bytes())
+                .map(|b| match self.on_change(service, key) {
+                    OnChange::Roll => format!("{}\0{}\0{}", b.name, b.driver, b.version),
+                    _ => format!("{}\0{}\0live", b.name, b.driver),
+                })
+                .map(String::into_bytes)
                 .unwrap_or_default()
         })
+    }
+
+    /// What a new version of the top-level secret `key` does to `service`:
+    /// the service's own references first, then the secret's `on_change`,
+    /// then `roll`.
+    pub fn on_change(&self, service: &str, key: &str) -> OnChange {
+        self.file
+            .services
+            .get(service)
+            .and_then(|s| s.secret_on_change(key))
+            .or_else(|| self.file.secrets.get(key).and_then(|d| d.on_change))
+            .unwrap_or_default()
+    }
+
+    /// The secrets `service` uses whose new versions reach its running
+    /// replicas in place (`on_change: restart` or `none`), with the setting
+    /// and the version bound now.
+    pub fn live_secrets(&self, service: &str) -> BTreeMap<String, (OnChange, u64)> {
+        let Ok(spec) = self.service(service) else {
+            return BTreeMap::new();
+        };
+        spec.secret_keys()
+            .into_iter()
+            .filter_map(|k| {
+                let mode = self.on_change(service, k);
+                let b = self.secrets.get(k)?;
+                (mode != OnChange::Roll).then(|| (k.to_string(), (mode, b.version)))
+            })
+            .collect()
+    }
+
+    /// The services using the top-level secret `key`.
+    pub fn services_using(&self, key: &str) -> Vec<String> {
+        self.file
+            .services
+            .iter()
+            .filter(|(_, s)| s.secret_keys().contains(key))
+            .map(|(n, _)| n.clone())
+            .collect()
     }
 
     /// [`StackDef::revision`] with each secret's contribution given.
@@ -122,6 +168,12 @@ impl StackDef {
         let mut s = spec.clone();
         s.name = None;
         s.depends_on.clear();
+        // What a new secret version does is not part of the instance; the
+        // version itself counts below, or not.
+        for r in &mut s.secrets {
+            r.on_change = None;
+        }
+        s.env.on_change.clear();
         // Domains are the ingress's: changing them never replaces an instance.
         s.domains.clear();
         // Published ports are the balancer's, not the instance's (UDP: below).
@@ -509,6 +561,71 @@ mod tests {
         let udp = rev("['203.0.113.7:10000:10000/udp']");
         assert_ne!(udp, none);
         assert_ne!(rev("['203.0.113.7:10001:10000/udp']"), udp);
+    }
+
+    #[test]
+    fn on_change_decides_what_a_new_version_rolls() {
+        let y = concat!(
+            "secrets:\n",
+            "  k: {external: true, on_change: restart}\n",
+            "  e: {external: true}\n",
+            "  n: {external: true, on_change: restart}\n",
+            "services:\n",
+            "  web: {image: x, secrets: [k, {source: n, on_change: none}]}\n",
+            "  api: {image: docker:busybox, secrets: [k], environment: {T: {secret: e, on_change: none}, U: {secret: k, on_change: roll}}}\n",
+        );
+        let mut a = def(y);
+        for k in ["k", "e", "n"] {
+            a.secrets.insert(k.into(), binding(k, 1));
+        }
+        // The service's own references win, the strongest of them; then
+        // the top-level setting; then roll.
+        assert_eq!(a.on_change("web", "k"), OnChange::Restart);
+        assert_eq!(a.on_change("web", "n"), OnChange::None);
+        assert_eq!(a.on_change("api", "k"), OnChange::Roll);
+        assert_eq!(a.on_change("api", "e"), OnChange::None);
+        assert_eq!(
+            a.live_secrets("web"),
+            BTreeMap::from([
+                ("k".to_string(), (OnChange::Restart, 1)),
+                ("n".to_string(), (OnChange::None, 1)),
+            ])
+        );
+        assert_eq!(a.services_using("k"), ["api", "web"]);
+        let (web, api) = (a.revision("web").unwrap(), a.revision("api").unwrap());
+        // k: web restarts in place (same revision), api rolls.
+        let mut b = a.clone();
+        b.secrets.get_mut("k").unwrap().version = 2;
+        assert_eq!(b.revision("web").unwrap(), web);
+        assert_ne!(b.revision("api").unwrap(), api);
+        // e and n roll nothing.
+        let mut c = a.clone();
+        c.secrets.get_mut("e").unwrap().version = 2;
+        c.secrets.get_mut("n").unwrap().version = 2;
+        assert_eq!(c.revision("web").unwrap(), web);
+        assert_eq!(c.revision("api").unwrap(), api);
+        // Moving between restart and none is not an instance change.
+        let mut d = a.clone();
+        d.file.secrets.get_mut("k").unwrap().on_change = Some(OnChange::None);
+        assert_eq!(d.revision("web").unwrap(), web);
+        // An explicit roll hashes exactly as no setting at all.
+        let plain = def(&y
+            .replace(", on_change: restart}", "}")
+            .replace(", on_change: none}", "}")
+            .replace(", on_change: roll}", "}"));
+        let mut p = plain.clone();
+        p.secrets = a.secrets.clone();
+        let mut r = p.clone();
+        for s in r.file.secrets.values_mut() {
+            s.on_change = Some(OnChange::Roll);
+        }
+        assert_eq!(p.revision("api").unwrap(), r.revision("api").unwrap());
+        assert_eq!(p.revision("web").unwrap(), r.revision("web").unwrap());
+        // The file round-trips its settings.
+        let y2 = serde_yaml_ng::to_string(&a.file).unwrap();
+        assert!(y2.contains("on_change: none"), "{y2}");
+        let back: ComposeFile = serde_yaml_ng::from_str(&y2).unwrap();
+        assert_eq!(back, a.file);
     }
 
     #[test]

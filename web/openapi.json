@@ -3764,6 +3764,15 @@
                   },
                   "working_dir": {
                     "type": "string"
+                  },
+                  "secret_on_change": {
+                    "type": "string",
+                    "enum": [
+                      "roll",
+                      "restart",
+                      "none"
+                    ],
+                    "description": "What a new version of a secret the app uses (env or files) does to its replicas: roll (default; a rolling update), restart (each replica's app restarted in place with the new value, one at a time, waiting until healthy) or none (files updated, replicas reported stale until they next start)."
                   }
                 },
                 "required": [
@@ -5093,6 +5102,15 @@
                   },
                   "working_dir": {
                     "type": "string"
+                  },
+                  "secret_on_change": {
+                    "type": "string",
+                    "enum": [
+                      "roll",
+                      "restart",
+                      "none"
+                    ],
+                    "description": "What a new version of a secret the app uses (env or files) does to its replicas: roll (default; a rolling update), restart (each replica's app restarted in place with the new value, one at a time, waiting until healthy) or none (files updated, replicas reported stale until they next start)."
                   }
                 },
                 "required": [
@@ -6521,7 +6539,7 @@
     },
     "/api/v1/tools/database_create": {
       "post": {
-        "description": "Create a database in a project's environment: Postgres, MySQL, MariaDB, MongoDB or Redis from the official image at `version`, its data on a named volume, one replica rolled out stop-first, with a health check. Credentials are generated and kept as org secrets (db.<name>.password; db.<name>.root-password for MySQL/MariaDB; db.<name>.url, the internal connection URL for apps: DATABASE_URL=${{secret.db.<name>.url}}). Other apps reach it at <name>.<project>-<env>. Not published outside the org unless `publish` is set. A database is an app: deploy, update, roll back and delete it with the app_* tools.",
+        "description": "Create a database in a project's environment: Postgres, MySQL, MariaDB, MongoDB or Redis from the official image at `version`, its data on a named volume, one replica rolled out stop-first, with a health check. Credentials are generated and kept as org secrets (db.<name>.password; db.<name>.root-password for MySQL/MariaDB; db.<name>.url, the internal connection URL for apps: DATABASE_URL=${{secret.db.<name>.url}}; `urls` keeps more such secrets with driver options). Setting db.<name>.password changes the password inside the running database first, then the URL secrets. Other apps reach it at <name>.<project>-<env>. Not published outside the org unless `publish` is set. A database is an app: deploy, update, roll back and delete it with the app_* tools.",
         "operationId": "database_create",
         "requestBody": {
           "content": {
@@ -6575,6 +6593,13 @@
                   "user": {
                     "description": "User created on first start (default: as database). Not Redis.",
                     "type": "string"
+                  },
+                  "urls": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "More secrets isb keeps holding the internal URL, each with a query string for a driver's options ({\"dsn.main-db.web\": \"sslmode=disable\\"
                   },
                   "version": {
                     "description": "Image tag (default: 17, 8.4, 11.4, 8.0, 7.4).",
@@ -12296,7 +12321,7 @@
     },
     "/api/v1/tools/secret_refresh": {
       "post": {
-        "description": "Re-read an externally stored secret from its source now, and roll the stacks using it if its version moved (listed in `rolled`). `name` is a store name, or a stack's driver reference. A no-op for the local store.",
+        "description": "Re-read an externally stored secret from its source now; if its version moved, each stack service using it acts per its `on_change` (`services`, `rolled`, `skipped` as for secret_set). `name` is a store name, or a stack's driver reference. A no-op for the local store.",
         "operationId": "secret_refresh",
         "requestBody": {
           "content": {
@@ -12422,7 +12447,7 @@
     },
     "/api/v1/tools/secret_set": {
       "post": {
-        "description": "Give a secret a new value (base64), bumping its version; creates it in the local store if missing. Stacks using it roll to the new version (listed in `rolled`).",
+        "description": "Give a secret a new value (base64), bumping its version; creates it in the local store if missing. Each stack service using it acts per its `on_change`: `roll` (default; a rolling update), `restart` (in place) or `none` (files updated, replicas stale until they next start). `services` lists what each service did, `rolled` the stacks that roll or restart, `skipped` what was not cycled and why (workspaces get the file, never a restart). A stack secret with a `rotate` command (a database app's password) is first changed where the old value is kept, in a running replica (`applied`); if that fails, nothing is stored. A database app's URL secret follows its password.",
         "operationId": "secret_set",
         "requestBody": {
           "content": {
@@ -16924,7 +16949,7 @@
     },
     "/api/v1/tools/workspace_settings": {
       "post": {
-        "description": "The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none). Without changes it reads them; org admins change the sandbox defaults.",
+        "description": "The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none); and secret_refresh (1h, at least 10s), how often the workspaces' secrets that are driver references (vault/item/field) are checked for a new version, which is written into running workspaces without a restart. Without changes it reads them; org admins change the sandbox defaults and secret_refresh.",
         "operationId": "workspace_settings",
         "requestBody": {
           "content": {
@@ -16961,6 +16986,10 @@
                   "sandbox_idle": {
                     "description": "e.g. 2h, or none.",
                     "type": "string"
+                  },
+                  "secret_refresh": {
+                    "type": "string",
+                    "description": "e.g. 1h, 5m; at least 10s."
                   }
                 },
                 "required": [],
@@ -18319,7 +18348,7 @@
     },
     "/orgs/{org}/api/v1/workspace/settings": {
       "get": {
-        "description": "The `workspace_settings` tool as a resource. The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none). Without changes it reads them; org admins change the sandbox defaults.",
+        "description": "The `workspace_settings` tool as a resource. The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none); and secret_refresh (1h, at least 10s), how often the workspaces' secrets that are driver references (vault/item/field) are checked for a new version, which is written into running workspaces without a restart. Without changes it reads them; org admins change the sandbox defaults and secret_refresh.",
         "operationId": "workspace_resource_get_settings",
         "parameters": [
           {
@@ -18374,7 +18403,7 @@
         "x-isb-tool": "workspace_settings"
       },
       "patch": {
-        "description": "The `workspace_settings` tool as a resource. The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none). Without changes it reads them; org admins change the sandbox defaults.",
+        "description": "The `workspace_settings` tool as a resource. The org's workspace settings: max_workspaces (1; platform admins can raise it), and the defaults for new sandboxes, sandbox_expiry (24h, at most 30d) and sandbox_idle (2h, or none); and secret_refresh (1h, at least 10s), how often the workspaces' secrets that are driver references (vault/item/field) are checked for a new version, which is written into running workspaces without a restart. Without changes it reads them; org admins change the sandbox defaults and secret_refresh.",
         "operationId": "workspace_resource_patch_settings",
         "parameters": [
           {
@@ -18421,6 +18450,10 @@
                   "sandbox_idle": {
                     "description": "e.g. 2h, or none.",
                     "type": "string"
+                  },
+                  "secret_refresh": {
+                    "type": "string",
+                    "description": "e.g. 1h, 5m; at least 10s."
                   }
                 },
                 "required": [],

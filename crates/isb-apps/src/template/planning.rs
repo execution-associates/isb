@@ -609,6 +609,9 @@ fn app_spec(
     if let Some(w) = &a.working_dir {
         spec["working_dir"] = json!(r.plain(w, &at("working_dir"))?);
     }
+    if let Some(o) = a.secret_on_change {
+        spec["secret_on_change"] = json!(o);
+    }
     let spec: AppSpec =
         serde_json::from_value(spec).map_err(|e| Error::invalid(format!("app {}: {e}", a.name)))?;
     spec.validate()

@@ -12,6 +12,8 @@
 //! Databases always roll out stop-first (they have a volume) and run one
 //! replica: two writers on one data directory corrupt it.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -166,6 +168,36 @@ impl Engine {
         vec!["/bin/sh".into(), "-c".into(), line.into()]
     }
 
+    /// The command that makes a new password take effect inside a running
+    /// database (`rotate`): the user's (`root: false`), or MySQL's and
+    /// MariaDB's root password. The new value arrives on stdin; the
+    /// instance's environment still holds the old one, which authenticates.
+    /// The engines read their password variables only when the data
+    /// directory is first made, so without this a new password would lock
+    /// the apps out.
+    pub fn rotate_command(self, root: bool) -> Vec<String> {
+        // MySQL string literal: backslashes and quotes doubled.
+        const MY_ESC: &str = r#"pw=$(cat | sed -e 's/\\/\\\\/g' -e "s/'/''/g")"#;
+        let line = match (self, root) {
+            (Engine::Postgres, _) => r#"pw=$(cat) && q="'" && printf 'ALTER ROLE :"u" PASSWORD :%spw%s;\n' "$q" "$q" | PGPASSWORD="$POSTGRES_PASSWORD" psql -v ON_ERROR_STOP=1 -q -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v u="$POSTGRES_USER" -v pw="$pw""#.to_string(),
+            (Engine::Mysql, false) => format!(
+                r#"{MY_ESC} && printf "ALTER USER '%s'@'%%' IDENTIFIED BY '%s';\n" "$MYSQL_USER" "$pw" | MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -h 127.0.0.1 -uroot"#
+            ),
+            (Engine::Mysql, true) => format!(
+                r#"{MY_ESC} && printf "ALTER USER IF EXISTS 'root'@'%%' IDENTIFIED BY '%s'; ALTER USER IF EXISTS 'root'@'localhost' IDENTIFIED BY '%s';\n" "$pw" "$pw" | MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -h 127.0.0.1 -uroot"#
+            ),
+            (Engine::Mariadb, false) => format!(
+                r#"{MY_ESC} && printf "ALTER USER '%s'@'%%' IDENTIFIED BY '%s';\n" "$MARIADB_USER" "$pw" | MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb -h 127.0.0.1 -uroot"#
+            ),
+            (Engine::Mariadb, true) => format!(
+                r#"{MY_ESC} && printf "ALTER USER IF EXISTS 'root'@'%%' IDENTIFIED BY '%s'; ALTER USER IF EXISTS 'root'@'localhost' IDENTIFIED BY '%s';\n" "$pw" "$pw" | MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb -h 127.0.0.1 -uroot"#
+            ),
+            (Engine::Mongodb, _) => r#"NEW=$(cat) mongosh --quiet --host 127.0.0.1 admin -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval 'db.changeUserPassword(process.env.MONGO_INITDB_ROOT_USERNAME, process.env.NEW)'"#.to_string(),
+            (Engine::Redis, _) => r#"NEW=$(cat) && redis-cli -h 127.0.0.1 --no-auth-warning CONFIG SET requirepass "$NEW" | grep -q OK"#.to_string(),
+        };
+        vec!["/bin/sh".into(), "-c".into(), line]
+    }
+
     /// A shell line that restores a dump read from stdin, replacing what
     /// the dump holds. `ISB_SOURCE_DB` names the dumped database (MongoDB
     /// renames it to this one's).
@@ -216,6 +248,13 @@ pub struct DatabaseSource {
     /// The user created on first start (not Redis; MongoDB's root user).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
+    /// More secrets isb keeps holding the internal URL, each with its own
+    /// query string (`{"dsn.chat-postgres.mattermost": "sslmode=disable"}`,
+    /// `""` for none): written at deploy and again when the password
+    /// changes, so an app that needs driver options never holds a copy of
+    /// the password that goes stale.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub urls: BTreeMap<String, String>,
 }
 
 /// A database or user name: an identifier every engine takes unquoted.
@@ -303,7 +342,9 @@ impl DatabaseSource {
                     "user: root is the engine's own administrator; pick another name",
                 ));
             }
-        } else if self.database.is_some() || self.user.is_some() {
+        }
+        self.validate_urls(app)?;
+        if !self.engine.has_database() && (self.database.is_some() || self.user.is_some()) {
             return Err(Error::invalid(format!(
                 "{} has no database or user to set",
                 self.engine
@@ -316,6 +357,41 @@ impl DatabaseSource {
 /// The secret holding a database's password.
 pub fn password_secret(app: &str) -> String {
     format!("db.{app}.password")
+}
+
+impl DatabaseSource {
+    fn validate_urls(&self, app: &str) -> Result<()> {
+        for (name, query) in &self.urls {
+            crate::secrets::validate_name(name)?;
+            if name.contains('/') || name.starts_with(&format!("db.{app}.")) {
+                return Err(Error::invalid(format!(
+                    "urls: {name:?} is not a secret isb can keep (db.{app}.* is the database's own, and a name with / is an external reference)"
+                )));
+            }
+            let ok = query.chars().all(|c| {
+                c.is_ascii_alphanumeric()
+                    || matches!(
+                        c,
+                        '=' | '&' | '_' | '-' | '.' | '~' | '%' | '+' | ',' | ':' | '/'
+                    )
+            });
+            if !ok || query.starts_with('?') {
+                return Err(Error::invalid(format!(
+                    "urls: {name:?}: {query:?} is a query string without its ?, such as sslmode=disable&connect_timeout=10"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The internal URL with `query` appended (`""` leaves it as it is).
+pub fn with_query(url: &str, query: &str) -> String {
+    match (query.is_empty(), url.contains('?')) {
+        (true, _) => url.to_string(),
+        (false, true) => format!("{url}&{query}"),
+        (false, false) => format!("{url}?{query}"),
+    }
 }
 
 /// The secret holding a MySQL or MariaDB root password.
@@ -523,6 +599,7 @@ pub fn connection(
         "password": {"secret": password_secret(&spec.name)},
         "url": url(&reference, &host, port),
         "url_secret": url_secret(&spec.name),
+        "url_secrets": db.urls.keys().collect::<Vec<_>>(),
         "volume": format!("{stack}_{}_{DATA_VOLUME}", spec.name),
     });
     if let Some(u) = &user {
@@ -641,6 +718,40 @@ mod tests {
         assert!(Engine::parse("oracle").is_err());
         let e: Engine = serde_json::from_value(json!("mongo")).unwrap();
         assert_eq!(e, Engine::Mongodb);
+    }
+
+    /// A database's passwords change inside it before its replica gets
+    /// them: `rotate` on exactly those secrets, and only on the database.
+    #[test]
+    fn passwords_rotate_inside_the_database() {
+        for engine in ENGINES {
+            let s = db_spec(engine.name());
+            let r = render_db(&s);
+            let rotating: Vec<&str> = r
+                .secrets
+                .iter()
+                .filter(|(_, d)| d.rotate.is_some())
+                .map(|(k, _)| k.as_str())
+                .collect();
+            let mut want = vec![format!("main-db.{}", password_secret("main-db"))];
+            if engine.has_root_password() {
+                want.push(format!("main-db.{}", root_password_secret("main-db")));
+            }
+            want.sort();
+            assert_eq!(rotating, want, "{engine}");
+            for root in [false, true] {
+                let argv = engine.rotate_command(root);
+                // The line parses as shell.
+                let ok = std::process::Command::new("sh")
+                    .args(["-n", "-c", &argv[2]])
+                    .status()
+                    .unwrap()
+                    .success();
+                assert!(ok, "{engine} root={root}: {}", argv[2]);
+                // The new value only ever arrives on stdin.
+                assert!(argv[2].contains("$(cat"), "{engine}");
+            }
+        }
     }
 
     #[test]
@@ -773,5 +884,42 @@ mod tests {
         }
         assert!(Engine::Mysql.restores_from(Engine::Mariadb));
         assert!(!Engine::Postgres.restores_from(Engine::Mysql));
+    }
+
+    #[test]
+    fn urls_take_a_query_string_and_never_the_databases_own_secrets() {
+        assert_eq!(
+            with_query("postgres://u:p@h:5432/d", ""),
+            "postgres://u:p@h:5432/d"
+        );
+        assert_eq!(
+            with_query(
+                "postgres://u:p@h:5432/d",
+                "sslmode=disable&connect_timeout=10"
+            ),
+            "postgres://u:p@h:5432/d?sslmode=disable&connect_timeout=10"
+        );
+        assert_eq!(
+            with_query("mongodb://u:p@h:27017/d?authSource=admin", "tls=false"),
+            "mongodb://u:p@h:27017/d?authSource=admin&tls=false"
+        );
+        let db = |urls: Value| -> DatabaseSource {
+            serde_json::from_value(json!({"engine": "postgres", "urls": urls})).unwrap()
+        };
+        assert!(
+            db(json!({"dsn.main-db.web": "sslmode=disable", "dsn.x": ""}))
+                .validate("main-db")
+                .is_ok()
+        );
+        for bad in [
+            json!({"db.main-db.url": ""}),
+            json!({"db.main-db.password": ""}),
+            json!({"op/vault/item": ""}),
+            json!({"dsn.x": "?sslmode=disable"}),
+            json!({"dsn.x": "a=b c"}),
+            json!({"dsn.x": "a=b#frag"}),
+        ] {
+            assert!(db(bad.clone()).validate("main-db").is_err(), "{bad}");
+        }
     }
 }

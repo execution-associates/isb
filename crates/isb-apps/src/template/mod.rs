@@ -243,6 +243,10 @@ pub struct AppTemplate {
     pub user: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
+    /// What a new version of one of the app's secrets (its generated ones,
+    /// its files) does to its replicas: the app's `secret_on_change`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_on_change: Option<crate::spec::OnChange>,
     /// Apps deployed (and converged) before this one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<String>,

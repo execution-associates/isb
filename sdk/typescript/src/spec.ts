@@ -7,6 +7,15 @@
  */
 export type BoolOrString = boolean | string;
 /**
+ * What a new version of a secret does to the stack services using it.
+ * Ordered weakest first: a service that uses a secret twice with different
+ * settings gets the stronger one.
+ *
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "OnChange".
+ */
+export type OnChange = "none" | "restart" | "roll";
+/**
  * A command: argv, or a string split the way a shell splits words.
  *
  * This interface was referenced by `ComposeFile`'s JSON-Schema
@@ -126,6 +135,11 @@ export type EnvMapOrList =
 export type EnvValue =
   | Scalar
   | {
+      /**
+       * What a new version of the secret does to this service (overrides
+       * the top-level secret's `on_change`).
+       */
+      on_change?: OnChange | null;
       /**
        * A top-level secret's key.
        */
@@ -290,11 +304,27 @@ export interface SecretDef {
    */
   name?: string | null;
   /**
+   * What a new version does to the services using it under `isb serve`:
+   * `roll` (default), `restart` or `none`. A service's own reference
+   * (`secrets: [{source, on_change}]`, `{secret, on_change}`) overrides it.
+   */
+  on_change?: OnChange | null;
+  /**
    * With `driver`: how often `isb serve` checks the driver for a new
    * version (`30m`, `1h`; default 1h). A new version rolls the services
    * using it.
    */
   refresh?: string | null;
+  /**
+   * Under `isb serve`: argv run in one running replica of each service
+   * using the secret when it gets a new version, before any replica is
+   * given it, to make the new value take effect where the old one is
+   * stored (a database user's password). It reads the new value on stdin
+   * and runs with the replica's own environment, which still holds the
+   * old one. A failure stops the change: `isb secret set` stores nothing,
+   * and a driver's new version is not taken up.
+   */
+  rotate?: string[] | null;
 }
 /**
  * Everything about one sandbox: a compose service.
@@ -714,6 +744,11 @@ export interface SecretRef {
    * Octal mode, e.g. `0400` (default) or `"0440"`.
    */
   mode?: IntOrString | null;
+  /**
+   * What a new version of the secret does to this service (overrides the
+   * top-level secret's `on_change`).
+   */
+  on_change?: OnChange | null;
   /**
    * The top-level secret's key.
    */

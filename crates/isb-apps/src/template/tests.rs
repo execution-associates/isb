@@ -430,3 +430,25 @@ fn every_builtin_plans() {
         }
     }
 }
+
+/// `secret_on_change` reaches the app, and from there every secret it uses.
+#[test]
+fn secret_on_change_reaches_the_app() {
+    let y = TWO.replace(
+        "  - name: web\n    image: ghcr:acme/stats:1\n",
+        "  - name: web\n    image: ghcr:acme/stats:1\n    secret_on_change: restart\n",
+    );
+    let t = Template::from_yaml(&y).unwrap();
+    let ep = no_entrypoint;
+    let ip: IpAddr = "203.0.113.7".parse().unwrap();
+    let p = plan(
+        &t,
+        &params("acme", &[("admin_email", "ops@example.com")]),
+        &ctx_with(Some(ip), &ep),
+    )
+    .unwrap();
+    let (db, web) = (&p.apps[0], &p.apps[1]);
+    assert_eq!(db.secret_on_change, None);
+    assert_eq!(web.secret_on_change, Some(crate::spec::OnChange::Restart));
+    assert!(Template::from_yaml(&y.replace("on_change: restart", "on_change: later")).is_err());
+}

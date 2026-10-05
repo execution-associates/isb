@@ -353,6 +353,11 @@ pub struct Settings {
     /// `none`.
     #[serde(default = "default_idle")]
     pub sandbox_idle: String,
+    /// How often the org's workspaces' secrets that are driver references
+    /// (`vault/item/field`) are checked for a new version (`1h`; at least
+    /// `10s`). A new one is written into the running workspaces.
+    #[serde(default = "default_secret_refresh")]
+    pub secret_refresh: String,
     /// `volume` or `host`: where new homes go, overriding the daemon
     /// (`host` needs `--workspace-home-root`). Platform admins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -375,12 +380,17 @@ fn default_idle() -> String {
     "2h".into()
 }
 
+fn default_secret_refresh() -> String {
+    "1h".into()
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Settings {
             max_workspaces: one(),
             sandbox_expiry: default_expiry(),
             sandbox_idle: default_idle(),
+            secret_refresh: default_secret_refresh(),
             home_kind: None,
             home_pool: None,
         }
@@ -395,6 +405,7 @@ impl Settings {
         }
         lifetime(&self.sandbox_expiry)?;
         idle(&self.sandbox_idle)?;
+        secret_refresh(&self.secret_refresh)?;
         Ok(())
     }
 }
@@ -406,6 +417,18 @@ pub fn lifetime(s: &str) -> Result<Duration> {
     if d.is_zero() || d > MAX_SANDBOX_LIFETIME {
         return Err(Error::invalid(format!(
             "expiry {s:?}: between a second and 30 days"
+        )));
+    }
+    Ok(d)
+}
+
+/// How often workspace driver references are polled: at least 10 seconds.
+pub fn secret_refresh(s: &str) -> Result<Duration> {
+    let d = crate::flex::parse_duration(s.trim())
+        .map_err(|e| Error::invalid(format!("secret_refresh {s:?}: {e}")))?;
+    if d < Duration::from_secs(10) {
+        return Err(Error::invalid(format!(
+            "secret_refresh {s:?}: at least 10s"
         )));
     }
     Ok(d)

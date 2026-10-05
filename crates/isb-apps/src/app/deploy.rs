@@ -30,6 +30,9 @@ use crate::org::OrgId;
 use crate::secrets::Secrets;
 use crate::stack::{Controller, StackDef};
 
+#[path = "db_secrets.rs"]
+mod db_secrets;
+
 /// Turns a checkout into an image: [`crate::build::run`], or a stand-in.
 pub type BuildFn =
     Arc<dyn Fn(&Client, &BuildRequest, &mut dyn FnMut(&str)) -> Result<BuiltImage> + Send + Sync>;
@@ -473,48 +476,6 @@ impl Apps {
             .set(org, &app.spec.webhook_secret(), secret.as_bytes())?;
         self.save(org, &app)?;
         Ok((app, secret))
-    }
-
-    /// A database's passwords, generated unless they exist (a database
-    /// re-created over its kept volume needs the passwords that volume was
-    /// initialized with), and its connection URL.
-    fn database_credentials(
-        &self,
-        org: &OrgId,
-        spec: &AppSpec,
-        db: &super::DatabaseSource,
-    ) -> Result<()> {
-        use super::database as d;
-        let mut names = vec![d::password_secret(&spec.name)];
-        if db.engine.has_root_password() {
-            names.push(d::root_password_secret(&spec.name));
-        }
-        for n in &names {
-            match self.inner.secrets.inspect(org, n) {
-                Ok(_) => {}
-                Err(e) if e.is_not_found() => {
-                    self.inner
-                        .secrets
-                        .set(org, n, git::random_hex(16).as_bytes())?;
-                }
-                Err(e) => return Err(e),
-            }
-        }
-        let (pw, _) = self.inner.secrets.get(org, &names[0])?;
-        let pw = String::from_utf8(pw).map_err(|_| Error::invalid("the password is not text"))?;
-        let url = d::internal_url(spec, db, pw.trim());
-        let current = self
-            .inner
-            .secrets
-            .get(org, &d::url_secret(&spec.name))
-            .ok()
-            .map(|(v, _)| v);
-        if current.as_deref() != Some(url.as_bytes()) {
-            self.inner
-                .secrets
-                .set(org, &d::url_secret(&spec.name), url.as_bytes())?;
-        }
-        Ok(())
     }
 
     /// The org's secret store (backups read destination credentials and

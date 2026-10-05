@@ -69,11 +69,31 @@ What a database gets that an image app does not:
   | `db.<name>.password` | The user's password (Redis: `requirepass`; MongoDB: the root user's). |
   | `db.<name>.root-password` | MySQL and MariaDB: `root`'s password. |
   | `db.<name>.url` | The internal connection URL, password included, for apps: `DATABASE_URL=${{secret.db.<name>.url}}`. |
+  | each of `urls` | The same URL with a query string for a driver's options, under a name you choose. |
+
+  An app whose driver needs options in the URL (`sslmode=disable`,
+  `connect_timeout=10`) gets them from `urls`, a map of secret name to query
+  string, never from a hand-made copy of the URL: a copy keeps the old
+  password when it changes, and the app is locked out at its next connect.
+
+  ```sh
+  isb db create pg --project shop --engine postgres \
+    --url 'dsn.pg.web?sslmode=disable&connect_timeout=10'
+  ```
+
+  On an existing database, `isb app update pg -f patch.yaml --deploy` with
+  `source: {database: {urls: {dsn.pg.web: "sslmode=disable"}}}` (a merge
+  patch; `null` drops one). Names under `db.<name>.` and references to an
+  external driver are refused.
 
   The database's own engine reads them only on first start, when the data
   directory is empty. So a database deleted and created again with the same
-  name **reuses** its passwords (they are kept with the volume), and
-  changing a password means changing it in the database too.
+  name **reuses** its passwords (they are kept with the volume). Setting a
+  password secret (`isb secret set db.<name>.password`) changes it inside
+  the running database first, authenticated with the old one, then stores
+  it and rewrites `db.<name>.url` and the `urls`, so apps using them follow; if the
+  database is not running, or the change fails, nothing is stored. See
+  [Changing the value where it is kept](secrets.md#changing-the-value-where-it-is-kept).
 - **No published port by default.** `--publish [IP:]PORT` (`publish` in
   `database_create`) publishes it on the host (default address
   `127.0.0.1`), load-balanced like any app port; `isb db show` then lists

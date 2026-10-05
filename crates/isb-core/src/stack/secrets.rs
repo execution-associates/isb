@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 use crate::org::OrgId;
 use crate::secrets::Secrets;
-use crate::spec::{ComposeFile, SecretDef};
+use crate::spec::{ComposeFile, OnChange, SecretDef};
 
 /// One top-level secret a stack uses, as deployed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -213,9 +213,131 @@ pub fn resolve(
     Ok(out)
 }
 
+/// What a new version of a secret did to one service of a stack.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Cycle {
+    /// The stack's name in its org.
+    pub stack: String,
+    pub service: String,
+    /// The top-level secret key in the stack's file.
+    pub key: String,
+    /// The store name, or the driver's reference.
+    pub secret: String,
+    pub from: u64,
+    pub to: u64,
+    /// `roll`: a rolling update replaces the replicas. `restart`: each
+    /// replica gets the value and its app is restarted in place. `none`:
+    /// the value is delivered where it can be, nothing restarts, and the
+    /// replicas are stale until they next start.
+    pub action: OnChange,
+    /// The secret's `rotate` command failed: the stack keeps the version it
+    /// had, and nothing cycles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl Cycle {
+    /// The replicas run the new value once this is done.
+    pub fn cycles(&self) -> bool {
+        self.error.is_none() && self.action != OnChange::None
+    }
+}
+
+/// Where a secret's `rotate` command made a new value take effect.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Applied {
+    pub stack: String,
+    pub service: String,
+    pub instance: String,
+}
+
+/// The stacks with a service that cycles (rolls or restarts), by name.
+pub fn cycled_stacks(cycles: &[Cycle]) -> Vec<String> {
+    let mut v: Vec<String> = cycles
+        .iter()
+        .filter(|c| c.cycles())
+        .map(|c| c.stack.clone())
+        .collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
 /// A forced refresh: the (driver, version) of every binding to the name, and
-/// the stacks that rolled.
-pub type Refreshed = (Vec<(String, u64)>, Vec<String>);
+/// what the new version did, per service.
+pub type Refreshed = (Vec<(String, u64)>, Vec<Cycle>);
+
+/// Instance config key (without `user.`) holding the versions of the
+/// `restart`/`none` secrets its app last started with, as a JSON object.
+/// A replica whose versions are behind the stack's is stale.
+pub const LABEL_SECRETS: &str = "isb.secrets";
+
+/// [`LABEL_SECRETS`]'s value.
+pub fn versions_label(v: &BTreeMap<String, u64>) -> String {
+    serde_json::to_string(v).unwrap_or_default()
+}
+
+/// [`LABEL_SECRETS`] read back; `None` when absent or unreadable.
+pub fn parse_versions_label(s: Option<&str>) -> Option<BTreeMap<String, u64>> {
+    serde_json::from_str(s?).ok()
+}
+
+/// A secret a replica runs an older version of (`on_change: none`, or a
+/// restart still to come).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StaleSecret {
+    pub key: String,
+    /// The version its app started with.
+    pub running: u64,
+    /// The version bound now, delivered to its files.
+    pub current: u64,
+}
+
+/// Which of `want`'s secrets a replica that started with `have` runs an
+/// older version of. A secret missing from `have` is not stale: the replica
+/// predates the setting, and is taken to run what is bound.
+pub fn stale(have: &BTreeMap<String, u64>, want: &BTreeMap<String, u64>) -> Vec<StaleSecret> {
+    want.iter()
+        .filter_map(|(k, cur)| {
+            let run = *have.get(k)?;
+            (run != *cur).then(|| StaleSecret {
+                key: k.clone(),
+                running: run,
+                current: *cur,
+            })
+        })
+        .collect()
+}
+
+/// One polling round's answers: the version of each `(org, driver, name)`,
+/// or why it could not be read.
+pub type Polled = BTreeMap<(OrgId, String, String), std::result::Result<u64, String>>;
+
+/// The current version of every `(org, driver, name)`, one polling round:
+/// each driver is asked once per org for all its names, so it can answer
+/// names that share a version (fields of one 1Password item) with one
+/// lookup.
+pub fn poll_versions(
+    secrets: &Secrets,
+    refs: impl IntoIterator<Item = (OrgId, String, String)>,
+) -> Polled {
+    let mut groups: BTreeMap<(OrgId, String), BTreeSet<String>> = BTreeMap::new();
+    for (org, driver, name) in refs {
+        groups.entry((org, driver)).or_default().insert(name);
+    }
+    let mut out = BTreeMap::new();
+    for ((org, driver), names) in groups {
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let got = secrets.versions_in(&driver, &org, &names);
+        for (n, v) in names.iter().zip(got) {
+            out.insert(
+                (org.clone(), driver.clone(), (*n).to_string()),
+                v.map_err(|e| e.to_string()),
+            );
+        }
+    }
+    out
+}
 
 /// When each driver-backed binding is next due for a version check.
 #[derive(Debug, Default)]
