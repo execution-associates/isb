@@ -96,16 +96,20 @@ class EgressSpec2(TypedDict, total=False):
     secrets: Sequence[EgressSecretSpec]
 
 
+_EnvValueSecretKw = TypedDict("_EnvValueSecretKw", {
+    #: `env` (default): the variable holds the value. `file`: the value
+    #: is `/run/secrets/NAME` and `KEY_FILE` holds that path, so it is
+    #: never instance config.
+    "as": Optional[SecretAs],
+}, total=False)
+
+
 class _EnvValueSecretRequired(TypedDict):
     #: A top-level secret's key.
     secret: str
 
 
-class EnvValueSecret(_EnvValueSecretRequired, total=False):
-    #: `env` (default): the variable holds the value. `file`: the value
-    #: is `/run/secrets/NAME` and `KEY_FILE` holds that path, so it is
-    #: never instance config.
-    as: Optional[SecretAs]
+class EnvValueSecret(_EnvValueSecretRequired, _EnvValueSecretKw, total=False):
     #: What a new version of the secret does to this service (overrides
     #: the top-level secret's `on_change`).
     on_change: Optional[OnChange]

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import keyword
 import os
 import subprocess
 import sys
@@ -130,27 +131,42 @@ class Gen:
         required = set(s.get("required", []))
         req_lines: list[str] = []
         opt_lines: list[str] = []
+        # A field named like a Python keyword (`as`) cannot be a class
+        # attribute: those go in a functional TypedDict the class extends.
+        kw_req: list[str] = []
+        kw_opt: list[str] = []
         for field, sub in s.get("properties", {}).items():
             if field in exclude:
                 continue
             t, _ = self.type_of(sub, name + camel(field))
-            line = f"    {field}: {t}"
             desc = first_paragraph(sub.get("description"))
-            if desc:
-                line = "".join(f"    #: {d}\n" for d in desc) + line
+            comment = "".join(f"    #: {d}\n" for d in desc)
+            if keyword.iskeyword(field):
+                (kw_req if field in required else kw_opt).append(f'{comment}    "{field}": {t},')
+                continue
+            line = comment + f"    {field}: {t}"
             (req_lines if field in required else opt_lines).append(line)
         lines = [doc] if doc is not None else first_paragraph(s.get("description"))
         doc_line = ""
         if lines:
             doc_line = '    """' + "\n    ".join(lines) + ('\n    """\n' if len(lines) > 1 else '"""\n')
+        text = ""
+        req_bases: list[str] = []
+        bases: list[str] = []
+        if kw_req:
+            text += f'_{name}RequiredKw = TypedDict("_{name}RequiredKw", {{\n' + "\n".join(kw_req) + "\n})\n\n\n"
+            req_bases.append(f"_{name}RequiredKw")
+        if kw_opt:
+            text += f'_{name}Kw = TypedDict("_{name}Kw", {{\n' + "\n".join(kw_opt) + "\n}, total=False)\n\n\n"
+            bases.append(f"_{name}Kw")
         if req_lines:
             base = f"_{name}Required"
-            text = f"class {base}(TypedDict):\n" + "\n".join(req_lines) + "\n\n\n"
-            text += f"class {name}({base}, total=False):\n{doc_line}"
-            text += "\n".join(opt_lines) + "\n" if opt_lines else ("" if doc_line else "    pass\n")
+            text += f"class {base}({', '.join(req_bases) or 'TypedDict'}):\n" + "\n".join(req_lines) + "\n\n\n"
+            bases.insert(0, base)
         else:
-            text = f"class {name}(TypedDict, total=False):\n{doc_line}"
-            text += "\n".join(opt_lines) + "\n" if opt_lines else ("" if doc_line else "    pass\n")
+            bases = req_bases + bases
+        text += f"class {name}({', '.join(bases) or 'TypedDict'}, total=False):\n{doc_line}"
+        text += "\n".join(opt_lines) + "\n" if opt_lines else ("" if doc_line else "    pass\n")
         self.typeddicts[name] = text
         self.order.append(name)
 

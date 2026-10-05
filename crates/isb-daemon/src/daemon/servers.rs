@@ -727,10 +727,10 @@ fn fan_out(
     let who = Assertion::for_caller(c)
         .ok_or_else(|| Error::Forbidden(format!("{c} cannot read servers")))?;
     let mut unscoped = a.clone();
-    if named.is_none()
-        && let Some(o) = unscoped.as_object_mut()
-    {
-        o.remove("org");
+    if named.is_none() {
+        if let Some(o) = unscoped.as_object_mut() {
+            o.remove("org");
+        }
     }
     let results: Vec<(String, std::result::Result<Value, String>)> = std::thread::scope(|sc| {
         let hs: Vec<_> = targets
