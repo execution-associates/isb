@@ -19,7 +19,7 @@ it; relative paths resolve against that directory.
 When it starts, the server writes one hello line:
 
 ```json
-{"isb": "1.6.6", "protocol": 1}
+{"isb": "1.6.7", "protocol": 1}
 ```
 
 A client checks `protocol` and refuses versions it does not know.
@@ -205,7 +205,7 @@ All take `files` (default `./isb.yaml` plus `./isb.override.yaml` if present),
 ## Example session
 
 ```text
-<- {"isb":"1.6.6","protocol":1}
+<- {"isb":"1.6.7","protocol":1}
 -> {"id":1,"method":"sandbox.ensure","params":{"spec":{"name":"web","image":"dev-base","cpus":2}}}
 <- {"id":1,"event":"progress","data":"web: creating from dev-base"}
 <- {"id":1,"event":"progress","data":"web: starting"}
