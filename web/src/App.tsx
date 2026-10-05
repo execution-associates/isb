@@ -5,6 +5,7 @@ import { appRoutes } from "@/apps/routes";
 import { day2Routes } from "@/day2-routes";
 import { Home, RequireAuth } from "@/components/app-shell";
 import { AuthLayout } from "@/components/auth-layout";
+import { ErrorBoundary } from "@/components/error-boundary";
 import { Button } from "@/components/ui/button";
 import { TextureLayer } from "@/components/texture-layer";
 import { Toaster } from "@/components/ui/sonner";
@@ -50,34 +51,36 @@ export function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <BrowserRouter>
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/setup" element={<SetupPage />} />
-            <Route path="/signup" element={<SignupPage />} />
-            <Route path="/invite" element={<InvitePage />} />
-            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-            <Route path="/reset-password" element={<ResetPasswordPage />} />
-            <Route element={<RequireAuth />}>
-              <Route index element={<Home />} />
-              <Route path="/orgs/:org" element={<OrgPage />} />
-              {appRoutes()}
-              {workspaceRoutes()}
-              {day2Routes()}
-              <Route path="/orgs/:org/members" element={<MembersPage />} />
-              <Route path="/orgs/:org/agents" element={<McpPage />} />
-              <Route path="/agents" element={<McpHome />} />
-              <Route path="/orgs/:org/secrets" element={<SecretsPage />} />
-              <Route path="/orgs/:org/settings" element={<SettingsPage />} />
-              <Route path="/orgs/:org/history" element={<OrgHistoryPage />} />
-              <Route path="/orgs/:org/audit" element={<AuditRedirect />} />
-              <Route path="/admin" element={<AdminPage />} />
-              <Route path="/admin/:tab" element={<AdminPage />} />
-              <Route path="/host" element={<HostPage />} />
-              <Route path="/host/:tab" element={<HostPage />} />
-              <Route path="/account" element={<AccountPage />} />
-            </Route>
-            <Route path="*" element={<NotFound />} />
-          </Routes>
+          <ErrorBoundary>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/setup" element={<SetupPage />} />
+              <Route path="/signup" element={<SignupPage />} />
+              <Route path="/invite" element={<InvitePage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
+              <Route element={<RequireAuth />}>
+                <Route index element={<Home />} />
+                <Route path="/orgs/:org" element={<OrgPage />} />
+                {appRoutes()}
+                {workspaceRoutes()}
+                {day2Routes()}
+                <Route path="/orgs/:org/members" element={<MembersPage />} />
+                <Route path="/orgs/:org/agents" element={<McpPage />} />
+                <Route path="/agents" element={<McpHome />} />
+                <Route path="/orgs/:org/secrets" element={<SecretsPage />} />
+                <Route path="/orgs/:org/settings" element={<SettingsPage />} />
+                <Route path="/orgs/:org/history" element={<OrgHistoryPage />} />
+                <Route path="/orgs/:org/audit" element={<AuditRedirect />} />
+                <Route path="/admin" element={<AdminPage />} />
+                <Route path="/admin/:tab" element={<AdminPage />} />
+                <Route path="/host" element={<HostPage />} />
+                <Route path="/host/:tab" element={<HostPage />} />
+                <Route path="/account" element={<AccountPage />} />
+              </Route>
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </ErrorBoundary>
         </BrowserRouter>
         <Toaster position="bottom-right" richColors={false} />
         <TextureLayer />
