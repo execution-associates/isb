@@ -297,7 +297,7 @@ impl App {
         self.stack()?.services.get(self.svc)
     }
 
-    fn clamp(&mut self) {
+    pub(super) fn clamp(&mut self) {
         let n = self.items().len();
         self.sel = self.sel.min(n.saturating_sub(1));
         let ns = self.stack().map(|s| s.services.len()).unwrap_or(0);
@@ -309,7 +309,7 @@ impl App {
         }
     }
 
-    fn step(&mut self, delta: isize) {
+    pub(super) fn step(&mut self, delta: isize) {
         let (cur, len) = match self.focus {
             Focus::Sidebar => (self.sel, self.items().len()),
             Focus::Services => (
