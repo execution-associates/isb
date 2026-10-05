@@ -37,6 +37,15 @@ export const jkeys = {
   runs: (org: string, name: string) => ["apps", org, "job-runs", name] as const,
 };
 
+/** Whether two job targets are the same app, or the same stack service. */
+export function sameTarget(a: JobTarget, b: JobTarget): boolean {
+  if ("app" in a || "app" in b) return "app" in a && "app" in b && a.app === b.app;
+  return a.stack === b.stack && a.service === b.service;
+}
+
+/** What a target is called in a sentence: the app, or the stack's service. */
+export const targetName = (t: JobTarget) => ("app" in t ? t.app : t.service);
+
 export const jobApp = (j: JobSpec) => ("app" in j.target ? j.target.app : `${j.target.stack}/${j.target.service}`);
 
 export function useJobs(org: string) {

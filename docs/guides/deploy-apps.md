@@ -53,7 +53,12 @@ isb project ls [--json] | rm NAME | env-add PROJECT ENV | env-rm PROJECT ENV
 - Apps of one environment reach each other by service name,
   `<app>.<project>-<env>` (or `<app>.<project>-<env>.<org>.isb`), as any
   stack's services do ([service discovery](../concepts/stacks.md#service-discovery)).
-- A project or environment that still has apps cannot be deleted.
+- An environment also holds compose stacks; each belongs to exactly one
+  ([Compose stacks in an environment](../concepts/apps.md#compose-stacks-in-an-environment)).
+  `isb stack deploy --project shop --env staging` puts a new one there, and
+  its services are also `<service>.shop-staging`.
+- A project or environment that still has apps or compose stacks cannot be
+  deleted.
 - Environment names ending in `pr-<number>` are refused: that suffix is kept
   for [preview stacks](previews.md).
 
@@ -338,8 +343,8 @@ See [Reach isb serve remotely](remote-access.md).
 
 | Tool | Does |
 |---|---|
-| `project_create`, `project_list`, `project_delete` | Projects; `project_list` shows each environment's stack and apps. A project with apps cannot be deleted. |
-| `environment_create`, `environment_list`, `environment_delete` | A project's environments (stored with the project). One with apps cannot be deleted. |
+| `project_create`, `project_list`, `project_delete` | Projects; `project_list` shows each environment's stack, apps, compose stacks and name `conflicts`. A project with apps or compose stacks cannot be deleted. |
+| `environment_create`, `environment_list`, `environment_delete` | A project's environments (stored with the project). One with apps or compose stacks cannot be deleted. |
 | `app_create` | Create an app (`deploy: true` deploys it too). Returns the app and its webhook secret. |
 | `app_get`, `app_list` | Settings, stack, service name, current deployment, webhook path, `domains_served`; env as a map with `{secret: NAME}` references. |
 | `app_update` | A merge patch of settings (`deploy: true` deploys after). |

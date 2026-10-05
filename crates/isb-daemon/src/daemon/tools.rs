@@ -5,6 +5,7 @@
 use super::*;
 
 mod stack_manifest;
+pub(super) mod stack_settings;
 
 /// The MCP annotations the tools below share.
 pub(super) struct Ann {
@@ -19,7 +20,8 @@ pub(super) fn stack_edit_tools(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> 
     stack_redeploy_tool(r, d, ann)?;
     stack_rollback_tool(r, d, ann)?;
     stack_remove_tool(r, d, ann)?;
-    stack_manifest::register(r, d, ann)
+    stack_manifest::register(r, d, ann)?;
+    stack_settings::register(r, d, ann)
 }
 
 pub(super) fn stack_deploy_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> {
@@ -28,17 +30,20 @@ pub(super) fn stack_deploy_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) ->
         d,
         "stack_deploy",
         "Deploy a stack",
-        "Deploy or update a stack from a docker-compose-style file (isb's format: docs/reference/compose.md). Each service runs `deploy.replicas` incus instances, supervised inside their guests so they survive restarts of this server and of the host. Published ports are load-balanced over healthy replicas. A changed service is rolled out per `deploy.update_config` (stop-first by default; `order: start-first` for no downtime). Returns the change per service; pass wait=true to block until the rollout settles.",
+        "Deploy or update a stack from a docker-compose-style file (isb's format: docs/reference/compose.md). Each service runs `deploy.replicas` incus instances, supervised inside their guests so they survive restarts of this server and of the host. Published ports are load-balanced over healthy replicas. A changed service is rolled out per `deploy.update_config` (stop-first by default; `order: start-first` for no downtime). Every stack belongs to one project environment (`project`, `environment`; a new stack's default is the project named like it, made if needed), and its services are also named `<service>.<project>-<env>` there; a service name the environment already gives an app or another stack's service is refused. The stack's managed domains (stack_domains_set) are merged into its services. Returns the change per service, the `owner`, the `deployment` it recorded (stack_deployments), and `reused_secrets` (only when there are some): the `file:`/`environment:` secrets given no value that deployed the value an earlier deploy stored, also logged as a warn event; pass wait=true to block until the rollout settles.",
         obj(
             json!({
                 "name": {"type": "string", "description": "Stack name: [a-z0-9-], starts with a letter, at most 30 characters."},
-                "compose": {"type": "string", "description": "The compose file, as YAML text. ${VAR} is filled from `vars` only."},
-                "vars": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Variables for ${VAR} and for secrets with `environment:`."},
+                "compose": {"type": "string", "description": "The compose file, as YAML text. ${VAR} is filled from `vars`, then the stack's environment (stack_env_set); an undefined one fails the deploy. Kept as written (stack_export) when it needs no `vars`."},
+                "vars": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Variables for ${VAR} and for secrets with `environment:`, over the stack's environment."},
                 "secrets": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Values of `file:`/`environment:` secrets by top-level secret name. They are stored in the org's store as <stack>_<name>; `external`, `age` and `driver` secrets need none."},
                 "base_dir": {"type": "string", "description": "Host directory relative bind paths resolve against. Remote callers: must be under a --bind-root."},
                 "wait": {"type": "boolean", "description": "Wait until every service converges, pauses or fails (default false)."},
                 "dry_run": {"type": "boolean", "description": "Only report what would change."},
-                "timeout": {"type": "string", "description": "How long wait may take, e.g. 5m (default 10m)."}
+                "reuse_secrets": {"type": "boolean", "description": "A `file:`/`environment:` secret given no value (in `secrets`, `vars` or the stack's environment) deploys the value an earlier deploy stored, and the result names it in `reused_secrets` (default true). false fails the deploy instead, so a rotated value that did not arrive is never replaced by the old one."},
+                "timeout": {"type": "string", "description": "How long wait may take, e.g. 5m (default 10m)."},
+                "project": {"type": "string", "description": "The project a new stack belongs to (made if it does not exist). Default: the project named like the stack, else a new one of that name. A stack's project never changes."},
+                "environment": {"type": "string", "description": "The project's environment (with project). Default: production, else the project's first."}
             }),
             &["name", "compose"]
         ),
@@ -173,7 +178,7 @@ pub(super) fn stack_list_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> R
         d,
         "stack_list",
         "List stacks",
-        "List deployed stacks with each service's replica, health and rollout state.",
+        "List deployed stacks with each service's replica, health and rollout state, and the project environment each compose stack belongs to (`project`, `environment`).",
         obj(json!({}), &[]),
         ann.ro,
         |d: &Daemon, _a: Value, c: &Caller| -> Result<Value> {
@@ -185,6 +190,15 @@ pub(super) fn stack_list_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> R
                 .filter(|s| {
                     orgs.as_ref()
                         .is_none_or(|v| v.iter().any(|o| o.as_str() == s.org))
+                })
+                .map(|s| {
+                    let owner = crate::org::OrgId::new(s.org.clone())
+                        .ok()
+                        .and_then(|o| d.apps.compose_owner(&o, &s.name));
+                    let mut v = serde_json::to_value(&s).unwrap_or_default();
+                    v["project"] = json!(owner.as_ref().map(|o| &o.project));
+                    v["environment"] = json!(owner.as_ref().map(|o| &o.environment));
+                    v
                 })
                 .collect();
             Ok(json!({"stacks": stacks}))
@@ -224,7 +238,7 @@ pub(super) fn stack_config_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) ->
         d,
         "stack_config",
         "Stack config",
-        "The compose file a stack was deployed with, resolved, and its secrets as references (store name, driver, version; never values).",
+        "The compose file a stack runs, as it resolved at its last deploy: `${VAR}` filled from the deploy's vars and the stack's environment, a secret variable as a `{secret}` reference, and the stack's managed domains merged into its services (`domains`: those, per service). Also the compose text it was deployed from when the daemon kept it as written (`source`, as stack_export gives it; null for a resolved deploy), and its secrets as references (store name, driver, version; never values).",
         obj(json!({"name": {"type": "string"}}), &["name"]),
         ann.ro,
         |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
@@ -242,6 +256,8 @@ pub(super) fn stack_config_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) ->
                 "deployed_at": def.deployed_at,
                 "deployed_by": def.deployed_by,
                 "file": def.file,
+                "source": def.source,
+                "domains": def.domains,
                 // References only: store name, driver, version.
                 "secrets": def.secrets,
             }))
@@ -374,24 +390,35 @@ pub(super) fn stack_rollback_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) 
         d,
         "stack_rollback",
         "Roll back a stack",
-        "Go back to the stack's previous deployment. A second rollback undoes the first.",
-        obj(json!({"name": {"type": "string"}}), &["name"]),
+        "Go back to the stack's previous deployment (a second rollback undoes the first), or with `to`, deploy a kept deployment's compose file and managed domains again (stack_deployments lists them), resolved with the stack's environment as it is now. Answers the changes and the `deployment` it started, and with `to`, `reused_secrets` (only when there are some): the `file:`/`environment:` secrets that deployed the value an earlier deploy stored.",
+        obj(
+            json!({
+                "name": {"type": "string"},
+                "to": {"type": "integer", "minimum": 1, "description": "A deployment id (stack_deployments)."}
+            }),
+            &["name"]
+        ),
         ann.write,
-        |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
+        |d: &Daemon, a: Value, c: &Caller| -> Result<Value> {
             #[derive(Deserialize)]
             struct A {
                 name: String,
                 #[serde(default)]
                 org: Option<String>,
+                #[serde(default)]
+                to: Option<u64>,
             }
             let a: A = args(a)?;
-            let changes = d.ctl.rollback(&qname(&a.org, &a.name)?)?;
+            let out = stack_settings::rollback(d, c, &a.org, &a.name, a.to)?;
             d.ctl.note(
                 "info",
                 &qname(&a.org, &a.name)?,
-                format!("rolled back by {}", caller_name(_c)),
+                match a.to {
+                    Some(id) => format!("rolled back to deployment {id} by {}", caller_name(c)),
+                    None => format!("rolled back by {}", caller_name(c)),
+                },
             );
-            Ok(json!({"changes": changes}))
+            Ok(out)
         }
     );
     Ok(())
@@ -422,6 +449,16 @@ pub(super) fn stack_remove_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) ->
             let q = qname(&a.org, &a.name)?;
             let def = d.ctl.definition(&q)?;
             d.ctl.remove(&q, a.volumes, Duration::from_secs(300))?;
+            // Its environment, managed domains and deployments go with it.
+            if let Err(e) = d.meta.remove(&def.org, &def.name) {
+                d.ctl
+                    .note("warn", &q, format!("stack settings not removed: {e}"));
+            }
+            // It belongs to no environment any more.
+            if let Err(e) = d.apps.compose_detach(&def.org, &def.name) {
+                d.ctl
+                    .note("warn", &q, format!("project record not updated: {e}"));
+            }
             // As swarm does: the secrets the stack made go with it, unless
             // another stack has come to use them.
             let mut removed: Vec<String> = Vec::new();

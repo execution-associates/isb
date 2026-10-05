@@ -1,9 +1,13 @@
-// Compose stacks: the stacks an org has that no project's apps own, as
-// documents (stack_export, stack_validate, stack_deploy).
-import { useQuery } from "@tanstack/react-query";
+// Compose stacks: stacks written as a compose file and deployed into a
+// project's environment, beside its apps, as documents (stack_export,
+// stack_validate, stack_deploy), with the same day-2 surface an app has:
+// environment, domains, deployments and rollback.
+import { type QueryClient, useQuery } from "@tanstack/react-query";
 import { ApiError } from "@/api/client";
-import { callTool, type StackStatus } from "@/api/tools";
-import type { Project } from "@/apps/api";
+import { callTool } from "@/api/tools";
+import { type Deployment, type DeploymentStatus, finished, keys, type Project } from "@/apps/api";
+import type { DomainSpec } from "@/apps/domains";
+import { stackTab } from "@/apps/service-tabs";
 
 export interface StackExport {
   name: string;
@@ -12,6 +16,9 @@ export interface StackExport {
   services: string[];
   /** `apps` when a project's environment owns the stack; `ingress` for isb's tunnel. */
   managed_by: "apps" | "ingress" | null;
+  /** The project and environment a compose stack belongs to (null for isb's tunnel). */
+  project: string | null;
+  environment: string | null;
   deployed_at: number;
   deployed_by: string;
 }
@@ -19,7 +26,11 @@ export interface StackExport {
 export const stackKeys = {
   org: (org: string) => ["stacks", org] as const,
   export: (org: string, name: string) => ["stacks", org, "export", name] as const,
-  status: (org: string, name: string) => ["stacks", org, "status", name] as const,
+  env: (org: string, name: string) => ["stacks", org, "env", name] as const,
+  domains: (org: string, name: string) => ["stacks", org, "domains", name] as const,
+  deployments: (org: string, name: string) => ["stacks", org, "deployments", name] as const,
+  deployment: (org: string, name: string, id: number) => ["stacks", org, "deployment", name, id] as const,
+  config: (org: string, name: string) => ["stacks", org, "config", name] as const,
 };
 
 /** A starting point for a new stack. */
@@ -31,20 +42,38 @@ export const NEW_STACK_TEMPLATE = `services:
       replicas: 2
 `;
 
-/** The stack names projects' apps own: <project>-<env> (a pull request's is <project>-<env>-pr-<n>). */
-export function appStackNames(projects: Project[]): Set<string> {
-  return new Set(projects.flatMap((p) => p.environments.map((e) => e.stack)));
+/** Where a compose stack lives. */
+export interface StackOwner {
+  project: string;
+  environment: string;
+}
+
+/** Every compose stack in the org's projects, with its owner. */
+export function composeStacks(projects: Project[]): (StackOwner & { name: string; services: string[] })[] {
+  return projects.flatMap((p) => p.environments.flatMap((e) => e.compose.map((c) => ({ ...c, project: p.name, environment: e.name }))));
+}
+
+/** The project environment a compose stack is deployed into, or null. */
+export function ownerOf(projects: Project[], name: string): StackOwner | null {
+  const c = composeStacks(projects).find((s) => s.name === name);
+  return c ? { project: c.project, environment: c.environment } : null;
+}
+
+/** A compose stack's page, under its project environment. */
+export function composePath(org: string, owner: StackOwner, name: string, tab?: string): string {
+  const base = `/orgs/${encodeURIComponent(org)}/projects/${encodeURIComponent(owner.project)}/${encodeURIComponent(owner.environment)}/compose/${encodeURIComponent(name)}`;
+  return tab ? `${base}/${tab}` : base;
 }
 
 /**
- * Whether a stack is a compose stack: one written as a file, not the stack
- * a project's environment renders its apps to (or one of its previews), and
- * not isb's own ingress tunnel.
+ * Where an old /orgs/:org/stacks/:stack link goes: the stack's page under its
+ * project environment, found in the projects' compose lists or, failing that,
+ * in its export. Null when it has no owner (isb's tunnel, a project's own apps
+ * stack): that page stays where it is.
  */
-export function isComposeStack(name: string, appStacks: Set<string>): boolean {
-  if (name === "isb-tunnel") return false;
-  if (appStacks.has(name)) return false;
-  return ![...appStacks].some((s) => name.startsWith(`${s}-pr-`));
+export function stackRedirect(org: string, name: string, tab: string | undefined, projects: Project[], exp?: Pick<StackExport, "managed_by" | "project" | "environment">): string | null {
+  const owner = ownerOf(projects, name) ?? (exp && !exp.managed_by && exp.project && exp.environment ? { project: exp.project, environment: exp.environment } : null);
+  return owner ? composePath(org, owner, name, stackTab(tab)) : null;
 }
 
 export function useStackExport(org: string, name: string) {
@@ -55,18 +84,265 @@ export function useStackExport(org: string, name: string) {
   });
 }
 
-/** A stack's status, or null when it is not deployed. */
-export function useStackStatus(org: string, name: string, refetchInterval?: number) {
+// The day-2 tools below (stack_env_get/set, stack_domains_get/set,
+// stack_deployments, stack_deployment_get, stack_rollback's `to`) are newer
+// than web/openapi.json: they are called untyped (callTool<R, string>) with
+// these hand-written shapes, mirroring the app tools'. Once the snapshot
+// has them, the generated argument types take over without other changes.
+
+/** stack_env_get: the stack's .env text, whose variables fill `${VAR}` in its compose file. */
+export interface StackEnv {
+  env: string;
+}
+
+/** stack_env_set {name, env, deploy?}: the stored text, and the deployment when `deploy`. */
+export interface StackEnvSet extends DeployResult {
+  env: string;
+}
+
+/**
+ * What a deploy answers (stack_deploy, stack_rollback, stack_env_set and
+ * stack_domains_set with `deploy`): the deployment it started, and the
+ * secrets it reused from an earlier deploy because no new value was given.
+ */
+export interface DeployResult {
+  deployment?: StackDeployment;
+  reused_secrets?: string[];
+}
+
+/** The secrets a deploy reused, from its answer or its deployment record. */
+export function reusedSecrets(r: DeployResult | null | undefined): string[] {
+  return r?.reused_secrets?.length ? r.reused_secrets : (r?.deployment?.reused_secrets ?? []);
+}
+
+/** What a stack deployment deployed: a compose file, a rollback, or a changed environment or set of domains. */
+export type StackAction = "deploy" | "rollback" | "env" | "domains";
+
+/** One deploy of a compose stack (stack_deployments), as app_deployments has them. */
+export interface StackDeployment {
+  id: number;
+  trigger: Deployment["trigger"];
+  status: DeploymentStatus;
+  action?: StackAction;
+  /** Who started it. */
+  actor?: string;
+  rollback_of?: number;
+  /** Secrets it reused from an earlier deploy: no new value was given. */
+  reused_secrets?: string[];
+  error?: string;
+  /** Unix milliseconds (seconds are taken too, see stackDeploymentMs). */
+  created_at: number;
+  started_at?: number;
+  finished_at?: number;
+  /** The services it changed. */
+  services?: string[];
+}
+
+/** stack_deployments {name, limit?}. */
+export interface StackDeployments {
+  current?: number | null;
+  deployments: StackDeployment[];
+}
+
+/** stack_deployment_get {name, id}: the record, the compose file it deployed, and its events. */
+export type StackDeploymentReply = (StackDeployment | { deployment: StackDeployment }) & {
+  /** The compose file it deployed. */
+  source?: string;
+  events?: (string | { at?: number; level?: string; service?: string; message: string })[];
+  log?: string | string[];
+};
+
+export interface StackDeploymentDetail {
+  record: StackDeployment;
+  source: string;
+  lines: string[];
+}
+
+/** A unix time in milliseconds, from either milliseconds or seconds. */
+const ms = (t: number | undefined) => (t === undefined || t === null ? undefined : t < 1e12 ? t * 1000 : t);
+
+/** A stack deployment with its times in milliseconds. */
+export function stackDeploymentMs(d: StackDeployment): StackDeployment {
+  return { ...d, created_at: ms(d.created_at) ?? 0, started_at: ms(d.started_at), finished_at: ms(d.finished_at) };
+}
+
+/** stack_deployment_get's reply, flat or `{deployment}`, as one shape with its log as lines. */
+export function stackDeploymentDetail(r: StackDeploymentReply): StackDeploymentDetail {
+  const record = stackDeploymentMs("deployment" in r ? r.deployment : r);
+  const events = (r.events ?? []).map((e) => (typeof e === "string" ? e : e.service ? `[${e.service}] ${e.message}` : e.message));
+  const log = typeof r.log === "string" ? (r.log.trim() ? r.log.replace(/\n$/, "").split("\n") : []) : (r.log ?? []);
+  return { record, source: r.source ?? "", lines: [...events, ...log] };
+}
+
+/**
+ * A stack deployment as the app pages' Deployment, so the deployments list
+ * and its rows draw it the same way.
+ */
+export function asDeployment(stack: string, d: StackDeployment): Deployment {
+  const x = stackDeploymentMs(d);
+  return {
+    id: x.id,
+    app: stack,
+    trigger: x.trigger ?? "api",
+    by: x.actor || "someone",
+    status: x.status,
+    rollback_of: x.rollback_of,
+    error: x.error,
+    created_at: x.created_at,
+    started_at: x.started_at,
+    finished_at: x.finished_at,
+  };
+}
+
+/**
+ * One service's domains (stack_domains_get): `managed` are the ones set here,
+ * stored beside the compose file and merged into it at deploy; `file` are
+ * the ones its `domains:` lists, changed only in the YAML.
+ */
+export interface ServiceDomains {
+  managed: DomainSpec[];
+  file: DomainSpec[];
+}
+
+/** stack_domains_get {name}: `{services: {[service]: {managed, file}}}`. */
+export type StackDomains = Record<string, ServiceDomains>;
+
+/** stack_domains_get's reply, with missing lists as empty ones. */
+export function stackDomains(r: { services?: Record<string, Partial<ServiceDomains> | null> } | null | undefined): StackDomains {
+  return Object.fromEntries(Object.entries(r?.services ?? {}).map(([svc, d]) => [svc, { managed: d?.managed ?? [], file: d?.file ?? [] }]));
+}
+
+export function getStackDomains(org: string, name: string): Promise<StackDomains> {
+  return callTool<{ services?: Record<string, Partial<ServiceDomains> | null> }, string>("stack_domains_get", { name }, org).then(stackDomains);
+}
+
+/** stack_domains_set {name, service, domains, deploy?}: one service's managed domains, replaced (the file's stay). */
+export function setStackDomains(org: string, name: string, service: string, domains: DomainSpec[], deploy: boolean) {
+  return callTool<{ domains?: DomainSpec[] } & DeployResult, string>("stack_domains_set", { name, service, domains, ...(deploy ? { deploy: true } : {}) }, org);
+}
+
+export function useStackEnv(org: string, name: string) {
   return useQuery({
-    queryKey: stackKeys.status(org, name),
-    refetchInterval,
-    queryFn: async () => {
-      try {
-        return await callTool<StackStatus>("stack_status", { name }, org);
-      } catch (e) {
-        if (e instanceof ApiError && e.status === 404) return null;
-        throw e;
-      }
-    },
+    queryKey: stackKeys.env(org, name),
+    queryFn: () => callTool<StackEnv, string>("stack_env_get", { name }, org).then((r) => r.env ?? ""),
   });
+}
+
+export function useStackDomains(org: string, name: string) {
+  return useQuery({
+    queryKey: stackKeys.domains(org, name),
+    queryFn: () => getStackDomains(org, name),
+  });
+}
+
+export function useStackDeployments(org: string, name: string, limit = 30, refetchInterval?: number | ((latest: StackDeployment | undefined) => number | false)) {
+  return useQuery({
+    queryKey: [...stackKeys.deployments(org, name), limit],
+    refetchInterval: typeof refetchInterval === "function" ? (q) => refetchInterval(q.state.data?.deployments[0]) : refetchInterval,
+    queryFn: () =>
+      callTool<StackDeployments, string>("stack_deployments", { name, limit }, org).then((r) => ({
+        current: r.current ?? null,
+        deployments: (r.deployments ?? []).map(stackDeploymentMs),
+      })),
+  });
+}
+
+/** One deployment, read again every 2 s until it finishes. */
+export function useStackDeployment(org: string, name: string, id: number) {
+  return useQuery({
+    queryKey: stackKeys.deployment(org, name, id),
+    refetchInterval: (q) => (q.state.data && finished(q.state.data.record.status) ? false : 2000),
+    queryFn: () => callTool<StackDeploymentReply, string>("stack_deployment_get", { name, id }, org).then(stackDeploymentDetail),
+  });
+}
+
+/** stack_config {name}: the file the stack runs, with managed domains merged in and `${VAR}` filled (secrets as references). */
+export interface StackConfig {
+  file: unknown;
+  source?: string | null;
+}
+
+export function useStackConfig(org: string, name: string, enabled: boolean) {
+  return useQuery({
+    queryKey: stackKeys.config(org, name),
+    enabled,
+    queryFn: () => callTool<StackConfig>("stack_config", { name }, org),
+  });
+}
+
+/**
+ * Each service's `deploy.replicas` in a compose file's text, 1 where it sets
+ * none (or sets it from a variable): what Start scales a stopped stack back
+ * to. A line scan, not a YAML parser: block style (`deploy:` then
+ * `replicas: 2` under it) and flow style (`deploy: {replicas: 2}`).
+ */
+export function sourceReplicas(yaml: string, services: string[]): Record<string, number> {
+  const found: Record<string, number> = {};
+  const lines = yaml.split("\n").map((l) => l.replace(/(^|\s)#.*$/, "").replace(/\s+$/, ""));
+  const indent = (l: string) => l.length - l.trimStart().length;
+  const key = (l: string) => /^\s*(["']?)([^"'\s:][^"':]*)\1\s*:(?:\s+(.*))?$/.exec(l);
+  const flow = (v: string | undefined) => (v ? /\breplicas\s*:\s*(\d+)/.exec(v) : null);
+  let inServices = false;
+  let svcIndent = -1;
+  let svc: string | null = null;
+  let deployIndent = -1;
+  let childIndent = -1;
+  for (const l of lines) {
+    if (!l.trim()) continue;
+    const ind = indent(l);
+    const k = key(l);
+    if (ind === 0) {
+      inServices = k?.[2] === "services" && !k[3];
+      svcIndent = -1;
+      svc = null;
+      continue;
+    }
+    if (!inServices) continue;
+    if (svcIndent < 0) svcIndent = ind;
+    if (ind <= svcIndent) {
+      svc = ind === svcIndent && k ? k[2] : null;
+      deployIndent = -1;
+      const m = svc && k?.[3] ? /\bdeploy\s*:\s*\{([^}]*)\}/.exec(k[3]) : null;
+      if (svc && m) found[svc] = Number(flow(m[1])?.[1] ?? 1);
+      continue;
+    }
+    if (!svc) continue;
+    if (deployIndent >= 0 && ind <= deployIndent) deployIndent = -1;
+    if (deployIndent < 0) {
+      if (k?.[2] === "deploy") {
+        const f = flow(k[3]);
+        if (f) found[svc] = Number(f[1]);
+        else if (!k[3]) {
+          deployIndent = ind;
+          childIndent = -1;
+        }
+      }
+      continue;
+    }
+    if (childIndent < 0) childIndent = ind;
+    if (ind === childIndent && k?.[2] === "replicas" && /^\d+$/.test(k[3] ?? "")) found[svc] = Number(k[3]);
+  }
+  return Object.fromEntries(services.map((s) => [s, found[s] ?? 1]));
+}
+
+/** After a deploy: refresh everything that shows stacks, and put the new file in the editor. */
+export async function afterDeploy(qc: QueryClient, org: string, name: string) {
+  const fresh = await callTool<StackExport>("stack_export", { name }, org);
+  qc.setQueryData(stackKeys.export(org, name), fresh);
+  await invalidateStacks(qc, org);
+}
+
+/** Refresh everything that lists stacks: the stack queries, stack_list, and projects' compose lists. */
+async function invalidateStacks(qc: QueryClient, org: string) {
+  await Promise.all([
+    qc.invalidateQueries({ queryKey: stackKeys.org(org) }),
+    qc.invalidateQueries({ queryKey: ["tool", "stack_list"] }),
+    // The apps queries hold each stack's status and the projects' compose lists.
+    qc.invalidateQueries({ queryKey: keys.org(org) }),
+  ]);
+}
+
+/** stack_validate and stack_deploy's project and environment arguments, when the stack has an owner. */
+export function ownerArgs(owner: StackOwner | null): { project?: string; environment?: string } {
+  return owner ? { project: owner.project, environment: owner.environment } : {};
 }

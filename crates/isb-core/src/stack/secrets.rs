@@ -72,11 +72,31 @@ fn declared<'a>(file: &'a ComposeFile, key: &str) -> Result<&'a SecretDef> {
     })
 }
 
+/// A `file:`/`environment:` secret deployed with the value an earlier
+/// deploy of the stack stored, because this deploy gave it none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reused {
+    /// The top-level secret's name in the compose file.
+    pub key: String,
+    /// The version deployed.
+    pub version: u64,
+    /// When that value was stored (unix seconds).
+    pub stored_at: u64,
+}
+
+/// What [`bind_reporting`] bound, and which values it reused.
+#[derive(Debug, Clone, Default)]
+pub struct Bound {
+    pub bindings: BTreeMap<String, SecretBinding>,
+    pub reused: Vec<Reused>,
+}
+
 /// Bind every secret `file`'s services use, for deploying it as `stack` in
 /// `org`. `given` holds the values of `file:`/`environment:` secrets, read by
-/// the client. Values the stack owns are stored now, and only when changed,
-/// so an unchanged value keeps its version. With `dry_run` nothing is
-/// written; the versions are what a deploy would produce.
+/// the client; one it lacks reuses the value an earlier deploy stored.
+/// Values the stack owns are stored now, and only when changed, so an
+/// unchanged value keeps its version. With `dry_run` nothing is written;
+/// the versions are what a deploy would produce.
 pub fn bind(
     secrets: &Secrets,
     org: &OrgId,
@@ -85,7 +105,22 @@ pub fn bind(
     given: &BTreeMap<String, Vec<u8>>,
     dry_run: bool,
 ) -> Result<BTreeMap<String, SecretBinding>> {
+    bind_reporting(secrets, org, stack, file, given, dry_run, true).map(|b| b.bindings)
+}
+
+/// [`bind`], naming the secrets that reused a stored value. Without
+/// `reuse`, a `file:`/`environment:` secret `given` lacks is an error.
+pub fn bind_reporting(
+    secrets: &Secrets,
+    org: &OrgId,
+    stack: &str,
+    file: &ComposeFile,
+    given: &BTreeMap<String, Vec<u8>>,
+    dry_run: bool,
+    reuse: bool,
+) -> Result<Bound> {
     let mut out = BTreeMap::new();
+    let mut reused = Vec::new();
     for key in used_keys(file) {
         let def = declared(file, &key)?;
         let b = if let Some(store) = def.store_name(&key) {
@@ -111,6 +146,27 @@ pub fn bind(
                 driver: driver.clone(),
                 version,
                 owned: false,
+            }
+        } else if reuse && def.age.is_none() && !given.contains_key(&key) {
+            // No value with this deploy: the one stored by an earlier deploy
+            // of the stack, so its file deploys again as written.
+            let name = owned_name(stack, &key)?;
+            let m = secrets.inspect(org, &name).map_err(|e| match e {
+                Error::NotFound(_) => {
+                    Error::invalid(format!("no value for secret {key:?}: pass it in `secrets`"))
+                }
+                e => e,
+            })?;
+            reused.push(Reused {
+                key: key.clone(),
+                version: m.version,
+                stored_at: m.updated_at,
+            });
+            SecretBinding {
+                name,
+                driver: m.driver,
+                version: m.version,
+                owned: true,
             }
         } else {
             let value = if let Some(text) = &def.age {
@@ -138,7 +194,10 @@ pub fn bind(
         };
         out.insert(key, b);
     }
-    Ok(out)
+    Ok(Bound {
+        bindings: out,
+        reused,
+    })
 }
 
 /// The driver and version `put` would leave.
@@ -515,9 +574,47 @@ mod tests {
             bind(&s, &org, "app", &f, &given2, false).unwrap()["tok"].version,
             2
         );
-        // A missing client value is an error naming the secret.
-        let e = bind(&s, &org, "app", &f, &BTreeMap::new(), false).unwrap_err();
+        // No value again: the one an earlier deploy stored, as it is.
+        let kept = bind(&s, &org, "app", &f, &BTreeMap::new(), false).unwrap();
+        assert_eq!(
+            (
+                kept["tok"].name.as_str(),
+                kept["tok"].version,
+                kept["tok"].owned
+            ),
+            ("app_tok", 2, true)
+        );
+        // With none stored, a missing client value is an error naming the
+        // secret.
+        let e = bind(&s, &org, "other", &f, &BTreeMap::new(), false).unwrap_err();
         assert!(e.to_string().contains("no value for secret"), "{e}");
+        // A reused value is named, with its version and when it was stored;
+        // one given is not.
+        let only_tok = BTreeMap::from([("tok".to_string(), b"new".to_vec())]);
+        let r = bind_reporting(&s, &org, "app", &f, &only_tok, true, true).unwrap();
+        let stored = s.inspect(&org, "app_cert").unwrap();
+        assert_eq!(
+            r.reused,
+            vec![Reused {
+                key: "cert".into(),
+                version: stored.version,
+                stored_at: stored.updated_at,
+            }]
+        );
+        assert!(
+            bind_reporting(&s, &org, "app", &f, &given2, false, true)
+                .unwrap()
+                .reused
+                .is_empty()
+        );
+        // Without reuse, a missing value fails as before, even with one
+        // stored, and stores nothing.
+        let e = bind_reporting(&s, &org, "app", &f, &only_tok, false, false).unwrap_err();
+        assert!(
+            e.to_string().contains("no value for secret \"cert\""),
+            "{e}"
+        );
+        assert_eq!(s.inspect(&org, "app_cert").unwrap().version, stored.version);
     }
 
     #[test]
@@ -578,6 +675,8 @@ mod tests {
     #[test]
     fn refresh_schedule() {
         let mut def = super::super::StackDef {
+            source: None,
+            domains: Default::default(),
             name: "app".into(),
             org: OrgId::default_org(),
             file: file(FILE),

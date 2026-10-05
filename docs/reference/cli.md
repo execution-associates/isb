@@ -189,13 +189,16 @@ is described in [isb tui](tui.md); without a daemon it shows sandboxes only.
 ## Stacks
 
 ```text
-isb stack deploy [NAME] [-f FILE]... [-d] [--timeout 10m]   waits for the rollout unless -d
+isb stack deploy [NAME] [-f FILE]... [-d] [--timeout 10m] [--project P [--env E]] [--no-reuse-secrets]   waits for the rollout unless -d
 isb stack ls [--json]
 isb stack ps NAME [--json]
 isb stack logs NAME SERVICE [--slot N] [-n 100]
 isb stack scale NAME SERVICE=N...
 isb stack redeploy NAME SERVICE
-isb stack rollback NAME
+isb stack rollback NAME [--to ID]   ID: a kept deployment (isb stack deployments)
+isb stack deployments NAME [--json]
+isb stack env NAME                  the stack's environment (.env text the daemon resolves ${VAR} with)
+isb stack env-set NAME [FILE] [--deploy]   replace it from FILE or stdin
 isb stack config NAME
 isb stack rm NAME [--volumes]
 ```
@@ -203,7 +206,17 @@ isb stack rm NAME [--volumes]
 `deploy` reads the file as `isb up` would (`.env`, `--env-file`, `${VAR}`),
 including `file:` and `environment:` secrets, and exits 0 once every service
 converged, 1 if one paused or is failing. The stack's name defaults to the
-compose project name. See [Stacks](../concepts/stacks.md).
+compose project name. A new stack belongs to `--project`/`--env` (the
+project is made if missing; the environment defaults to `production`), or
+to the project named like it; an existing stack keeps its project, and
+naming another is refused. A stack with an environment on the daemon
+(`isb stack env-set`) has its `${VAR}` resolved there, from one compose
+file. A `file:`/`environment:` secret that gets no value reuses the one an
+earlier deploy stored, with `warning: secret KEY: no value given; reusing
+the value stored on DATE` on stderr (`deploy`, `rollback --to` and
+`env-set --deploy` all print it); `--no-reuse-secrets` fails the deploy
+instead. See [Stacks](../concepts/stacks.md) and
+[Compose stacks in an environment](../concepts/apps.md#compose-stacks-in-an-environment).
 
 ## Orgs and the host
 

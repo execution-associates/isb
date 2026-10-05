@@ -99,9 +99,19 @@ pub const MIN_PASSWORD_LEN: usize = 12;
 /// "password" is a denial of service, not a secret.
 pub const MAX_PASSWORD_LEN: usize = 1024;
 
+/// [`password_policy`], with no minimum length under
+/// `ISB_DEV_WEAK_PASSWORDS` ([`super::dev`]).
 pub fn check_password_policy(pw: &str) -> Result<(), AuthError> {
-    let n = pw.chars().count();
-    if n < MIN_PASSWORD_LEN {
+    password_policy(pw, super::dev::weak_passwords()?)
+}
+
+/// At least [`MIN_PASSWORD_LEN`] characters (`weak`: at least one), at most
+/// [`MAX_PASSWORD_LEN`] bytes.
+pub fn password_policy(pw: &str, weak: bool) -> Result<(), AuthError> {
+    if weak && pw.is_empty() {
+        return Err(AuthError::Invalid("password is empty".into()));
+    }
+    if !weak && pw.chars().count() < MIN_PASSWORD_LEN {
         return Err(AuthError::Invalid(format!(
             "password too short: at least {MIN_PASSWORD_LEN} characters"
         )));
@@ -284,5 +294,10 @@ mod tests {
         assert!(check_password_policy("short").is_err());
         assert!(check_password_policy("exactly12chr").is_ok());
         assert!(check_password_policy(&"x".repeat(2000)).is_err());
+        // ISB_DEV_WEAK_PASSWORDS: any length, but never empty or huge.
+        assert!(password_policy("password", true).is_ok());
+        assert!(password_policy("password", false).is_err());
+        assert!(password_policy("", true).is_err());
+        assert!(password_policy(&"x".repeat(2000), true).is_err());
     }
 }

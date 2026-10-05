@@ -178,3 +178,56 @@ export function stackVerdict(r: DryRun, opts: { name: string; creating: boolean 
 
 /** `line N: message`, or just the message. */
 export const problemText = (p: Problem): string => (p.line ? `Line ${p.line}: ${p.message}` : p.message);
+
+const RESERVED = /^(?:true|false|null|yes|no|on|off|y|n|~)$/i;
+
+/** A string YAML reads back as that same string without quotes. */
+function plain(s: string): boolean {
+  return /^[A-Za-z_/.$][\w ./:@$+=,~()-]*$/.test(s) && !/\s$/.test(s) && !s.endsWith(":") && !s.includes(": ") && !s.includes(" #") && !RESERVED.test(s);
+}
+
+function scalar(v: unknown): string {
+  if (v === null || v === undefined) return "null";
+  if (typeof v === "string") return plain(v) ? v : JSON.stringify(v);
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (Array.isArray(v)) return "[]";
+  if (typeof v === "object") return "{}";
+  return JSON.stringify(String(v));
+}
+
+const fields = (o: object) => Object.entries(o).filter(([, x]) => x !== null && x !== undefined);
+const isBlock = (v: unknown) => (Array.isArray(v) ? v.length > 0 : typeof v === "object" && v !== null && fields(v).length > 0);
+
+/** A value after `prefix` (a key or a list dash): inline, or a literal block for multi-line text. */
+function inline(v: unknown, ind: number, prefix: string): string[] {
+  if (typeof v === "string" && v.includes("\n") && !/^\s/.test(v) && !/\n\n+$/.test(v)) {
+    const body = v.replace(/\n$/, "").split("\n");
+    return [`${prefix}${v.endsWith("\n") ? "|" : "|-"}`, ...body.map((l) => (l ? " ".repeat(ind) + l : ""))];
+  }
+  return [prefix + scalar(v)];
+}
+
+function block(v: unknown, ind: number): string[] {
+  const pad = " ".repeat(ind);
+  if (Array.isArray(v)) {
+    return v.flatMap((item) => {
+      if (!isBlock(item)) return inline(item, ind + 2, `${pad}- `);
+      const inner = block(item, ind + 2);
+      return [`${pad}- ${inner[0].slice(ind + 2)}`, ...inner.slice(1)];
+    });
+  }
+  return fields(v as object).flatMap(([k, x]) => {
+    const key = `${pad}${plain(k) ? k : JSON.stringify(k)}:`;
+    return isBlock(x) ? [key, ...block(x, ind + 2)] : inline(x, ind + 2, `${key} `);
+  });
+}
+
+/**
+ * A JSON value as block-style YAML (the deployed compose file stack_config
+ * answers as JSON): maps and lists indented by two, null fields left out,
+ * strings quoted only where YAML would read them as something else.
+ */
+export function toYaml(v: unknown): string {
+  if (!isBlock(v)) return `${scalar(v)}\n`;
+  return `${block(v, 0).join("\n")}\n`;
+}

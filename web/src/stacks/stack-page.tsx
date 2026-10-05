@@ -1,75 +1,97 @@
-// /orgs/:org/stacks/:stack/:tab: a compose stack, with its file in an editor
-// (Compose), what runs (Services), and its output (Logs). Deploying the file
-// is stack_deploy, the same call `isb stack deploy` makes.
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileCode2, Layers, Loader2, RefreshCw, ScrollText, Server, Trash2 } from "lucide-react";
-import { Suspense, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+// /orgs/:org/projects/:project/:env/compose/:stack/:tab: a compose stack in a
+// project environment, on the same page an app has: the shared header (with
+// Stop/Start, Deploy and the deployment in progress) and the shared tab list
+// (service-tabs.ts). YAML is the compose file in an editor; deploying it is
+// stack_deploy, the same call `isb stack deploy` makes. The tabs are in
+// stack-general.tsx, stack-tabs.tsx, stack-deployments.tsx, stack-yaml.tsx,
+// stack-jobs.tsx and stack-terminal.tsx. The old Compose and Services tabs
+// redirect to YAML and General. /orgs/:org/stacks/:stack redirects here, and
+// still shows the stacks no project owns (isb's tunnel, an apps stack).
+import { useQueryClient } from "@tanstack/react-query";
+import { ArrowUpRight, FileCode2, Layers, Loader2, Play, Rocket, Server, Square } from "lucide-react";
+import { lazy, Suspense, useState } from "react";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import { toast } from "sonner";
-import { callTool, type ServiceStatus } from "@/api/tools";
-import { PageHeader } from "@/components/app-shell";
-import { StatusDot } from "@/components/status";
+import { callTool } from "@/api/tools";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { YamlWorkbench } from "@/components/yaml-workbench";
 import { canWrite } from "@/lib/admin";
 import { relativeTime } from "@/lib/format";
+import { errorMessage } from "@/lib/messages";
 import { useMe } from "@/lib/session";
-import { type DryRun, stackVerdict } from "@/lib/yaml-edit";
-import { isNotFound, useProjects } from "@/apps/api";
-import { ConfirmDialog, Crumbs, EmptyState, QueryError, Section, TabLinks, ToneBadge } from "@/apps/components";
+import { finished, isNotFound, keys, useProjects, useStack } from "@/apps/api";
+import { ConfirmDialog, Crumbs, EmptyState, QueryError, ToneBadge } from "@/apps/components";
 import { HEALTH_LABEL, HEALTH_TONE, stackHealth } from "@/apps/health";
 import { useOrgLive } from "@/apps/live";
-import { LogView } from "@/apps/log-view";
-import { Segmented } from "@/apps/segmented";
-import { type StackExport, stackKeys, useStackExport, useStackStatus } from "./api";
+import { DeploymentBanner, ServiceHeader, ServiceTabBar } from "@/apps/service-page";
+import { activeServiceTab, serviceTabs, stackTab } from "@/apps/service-tabs";
+import {
+  afterDeploy,
+  asDeployment,
+  composePath,
+  type DeployResult,
+  ownerArgs,
+  ownerOf,
+  sourceReplicas,
+  type StackOwner,
+  stackKeys,
+  stackRedirect,
+  useStackDeployments,
+  useStackExport,
+} from "./api";
+import { deployToast, StackDeploymentPage, StackDeploymentsTab } from "./stack-deployments";
+import { StackAdvancedTab, StackGeneralTab } from "./stack-general";
+import { type StackServices, StackDomainsTab, StackEnvironmentTab, StackLogsTab, StackMonitoringTab } from "./stack-tabs";
+import { StackYamlTab } from "./stack-yaml";
 
-const TABS = [
-  { id: "compose", label: "Compose", icon: FileCode2 },
-  { id: "services", label: "Services", icon: Layers },
-  { id: "logs", label: "Logs", icon: ScrollText },
-] as const;
-type TabId = (typeof TABS)[number]["id"];
+// xterm.js is loaded only when the Terminal tab opens; the jobs tab too.
+const StackTerminalTab = lazy(() => import("./stack-terminal").then((m) => ({ default: m.StackTerminalTab })));
+const StackJobsTab = lazy(() => import("./stack-jobs").then((m) => ({ default: m.StackJobsTab })));
 
-const STATE_TONE: Record<string, "ok" | "warn" | "bad" | "busy" | "idle"> = {
-  converged: "ok",
-  updating: "busy",
-  starting: "busy",
-  paused: "warn",
-  waiting: "warn",
-  failing: "bad",
-};
+function StackSkeleton() {
+  return (
+    <div className="space-y-6">
+      <Skeleton className="h-11 w-64" />
+      <Skeleton className="h-9 w-full max-w-md" />
+      <Skeleton className="h-96 rounded-xl" />
+    </div>
+  );
+}
 
-/** After a deploy: refresh everything that shows stacks, and put the new file in the editor. */
-export async function afterDeploy(qc: ReturnType<typeof useQueryClient>, org: string, name: string) {
-  const fresh = await callTool<StackExport>("stack_export", { name }, org);
-  qc.setQueryData(stackKeys.export(org, name), fresh);
-  await Promise.all([qc.invalidateQueries({ queryKey: stackKeys.org(org) }), qc.invalidateQueries({ queryKey: ["tool", "stack_list"] })]);
+/** /orgs/:org/stacks/:stack(/:tab(/:id)): to the stack's page under its project environment, or the page here when no project owns it. */
+export function StackRedirect() {
+  const { org = "", stack: name = "", tab: seg, id } = useParams();
+  const tab = seg && id ? `${stackTab(seg)}/${id}` : seg;
+  const projects = useProjects(org);
+  const known = projects.data ? ownerOf(projects.data, name) : null;
+  // The export is only needed when the projects' compose lists don't name the stack.
+  const exp = useStackExport(org, name);
+  if (projects.isLoading || (!known && exp.isLoading)) return <StackSkeleton />;
+  const to = stackRedirect(org, name, tab, projects.data ?? [], exp.data);
+  return to ? <Navigate to={to} replace /> : <StackPage />;
 }
 
 export function StackPage() {
-  const { org = "", stack: name = "", tab = "compose" } = useParams();
+  const { org = "", project, env, stack: name = "", tab, id } = useParams();
+  const [params] = useSearchParams();
   const exp = useStackExport(org, name);
-  const status = useStackStatus(org, name, 3000);
+  const status = useStack(org, name, 3000);
   const projects = useProjects(org);
   const writer = canWrite(useMe().data!, org);
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [removing, setRemoving] = useState(false);
+  const [deploying, setDeploying] = useState(false);
   useOrgLive(org);
   const o = encodeURIComponent(org);
 
-  if (exp.isLoading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-11 w-64" />
-        <Skeleton className="h-9 w-full max-w-md" />
-        <Skeleton className="h-96 rounded-xl" />
-      </div>
-    );
+  // The page's old tab names: Compose is YAML, Services is General.
+  const legacy = stackTab(tab);
+  if (tab && legacy !== tab && project && env) {
+    return <Navigate to={`${composePath(org, { project, environment: env }, name, legacy)}${params.size ? `?${params}` : ""}`} replace />;
   }
+  if (exp.isLoading) return <StackSkeleton />;
   if (exp.error || !exp.data) {
     return isNotFound(exp.error) ? (
       <Card className="py-0">
@@ -90,202 +112,225 @@ export function StackPage() {
     );
   }
   const e = exp.data;
-  const active = (TABS.some((t) => t.id === tab) ? tab : "compose") as TabId;
+  const tabs = serviceTabs({ writer });
+  const active = activeServiceTab(legacy, tabs);
+  const services = status.data?.services;
   const health = stackHealth(status.data ?? undefined);
-  const owner = e.managed_by === "apps" ? (projects.data ?? []).find((p) => p.environments.some((env) => env.stack === name || name.startsWith(`${env.stack}-pr-`))) : undefined;
+  const healthy = (services ?? []).reduce((n, s) => n + s.healthy, 0);
+  const replicas = (services ?? []).reduce((n, s) => n + s.replicas, 0);
+  const url = (services ?? []).flatMap((s) => s.domains ?? []).map((d) => d.url).find(Boolean);
+  const appsOwner = e.managed_by === "apps" ? (projects.data ?? []).find((p) => p.environments.some((x) => x.stack === name || name.startsWith(`${x.stack}-pr-`))) : undefined;
+  // The project environment this compose stack is deployed into: the URL's, else the projects' or the export's say.
+  const owner: StackOwner | null =
+    project && env
+      ? { project, environment: env }
+      : (ownerOf(projects.data ?? [], name) ?? (!e.managed_by && e.project && e.environment ? { project: e.project, environment: e.environment } : null));
+  const base = (t: string) => (owner ? composePath(org, owner, name, t) : `/orgs/${o}/stacks/${encodeURIComponent(name)}/${t}`);
+  // The picked service rides along between tabs.
+  const picked = params.get("service");
+  const tabPath = (t: string, service = picked ?? undefined) => `${base(t)}${service ? `?service=${encodeURIComponent(service)}` : ""}`;
+  const deploymentsPath = (d?: number) => base(d ? `deployments/${d}` : "deployments");
+  const envPath = owner && `/orgs/${o}/projects/${encodeURIComponent(owner.project)}/${encodeURIComponent(owner.environment)}`;
+
+  // Deploy the compose file as it is now: what the YAML tab's Deploy does
+  // with no edits, so environment or domain changes saved without deploying
+  // go out. Not for a stack a project's apps or isb itself manage.
+  const deploy = e.managed_by
+    ? undefined
+    : {
+        pending: deploying,
+        run: async () => {
+          setDeploying(true);
+          try {
+            const r = await callTool<DeployResult>("stack_deploy", { name, compose: e.yaml, ...ownerArgs(owner) }, org);
+            await afterDeploy(qc, org, name);
+            deployToast(name, r);
+            if (r?.deployment?.id) navigate(deploymentsPath(r.deployment.id));
+          } catch (err) {
+            toast.error(errorMessage(err));
+          } finally {
+            setDeploying(false);
+          }
+        },
+      };
 
   return (
     <>
-      <Crumbs items={[{ label: "Projects", to: `/orgs/${o}/projects` }, { label: "Compose stacks", to: `/orgs/${o}/projects#compose-stacks` }, { label: name }]} />
-      <PageHeader
-        icon={
-          <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border bg-gradient-to-b from-background to-muted shadow-xs">
-            <Layers className="size-5 text-muted-foreground" />
-          </span>
+      <Crumbs
+        items={
+          owner && envPath
+            ? [
+                { label: "Projects", to: `/orgs/${o}/projects` },
+                { label: owner.project, to: `/orgs/${o}/projects/${encodeURIComponent(owner.project)}` },
+                { label: owner.environment, to: envPath },
+                { label: name },
+              ]
+            : [{ label: "Projects", to: `/orgs/${o}/projects` }, { label: name }]
         }
-        title={
-          <>
-            <span className="truncate">{name}</span>
+      />
+      <ServiceHeader
+        icon={Layers}
+        name={name}
+        state={
+          status.isLoading ? (
+            <Skeleton className="h-5 w-20 rounded-full" />
+          ) : (
             <ToneBadge tone={HEALTH_TONE[health]} pulse={health === "updating"}>
               {HEALTH_LABEL[health]}
             </ToneBadge>
-          </>
+          )
         }
-        description={
-          <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
-            <span className="inline-flex items-center gap-1.5">
-              <Server className="size-3.5" />
-              {e.services.length} service{e.services.length === 1 ? "" : "s"}
+        details={
+          <>
+            <span className="flex min-w-0 items-center gap-1.5">
+              <FileCode2 className="size-3.5 shrink-0" />
+              <span className="truncate font-mono text-xs">
+                compose · {e.services.length} service{e.services.length === 1 ? "" : "s"}
+              </span>
             </span>
-            <span title={new Date(e.deployed_at * 1000).toLocaleString()}>
-              Deployed {relativeTime(e.deployed_at)} by {e.deployed_by || "someone"}
+            <span className="flex items-center gap-1.5">
+              <Server className="size-3.5 shrink-0" />
+              {status.isLoading ? <Skeleton className="h-3.5 w-20" /> : services?.length ? `${healthy}/${replicas} healthy` : "not running"}
             </span>
-          </span>
+            {e.deployed_at > 0 && (
+              <span title={new Date(e.deployed_at * 1000).toLocaleString()}>
+                Deployed {relativeTime(e.deployed_at)} by {e.deployed_by || "someone"}
+              </span>
+            )}
+            {url && (
+              <a href={url} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-1 font-medium text-foreground underline-offset-4 hover:underline">
+                <span className="truncate">{url.replace(/^https?:\/\//, "")}</span>
+                <ArrowUpRight className="size-3.5 shrink-0" />
+              </a>
+            )}
+          </>
         }
         actions={
           writer &&
-          !e.managed_by && (
-            <Button variant="outline" onClick={() => setRemoving(true)}>
-              <Trash2 />
-              Remove
-            </Button>
+          deploy && (
+            <>
+              {!status.isLoading && <StopStart org={org} name={name} yaml={e.yaml} names={e.services} services={services} />}
+              <Button onClick={deploy.run} disabled={deploy.pending}>
+                {deploy.pending ? <Loader2 className="animate-spin" /> : <Rocket />}
+                {e.deployed_at ? "Redeploy" : "Deploy"}
+              </Button>
+            </>
           )
         }
       />
+      <StackActiveDeployment org={org} name={name} path={deploymentsPath} viewing={active === "deployments" && id ? Number(id) : undefined} />
       {e.managed_by === "apps" && (
         <Alert className="mb-5">
-          <AlertTitle>This stack belongs to {owner ? `the project ${owner.name}` : "a project"}'s apps</AlertTitle>
+          <AlertTitle>This stack belongs to {appsOwner ? `the project ${appsOwner.name}` : "a project"}'s apps</AlertTitle>
           <AlertDescription>
             Its services are apps. Change them from their app pages (or their YAML tab), not from a compose file.{" "}
-            {owner && (
-              <Link to={`/orgs/${o}/projects/${owner.name}`} className="font-medium underline underline-offset-4">
-                Open {owner.name}
+            {appsOwner && (
+              <Link to={`/orgs/${o}/projects/${appsOwner.name}`} className="font-medium underline underline-offset-4">
+                Open {appsOwner.name}
               </Link>
             )}
           </AlertDescription>
         </Alert>
       )}
-      <TabLinks active={active} tabs={TABS.map((t) => ({ ...t, to: `/orgs/${o}/stacks/${encodeURIComponent(name)}/${t.id}` }))} />
-      {active === "compose" && (
-        <Section
-          title="Compose file"
-          description={
-            <>
-              The file this stack runs from, in isb's compose format, with variables filled in. Secrets that came from a file or variable appear as <span className="font-mono">external</span> secrets in the org's store, so the file deploys again as it is.
-            </>
-          }
-        >
-          <YamlWorkbench
-            baseline={e.yaml}
-            label={`Compose file of ${name}`}
-            readOnly={!writer}
-            deployOnly
-            deployLabel="Deploy"
-            refuse={e.managed_by ? `${name} is managed by ${e.managed_by === "apps" ? "a project's apps" : "isb itself"}.` : undefined}
-            note="Deploying replaces the services whose settings changed, rolling."
-            validate={async (text) =>
-              stackVerdict(await callTool<DryRun>("stack_validate", { name, compose: text }, org), { name, creating: false })
-            }
-            save={async (text) => {
-              await callTool("stack_deploy", { name, compose: text }, org);
-              await afterDeploy(qc, org, name);
-              toast.success(`Deploying ${name}`);
-              navigate(`/orgs/${o}/stacks/${encodeURIComponent(name)}/services`);
-            }}
-          />
-        </Section>
+      <ServiceTabBar tabs={tabs} active={active} to={(t) => tabPath(t)} />
+      {active === "yaml" && <StackYamlTab org={org} name={name} exp={e} owner={owner} writer={writer} deploymentsPath={deploymentsPath} generalPath={tabPath("general")} />}
+      {active === "general" && (
+        <StackGeneralTab
+          org={org}
+          name={name}
+          exp={e}
+          services={services}
+          loading={status.isLoading}
+          writer={writer}
+          tabPath={tabPath}
+          deploy={deploy}
+          removable={!e.managed_by}
+          onRemoved={() => navigate(envPath || `/orgs/${o}/projects`)}
+        />
       )}
-      {active === "services" && <ServicesTab services={status.data?.services} loading={status.isLoading} />}
-      {active === "logs" && <LogsTab org={org} name={name} services={status.data?.services ?? []} />}
-      <ConfirmDialog
-        open={removing}
-        onOpenChange={setRemoving}
-        title={`Remove ${name}?`}
-        description="Its instances and published ports are deleted. Named volumes are kept."
-        confirmLabel="Remove stack"
-        typed={name}
-        onConfirm={async () => {
-          await callTool("stack_remove", { name }, org);
-          await Promise.all([qc.invalidateQueries({ queryKey: stackKeys.org(org) }), qc.invalidateQueries({ queryKey: ["tool", "stack_list"] })]);
-          toast.success(`${name} removed`);
-          navigate(`/orgs/${o}/projects`);
-        }}
-      />
+      {active === "environment" && <StackEnvironmentTab org={org} name={name} deploymentsPath={deploymentsPath} />}
+      {active === "domains" && (
+        <StackDomainsTab org={org} name={name} services={e.services} status={services} statusLoading={status.isLoading} deploymentsPath={deploymentsPath} yamlPath={tabPath("yaml")} />
+      )}
+      {active === "deployments" &&
+        (id ? (
+          <StackDeploymentPage org={org} name={name} id={Number(id)} writer={writer} path={deploymentsPath} />
+        ) : (
+          <StackDeploymentsTab org={org} name={name} writer={writer} path={deploymentsPath} deploy={deploy} />
+        ))}
+      {active === "logs" && <StackLogsTab org={org} name={name} services={(services ?? []).map((s) => s.service)} />}
+      {active === "monitoring" && <StackMonitoringTab org={org} name={name} services={e.services} status={services} loading={status.isLoading} error={status.error} />}
+      <Suspense fallback={<Skeleton className="h-64" />}>
+        {active === "jobs" && <StackJobsTab org={org} name={name} services={e.services} />}
+        {active === "terminal" && <StackTerminalTab org={org} services={e.services} status={services} loading={status.isLoading} />}
+      </Suspense>
+      {active === "advanced" && <StackAdvancedTab org={org} name={name} services={services} loading={status.isLoading} writer={writer} />}
     </>
   );
 }
 
-function ServicesTab({ services, loading }: { services: ServiceStatus[] | undefined; loading: boolean }) {
-  if (loading) return <Skeleton className="h-64 rounded-xl" />;
-  if (!services?.length) {
-    return (
-      <Card className="py-0">
-        <EmptyState icon={Layers} title="Nothing is running" compact>
-          Deploy the compose file and its services show up here.
-        </EmptyState>
-      </Card>
-    );
-  }
-  return (
-    <div className="grid gap-4">
-      {services.map((s) => (
-        <Card key={s.service} className="gap-0 px-5 py-4">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <h2 className="font-mono text-[15px] font-semibold">{s.service}</h2>
-            <ToneBadge tone={STATE_TONE[s.state] ?? "idle"} pulse={STATE_TONE[s.state] === "busy"}>
-              {s.state}
-            </ToneBadge>
-            <span className="text-xs text-muted-foreground tabular-nums">
-              {s.healthy}/{s.replicas} healthy
-            </span>
-            <span className="ml-auto truncate font-mono text-xs text-muted-foreground">{s.image}</span>
-          </div>
-          {s.message && <p className="mt-1.5 text-[13px] text-muted-foreground">{s.message}</p>}
-          <ul className="mt-3 grid gap-1 text-[13px]">
-            {s.instances.map((i) => (
-              <li key={i.name} className="flex items-center gap-2">
-                <StatusDot tone={i.healthy ? "success" : i.status === "Running" ? "warning" : "danger"} className="size-1.5" />
-                <span className="font-mono text-xs">{i.name}</span>
-                <span className="text-xs text-muted-foreground">{i.status}</span>
-              </li>
-            ))}
-          </ul>
-          {s.ports.length > 0 && (
-            <p className="mt-3 border-t pt-2.5 font-mono text-xs text-muted-foreground">
-              {s.ports.map((p) => `${p.listen ?? ""}${p.target ? ` -> :${p.target}` : ""}`).join("   ")}
-            </p>
-          )}
-        </Card>
-      ))}
-    </div>
-  );
+/**
+ * The stack's deployment in progress (stack_deployments' newest, not
+ * finished), read every 2 s while it runs and every 10 s otherwise, so one
+ * started elsewhere shows up too. Hidden on that deployment's own page.
+ */
+function StackActiveDeployment({ org, name, path, viewing }: { org: string; name: string; path: (id?: number) => string; viewing?: number }) {
+  const deps = useStackDeployments(org, name, 5, (latest) => (latest && !finished(latest.status) ? 2000 : 10000));
+  const latest = deps.data?.deployments[0];
+  if (!latest || finished(latest.status) || latest.id === viewing) return null;
+  return <DeploymentBanner d={asDeployment(name, latest)} to={path(latest.id)} coarse />;
 }
 
-function LogsTab({ org, name, services }: { org: string; name: string; services: ServiceStatus[] }) {
-  const [picked, setPicked] = useState<string>("");
-  const service = picked || services[0]?.service || "";
-  const logs = useQuery({
-    queryKey: [...stackKeys.org(org), "logs", name, service],
-    enabled: !!service,
-    refetchInterval: 5000,
-    queryFn: () => callTool<{ logs: Record<string, string> }>("stack_logs", { name, service, lines: 200 }, org).then((r) => r.logs),
-  });
-  if (!services.length) {
-    return (
-      <Card className="py-0">
-        <EmptyState icon={ScrollText} title="Not running">
-          Deploy the stack and its services' output shows up here.
-        </EmptyState>
-      </Card>
-    );
-  }
-  const entries = Object.entries(logs.data ?? {});
+/**
+ * Stop and Start for the whole stack, as an app has for its service. Stop
+ * scales every service to 0 (stack_scale); Start, shown once every service
+ * is at 0, scales each back to the replicas its compose file asks for.
+ */
+function StopStart({ org, name, yaml, names, services }: { org: string; name: string; yaml: string; names: string[]; services: StackServices | undefined }) {
+  const qc = useQueryClient();
+  const [stopOpen, setStopOpen] = useState(false);
+  const [starting, setStarting] = useState(false);
+  if (!services?.length) return null;
+  const refresh = () => Promise.all([qc.invalidateQueries({ queryKey: stackKeys.org(org) }), qc.invalidateQueries({ queryKey: keys.org(org) })]);
+  const stopped = services.every((s) => s.replicas === 0);
+  const start = async () => {
+    setStarting(true);
+    try {
+      const want = sourceReplicas(yaml, names.length ? names : services.map((s) => s.service));
+      for (const [service, replicas] of Object.entries(want)) await callTool("stack_scale", { name, service, replicas }, org);
+      await refresh();
+      toast.success(`${name} starting`);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setStarting(false);
+    }
+  };
   return (
-    <div className="grid gap-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <Segmented value={service} onChange={setPicked} label="Service" options={services.map((s) => ({ value: s.service, label: s.service }))} />
-        <Button variant="outline" size="sm" className="ml-auto" onClick={() => logs.refetch()} disabled={logs.isFetching} aria-label="Refresh now">
-          {logs.isFetching ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-          Refresh
+    <>
+      {stopped ? (
+        <Button variant="outline" onClick={start} disabled={starting}>
+          {starting ? <Loader2 className="animate-spin" /> : <Play />}
+          Start
         </Button>
-      </div>
-      {logs.error ? <QueryError error={logs.error} /> : null}
-      <Suspense fallback={<Skeleton className="h-64 rounded-xl" />}>
-        {entries.length === 0 ? (
-          <LogView lines={[]} live title={<span className="font-mono">{service}</span>} empty={logs.isLoading ? "Loading output..." : "No output yet."} />
-        ) : (
-          entries.map(([instance, text]) => (
-            <LogView
-              key={instance}
-              lines={text.trim() ? text.replace(/\n$/, "").split("\n") : []}
-              live
-              filename={`${instance}.log`}
-              title={<span className="font-mono">{instance}</span>}
-              empty="No output yet."
-            />
-          ))
-        )}
-      </Suspense>
-    </div>
+      ) : (
+        <Button variant="outline" onClick={() => setStopOpen(true)}>
+          <Square />
+          Stop
+        </Button>
+      )}
+      <ConfirmDialog
+        open={stopOpen}
+        onOpenChange={setStopOpen}
+        title={`Stop ${name}?`}
+        description="Every service is scaled to 0 replicas and its domains answer 503 until you start it or deploy again. The compose file, settings and volumes are kept."
+        confirmLabel="Stop stack"
+        onConfirm={async () => {
+          for (const s of services) if (s.replicas > 0) await callTool("stack_scale", { name, service: s.service, replicas: 0 }, org);
+          await refresh();
+          toast.success(`${name} stopped`);
+        }}
+      />
+    </>
   );
 }

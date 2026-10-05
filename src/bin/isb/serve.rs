@@ -63,6 +63,10 @@ pub(crate) struct ServeArgs {
     /// client ids, comma-separated, exact. Needs Access and --public-url.
     #[arg(long, env = "ISB_SUPERADMIN_ACCESS", value_name = "LIST")]
     pub(crate) superadmin_access: Option<String>,
+    /// Debug builds: every loopback request with no credential is a
+    /// superadmin acting as this email (for developing isb).
+    #[arg(long, env = "ISB_DEV_SUPERADMIN", value_name = "EMAIL", hide = true)]
+    pub(crate) dev_superadmin: Option<String>,
     /// Where users reach isb (https://isb.example.com), for invitation and
     /// password-reset links.
     #[arg(long, env = "ISB_PUBLIC_URL")]
@@ -267,6 +271,8 @@ pub(crate) fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
         }
         return Ok(0);
     }
+    // A release build refuses to start with it set, rather than ignore it.
+    isb::auth::dev::weak_passwords()?;
     let access = match (a.access_team_domain, a.access_aud) {
         (Some(t), Some(aud)) if !t.is_empty() && !aud.is_empty() => Some((t, aud)),
         (Some(t), None) | (None, Some(t)) if !t.is_empty() => {
@@ -367,6 +373,7 @@ pub(crate) fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
             .as_deref()
             .map(isb::daemon::superadmin::AccessAllowList::parse)
             .transpose()?,
+        dev_superadmin: isb::auth::dev::superadmin(a.dev_superadmin.as_deref())?,
         heartbeat: match a.heartbeat_url.filter(|u| !u.trim().is_empty()) {
             Some(u) => Some(
                 isb::monitor::heartbeat::Heartbeat::new(&u, a.heartbeat_interval)

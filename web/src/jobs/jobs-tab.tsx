@@ -1,8 +1,9 @@
-// An app's Jobs tab: commands on a cron schedule (docs/guides/jobs.md), in a
-// running replica (exec) or a fresh one-off instance (run), with their runs.
+// A service's Jobs tab (an app's, or a compose stack service's): commands on
+// a cron schedule (docs/guides/jobs.md), in a running replica (exec) or a
+// fresh one-off instance (run), with their runs.
 import { useQueryClient } from "@tanstack/react-query";
 import { CalendarClock, Loader2, MoreHorizontal, Pause, Pencil, Play, Plus, SquareTerminal, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
 import { keys } from "@/apps/api";
@@ -27,9 +28,11 @@ import { useCanWrite } from "@/lib/use-role";
 import { cn } from "@/lib/utils";
 import { scheduleNameProblem, type Run } from "@/data/api";
 import { RunBadge, RunLogDialog, RunsTable } from "@/data/runs";
-import { durationSeconds, type JobEntry, type JobSpec, joinWords, splitWords, useJobRuns, useJobs } from "./api";
+import { durationSeconds, type JobEntry, type JobSpec, type JobTarget, joinWords, sameTarget, splitWords, targetName, useJobRuns, useJobs } from "./api";
 
-export function JobsTab({ org, app }: { org: string; app: { name: string } }) {
+/** The jobs of one target: `{app}`, or a compose stack's `{stack, service}`; `picker` (a service picker) sits above the intro. */
+export function JobsTab({ org, target, picker }: { org: string; target: JobTarget; picker?: ReactNode }) {
+  const name = targetName(target);
   const jobs = useJobs(org);
   const canWrite = useCanWrite(org);
   const [edit, setEdit] = useState<{ job?: JobSpec } | null>(null);
@@ -53,13 +56,14 @@ export function JobsTab({ org, app }: { org: string; app: { name: string } }) {
     );
   }
   if (jobs.error) return <QueryError error={jobs.error} />;
-  const mine = (jobs.data ?? []).filter((j) => "app" in j.job.target && j.job.target.app === app.name);
+  const mine = (jobs.data ?? []).filter((j) => sameTarget(j.job.target, target));
 
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
+      {picker}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="max-w-2xl text-sm text-muted-foreground">
-          Commands that run on a schedule against {app.name}: a cleanup, a report, a migration check. Each run keeps its exit code, duration and output.
+          Commands that run on a schedule against {name}: a cleanup, a report, a migration check. Each run keeps its exit code, duration and output.
         </p>
         {canWrite && mine.length > 0 && (
           <Button onClick={() => setEdit({})}>
@@ -82,13 +86,13 @@ export function JobsTab({ org, app }: { org: string; app: { name: string } }) {
               )
             }
           >
-            Run a command in {app.name} every few minutes, hourly or nightly.
+            Run a command in {name} every few minutes, hourly or nightly.
           </EmptyState>
         </Card>
       ) : (
         mine.map((j) => <JobCard key={j.job.name} org={org} entry={j} canWrite={canWrite} onEdit={() => setEdit({ job: j.job })} onLog={(run) => setLog({ job: j.job.name, run })} />)
       )}
-      <JobDialog org={org} app={app.name} existing={edit?.job} open={!!edit} onOpenChange={(o) => !o && setEdit(null)} />
+      <JobDialog org={org} target={target} existing={edit?.job} open={!!edit} onOpenChange={(o) => !o && setEdit(null)} />
       <RunLogDialog
         open={!!log}
         onOpenChange={(o) => !o && setLog(null)}
@@ -252,7 +256,7 @@ function NextRuns({ schedule, timezone }: { schedule: string; timezone?: string 
   );
 }
 
-function JobDialog({ org, app, existing, open, onOpenChange }: { org: string; app: string; existing?: JobSpec; open: boolean; onOpenChange: (o: boolean) => void }) {
+function JobDialog({ org, target, existing, open, onOpenChange }: { org: string; target: JobTarget; existing?: JobSpec; open: boolean; onOpenChange: (o: boolean) => void }) {
   const qc = useQueryClient();
   const [f, setF] = useState({
     name: "",
@@ -337,7 +341,7 @@ function JobDialog({ org, app, existing, open, onOpenChange }: { org: string; ap
         // A merge patch: keys taken out are nulled.
         env: { ...Object.fromEntries(Object.keys(existing?.env ?? {}).map((k) => [k, null])), ...env.map },
       };
-      if (!existing) args.target = { app };
+      if (!existing) args.target = target;
       if (f.timezone.trim() || existing?.timezone) args.timezone = f.timezone.trim() || null;
       if (f.user.trim() || existing?.user) args.user = f.user.trim() || null;
       if (f.cwd.trim() || existing?.cwd) args.cwd = f.cwd.trim() || null;
@@ -357,7 +361,7 @@ function JobDialog({ org, app, existing, open, onOpenChange }: { org: string; ap
     <Dialog open={open} onOpenChange={(o) => !pending && onOpenChange(o)}>
       <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>{existing ? `Edit job ${existing.name}` : `New job for ${app}`}</DialogTitle>
+          <DialogTitle>{existing ? `Edit job ${existing.name}` : `New job for ${targetName(target)}`}</DialogTitle>
           <DialogDescription>Runs as argv, without a shell: write sh -c '…' for pipes and &&.</DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="grid gap-4">

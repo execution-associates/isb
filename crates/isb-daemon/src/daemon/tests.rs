@@ -1,6 +1,7 @@
 use super::*;
 use crate::auth::{Principal, PrincipalKind, Role, User};
 use crate::org::OrgId;
+use crate::stack::StackDef;
 
 /// A token holder with these roles and scopes.
 pub(super) fn token(orgs: &[(&str, Role)], scopes: &[&str]) -> Caller {
@@ -368,4 +369,114 @@ fn token_scopes_narrow_the_role() {
     let v = token(&[("acme", Role::Viewer)], &["admin"]);
     assert!(!ok(&v, "stack_deploy", a.clone()));
     assert!(ok(&v, "stack_status", a));
+}
+
+/// Apps over a controller (no incusd) with compose stack `wiki` deployed
+/// in org acme.
+fn apps_with_wiki(dir: &std::path::Path) -> crate::app::Apps {
+    let store = Store::open(dir).unwrap();
+    store
+        .save(&StackDef {
+            source: None,
+            domains: Default::default(),
+            name: "wiki".into(),
+            org: OrgId::new("acme").unwrap(),
+            file: serde_yaml_ng::from_str("services:\n  redis: {image: x}\n").unwrap(),
+            base_dir: "/".into(),
+            secrets: BTreeMap::new(),
+            force: BTreeMap::new(),
+            images: BTreeMap::new(),
+            deployed_at: 0,
+            deployed_by: String::new(),
+            previous: None,
+        })
+        .unwrap();
+    let k = crate::secrets::Keyring::new(age::x25519::Identity::generate(), vec![]);
+    let secrets = Arc::new(crate::secrets::Secrets::new(
+        crate::secrets::LocalDriver::new(dir, Arc::new(k)),
+    ));
+    let client = Client::with_socket("/nonexistent/isb-test/incus.sock");
+    let ctl = Controller::start(
+        client.clone(),
+        store,
+        Duration::from_secs(3600),
+        secrets.clone(),
+    )
+    .unwrap();
+    crate::app::Apps::new(dir, client, ctl, secrets)
+}
+
+#[test]
+fn a_deployed_stack_keeps_its_owner_and_a_new_one_gets_a_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let ap = apps_with_wiki(dir.path());
+    let org = OrgId::new("acme").unwrap();
+    let own = |name: &str, p: Option<&str>, e: Option<&str>| stack_owner(&ap, &org, name, p, e);
+    let t = |p: &str, e: &str, c: bool| (p.to_string(), e.to_string(), c);
+    // New stacks: the project of the name, made when missing.
+    assert_eq!(
+        own("blog", None, None).unwrap(),
+        t("blog", "production", true)
+    );
+    ap.project_create(&org, "shop", "", &["staging".into()])
+        .unwrap();
+    assert_eq!(
+        own("cache", Some("shop"), None).unwrap(),
+        t("shop", "staging", false)
+    );
+    assert!(
+        own("cache", Some("shop"), Some("qa")).is_err(),
+        "no such environment"
+    );
+    assert_eq!(
+        own("cache", Some("new"), None).unwrap(),
+        t("new", "production", true)
+    );
+    assert!(
+        own("cache", None, Some("staging")).is_err(),
+        "environment needs project"
+    );
+    // An existing stack keeps its owner; asking for another is refused.
+    ap.compose_attach(&org, "shop", "staging", "wiki", false)
+        .unwrap();
+    assert_eq!(
+        own("wiki", None, None).unwrap(),
+        t("shop", "staging", false)
+    );
+    assert_eq!(
+        own("wiki", Some("shop"), None).unwrap(),
+        t("shop", "staging", false)
+    );
+    let e = own("wiki", Some("blog"), None).unwrap_err();
+    assert!(e.to_string().contains("belongs to shop/staging"), "{e}");
+    // The apps' own stack is not a compose stack's to take.
+    assert!(
+        ap.compose_check(&org, "shop", "staging", "shop-staging", &["x".into()])
+            .is_err()
+    );
+    // Removing it detaches it (what stack_remove does after the removal).
+    ap.compose_detach(&org, "wiki").unwrap();
+    assert!(ap.compose_owner(&org, "wiki").is_none());
+}
+
+#[test]
+fn a_deploy_reuses_stored_secrets_unless_told_not_to() {
+    // Reuse is the default; `reuse_secrets: false` opts out.
+    let a: DeployArgs = args(json!({"name": "wiki", "compose": "services: {}"})).unwrap();
+    assert!(a.reuse_secrets);
+    let a: DeployArgs = args(json!({
+        "name": "wiki", "compose": "services: {}", "reuse_secrets": false
+    }))
+    .unwrap();
+    assert!(!a.reuse_secrets);
+    // A reused secret is a warn event naming it, its version and its date.
+    let r = crate::stack::secrets::Reused {
+        key: "db_password".into(),
+        version: 3,
+        stored_at: 1_790_000_000,
+    };
+    assert_eq!(
+        reused_note(&r),
+        "secret db_password: no value given; reusing the value stored on 2026-09-21T14:13:20Z (version 3)"
+    );
 }

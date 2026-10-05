@@ -324,35 +324,82 @@ export function AreaChart({
   );
 }
 
+/** The icon tile left of a service page's title (an app's, a compose stack's). */
+export function HeaderIcon({ icon: Icon }: { icon: typeof CircleAlert }) {
+  return (
+    <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border bg-gradient-to-b from-background to-muted shadow-xs">
+      <Icon className="size-5 text-muted-foreground" />
+    </span>
+  );
+}
+
 /** Horizontal scrolling tab links (the app page's tabs); never wraps on phones. */
 export function TabLinks({ tabs, active }: { tabs: { id: string; label: string; to: string; icon?: typeof CircleAlert }[]; active: string }) {
   const bar = useRef<HTMLDivElement>(null);
-  // On a phone the active tab may sit past the edge: bring it into view.
+  const nav = useRef<HTMLElement>(null);
+  // Too many tabs for the width: the icons go first, then the bar scrolls,
+  // fading at the edge with more past it. `full` is the row's width with
+  // its icons, measured while they show.
+  const [compact, setCompact] = useState(false);
+  const full = useRef(0);
+  const [edge, setEdge] = useState({ start: false, end: false });
+  const ids = tabs.map((t) => t.id).join(" ");
+  useEffect(() => setCompact(false), [ids]);
+  useEffect(() => {
+    const box = bar.current;
+    const row = nav.current;
+    if (!box || !row) return;
+    const fit = () => {
+      const pad = Number.parseFloat(getComputedStyle(box).paddingLeft) + Number.parseFloat(getComputedStyle(box).paddingRight);
+      if (!compact) full.current = row.offsetWidth;
+      const want = full.current > box.clientWidth - pad;
+      if (want !== compact) setCompact(want);
+      const start = box.scrollLeft > 1;
+      const end = box.scrollLeft + box.clientWidth < box.scrollWidth - 1;
+      setEdge((e) => (e.start === start && e.end === end ? e : { start, end }));
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(box);
+    ro.observe(row);
+    box.addEventListener("scroll", fit, { passive: true });
+    return () => {
+      ro.disconnect();
+      box.removeEventListener("scroll", fit);
+    };
+  }, [compact, ids]);
+  // The active tab may sit past the edge: bring it into view.
   useEffect(() => {
     const el = bar.current?.querySelector<HTMLElement>('[aria-current="page"]');
     const box = bar.current;
     if (!el || !box) return;
     const l = el.offsetLeft; // the bar is the links' offset parent
     if (l < box.scrollLeft || l + el.offsetWidth > box.scrollLeft + box.clientWidth) box.scrollLeft = l - 16;
-  }, [active]);
+  }, [active, compact]);
+  const fade = "pointer-events-none absolute top-0 bottom-px w-10 from-background to-transparent transition-opacity";
   return (
-    <div ref={bar} className="relative -mx-4 mb-6 overflow-x-auto border-b px-4 sm:mx-0 sm:px-0 [scrollbar-width:none]">
-      <nav className="flex min-w-max gap-1" aria-label="Sections">
-        {tabs.map((t) => (
-          <Link
-            key={t.id}
-            to={t.to}
-            aria-current={t.id === active ? "page" : undefined}
-            className={cn(
-              "relative inline-flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground",
-              t.id === active && "text-foreground after:absolute after:inset-x-2 after:-bottom-px after:h-0.5 after:rounded-full after:bg-foreground",
-            )}
-          >
-            {t.icon && <t.icon className="size-4" />}
-            {t.label}
-          </Link>
-        ))}
-      </nav>
+    <div className="relative -mx-4 mb-6 sm:mx-0">
+      <div ref={bar} className="relative overflow-x-auto border-b px-4 sm:px-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <nav ref={nav} className="flex min-w-max gap-0.5" aria-label="Sections">
+          {tabs.map((t) => (
+            <Link
+              key={t.id}
+              to={t.to}
+              aria-current={t.id === active ? "page" : undefined}
+              className={cn(
+                "relative inline-flex items-center gap-2 px-3 py-2.5 text-sm font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground",
+                compact && "px-2.5",
+                t.id === active && "text-foreground after:absolute after:inset-x-2 after:-bottom-px after:h-0.5 after:rounded-full after:bg-foreground",
+              )}
+            >
+              {t.icon && <t.icon className={cn("size-4", compact && "hidden")} />}
+              {t.label}
+            </Link>
+          ))}
+        </nav>
+      </div>
+      <span aria-hidden className={cn(fade, "left-0 bg-gradient-to-r", edge.start ? "opacity-100" : "opacity-0")} />
+      <span aria-hidden className={cn(fade, "right-0 bg-gradient-to-l", edge.end ? "opacity-100" : "opacity-0")} />
     </div>
   );
 }

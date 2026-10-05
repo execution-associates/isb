@@ -41,10 +41,16 @@ export function stepFor(range: RangeId): number {
   return Math.max(10, Math.round(r.seconds / TARGET_POINTS / 10) * 10);
 }
 
-export function useMetric(org: string, app: string, metric: Metric, range: RangeId, refetchInterval?: number) {
+/** Whose metrics: an app, or one service of a stack (a compose stack's). */
+export type MetricTarget = { app: string } | { stack: string; service: string };
+
+export const targetLabel = (t: MetricTarget) => ("app" in t ? t.app : t.service);
+
+export function useMetric(org: string, target: MetricTarget, metric: Metric, range: RangeId, refetchInterval?: number) {
+  const who = "app" in target ? ["app", target.app] : ["stack", target.stack, target.service];
   return useQuery({
-    queryKey: ["apps", org, "metrics", app, metric, range],
-    queryFn: () => callTool<MetricAnswer>("metrics_query", { app, metric, range, step: stepFor(range) }, org),
+    queryKey: ["apps", org, "metrics", ...who, metric, range],
+    queryFn: () => callTool<MetricAnswer>("metrics_query", { ...target, metric, range, step: stepFor(range) }, org),
     refetchInterval,
     placeholderData: (prev) => (prev && prev.metric === metric ? prev : undefined),
   });

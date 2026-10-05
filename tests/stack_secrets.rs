@@ -66,6 +66,8 @@ impl SecretStack {
             isb::stack::secrets::bind(&self.secrets, &org, &self.name, &p.file, &given, false)
                 .unwrap();
         let def = isb::stack::StackDef {
+            source: None,
+            domains: Default::default(),
             name: self.name.clone(),
             org,
             file: p.file,

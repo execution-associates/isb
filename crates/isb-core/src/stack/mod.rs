@@ -19,10 +19,12 @@
 
 mod changes;
 pub mod controller;
+pub mod deployments;
 pub mod failure;
 pub mod migrate;
 mod ports;
 pub mod secrets;
+pub mod source;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -71,6 +73,15 @@ pub struct StackDef {
     /// Who deployed it (an Access identity, or `local`).
     #[serde(default)]
     pub deployed_by: String,
+    /// The compose file as written (`${VAR}` unresolved), when it was
+    /// deployed as text and needed no variables from the caller: what
+    /// stack_export hands out. `file` is what it resolved to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// The stack's managed domains merged into `file` ([`source`]), per
+    /// service, so a rollback puts them back too.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub domains: BTreeMap<String, Vec<crate::spec::DomainSpec>>,
     /// The deployment this one replaced, for rollback.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous: Option<Box<StackDef>>,
@@ -479,6 +490,8 @@ mod tests {
 
     fn def(y: &str) -> StackDef {
         StackDef {
+            source: None,
+            domains: Default::default(),
             name: "app".into(),
             org: OrgId::default_org(),
             file: serde_yaml_ng::from_str(y).unwrap(),

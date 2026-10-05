@@ -160,7 +160,7 @@ export function AccountPage() {
         <AppSection title="Superadmin" description="This identity has no isb account, so it has no profile, sessions, passkeys or API tokens of its own.">
           <p className="text-[13px] leading-relaxed text-muted-foreground">
             Signed in as <span className="font-mono text-foreground">{me.superadmin.source}</span>: the host's unix socket's reach, granted by{" "}
-            {me.superadmin.via.kind === "token" ? "a superadmin token" : me.superadmin.via.kind === "tailnet" ? "the daemon's --superadmin-tailnet list" : "the daemon's --superadmin-access list"}.
+            {{ token: "a superadmin token", tailnet: "the daemon's --superadmin-tailnet list", access: "the daemon's --superadmin-access list", dev: "the daemon's ISB_DEV_SUPERADMIN (a debug build, for developing isb)" }[me.superadmin.via.kind]}.
           </p>
         </AppSection>
       </>

@@ -24,11 +24,14 @@ describe("superadmins", () => {
     expect(superadminVia(person)).toBe("tailnet login a@x.io");
     expect(superadminVia(tagged)).toBe("tailnet node agent.t.ts.net (tag:agents)");
     expect(superadminVia(access)).toBe("Access service token svc.access");
+    const dev = me({ source: "dev:dev@dev.com", via: { kind: "dev", email: "dev@dev.com" }, account: true });
+    expect(superadminVia(dev)).toBe("ISB_DEV_SUPERADMIN as dev@dev.com");
     expect(superadminVia(me(null))).toBeNull();
     // Tailnet and Access identities ride on every request: no sign-out.
     expect(ambientSuperadmin(token)).toBe(false);
     expect(ambientSuperadmin(person)).toBe(true);
     expect(ambientSuperadmin(access)).toBe(true);
+    expect(ambientSuperadmin(dev)).toBe(true);
     expect(roleIn(token, "acme")).toBe("superadmin");
     expect(roleIn(me(null), "acme")).toBe("platform admin");
   });

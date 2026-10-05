@@ -1,7 +1,8 @@
-// The Environment tab: the app's .env text, saved with app_env_set.
+// The Environment tab: the app's .env text, saved with app_env_set. The
+// editor itself is shared with a compose stack's Environment tab.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CircleAlert, KeyRound, Loader2, Rocket, Save, Undo2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { callTool } from "@/api/tools";
@@ -27,10 +28,61 @@ export function EnvironmentTab({ org, app }: { org: string; app: App }) {
     queryKey: keys.env(org, app.name),
     queryFn: () => callTool<{ env: string }>("app_env_get", { name: app.name }, org).then((r) => r.env),
   });
-  const secrets = useSecretNames(org);
-  const writer = canWrite(useMe().data!, org);
   const qc = useQueryClient();
   const navigate = useNavigate();
+  return (
+    <EnvironmentEditor
+      org={org}
+      env={env}
+      label={`Environment of ${app.name}`}
+      save={async (value, deploy) => {
+        const r = await callTool<{ env: string; deployment?: Deployment }>("app_env_set", { name: app.name, env: value, deploy }, org);
+        qc.setQueryData(keys.env(org, app.name), r.env);
+        if (r.deployment) {
+          openDeployment(qc, navigate, org, r.deployment);
+        } else {
+          await qc.invalidateQueries({ queryKey: keys.org(org) });
+          toast.success("Environment saved. It takes effect at the next deploy.");
+        }
+      }}
+      notes={
+        <p>
+          Other apps here are reachable by name:{" "}
+          <span className="font-mono break-words text-foreground/80">
+            NAME.{app.project}-{app.environment}
+          </span>
+        </p>
+      }
+    />
+  );
+}
+
+/**
+ * A service's .env text in the highlighting editor, checked as you type,
+ * with Save and Save and deploy. `save` stores it (and deploys when asked),
+ * then updates the cache and says what happened; it rejects with the reason.
+ * The app's Environment tab and a compose stack's both use it.
+ */
+export function EnvironmentEditor({
+  org,
+  env,
+  label,
+  save: store,
+  help,
+  notes,
+}: {
+  org: string;
+  /** The saved text, as a query. */
+  env: { data?: string; isLoading: boolean; error: unknown };
+  label: string;
+  save: (text: string, deploy: boolean) => Promise<void>;
+  /** A line after the format help: what these variables feed. */
+  help?: ReactNode;
+  /** Paragraphs under the summary. */
+  notes?: ReactNode;
+}) {
+  const secrets = useSecretNames(org);
+  const writer = canWrite(useMe().data!, org);
   const [text, setText] = useState<string | null>(null);
   const [pending, setPending] = useState<"save" | "deploy" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -54,15 +106,8 @@ export function EnvironmentTab({ org, app }: { org: string; app: App }) {
     setPending(deploy ? "deploy" : "save");
     setError(null);
     try {
-      const r = await callTool<{ env: string; deployment?: Deployment }>("app_env_set", { name: app.name, env: value, deploy }, org);
-      qc.setQueryData(keys.env(org, app.name), r.env);
+      await store(value, deploy);
       setText(null);
-      if (r.deployment) {
-        openDeployment(qc, navigate, org, r.deployment);
-      } else {
-        await qc.invalidateQueries({ queryKey: keys.org(org) });
-        toast.success("Environment saved. It takes effect at the next deploy.");
-      }
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -82,6 +127,7 @@ export function EnvironmentTab({ org, app }: { org: string; app: App }) {
           <>
             One <span className="font-mono text-foreground/80">KEY=value</span> per line; <span className="font-mono">#</span> comments are kept. Refer to an org secret
             with <span className={cn(SECRET_CHIP, "px-1 py-0 text-[12px]")}>{"${{secret.NAME}}"}</span> and only the reference is ever shown.
+            {help && <> {help}</>}
           </>
         }
         footer={
@@ -130,7 +176,7 @@ export function EnvironmentTab({ org, app }: { org: string; app: App }) {
               analysis={analysis}
               missing={missing}
               readOnly={!writer}
-              label={`Environment of ${app.name}`}
+              label={label}
               placeholder={writer ? PLACEHOLDER : "No variables."}
             />
           )}
@@ -192,12 +238,7 @@ export function EnvironmentTab({ org, app }: { org: string; app: App }) {
         </Section>
         <div className="grid gap-2 px-1 text-xs leading-relaxed text-muted-foreground">
           <p>Plain values are readable by whoever can read the instance. Put anything sensitive in a secret.</p>
-          <p>
-            Other apps here are reachable by name:{" "}
-            <span className="font-mono break-words text-foreground/80">
-              NAME.{app.project}-{app.environment}
-            </span>
-          </p>
+          {notes}
         </div>
       </div>
     </div>

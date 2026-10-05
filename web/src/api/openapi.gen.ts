@@ -1803,7 +1803,7 @@ export interface paths {
         put?: never;
         /**
          * Delete an environment
-         * @description Remove an environment that has no apps left from a project.
+         * @description Remove an environment that has no apps and no compose stacks left from a project.
          */
         post: operations["environment_delete"];
         delete?: never;
@@ -2803,7 +2803,7 @@ export interface paths {
         put?: never;
         /**
          * Change an org
-         * @description Platform admins: change an org's limits, per-instance defaults or egress exceptions. Fields left out keep their value; `egress` replaces the list. A limit cannot be lifted once set (as with `isb org create`).
+         * @description Platform admins: change an org's limits, per-instance defaults, egress exceptions or the UDP ports its stacks may publish. Fields left out keep their value; `egress` and `udp` replace their lists. A limit cannot be lifted once set (as with `isb org create`).
          */
         post: operations["org_update"];
         delete?: never;
@@ -2963,7 +2963,7 @@ export interface paths {
         put?: never;
         /**
          * Delete a project
-         * @description Delete a project that has no apps left.
+         * @description Delete a project that has no apps and no compose stacks left.
          */
         post: operations["project_delete"];
         delete?: never;
@@ -2983,7 +2983,7 @@ export interface paths {
         put?: never;
         /**
          * List projects
-         * @description An org's projects, each with its environments and the apps in each.
+         * @description An org's projects, each with its environments and, in each, its apps and its compose stacks (`compose`: name, services and `deployed_at`, unix seconds) and `conflicts`: a compose service that does not get the environment's name `<service>.<project>-<env>` because `winner` (a stack; `<project>-<env>` for an app) holds it.
          */
         post: operations["project_list"];
         delete?: never;
@@ -3623,7 +3623,7 @@ export interface paths {
         put?: never;
         /**
          * Stack config
-         * @description The compose file a stack was deployed with, resolved, and its secrets as references (store name, driver, version; never values).
+         * @description The compose file a stack runs, as it resolved at its last deploy: `${VAR}` filled from the deploy's vars and the stack's environment, a secret variable as a `{secret}` reference, and the stack's managed domains merged into its services (`domains`: those, per service). Also the compose text it was deployed from when the daemon kept it as written (`source`, as stack_export gives it; null for a resolved deploy), and its secrets as references (store name, driver, version; never values).
          */
         post: operations["stack_config"];
         delete?: never;
@@ -3643,9 +3643,129 @@ export interface paths {
         put?: never;
         /**
          * Deploy a stack
-         * @description Deploy or update a stack from a docker-compose-style file (isb's format: docs/reference/compose.md). Each service runs `deploy.replicas` incus instances, supervised inside their guests so they survive restarts of this server and of the host. Published ports are load-balanced over healthy replicas. A changed service is rolled out per `deploy.update_config` (stop-first by default; `order: start-first` for no downtime). Returns the change per service; pass wait=true to block until the rollout settles.
+         * @description Deploy or update a stack from a docker-compose-style file (isb's format: docs/reference/compose.md). Each service runs `deploy.replicas` incus instances, supervised inside their guests so they survive restarts of this server and of the host. Published ports are load-balanced over healthy replicas. A changed service is rolled out per `deploy.update_config` (stop-first by default; `order: start-first` for no downtime). Every stack belongs to one project environment (`project`, `environment`; a new stack's default is the project named like it, made if needed), and its services are also named `<service>.<project>-<env>` there; a service name the environment already gives an app or another stack's service is refused. The stack's managed domains (stack_domains_set) are merged into its services. Returns the change per service, the `owner`, the `deployment` it recorded (stack_deployments), and `reused_secrets` (only when there are some): the `file:`/`environment:` secrets given no value that deployed the value an earlier deploy stored, also logged as a warn event; pass wait=true to block until the rollout settles.
          */
         post: operations["stack_deploy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/stack_deployment_get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A stack deployment
+         * @description One deployment of a compose stack: its record (as stack_deployments lists it), the compose text it deployed (`source`, as stack_export gave it), the stack's environment (`env`, secret references only) and managed domains (`domains`) at the time, and its log: the stack's events while it ran, as `events` [{at (unix ms), level, service, message}] and as `log` text. Poll until `finished`. stack_rollback with `to` deploys it again.
+         */
+        post: operations["stack_deployment_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/stack_deployments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List a stack's deployments
+         * @description A compose stack's deployments, newest first (the last 30 are kept): id, trigger (manual: the local CLI; api), action (deploy, rollback, env, domains), actor, status (deploying, done, failed, superseded), rollback_of, services (the ones it created, changed, scaled or removed), reused_secrets (only when there are some: `file:`/`environment:` secrets given no value that deployed the value an earlier deploy stored), error, created_at, started_at, finished_at (unix seconds). `current` is the newest that finished done. stack_deployment_get has one's file and log.
+         */
+        post: operations["stack_deployments"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/stack_domains_get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get a stack's domains
+         * @description A compose stack's domains per service: {services: {SERVICE: {managed, file}}}. `managed` are the stack's own domain records (stack_domains_set; the web UI's Domains tab edits them), `file` the ones its compose file gives under `domains:` (change those in the file). Each is [{host, path?, port?, https?, redirect?, strip_prefix?, www_redirect?}]. A deploy serves both.
+         */
+        post: operations["stack_domains_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/stack_domains_set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set a service's domains
+         * @description Replace the managed domains of one service of a compose stack: domain records kept beside its compose file (which is not changed) and merged into the service at each deploy. Same shape as an app's domains. A hostname the file already gives a service, or given twice, is refused. Takes effect at the next deploy (deploy=true redeploys the stack's file now, answering its changes, `deployment` and `reused_secrets` as stack_deploy does; a domain change replaces no instance). Answers the stack's domains as stack_domains_get does.
+         */
+        post: operations["stack_domains_set"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/stack_env_get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get a stack's environment
+         * @description A compose stack's environment as .env text (KEY=value lines, comments kept): the variables its compose file's ${VAR} resolves against at each deploy. Secret references read KEY=${{secret.NAME}}; their values are never shown.
+         */
+        post: operations["stack_env_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/stack_env_set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set a stack's environment
+         * @description Replace a compose stack's environment with .env text: KEY=value lines (quotes and # comments as in docker compose; comments are kept), KEY=${{secret.NAME}} for an org secret. The daemon resolves the compose file's ${VAR} against it at every deploy (a deploy's `vars` win). A secret variable may only be the whole value of a service's environment variable (`KEY: ${VAR}`), where it is delivered as the secret; anywhere else the deploy is refused, so a value never enters the stored file. A stack not yet deployed may have one, for its first deploy. Takes effect at the next deploy (deploy=true redeploys the stack's file now, answering its changes, `deployment` and `reused_secrets` as stack_deploy does).
+         */
+        post: operations["stack_env_set"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3663,7 +3783,7 @@ export interface paths {
         put?: never;
         /**
          * Export a stack as YAML
-         * @description The compose file a stack runs from, as YAML text ready for stack_deploy (the web UI's stack editor shows it): resolved (no ${VAR}), with secrets that came from a file or environment variable named as `external` store secrets, so it deploys again without their values. Also says whether the stack belongs to a project's apps (`managed_by: apps`), in which case change it through the apps, not this file.
+         * @description The compose file a stack runs from, as YAML text ready for stack_deploy (the web UI's stack editor shows it). A file deployed as text that needed no `vars` from its caller comes back as written (`resolved: false`): comments kept and `${VAR}` unresolved, which the stack's environment fills at each deploy (stack_env_set). Otherwise (`resolved: true`) it is the file as it resolved, with secrets that came from a file or environment variable named as `external` store secrets, so it deploys again without their values. Either way the stack's managed domains (stack_domains_set) are not in it; stack_config shows the file with them. Also says whether the stack belongs to a project's apps (`managed_by: apps`), in which case change it through the apps, not this file, and which project environment a compose stack belongs to (`project`, `environment`).
          */
         post: operations["stack_export"];
         delete?: never;
@@ -3683,7 +3803,7 @@ export interface paths {
         put?: never;
         /**
          * List stacks
-         * @description List deployed stacks with each service's replica, health and rollout state.
+         * @description List deployed stacks with each service's replica, health and rollout state, and the project environment each compose stack belongs to (`project`, `environment`).
          */
         post: operations["stack_list"];
         delete?: never;
@@ -3763,7 +3883,7 @@ export interface paths {
         put?: never;
         /**
          * Roll back a stack
-         * @description Go back to the stack's previous deployment. A second rollback undoes the first.
+         * @description Go back to the stack's previous deployment (a second rollback undoes the first), or with `to`, deploy a kept deployment's compose file and managed domains again (stack_deployments lists them), resolved with the stack's environment as it is now. Answers the changes and the `deployment` it started, and with `to`, `reused_secrets` (only when there are some): the `file:`/`environment:` secrets that deployed the value an earlier deploy stored.
          */
         post: operations["stack_rollback"];
         delete?: never;
@@ -3823,7 +3943,7 @@ export interface paths {
         put?: never;
         /**
          * Check a compose file
-         * @description A dry run of stack_deploy for an editor: parses the compose YAML, checks it the way a deploy would (services, secrets, ports, ingress) and says what would change, without deploying or storing anything. Answers {valid, errors: [{line, column, message}], changes (per service), exists, managed_by, diff (a unified diff from the deployed file, stack_export's text, to this one)}; a bad file is an answer, not a failed call.
+         * @description A dry run of stack_deploy for an editor: parses the compose YAML, checks it the way a deploy would (services, secrets, ports, ingress) and says what would change, without deploying or storing anything, including the project environment it goes in and whether its service names are free there. Answers {valid, errors: [{line, column, message}], changes (per service), exists, managed_by, project, environment (where it belongs, or would), diff (a unified diff from stack_export's text to this one)}; a bad file is an answer, not a failed call.
          */
         post: operations["stack_validate"];
         delete?: never;
@@ -5208,7 +5328,7 @@ export interface components {
                 source: string;
                 via: {
                     /** @enum {string} */
-                    kind: "token" | "tailnet" | "access";
+                    kind: "token" | "tailnet" | "access" | "dev";
                 } & {
                     [key: string]: unknown;
                 };
@@ -11045,6 +11165,8 @@ export interface operations {
                     };
                     /** @description Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. Same as placement {"server": NAME}. */
                     server?: string;
+                    /** @description UDP ports the org's stacks may publish on the host, IP:PORT each (a specific host address, e.g. 203.0.113.7:10000), forwarded by incus to the service's one replica with the client's address kept (docs/concepts/stacks.md). Replaces the list; [] clears it. */
+                    udp?: string[];
                     /** @description With a dedicated VM: wait until it is made and the org created (default true; minutes). false answers at once with `provision`; follow it with server_provision_get (name vm-<org>). */
                     wait?: boolean;
                 };
@@ -11271,6 +11393,8 @@ export interface operations {
                     };
                     /** @description Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. Same as placement {"server": NAME}. */
                     server?: string;
+                    /** @description UDP ports the org's stacks may publish on the host, IP:PORT each (a specific host address, e.g. 203.0.113.7:10000), forwarded by incus to the service's one replica with the client's address kept (docs/concepts/stacks.md). Replaces the list; [] clears it. */
+                    udp?: string[];
                     /** @description With a dedicated VM: wait until it is made and the org created (default true; minutes). false answers at once with `provision`; follow it with server_provision_get (name vm-<org>). */
                     wait?: boolean;
                 };
@@ -12990,26 +13114,277 @@ export interface operations {
                 "application/json": {
                     /** @description Host directory relative bind paths resolve against. Remote callers: must be under a --bind-root. */
                     base_dir?: string;
-                    /** @description The compose file, as YAML text. ${VAR} is filled from `vars` only. */
+                    /** @description The compose file, as YAML text. ${VAR} is filled from `vars`, then the stack's environment (stack_env_set); an undefined one fails the deploy. Kept as written (stack_export) when it needs no `vars`. */
                     compose: string;
                     /** @description Only report what would change. */
                     dry_run?: boolean;
+                    /** @description The project's environment (with project). Default: production, else the project's first. */
+                    environment?: string;
                     /** @description Stack name: [a-z0-9-], starts with a letter, at most 30 characters. */
                     name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
+                    /** @description The project a new stack belongs to (made if it does not exist). Default: the project named like the stack, else a new one of that name. A stack's project never changes. */
+                    project?: string;
+                    /** @description A `file:`/`environment:` secret given no value (in `secrets`, `vars` or the stack's environment) deploys the value an earlier deploy stored, and the result names it in `reused_secrets` (default true). false fails the deploy instead, so a rotated value that did not arrive is never replaced by the old one. */
+                    reuse_secrets?: boolean;
                     /** @description Values of `file:`/`environment:` secrets by top-level secret name. They are stored in the org's store as <stack>_<name>; `external`, `age` and `driver` secrets need none. */
                     secrets?: {
                         [key: string]: string;
                     };
                     /** @description How long wait may take, e.g. 5m (default 10m). */
                     timeout?: string;
-                    /** @description Variables for ${VAR} and for secrets with `environment:`. */
+                    /** @description Variables for ${VAR} and for secrets with `environment:`, over the stack's environment. */
                     vars?: {
                         [key: string]: string;
                     };
                     /** @description Wait until every service converges, pauses or fails (default false). */
                     wait?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    stack_deployment_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    id: number;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    stack_deployments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    limit?: number;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    stack_domains_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    stack_domains_set: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Redeploy the stack's file with them now. */
+                    deploy?: boolean;
+                    /** @description [{host, path?, port?, https?, redirect?, strip_prefix?, www_redirect?}]: host `auto` for a generated name; port is the one the service listens on (not needed with redirect). [] removes them. */
+                    domains: Record<string, never>[];
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    service: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    stack_env_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    stack_env_set: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Redeploy the stack's file with it now. */
+                    deploy?: boolean;
+                    /** @description The .env text. */
+                    env: string;
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
                 };
             };
         };
@@ -13250,6 +13625,8 @@ export interface operations {
                     name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
+                    /** @description A deployment id (stack_deployments). */
+                    to?: number;
                 };
             };
         };
@@ -13368,10 +13745,14 @@ export interface operations {
                 "application/json": {
                     /** @description The compose file, as YAML text. */
                     compose: string;
+                    /** @description As stack_deploy's. */
+                    environment?: string;
                     /** @description The stack's name; an unused one is a new stack. */
                     name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
+                    /** @description As stack_deploy's. */
+                    project?: string;
                     /** @description Variables for ${VAR}. */
                     vars?: {
                         [key: string]: string;
