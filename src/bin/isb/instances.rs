@@ -372,6 +372,16 @@ fn stdin_for(a: &ExecArgs, tty: bool) -> Stdin {
     }
 }
 
+/// Piped input the command will not see is said once on stderr, instead of
+/// vanishing: `-i` feeds it, `-n` says the caller meant it.
+pub(crate) fn hint_unforwarded_stdin() {
+    if isb::exec::stdin_has_input() {
+        eprintln!(
+            "isb: stdin is not forwarded without -i (pass -i to feed it, -n to drop it quietly)"
+        );
+    }
+}
+
 /// The compose service whose sandbox is the instance `name`, when that is
 /// not the service's own key (`container_name:`, or a prefixed name).
 fn service_of_instance(p: &isb::compose::Project, name: &str) -> Option<String> {
@@ -430,6 +440,9 @@ pub(crate) fn exec(ctx: &Ctx, a: ExecArgs) -> Result<u8> {
     }
     let (width, height) = isb::exec::terminal_size().unzip();
     let stdin = stdin_for(&a, tty);
+    if matches!(stdin, Stdin::Null) && !a.no_stdin {
+        hint_unforwarded_stdin();
+    }
     let opts = ExecOptions {
         cwd: a.cwd,
         user: a.user,
