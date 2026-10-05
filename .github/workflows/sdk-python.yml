@@ -194,8 +194,12 @@ jobs:
 
   publish:
     name: publish to PyPI
-    if: startsWith(github.ref, 'refs/tags/v')
     needs: [sdist, wheels]
+    # A job skipped upstream (the rebuild or `check` a tag skips) fails an
+    # implicit success(), so this names the result it depends on.
+    if: >-
+      ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v')
+      && needs.sdist.result == 'success' && needs.wheels.result == 'success' }}
     runs-on: ubuntu-latest
     defaults:
       run:
