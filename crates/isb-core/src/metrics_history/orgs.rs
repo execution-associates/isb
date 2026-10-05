@@ -34,7 +34,7 @@ const ORGS_EVERY: Duration = Duration::from_secs(30);
 const ORGS_UNKNOWN_EVERY: Duration = Duration::from_secs(10);
 
 /// The sampler's view of which orgs exist, read again every
-/// [`ORGS_EVERY`], or sooner when a sample has an instance in an `isb-`
+/// `ORGS_EVERY`, or sooner when a sample has an instance in an `isb-`
 /// project it does not know.
 #[derive(Debug, Default)]
 pub struct OrgSet {
