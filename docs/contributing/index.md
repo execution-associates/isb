@@ -1,6 +1,6 @@
 ---
 title: Developing isb
-description: How the repository is laid out, how to build and test isb safely in a sandbox, the checks CI runs, the legibility ratchet, and measuring compile time.
+description: How the repository is laid out, how to build and test isb safely in a sandbox, how releases are cut, the checks CI runs, the legibility ratchet, and measuring compile time.
 order: 6
 nav_title: Contributing
 ---
@@ -60,7 +60,7 @@ The web UI is embedded at build time: `cd web && bun install --frozen-lockfile
 Releases are static musl binaries. cc-rs does not find a musl compiler by
 itself (`ToolNotFound: x86_64-linux-musl-gcc`), so the target needs
 `CC_x86_64_unknown_linux_musl=musl-gcc`. `scripts/build-release.sh` does the
-whole job, as `release.yml` does: it checks the prerequisites and names what
+whole job, as `release-binaries.yml` does: it checks the prerequisites and names what
 is missing, sets the compiler variable, builds the web UI, runs `cargo build
 --release --locked --target ...-unknown-linux-musl` and checks the result.
 
@@ -69,6 +69,20 @@ scripts/build-release.sh --check    # only the prerequisites
 scripts/build-release.sh            # the binary: $CARGO_TARGET_DIR/<target>/release/isb
 scripts/check.sh --release          # the checks below, then that build
 ```
+
+### Releasing
+
+Every push to `main` builds the four release tarballs (Linux musl and macOS,
+x86_64 and aarch64) in the `Release binaries` workflow
+(`.github/workflows/release-binaries.yml`) and keeps them as artifacts for 30
+days. That workflow has no secrets. A `v*` tag on a `main` commit whose CI is
+green promotes them: `release.yml` refuses a commit that has not passed CI on
+`main`, downloads that commit's tarballs, checks they carry the tag's version,
+then signs `SHA256SUMS`, creates the GitHub release and publishes the crates.
+When `main` has no tarballs for the commit, it builds them itself. The SDK
+workflows apply the same gate on the tag and skip the checks that already
+passed on `main` for the commit (`scripts/main-run.sh` finds those runs).
+So tag as soon as `main`'s runs for the merge commit are green.
 
 ## Layout
 
