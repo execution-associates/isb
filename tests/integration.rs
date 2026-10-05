@@ -434,9 +434,9 @@ fn cli_exec() {
         t.elapsed()
     );
 
-    // Forwarded stdin reaches the command, and EOF closes it.
+    // With -i, piped stdin reaches the command, and EOF closes it.
     let mut child = Command::new(&bin)
-        .args(["exec", &name, "--", "tr", "a-z", "A-Z"])
+        .args(["exec", "-i", &name, "--", "tr", "a-z", "A-Z"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -451,6 +451,23 @@ fn cli_exec() {
         .unwrap();
     assert_eq!(out, "HELLO");
     assert!(child.wait().unwrap().success());
+    // Without it the command sees EOF, and isb says the input went unread.
+    let mut child = Command::new(&bin)
+        .args(["exec", &name, "--", "cat"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(b"hello").unwrap();
+    let o = child.wait_with_output().unwrap();
+    assert!(o.status.success());
+    assert_eq!(String::from_utf8_lossy(&o.stdout), "");
+    assert!(
+        String::from_utf8_lossy(&o.stderr).contains("not forwarded without -i"),
+        "{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
 
     // SIGINT to isb reaches the command.
     let mut child = Command::new(&bin)

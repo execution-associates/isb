@@ -62,7 +62,7 @@ from ._types import (
 from ._util import Duration
 from .volumes import Volumes
 
-__version__ = "1.5.0"
+__version__ = "1.5.2"
 
 __all__ = [
     "PROTOCOL",

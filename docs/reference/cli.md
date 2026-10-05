@@ -117,7 +117,9 @@ isb prune --label KEY --missing-path [-y] [--json]
   terminal, with `-T` (the pipe form, for a server that speaks on stdin and
   stdout), or with `-i`; otherwise the command sees EOF, so a script that
   calls `isb exec` keeps its own stdin, and `isb exec web -i -- cat < f`
-  feeds a file. `-n` gives the command an empty stdin even from a terminal;
+  feeds a file. Piped input left unread is said on stderr (`stdin is not
+  forwarded without -i`). `-n` gives the command an empty stdin even from a
+  terminal, and keeps that line quiet;
   `-l` runs it through the user's login shell; `--timeout` kills it (no
   limit by default).
 - `prune` deletes sandboxes whose `KEY` label is an absolute host path that
@@ -377,7 +379,8 @@ isb cp LOCAL INSTANCE:/path             and in (at most 2 MiB)
 `--kind` is `app`, `database`, `stack`, `tunnel`, `workspace`, `build` or
 `sandbox`. `exec` runs argv with no shell, prints the command's output and exits
 with its status (124 when `--timeout`, default 60s and at most 15m, killed it);
-`-i` feeds this process's stdin (at most 1 MiB). These go through the daemon's
+`-i` feeds this process's stdin (at most 1 MiB); without it, piped input is
+left unread and said on stderr, which `-n` keeps quiet. These go through the daemon's
 tools, so they work from anywhere `ISB_URL` and `ISB_TOKEN` reach it, as
 members and up; `isb exec` is the one for sandboxes on this host.
 
