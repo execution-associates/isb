@@ -149,8 +149,11 @@ Linux. [isb on macOS](macos.md) has the details and the limits.
 
 ## The SDKs
 
-The Python and TypeScript SDKs each bundle the binary; the Rust crate is the
-same engine as a library.
+The Python and TypeScript SDKs each bundle the release's signed binary,
+checked against the release signature when the package is built; pip and npm
+check only their registry's hashes when you install. Set
+`ISB_BIN=$(command -v isb)` to have an SDK use the isb you installed instead.
+The Rust crate is the same engine as a library, built from source.
 
 ```sh
 pip install isb-sdk                  # imported as `isb`
