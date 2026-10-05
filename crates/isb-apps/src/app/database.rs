@@ -12,6 +12,8 @@
 //! Databases always roll out stop-first (they have a volume) and run one
 //! replica: two writers on one data directory corrupt it.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -246,6 +248,13 @@ pub struct DatabaseSource {
     /// The user created on first start (not Redis; MongoDB's root user).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
+    /// More secrets isb keeps holding the internal URL, each with its own
+    /// query string (`{"dsn.chat-postgres.mattermost": "sslmode=disable"}`,
+    /// `""` for none): written at deploy and again when the password
+    /// changes, so an app that needs driver options never holds a copy of
+    /// the password that goes stale.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub urls: BTreeMap<String, String>,
 }
 
 /// A database or user name: an identifier every engine takes unquoted.
@@ -333,7 +342,9 @@ impl DatabaseSource {
                     "user: root is the engine's own administrator; pick another name",
                 ));
             }
-        } else if self.database.is_some() || self.user.is_some() {
+        }
+        self.validate_urls(app)?;
+        if !self.engine.has_database() && (self.database.is_some() || self.user.is_some()) {
             return Err(Error::invalid(format!(
                 "{} has no database or user to set",
                 self.engine
@@ -346,6 +357,41 @@ impl DatabaseSource {
 /// The secret holding a database's password.
 pub fn password_secret(app: &str) -> String {
     format!("db.{app}.password")
+}
+
+impl DatabaseSource {
+    fn validate_urls(&self, app: &str) -> Result<()> {
+        for (name, query) in &self.urls {
+            crate::secrets::validate_name(name)?;
+            if name.contains('/') || name.starts_with(&format!("db.{app}.")) {
+                return Err(Error::invalid(format!(
+                    "urls: {name:?} is not a secret isb can keep (db.{app}.* is the database's own, and a name with / is an external reference)"
+                )));
+            }
+            let ok = query.chars().all(|c| {
+                c.is_ascii_alphanumeric()
+                    || matches!(
+                        c,
+                        '=' | '&' | '_' | '-' | '.' | '~' | '%' | '+' | ',' | ':' | '/'
+                    )
+            });
+            if !ok || query.starts_with('?') {
+                return Err(Error::invalid(format!(
+                    "urls: {name:?}: {query:?} is a query string without its ?, such as sslmode=disable&connect_timeout=10"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The internal URL with `query` appended (`""` leaves it as it is).
+pub fn with_query(url: &str, query: &str) -> String {
+    match (query.is_empty(), url.contains('?')) {
+        (true, _) => url.to_string(),
+        (false, true) => format!("{url}&{query}"),
+        (false, false) => format!("{url}?{query}"),
+    }
 }
 
 /// The secret holding a MySQL or MariaDB root password.
@@ -553,6 +599,7 @@ pub fn connection(
         "password": {"secret": password_secret(&spec.name)},
         "url": url(&reference, &host, port),
         "url_secret": url_secret(&spec.name),
+        "url_secrets": db.urls.keys().collect::<Vec<_>>(),
         "volume": format!("{stack}_{}_{DATA_VOLUME}", spec.name),
     });
     if let Some(u) = &user {
@@ -837,5 +884,42 @@ mod tests {
         }
         assert!(Engine::Mysql.restores_from(Engine::Mariadb));
         assert!(!Engine::Postgres.restores_from(Engine::Mysql));
+    }
+
+    #[test]
+    fn urls_take_a_query_string_and_never_the_databases_own_secrets() {
+        assert_eq!(
+            with_query("postgres://u:p@h:5432/d", ""),
+            "postgres://u:p@h:5432/d"
+        );
+        assert_eq!(
+            with_query(
+                "postgres://u:p@h:5432/d",
+                "sslmode=disable&connect_timeout=10"
+            ),
+            "postgres://u:p@h:5432/d?sslmode=disable&connect_timeout=10"
+        );
+        assert_eq!(
+            with_query("mongodb://u:p@h:27017/d?authSource=admin", "tls=false"),
+            "mongodb://u:p@h:27017/d?authSource=admin&tls=false"
+        );
+        let db = |urls: Value| -> DatabaseSource {
+            serde_json::from_value(json!({"engine": "postgres", "urls": urls})).unwrap()
+        };
+        assert!(
+            db(json!({"dsn.main-db.web": "sslmode=disable", "dsn.x": ""}))
+                .validate("main-db")
+                .is_ok()
+        );
+        for bad in [
+            json!({"db.main-db.url": ""}),
+            json!({"db.main-db.password": ""}),
+            json!({"op/vault/item": ""}),
+            json!({"dsn.x": "?sslmode=disable"}),
+            json!({"dsn.x": "a=b c"}),
+            json!({"dsn.x": "a=b#frag"}),
+        ] {
+            assert!(db(bad.clone()).validate("main-db").is_err(), "{bad}");
+        }
     }
 }

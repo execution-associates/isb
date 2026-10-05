@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use isb::{Client, Sandbox};
 
+#[allow(dead_code, reason = "each test binary uses some of the shared helpers")]
 mod common;
 use common::{default_org_client, enabled, image};
 

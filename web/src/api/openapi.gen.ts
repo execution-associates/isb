@@ -1723,7 +1723,7 @@ export interface paths {
         put?: never;
         /**
          * Create a database
-         * @description Create a database in a project's environment: Postgres, MySQL, MariaDB, MongoDB or Redis from the official image at `version`, its data on a named volume, one replica rolled out stop-first, with a health check. Credentials are generated and kept as org secrets (db.<name>.password; db.<name>.root-password for MySQL/MariaDB; db.<name>.url, the internal connection URL for apps: DATABASE_URL=${{secret.db.<name>.url}}). Other apps reach it at <name>.<project>-<env>. Not published outside the org unless `publish` is set. A database is an app: deploy, update, roll back and delete it with the app_* tools.
+         * @description Create a database in a project's environment: Postgres, MySQL, MariaDB, MongoDB or Redis from the official image at `version`, its data on a named volume, one replica rolled out stop-first, with a health check. Credentials are generated and kept as org secrets (db.<name>.password; db.<name>.root-password for MySQL/MariaDB; db.<name>.url, the internal connection URL for apps: DATABASE_URL=${{secret.db.<name>.url}}; `urls` keeps more such secrets with driver options). Setting db.<name>.password changes the password inside the running database first, then the URL secrets. Other apps reach it at <name>.<project>-<env>. Not published outside the org unless `publish` is set. A database is an app: deploy, update, roll back and delete it with the app_* tools.
          */
         post: operations["database_create"];
         delete?: never;
@@ -8846,6 +8846,10 @@ export interface operations {
                     resources?: Record<string, never>;
                     /** @description User created on first start (default: as database). Not Redis. */
                     user?: string;
+                    /** @description More secrets isb keeps holding the internal URL, each with a query string for a driver's options ({"dsn.main-db.web": "sslmode=disable\ */
+                    urls?: {
+                        [key: string]: string;
+                    };
                     /** @description Image tag (default: 17, 8.4, 11.4, 8.0, 7.4). */
                     version?: string;
                     /** @description Wait until it is up (default false). */

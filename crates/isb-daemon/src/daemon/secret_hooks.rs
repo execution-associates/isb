@@ -44,14 +44,15 @@ pub(super) fn register(r: &mut Registry, d: &Arc<Daemon>) -> Result<()> {
     let changed: secrets::Changed = Arc::new(move |org: &crate::org::OrgId, name: &str| {
         let mut cycles = ctl.secret_changed(org, name);
         let mut skipped = workspace_secret_changed(&ctl, &wsm, org, name, true);
-        // A database app's password moved: its URL secret, which carries
-        // it, follows, and so do the apps that use the URL.
+        // A database app's password moved: its URL secrets, which carry
+        // it, follow, and so do the apps that use them.
         match apps.database_password_changed(org, name) {
-            Ok(Some(url)) => {
-                cycles.extend(ctl.secret_changed(org, &url));
-                skipped.extend(workspace_secret_changed(&ctl, &wsm, org, &url, true));
+            Ok(urls) => {
+                for url in urls {
+                    cycles.extend(ctl.secret_changed(org, &url));
+                    skipped.extend(workspace_secret_changed(&ctl, &wsm, org, &url, true));
+                }
             }
-            Ok(None) => {}
             Err(e) => ctl.note(
                 "error",
                 &crate::stack::qualified(org, "@secrets"),

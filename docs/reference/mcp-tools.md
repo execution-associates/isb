@@ -224,7 +224,7 @@ There is no `port-forward` tool: run `curl` with `app_exec`, or reach an instanc
 
 | Tool | Who | Does |
 |---|---|---|
-| `database_create` | member | A database app (`engine`, `version`, `database`, `user`, `publish`, `env`, `resources`), deployed unless `deploy: false` (`wait`). |
+| `database_create` | member | A database app (`engine`, `version`, `database`, `user`, `urls`, `publish`, `env`, `resources`), deployed unless `deploy: false` (`wait`). |
 | `database_list` | viewer | Databases with connection details, the password as a secret reference. |
 | `database_get` | viewer; member with `reveal` | One database; `reveal: true` adds the password and URL values (a secret read). |
 | `backup_destination_create` | member | An S3-compatible bucket; key pairs kept as org secrets; tested unless `test: false`. An endpoint on the daemon's own host (loopback, link-local) is for local callers and platform admins only. |
