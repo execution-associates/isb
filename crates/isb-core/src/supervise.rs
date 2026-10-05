@@ -702,12 +702,53 @@ pub fn console_log(client: &Client, name: &str) -> Result<Vec<u8>> {
     client.console_log(name)
 }
 
+/// The services supervised in `sb`, by the (sanitized) name their units
+/// carry: what [`logs`] takes when the caller does not know the compose
+/// service an instance was made from.
+pub fn supervised(sb: &Sandbox) -> Result<Vec<String>> {
+    let out = root_exec(
+        sb,
+        &[
+            "find",
+            "/etc/systemd/system",
+            "-maxdepth",
+            "1",
+            "-name",
+            "isb-*.service",
+        ],
+        Duration::from_secs(30),
+    )?;
+    Ok(services_of(&check(out, "find")?.stdout_text()))
+}
+
+fn services_of(listing: &str) -> Vec<String> {
+    let mut out: Vec<String> = listing
+        .lines()
+        .filter_map(|l| l.trim().rsplit('/').next())
+        .filter_map(|f| f.strip_prefix("isb-")?.strip_suffix(".service"))
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn spec(y: &str) -> SandboxSpec {
         serde_yaml_ng::from_str(y).unwrap()
+    }
+
+    #[test]
+    fn supervised_services_are_read_back_from_their_unit_files() {
+        let ls = "/etc/systemd/system/isb-web.service\n/etc/systemd/system/isb-api-v2.service\n\n/etc/systemd/system/isb-.service\n";
+        assert_eq!(services_of(ls), ["api-v2", "web"]);
+        // What logs() is given names the same unit.
+        assert_eq!(unit_name("api-v2"), "isb-api-v2.service");
+        assert!(services_of("").is_empty());
     }
 
     #[test]

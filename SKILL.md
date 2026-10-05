@@ -21,6 +21,12 @@ whole Linux machine that starts in seconds) or a **VM** with `type: vm`. The
 `isb serve` daemon adds orgs, apps, stacks, databases, secrets and domains,
 and serves all of it as MCP tools.
 
+**If the isb MCP server is connected, you do not need this skill.** Its
+instructions carry the rules, and its `guide` tool (topics `start`, `safety`,
+`sandboxes`, `apps`, `inspect`, `data`, `workspace`, `admin`, `cli`) is this
+manual. Call `guide` with `topic: start` first. Keep reading here when you
+have only the CLI on a host.
+
 ## First: where are you?
 
 Pick the way in that matches what you hold. Never go around it.

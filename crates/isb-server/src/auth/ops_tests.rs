@@ -341,6 +341,29 @@ fn users_are_for_platform_admins() {
     assert!(forbidden(users(s, &t)));
 }
 
+#[test]
+fn platform_admins_act_on_other_accounts() {
+    let w = world();
+    let s = &w.s;
+    let root = session(s, &w.root);
+    let owner = session(s, &w.owner);
+    // Every token, every org.
+    create_token(s, &session(s, &w.member), new_token("acme")).unwrap();
+    assert!(forbidden(all_tokens(s, &owner)));
+    let all = all_tokens(s, &root).unwrap();
+    assert_eq!(all["tokens"][0]["user"]["email"], "member@x.io");
+    // Someone's SSH keys: read and remove, never add.
+    let key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK85M+Nlyes6IrHWrRVqw80hYRdvPHO+GwqREPk1qxkh alice@laptop";
+    let k = add_ssh_key(s, &session(s, &w.member), key, Some("laptop")).unwrap();
+    let kid = k["ssh_key"]["id"].as_i64().unwrap();
+    let mine = ssh_keys(s, &session(s, &w.member)).unwrap();
+    assert!(forbidden(user_ssh_keys(s, &owner, w.member.id)));
+    assert_eq!(user_ssh_keys(s, &root, w.member.id).unwrap(), mine);
+    assert!(hidden(user_ssh_keys(s, &root, 999)));
+    assert!(hidden(delete_user_ssh_key(s, &root, w.viewer.id, kid)));
+    delete_user_ssh_key(s, &root, w.member.id, kid).unwrap();
+}
+
 /// `orgs` (and `memberships`) of `me` with `existing` as the orgs there are.
 fn listed(s: &AuthStore, p: &Principal, existing: &[&str]) -> (Vec<String>, Vec<String>) {
     let real: Vec<OrgId> = existing.iter().map(|o| org(o)).collect();

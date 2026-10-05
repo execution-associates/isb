@@ -1852,6 +1852,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/guide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Guide
+         * @description The isb manual, one topic at a time (Markdown): start (where you are, what you may do, the topics), safety, sandboxes, apps, inspect, data, workspace, admin, cli. Read start and safety before your first change.
+         */
+        post: operations["guide"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/history_query": {
         parameters: {
             query?: never;
@@ -2703,7 +2723,7 @@ export interface paths {
         put?: never;
         /**
          * Create an org
-         * @description Platform admins: create an org (an incus project with its own bridge and network ACL), with optional limits and egress exceptions. Fails if it exists. Bind roots are set from the host's CLI only.
+         * @description Platform admins: create an org (an incus project with its own bridge and network ACL), with optional limits, egress exceptions, domain allowlist and ingress provider. Fails if it exists. Bind roots are set from the host's CLI only.
          */
         post: operations["org_create"];
         delete?: never;
@@ -2803,7 +2823,7 @@ export interface paths {
         put?: never;
         /**
          * Change an org
-         * @description Platform admins: change an org's limits, per-instance defaults, egress exceptions or the UDP ports its stacks may publish. Fields left out keep their value; a limit given as "none" (or null) is lifted; `egress` and `udp` replace their lists. The same as `isb org update`.
+         * @description Platform admins: change an org's limits, per-instance defaults, egress exceptions, the UDP ports its stacks may publish, its domain allowlist or its ingress provider. Fields left out keep their value; a limit given as "none" (or null) is lifted; `egress`, `udp` and `domains` replace their lists. The same as `isb org update` (and `isb org create`'s --allow-domain, --ingress and --cloudflare-* on an existing org).
          */
         post: operations["org_update"];
         delete?: never;
@@ -3052,6 +3072,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/sandbox_device_remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove a sandbox device
+         * @description Remove one of a sandbox's own devices (instance_get lists them): a disk, a port, a GPU. Not the root disk, nor a profile's device; and not its network card for a remote caller, nor for anyone when an egress policy confines it. Not a stack replica nor the workspace. Members and up.
+         */
+        post: operations["sandbox_device_remove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/sandbox_exec": {
         parameters: {
             query?: never;
@@ -3112,6 +3152,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/sandbox_logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A sandbox's logs
+         * @description Recent output of the command a sandbox supervises (its spec's `restart:`; the journal of its isb-<service> unit), or of an OCI image's console. `service` picks the unit when it supervises more than one. `tail` lines (default 200, at most 5000); `since` keeps lines newer than a duration like 10m or an RFC 3339 time (not for an OCI console, which has no timestamps).
+         */
+        post: operations["sandbox_logs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/sandbox_port_add": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish a sandbox port
+         * @description Add a proxy device to a running sandbox (one already as asked is left alone) and answer its listen address. `spec` is `[IP:]HOST:GUEST[/udp]` (IP defaults to 127.0.0.1) or `listen=..,connect=..[,bind=guest][,search=N]`. Remote callers are held to the remote-spec policy, as sandbox_create's ports are: loopback only unless the operator lists the address, no unix sockets, no guest-bound ports. Not a stack replica nor the workspace (workspace_port_add). Members and up.
+         */
+        post: operations["sandbox_port_add"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/sandbox_port_list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List a sandbox's ports
+         * @description A sandbox's proxy devices (its published ports) by device name, each with its properties: listen, connect, bind and the rest.
+         */
+        post: operations["sandbox_port_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/sandbox_port_remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unpublish a sandbox port
+         * @description Remove one proxy device (sandbox_port_list names them) from a sandbox. Members and up.
+         */
+        post: operations["sandbox_port_remove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools/sandbox_remove": {
         parameters: {
             query?: never;
@@ -3126,6 +3246,46 @@ export interface paths {
          * @description Delete a sandbox (stopping it first). Not for stack replicas: remove or scale the stack.
          */
         post: operations["sandbox_remove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/sandbox_start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a sandbox
+         * @description Start a stopped sandbox and wait until it runs. Not a stack replica (scale its stack) nor the workspace (workspace_start). Members and up.
+         */
+        post: operations["sandbox_start"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/sandbox_stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop a sandbox
+         * @description Stop a sandbox, keeping it and its disk (sandbox_start starts it again): a clean shutdown of at most `timeout` (default 30s, at most 10m), or `force` to kill it. Not a stack replica (scale its stack to 0) nor the workspace (workspace_stop). Members and up.
+         */
+        post: operations["sandbox_stop"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3583,7 +3743,7 @@ export interface paths {
         put?: never;
         /**
          * List your SSH keys
-         * @description The SSH public keys on your account: what `isb ssh-proxy` lets in to your orgs' workspaces and sandboxes (id, name, algorithm, fingerprint, last use).
+         * @description The SSH public keys on your account: what `isb ssh-proxy` lets in to your orgs' workspaces and sandboxes (id, name, algorithm, fingerprint, last use). A platform admin may list another user's (`user`).
          */
         post: operations["ssh_key_list"];
         delete?: never;
@@ -3603,7 +3763,7 @@ export interface paths {
         put?: never;
         /**
          * Remove an SSH key
-         * @description Remove one of your SSH keys by id; sessions it opened end within seconds.
+         * @description Remove one of your SSH keys by id (a platform admin: another user's, with `user`); sessions it opened end within seconds.
          */
         post: operations["ssh_key_remove"];
         delete?: never;
@@ -4223,7 +4383,7 @@ export interface paths {
         put?: never;
         /**
          * List API tokens
-         * @description Your API tokens' metadata (id, name, org, scopes, created, last used, expiry; never the secret), only one org's when `org` is given (an org token sees only its org's). With all=true, every token in `org`, with who holds each: owners and admins.
+         * @description Your API tokens' metadata (id, name, org, scopes, created, last used, expiry; never the secret), only one org's when `org` is given (an org token sees only its org's). With all=true, every token in `org`, with who holds each: owners and admins. With all_orgs=true, every token on the platform, in every org and none, with who holds each: platform admins (superadmin tokens: superadmin_token_list).
          */
         post: operations["token_list"];
         delete?: never;
@@ -4286,6 +4446,46 @@ export interface paths {
          * @description Platform admins: disable or enable a user (disabling ends their sessions), or grant or revoke platform admin. Nobody does either to themselves, and the last enabled platform admin stays one.
          */
         post: operations["user_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a volume
+         * @description Create an empty named volume in the org's pool, for a sandbox spec or an app to mount by name. `size` (e.g. 10GiB) bounds it; under the org's disk limit it defaults to the root disk's size. An existing volume is left as it is (`created`: false). Org admins and owners.
+         */
+        post: operations["volume_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/volume_delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete a volume
+         * @description Delete a named volume, its snapshots and its snapshot settings, for good. Refused while an instance has it attached, running or not (sandbox_device_remove, or remove the instance, first), while a snapshot of it is being taken, while a backup names it (backup_delete), and for a staged restore (volume_restore_discard). Org admins and owners.
+         */
+        post: operations["volume_delete"];
         delete?: never;
         options?: never;
         head?: never;
@@ -9291,6 +9491,49 @@ export interface operations {
             };
         };
     };
+    guide: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /**
+                     * @description Default: start.
+                     * @enum {string}
+                     */
+                    topic?: "start" | "safety" | "sandboxes" | "apps" | "inspect" | "data" | "workspace" | "admin" | "cli";
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
     history_query: {
         parameters: {
             query?: never;
@@ -11199,6 +11442,10 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description Cloudflare account id for the tunnel's API calls (default: the tunnel token's); "" clears it. */
+                    cloudflare_account?: string;
+                    /** @description Cloudflare zone id the org's hostnames are in (default: looked up per hostname); "" clears it. */
+                    cloudflare_zone?: string;
                     /** @description CPUs across the org: the sum of every instance's limits.cpu, stopped ones included. "none" or null lifts the limit. */
                     cpus?: number | "none" | null;
                     /** @description CPUs an instance gets when its spec sets none. */
@@ -11207,8 +11454,15 @@ export interface operations {
                     default_memory?: string;
                     /** @description Disk across the org, e.g. 100GiB: the sum of every root disk's and volume's size. While set, each instance isb creates gets a root size of its own (raw_devices.root.size, else 10GiB); setting it is refused while an instance has none, naming each. "none" or null lifts the limit. */
                     disk?: string | null;
+                    /** @description Domain suffixes the org's services may serve: example.com allows it and every name under it, *.example.com wildcard hosts too. Replaces the list; [] clears it (any concrete name, no wildcards). The same as `isb org create --allow-domain`. */
+                    domains?: string[];
                     /** @description Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/concepts/orgs.md). Replaces the list; [] clears it. */
                     egress?: string[];
+                    /**
+                     * @description How the org's domains are reached: caddy (the server's public listeners) or cloudflare-tunnel (the org's own tunnel, token in its secret cloudflare-tunnel-token).
+                     * @enum {string}
+                     */
+                    ingress?: "caddy" | "cloudflare-tunnel";
                     /** @description Instances in the org, stopped ones included. "none" or null lifts the limit. */
                     instances?: number | "none" | null;
                     /** @description Memory across the org, e.g. 16GiB: the sum of every instance's limits.memory, stopped ones included. "none" or null lifts the limit. */
@@ -11427,6 +11681,10 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description Cloudflare account id for the tunnel's API calls (default: the tunnel token's); "" clears it. */
+                    cloudflare_account?: string;
+                    /** @description Cloudflare zone id the org's hostnames are in (default: looked up per hostname); "" clears it. */
+                    cloudflare_zone?: string;
                     /** @description CPUs across the org: the sum of every instance's limits.cpu, stopped ones included. "none" or null lifts the limit. */
                     cpus?: number | "none" | null;
                     /** @description CPUs an instance gets when its spec sets none. */
@@ -11435,8 +11693,15 @@ export interface operations {
                     default_memory?: string;
                     /** @description Disk across the org, e.g. 100GiB: the sum of every root disk's and volume's size. While set, each instance isb creates gets a root size of its own (raw_devices.root.size, else 10GiB); setting it is refused while an instance has none, naming each. "none" or null lifts the limit. */
                     disk?: string | null;
+                    /** @description Domain suffixes the org's services may serve: example.com allows it and every name under it, *.example.com wildcard hosts too. Replaces the list; [] clears it (any concrete name, no wildcards). The same as `isb org create --allow-domain`. */
+                    domains?: string[];
                     /** @description Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/concepts/orgs.md). Replaces the list; [] clears it. */
                     egress?: string[];
+                    /**
+                     * @description How the org's domains are reached: caddy (the server's public listeners) or cloudflare-tunnel (the org's own tunnel, token in its secret cloudflare-tunnel-token).
+                     * @enum {string}
+                     */
+                    ingress?: "caddy" | "cloudflare-tunnel";
                     /** @description Instances in the org, stopped ones included. "none" or null lifts the limit. */
                     instances?: number | "none" | null;
                     /** @description Memory across the org, e.g. 16GiB: the sum of every instance's limits.memory, stopped ones included. "none" or null lifts the limit. */
@@ -11986,6 +12251,47 @@ export interface operations {
             };
         };
     };
+    sandbox_device_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    device: string;
+                    /** @description The sandbox, from sandbox_list. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
     sandbox_exec: {
         parameters: {
             query?: never;
@@ -12122,6 +12428,178 @@ export interface operations {
             };
         };
     };
+    sandbox_logs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The sandbox, from sandbox_list. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description The compose service the sandbox was made from (default: the one it supervises). */
+                    service?: string;
+                    /** @description A duration back from now (10m, 2h) or an RFC 3339 time. */
+                    since?: string;
+                    tail?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    sandbox_port_add: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The device's name (default port-<bind>-<listen port>). */
+                    device?: string;
+                    /** @description The sandbox, from sandbox_list. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description Step past up to this many taken host ports. */
+                    search?: number;
+                    /** @description e.g. 8080:80, 127.0.0.1:5173:5173, or listen=tcp:127.0.0.1:9000,connect=tcp:127.0.0.1:9000. */
+                    spec: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    sandbox_port_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The sandbox, from sandbox_list. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    sandbox_port_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    device: string;
+                    /** @description The sandbox, from sandbox_list. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
     sandbox_remove: {
         parameters: {
             query?: never;
@@ -12135,6 +12613,90 @@ export interface operations {
                     name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    sandbox_start: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The sandbox, from sandbox_list. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    sandbox_stop: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Kill instead of a clean shutdown. */
+                    force?: boolean;
+                    /** @description The sandbox, from sandbox_list. */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description The clean shutdown's deadline, e.g. 30s. */
+                    timeout?: string;
                 };
             };
         };
@@ -13062,6 +13624,8 @@ export interface operations {
                 "application/json": {
                     /** @description Ignored: this is about the caller, not an org. */
                     org?: string;
+                    /** @description Platform admins: act on this user's account (their email) instead of yours, as `--user` does on the host. */
+                    user?: string;
                 };
             };
         };
@@ -13101,6 +13665,8 @@ export interface operations {
                     id: number;
                     /** @description Ignored: this is about the caller, not an org. */
                     org?: string;
+                    /** @description Platform admins: act on this user's account (their email) instead of yours, as `--user` does on the host. */
+                    user?: string;
                 };
             };
         };
@@ -14410,6 +14976,8 @@ export interface operations {
                 "application/json": {
                     /** @description Every token in the org, not just yours (owners and admins). */
                     all?: boolean;
+                    /** @description Every token on the platform (platform admins), as `isb token ls` lists them on the host. */
+                    all_orgs?: boolean;
                     /** @description Only this org's tokens (all: the org to list; default: default). */
                     org?: string;
                 };
@@ -14533,6 +15101,87 @@ export interface operations {
                     platform_admin?: boolean;
                     /** @description The user's id (user_list shows it). */
                     user_id?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    volume_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The volume: letters, digits, _, - and . */
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
+                    /** @description e.g. 10GiB. */
+                    size?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tool's result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result: unknown;
+                    };
+                };
+            };
+            /** @description An error: {error, message, data} */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolError"];
+                };
+            };
+        };
+    };
+    volume_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description The org to act in (default: default). */
+                    org?: string;
                 };
             };
         };
