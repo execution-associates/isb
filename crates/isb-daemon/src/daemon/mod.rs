@@ -72,7 +72,10 @@ use crate::sandbox::{EnsureOptions, Sandbox, SandboxInfo};
 use crate::server::{AccessValidator, Caller, Listener, Registry, Tool, ToolPolicy};
 use crate::spec::SandboxSpec;
 use crate::stack::{Controller, Store, now_secs};
-use authorize::{CROSS_ORG_READS, PLATFORM_TOOLS, arg_org, authorize_class, tool_listed};
+use authorize::{
+    CROSS_ORG_READS, PLATFORM_TOOLS, arg_org, authorize_class, event_visible, read_orgs,
+    tool_listed, visible_orgs,
+};
 use policy::RemotePolicy;
 use stack_deploy::{DeployArgs, How, deploy, stack_deploy};
 #[cfg(test)]
@@ -663,14 +666,6 @@ fn with_external_drivers(
     secrets.with_driver(Arc::new(onepassword::OnePasswordDriver::new(token)))
 }
 
-/// The orgs a caller may see, or `None` for all of them.
-fn visible_orgs(c: &Caller) -> Option<Vec<crate::org::OrgId>> {
-    match c.principal() {
-        Some(p) if !p.platform_admin => Some(p.orgs.iter().map(|(o, _)| o.clone()).collect()),
-        _ => None,
-    }
-}
-
 /// Authentication and authorization for every listener.
 fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate::server::Hooks {
     use crate::server::Authenticated;
@@ -779,16 +774,6 @@ fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate:
 fn bearer(req: &crate::server::http::Request) -> Option<&str> {
     let (scheme, token) = req.header("authorization")?.trim().split_once(' ')?;
     scheme.eq_ignore_ascii_case("bearer").then(|| token.trim())
-}
-
-/// Events name their stack `org/stack` (or just `stack` in the default org).
-fn event_visible(orgs: &Option<Vec<crate::org::OrgId>>, stack: &str) -> bool {
-    let Some(orgs) = orgs else { return true };
-    let org = stack
-        .split_once('/')
-        .map(|(o, _)| o)
-        .unwrap_or(crate::org::DEFAULT_ORG);
-    orgs.iter().any(|o| o.as_str() == org)
 }
 
 fn args<T: DeserializeOwned>(v: Value) -> Result<T> {

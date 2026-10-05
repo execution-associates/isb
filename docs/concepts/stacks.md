@@ -282,7 +282,24 @@ state:
 
 and per replica its status, health, address, whether it is in rotation, its
 restarts and its last probe output. `isb stack logs STACK SERVICE` shows each
-replica's recent output.
+replica's recent output (`--tail N`, `--since 10m` or an RFC 3339 time).
+
+A replica that does not come up (it exits, or never passes its healthcheck
+before its deadline) is deleted and made again. Before it is deleted, isb
+reads its last 200 lines of output (its journal, or an OCI image's console;
+at most 32 KiB) and keeps them with the failed attempt: `isb stack ps` names
+the attempt while the service is not converged, `isb stack logs STACK SERVICE`
+prints its output after the live replicas' (alone with `--failed`, and
+whenever no live replica printed anything), and the deployment that was
+rolling out keeps it (`stack_deployment_get` `failed_attempts`), so it
+outlives a restart of the daemon.
+
+`isb stack exec STACK SERVICE -- CMD...` runs a command in one of the
+service's replicas, as `isb app exec` does for an app: a running replica,
+healthy and in rotation first, or the one `--replica N` names. It prints the
+output and exits with the command's status; it is not interactive (`-i` feeds
+stdin), and it works over the socket and, from a workspace, over `$ISB_URL`.
+Members and up.
 
 ## Editing in the web UI
 
@@ -379,7 +396,8 @@ their apps have their own.
 isb stack deploy [NAME] [-f FILE...] [-d] [--timeout 10m]   deploy or update; waits unless -d
 isb stack ls [--json]
 isb stack ps NAME [--json]
-isb stack logs NAME SERVICE [--slot N] [-n 100]
+isb stack logs NAME SERVICE [--slot N] [-n|--tail 100] [--since 10m|TIME] [--failed]
+isb stack exec NAME SERVICE [--replica N] [-u USER] [-w DIR] [-e K=V]... [-i] -- CMD...
 isb stack scale NAME SERVICE=N...
 isb stack redeploy NAME SERVICE
 isb stack rollback NAME [--to ID]

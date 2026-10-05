@@ -419,31 +419,12 @@ fn app_logs(d: &Daemon, a: Value, _c: &Caller) -> Result<Value> {
             return Err(Error::NotFound(format!("replica {n} of {}", a.name)));
         }
     }
-    let cutoff = match &a.since {
-        Some(s) => {
-            let d = crate::flex::parse_duration(s).map_err(Error::invalid)?;
-            Some(now_ms_i64() - d.as_millis() as i64)
-        }
-        None => None,
-    };
-    // A `since` filters what was read, so read more than the tail then.
+    let cutoff = a.since.as_deref().map(since_cutoff).transpose()?;
     let lines = a.tail.unwrap_or(200).clamp(1, 5000);
-    let read = if cutoff.is_some() { 5000 } else { lines };
-    let mut logs = d.ctl.logs(&stack, &a.name, a.replica, read)?;
-    let mut since_applied = true;
-    if let Some(cut) = cutoff {
-        for text in logs.values_mut() {
-            let (t, seen) = since_lines(text, cut);
-            since_applied &= seen || text.is_empty();
-            *text = t;
-        }
-    }
-    for text in logs.values_mut() {
-        let all: Vec<&str> = text.lines().collect();
-        if all.len() > lines {
-            *text = all[all.len() - lines..].join("\n");
-        }
-    }
+    let mut logs = d
+        .ctl
+        .logs(&stack, &a.name, a.replica, read_lines(cutoff, lines))?;
+    let since_applied = window_logs(&mut logs, cutoff, lines);
     let slots: BTreeMap<&str, u32> = svc
         .instances
         .iter()
@@ -451,15 +432,57 @@ fn app_logs(d: &Daemon, a: Value, _c: &Caller) -> Result<Value> {
         .collect();
     let mut out = json!({"app": a.name, "logs": logs, "replicas": slots});
     // A replica that failed to come up is already deleted: its last output.
-    if let Some(f) = d.ctl.last_failure(&stack, &a.name) {
+    if let Some(f) = d.ctl.last_failure(&stack, &a.name, false) {
         out["last_failed_attempt"] = json!(f);
     }
-    if cutoff.is_some() && !since_applied {
-        out["note"] = json!(
-            "since could not be applied to every replica: an OCI image's console log has no timestamps, so all of its tail is shown"
-        );
+    if !since_applied {
+        out["note"] = json!(SINCE_NOTE);
     }
     Ok(out)
+}
+
+/// What a logs call says when `since` met lines without timestamps.
+pub(in crate::daemon) const SINCE_NOTE: &str = "since could not be applied to every replica: an OCI image's console log has no timestamps, so all of its tail is shown";
+
+/// A logs call's `since` as a cutoff in unix ms: a duration back from now
+/// (10m, 2h) or an RFC 3339 time (2026-10-05T14:00:00Z).
+pub(in crate::daemon) fn since_cutoff(s: &str) -> Result<i64> {
+    if let Ok(d) = crate::flex::parse_duration(s) {
+        return Ok(now_ms_i64() - d.as_millis() as i64);
+    }
+    crate::history::rfc3339_ms(s).ok_or_else(|| {
+        Error::invalid(format!(
+            "since {s:?}: want a duration like 10m or an RFC 3339 time like 2026-10-05T14:00:00Z"
+        ))
+    })
+}
+
+/// How many lines to read per replica: a `since` filters what was read, so
+/// more than the tail then.
+pub(in crate::daemon) fn read_lines(cutoff: Option<i64>, lines: usize) -> usize {
+    if cutoff.is_some() { 5000 } else { lines }
+}
+
+/// Narrow each replica's text to lines newer than `cutoff`, then its last
+/// `lines`. False when `since` could not be applied to one (no timestamps).
+pub(in crate::daemon) fn window_logs(
+    logs: &mut BTreeMap<String, String>,
+    cutoff: Option<i64>,
+    lines: usize,
+) -> bool {
+    let mut since_applied = true;
+    for text in logs.values_mut() {
+        if let Some(cut) = cutoff {
+            let (t, seen) = since_lines(text, cut);
+            since_applied &= seen || text.is_empty();
+            *text = t;
+        }
+        let all: Vec<&str> = text.lines().collect();
+        if all.len() > lines {
+            *text = all[all.len() - lines..].join("\n");
+        }
+    }
+    since_applied
 }
 
 fn now_ms_i64() -> i64 {
@@ -592,13 +615,13 @@ pub(super) fn register(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<(
         d,
         "app_logs",
         "An app's logs",
-        "Recent output of an app's replicas, by app name (kubectl logs deploy/NAME): all replicas, or one with `replica`. `tail` lines (default 200, at most 5000); `since` keeps lines newer than a duration like 10m (for system images; an OCI image's console log has no timestamps). A replaced replica's logs go with it, so there is no `previous`, except that a replica that failed to come up (a crash loop) leaves its last output as `last_failed_attempt` while the app is not converged; app_events and history_query say what happened.",
+        "Recent output of an app's replicas, by app name (kubectl logs deploy/NAME): all replicas, or one with `replica`. `tail` lines (default 200, at most 5000); `since` keeps lines newer than a duration like 10m or an RFC 3339 time (for system images; an OCI image's console log has no timestamps). A replaced replica's logs go with it, so there is no `previous`, except that a replica that failed to come up (a crash loop) leaves its last output as `last_failed_attempt` while the app is not converged; app_events and history_query say what happened.",
         obj(
             json!({
                 "name": {"type": "string", "description": "The app's name (`app` is accepted as an alias)."},
                 "replica": {"type": "integer", "minimum": 1, "description": "One replica's slot."},
                 "tail": {"type": "integer", "minimum": 1, "maximum": 5000},
-                "since": {"type": "string", "description": "e.g. 10m, 2h."}
+                "since": {"type": "string", "description": "A duration back from now (10m, 2h) or an RFC 3339 time."}
             }),
             &["name"]
         ),

@@ -1,5 +1,5 @@
-//! `app_exec` and `instance_exec`: run argv in a replica or an instance, with
-//! the output capped and the time bounded.
+//! `app_exec`, `stack_exec` and `instance_exec`: run argv in a replica or an
+//! instance, with the output capped and the time bounded.
 
 use super::*;
 use crate::exec::ExecEvent;
@@ -271,6 +271,51 @@ fn app_exec(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     Ok(out)
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StackExecArgs {
+    name: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    org: Option<String>,
+    service: String,
+    argv: Vec<String>,
+    #[serde(default)]
+    replica: Option<u32>,
+    #[serde(default)]
+    instance: Option<String>,
+    cwd: Option<String>,
+    user: Option<String>,
+    #[serde(default)]
+    env: BTreeMap<String, String>,
+    stdin: Option<String>,
+    timeout: Option<String>,
+}
+
+/// As app_exec, for a compose stack's service: the replica is picked from
+/// the controller's status of that service.
+fn stack_exec(d: &Daemon, a: Value, _c: &Caller) -> Result<Value> {
+    let org = arg_org(&a)?;
+    let a: StackExecArgs = args(a)?;
+    let run = Run::new(a.argv, a.cwd, a.user, a.env, a.stdin, a.timeout.as_deref())?;
+    let stack = crate::stack::qualified(&org, &a.name);
+    let svc = d
+        .ctl
+        .status(&stack)?
+        .services
+        .into_iter()
+        .find(|s| s.service == a.service)
+        .ok_or_else(|| Error::NotFound(format!("service {} of stack {}", a.service, a.name)))?;
+    let what = format!("{}/{}", a.name, a.service);
+    let inst = pick_replica(&what, &svc.instances, a.replica, a.instance.as_deref())?;
+    let oc = crate::org::client(&d.client, &org);
+    let mut out = run_capped(&oc, &inst.name, run, EXEC_OUTPUT_CAP)?;
+    out["stack"] = json!(a.name);
+    out["service"] = json!(a.service);
+    out["replica"] = json!(inst.slot);
+    Ok(out)
+}
+
 fn instance_exec(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     let org = arg_org(&a)?;
     let a: ExecArgs = args(a)?;
@@ -323,6 +368,21 @@ pub(super) fn register(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<(
         obj(app_exec_props, &["name", "argv"]),
         annotations("app_exec", ann),
         app_exec
+    );
+    let mut stack_exec_props = exec_props("The stack's name.");
+    stack_exec_props["service"] = json!({"type": "string", "description": "The compose service."});
+    stack_exec_props["replica"] = json!({"type": "integer", "minimum": 1, "description": "The replica's slot (default: a running one, preferring healthy replicas in rotation)."});
+    stack_exec_props["instance"] =
+        json!({"type": "string", "description": "Or the replica's instance name."});
+    tool!(
+        r,
+        d,
+        "stack_exec",
+        "Run a command in a stack service",
+        "Run argv in one of a compose stack service's replicas and return its exit code and output, as app_exec does for an app: by default a running replica, healthy and in rotation first; `replica` (slot) or `instance` choose one. 60s default timeout (at most 15m); stdout and stderr are each capped at 1 MiB (the end is kept; `truncated` says so). Members and up.",
+        obj(stack_exec_props, &["name", "service", "argv"]),
+        annotations("stack_exec", ann),
+        stack_exec
     );
     tool!(
         r,

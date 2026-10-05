@@ -201,8 +201,9 @@ cannot exec or read secrets.
   `kind`), `instance_get` (one in full: env names never values, volumes,
   domains, history), `app_exec` (`name`, `argv`, `replica`, `stdin`,
   `cwd`, `user`, `env`, `timeout` default 60s at most 15m; each stream
-  capped at 1 MiB, `truncated`/`timed_out` say so) and `instance_exec`
-  (any instance by name), `app_logs` (`tail`, `since`, `replica`),
+  capped at 1 MiB, `truncated`/`timed_out` say so), `stack_exec` (the
+  same for a compose service: `name`, `service`, `argv`) and
+  `instance_exec` (any instance by name), `app_logs` (`tail`, `since`, `replica`),
   `app_top`, `app_events`, `app_restart` (rolling, `wait`), `app_scale`,
   `instance_restart`, `instance_file_read` (at most 4 MiB) and
   `instance_file_write` (at most 2 MiB; never `/run/isb`, `/run/secrets`,
@@ -211,6 +212,7 @@ cannot exec or read secrets.
   exec and files. argv lands in the audit log: keep passwords in `env` or
   `stdin`. No port-forward: `curl` through `app_exec`. CLI: `isb instance
   ls|get|exec|restart`, `isb app exec|logs|restart|scale|top|events`,
+  `isb stack exec|logs` (`--failed`: the last replica that failed to start),
   `isb cp`.
 - **Data:** `database_create`, `database_get`, `backup_*`, `volume_*`,
   `job_*`. **Secrets:** `secret_create`, `secret_set` (values base64; a new
