@@ -189,8 +189,9 @@ With Access configured (`CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD`), it stays
 the front door of the loopback listeners: `/api/v1/auth/*` also needs a
 valid `Cf-Access-Jwt-Assertion`, as `/mcp` does, and isb's own sign-in
 applies behind it, with the verified user as an [edge
-identity](#edge-identities). `--superadmin-access` makes listed Access identities
-superadmins; it needs Access and `--public-url`. Without Access the identity
+identity](#edge-identities). `--superadmin-access` (and `isb superadmin add
+--access`) makes listed Access identities superadmins; it needs Access and
+`--public-url`. Without Access the identity
 endpoints are still served: they authenticate their own callers.
 
 ## Edge identities
@@ -209,8 +210,9 @@ login such as `someone@github` is not one).
   the first admin without the setup token, and a password is optional. The
   identity is linked to the account (provider `tailnet` or `access` in
   [`user_identities`](#schema)). `can_claim` is false when the front door's
-  superadmin list (`--superadmin-tailnet`, `--superadmin-access`) is set and
-  leaves the identity out.
+  superadmin list (`--superadmin-tailnet`, `--superadmin-access`, or that
+  front door's identities from `isb superadmin add`) is set and leaves the
+  identity out.
 - **Sign-in**: `POST edge` starts an ordinary session by the [provider
   rules](#the-flow): a linked identity signs its user in, a verified email
   links to the user who has it, and a new account needs an invitation or

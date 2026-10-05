@@ -424,6 +424,21 @@ pub fn agent_identities(
         .map(|u| u.email)
         .collect();
     let who = |l: &[String]| if names { l.to_vec() } else { Vec::new() };
+    // The flags' superadmins and isb.db's, where this server can match them.
+    let (mut sa_access, mut sa_tailnet) = (
+        ways.superadmin_access.clone(),
+        ways.superadmin_tailnet.clone(),
+    );
+    for i in store.list_superadmin_identities()? {
+        let list = match i.kind {
+            AgentKind::Access if ways.access && ways.public_url.is_some() => &mut sa_access,
+            AgentKind::Tailnet if !ways.tailnet_listen.is_empty() => &mut sa_tailnet,
+            _ => continue,
+        };
+        if !list.contains(&i.value) {
+            list.push(i.value);
+        }
+    }
     Ok(json!({
         "identities": store.list_agent_identities(org)?,
         "available": {
@@ -432,8 +447,8 @@ pub fn agent_identities(
             "public_url": ways.public_url,
             "reach": {
                 "platform_admins": {"count": admins.len(), "who": who(&admins)},
-                "access_superadmins": {"count": ways.superadmin_access.len(), "who": who(&ways.superadmin_access), "you": has(&ways.superadmin_access)},
-                "tailnet_superadmins": {"count": ways.superadmin_tailnet.len(), "who": who(&ways.superadmin_tailnet), "you": has(&ways.superadmin_tailnet)},
+                "access_superadmins": {"count": sa_access.len(), "who": who(&sa_access), "you": has(&sa_access)},
+                "tailnet_superadmins": {"count": sa_tailnet.len(), "who": who(&sa_tailnet), "you": has(&sa_tailnet)},
             },
         },
     }))

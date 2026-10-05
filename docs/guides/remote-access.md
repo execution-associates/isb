@@ -127,7 +127,10 @@ public URL when `--public-url` is set).
 
 `--superadmin-access alice@example.com,abc123.access` (or
 `ISB_SUPERADMIN_ACCESS`) gives the listed Access identities, users by email
-and service tokens by client id, the unix socket's reach. Only a verified
+and service tokens by client id, the unix socket's reach. On a running
+daemon, `isb superadmin add --access EMAIL` (or `--access-token CLIENT_ID`)
+on the host does the same with no restart ([Superadmin identities in
+isb.db](../concepts/access.md#superadmin-identities-in-isbdb)). Only a verified
 assertion counts, so the flag is refused without both `CF_ACCESS_*` values,
 and it needs `--public-url` (an Access superadmin's `Host` must be it). The
 `CF_Authorization` cookie makes it ambient, so the same CSRF, `Origin`,
@@ -154,7 +157,10 @@ untagged peer whose login is an isb user's (or is linked to one) is signed
 in as that user without a password. The
 `Host` a browser sends must be the listen address, the node's MagicDNS name
 (`host` or `host.tailnet.ts.net`) or the public URL's host. An empty list is
-refused.
+refused. With the tailnet address served, `isb superadmin add --tailnet
+LOGIN_OR_TAG` on the host lists one more without the variable or a restart
+([Superadmin identities in
+isb.db](../concepts/access.md#superadmin-identities-in-isbdb)).
 
 The identity comes only from the TCP peer address, asked of the local
 tailscaled (`whois` over its LocalAPI socket, else the `tailscale` CLI on
