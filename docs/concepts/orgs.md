@@ -113,7 +113,8 @@ The project is **restricted**, so incus itself refuses what would reach the
 host:
 
 - unprivileged containers only; no nesting, no `raw.lxc`, no `raw.idmap` of
-  root, no proxy devices (a superadmin can allow nesting for the org's
+  root, no proxy devices (a platform admin can allow a stack's UDP ports,
+  [UDP ports](#udp-ports); a superadmin can allow nesting for the org's
   workspace alone: [The Docker exception](security.md#the-docker-exception));
 - disks are managed volumes only, or bind mounts from the org's
   `--bind-root` directories;
@@ -192,6 +193,38 @@ changes nothing, since the internet is allowed anyway.
 An exception only lifts the org's ACL. The host's firewall still applies: a
 destination routed out of an interface other than the uplink (a tailnet host
 through `tailscale0`, say) also needs the host to forward to it.
+
+## UDP ports
+
+A stack's UDP port is a NAT proxy device on its replica
+([UDP ports](stacks.md#udp-ports)) and takes that port on that host address
+away from everyone else, so the org does not pick its own: a platform admin
+lists the ports it may publish, `IP:PORT` each, with a specific host address.
+
+```sh
+isb org create media --allow-udp 203.0.113.7:10000 --allow-udp 203.0.113.7:59000
+```
+
+The flag repeats. Giving it replaces the list; leaving it out keeps it;
+`--allow-udp none` clears it. Over the tools it is `org_update`'s `udp`. The
+list is stored in the project's `user.isb.udp` and shown by `isb org show`. A
+stack deploy that publishes UDP anywhere else is refused, whoever deploys it.
+Taking a port off the list does not touch a stack already publishing it; its
+next deploy is refused.
+
+Two layers keep proxy devices to those ports, as for [the Docker
+exception](security.md#the-docker-exception):
+
+- **The project.** With a UDP port listed, the org's project allows proxy
+  devices (`restricted.devices.proxy=allow`); with none, it blocks them
+  again. Clearing the list fails (incus refuses) while a replica still has
+  one: remove the stack first.
+- **isb itself.** Once the project allows them, isb refuses every proxy
+  device in every instance of an org project except a stack replica's UDP
+  port: host-bound, NAT mode, UDP into the instance's own address, made by
+  the stack controller, whose mark no spec, compose file or tool argument
+  can carry. A sandbox's `ports`, a guest-bound port and a raw proxy device
+  are refused, whoever asks.
 
 ## Domains
 

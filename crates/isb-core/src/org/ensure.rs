@@ -11,6 +11,7 @@ struct Kept {
     ingress: String,
     cf_account: String,
     cf_zone: String,
+    udp: String,
 }
 
 /// `opts` over the existing project's settings, checked.
@@ -61,12 +62,22 @@ fn kept(opts: &OrgOptions, existing: Option<&Value>) -> Result<Kept> {
             )));
         }
     }
+    let udp = match &opts.udp {
+        Some(u) => {
+            for a in u {
+                check_udp_port(&a.to_string())?;
+            }
+            udp::render(u)
+        }
+        None => keep(KEY_UDP),
+    };
     Ok(Kept {
         egress,
         domains,
         ingress,
         cf_account,
         cf_zone,
+        udp,
     })
 }
 
@@ -353,6 +364,10 @@ fn project_config(org: &OrgId, k: &Kept, opts: &OrgOptions, existing: Option<&Va
         KEY_INGRESS: k.ingress,
         KEY_CF_ACCOUNT: k.cf_account,
         KEY_CF_ZONE: k.cf_zone,
+        // A stack's UDP ports are NAT proxy devices: allowed in the project
+        // once the org has any, and kept to them by `check_proxies`.
+        "restricted.devices.proxy": if k.udp.is_empty() { "block" } else { "allow" },
+        KEY_UDP: k.udp,
     });
     let roots: Vec<String> = opts
         .bind_roots
@@ -551,6 +566,7 @@ mod tests {
             ingress: INGRESS_CADDY.into(),
             cf_account: String::new(),
             cf_zone: String::new(),
+            udp: String::new(),
         }
     }
 

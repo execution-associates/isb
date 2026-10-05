@@ -126,9 +126,50 @@ traffic. A replica whose connection fails is skipped for a backoff and the
 client is tried on the next one, and a replica taken out of rotation keeps
 its open connections until they end.
 
-Limits: TCP only (a UDP published port is an error in a stack), single ports
-(no ranges), and backends see the daemon's address, not the client's.
-Guest-bound ports (`bind: guest`) stay per-instance proxy devices.
+Limits: TCP (UDP is below), single ports (no ranges), and backends see the
+daemon's address, not the client's. Guest-bound ports (`bind: guest`) stay
+per-instance proxy devices.
+
+### UDP ports
+
+A UDP published port is not served by the daemon. It is a proxy device in
+NAT mode on the service's replica: DNAT on the host to the replica's bridge
+address, so the app sees each client's own address (which a WebRTC media
+server needs for ICE), and packets keep flowing while the daemon is down.
+
+```yaml
+services:
+  jvb:
+    image: docker:jitsi/jvb:stable
+    ports:
+      - "203.0.113.7:10000:10000/udp"
+```
+
+- **One replica, stop-first.** Two instances cannot hold one port, so a
+  service that publishes UDP is refused at deploy with `replicas` above 1 or
+  a `start-first` update or rollback, and `isb stack scale` above 1 is
+  refused.
+- **The port follows the replica.** Each new replica is created with the
+  device, so the port moves with every replacement (a rollout, a redeploy,
+  or a replica the daemon replaces); a restart keeps it. It forwards
+  whenever the replica runs, healthy or not: there is no balancer to take
+  it out of rotation. Changing a UDP port replaces the replica.
+- **A host address of its own.** The listen address must be one of the
+  host's addresses, written out (`0.0.0.0`, `::` and loopback are
+  refused). Single ports only, as for TCP.
+- **Allowed by a platform admin.** Each `IP:PORT` must be on the org's list
+  ([UDP ports](orgs.md#udp-ports)); anything else is refused at deploy, and so
+  is a port another stack publishes. A remote caller also needs the address in
+  `--publish-address` ([The remote-spec policy](security.md#the-remote-spec-policy)).
+- **No `egress`.** A service with `egress` sits on a bridge of its own and
+  cannot publish UDP.
+- **Through the host firewall.** DNAT routes the packets into the org's
+  bridge, so a default-deny firewall drops them unless it lets them through,
+  e.g. `sudo ufw route allow proto udp to any port 10000`.
+
+TCP on the same port (`203.0.113.7:59000:59000` beside
+`203.0.113.7:59000:59000/udp`) still goes through the balancer. `isb stack
+status` shows a UDP port as `IP:PORT/udp`, with the replica as its backend.
 
 ## Domains
 

@@ -40,6 +40,11 @@ pub(crate) enum OrgCmd {
         /// clears it (any concrete name, no wildcards).
         #[arg(long, value_name = "SUFFIX")]
         allow_domain: Vec<String>,
+        /// A UDP port the org's stacks may publish on the host, IP:PORT
+        /// with a specific host address, e.g. 203.0.113.7:10000
+        /// (repeatable). Replaces the list; `none` clears it.
+        #[arg(long, value_name = "IP:PORT")]
+        allow_udp: Vec<String>,
         /// How the org's domains are reached: `caddy` (the server's public
         /// listeners) or `cloudflare-tunnel` (the org's own tunnel, token
         /// in its secret cloudflare-tunnel-token).
@@ -128,6 +133,7 @@ pub(crate) fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
             bind_root,
             allow_egress,
             allow_domain,
+            allow_udp,
             ingress,
             cloudflare_account,
             cloudflare_zone,
@@ -184,13 +190,11 @@ pub(crate) fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
                         a[k] = serde_json::json!(v);
                     }
                 }
-                if !allow_egress.is_empty() {
-                    let e: Vec<String> = if allow_egress == ["none"] {
-                        vec![]
-                    } else {
-                        allow_egress
-                    };
-                    a["egress"] = serde_json::json!(e);
+                for (k, list) in [("egress", allow_egress), ("udp", allow_udp)] {
+                    if !list.is_empty() {
+                        let e: Vec<String> = if list == ["none"] { vec![] } else { list };
+                        a[k] = serde_json::json!(e);
+                    }
                 }
                 let v = if vm {
                     a["wait"] = serde_json::json!(false);
@@ -232,6 +236,15 @@ pub(crate) fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
                         .collect::<Result<Vec<_>>>()?,
                 )
             };
+            let udp = match allow_udp.as_slice() {
+                [] => None,
+                [n] if n == "none" => Some(Vec::new()),
+                l => Some(
+                    l.iter()
+                        .map(|u| org::check_udp_port(u))
+                        .collect::<Result<Vec<_>>>()?,
+                ),
+            };
             let roots = bind_root
                 .into_iter()
                 .map(|p| {
@@ -255,6 +268,7 @@ pub(crate) fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
                     ingress,
                     cloudflare_account,
                     cloudflare_zone,
+                    udp,
                 },
                 &mut rep,
             )?;
@@ -357,6 +371,14 @@ pub(crate) fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
                         "any name, no wildcards".to_string()
                     } else {
                         o.domains.join(", ")
+                    }
+                );
+                println!(
+                    "udp        {}",
+                    if o.udp.is_empty() {
+                        "none".to_string()
+                    } else {
+                        o.udp.join(", ")
                     }
                 );
                 let mut ing = o.ingress.clone();

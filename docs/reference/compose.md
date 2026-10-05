@@ -629,6 +629,10 @@ every other property equal) counts as correct. One that is not (outside the
 range, or otherwise different) is removed and searched for again after the
 start, rather than replaced at a port that may be taken.
 
+**Under a stack** (`isb stack deploy`), host-bound ports are not proxy
+devices: TCP is served by the daemon's balancer and UDP by a NAT proxy on
+the service's one replica, single ports only (see [Stacks](../concepts/stacks.md#the-load-balancer)).
+
 ```yaml
 ports:
   - "${IP}:5173-5223:5173"
