@@ -8,7 +8,9 @@
 
 pub mod app;
 pub mod fmt;
+mod header;
 pub mod model;
+mod mouse;
 pub mod source;
 pub mod theme;
 pub mod ui;
@@ -21,7 +23,11 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
 use ratatui::DefaultTerminal;
-use ratatui::crossterm::event::{self, Event as TermEvent, KeyEventKind};
+use ratatui::crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event as TermEvent, KeyEventKind, MouseButton,
+    MouseEventKind,
+};
+use ratatui::crossterm::execute;
 
 use crate::client::Client;
 use crate::error::{Error, Result};
@@ -68,7 +74,7 @@ pub fn run(client: Client, socket: PathBuf) -> Result<()> {
     if daemon {
         spawn_events(socket.clone(), tx.clone(), stop.clone());
     }
-    let mut terminal = ratatui::init();
+    let mut terminal = init();
     let r = event_loop(
         &mut terminal,
         &mut app,
@@ -78,9 +84,27 @@ pub fn run(client: Client, socket: PathBuf) -> Result<()> {
         &rx,
         &refresh,
     );
-    ratatui::restore();
+    restore();
     stop.store(true, Ordering::SeqCst);
     r
+}
+
+/// Take the terminal, with mouse reporting on so the sidebar takes clicks.
+/// Most terminals still select text with shift held.
+fn init() -> DefaultTerminal {
+    let t = ratatui::init();
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = execute!(std::io::stdout(), DisableMouseCapture);
+        hook(info);
+    }));
+    let _ = execute!(std::io::stdout(), EnableMouseCapture);
+    t
+}
+
+fn restore() {
+    let _ = execute!(std::io::stdout(), DisableMouseCapture);
+    ratatui::restore();
 }
 
 fn event_loop(
@@ -107,6 +131,18 @@ fn event_loop(
                         refresh.store(true, Ordering::SeqCst);
                     }
                     Effect::Plan { file, name } => plan(file, name, socket, tx),
+                },
+                TermEvent::Mouse(m) => match m.kind {
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        let size = terminal.size()?;
+                        let area = ratatui::layout::Rect::new(0, 0, size.width, size.height);
+                        if let Some(n) = mouse::sidebar_hit(app, area, m.column, m.row) {
+                            app.select(n);
+                        }
+                    }
+                    MouseEventKind::ScrollDown => app.wheel(1),
+                    MouseEventKind::ScrollUp => app.wheel(-1),
+                    _ => {}
                 },
                 TermEvent::Resize(..) => {}
                 _ => {}
@@ -279,7 +315,7 @@ fn sandbox_logs(client: &Client, q: &str, oci: bool) -> Result<Vec<LogLine>> {
 
 /// Hand the terminal to a shell in the instance, then take it back.
 fn shell(terminal: &mut DefaultTerminal, client: &Client, name: &str) -> Result<()> {
-    ratatui::restore();
+    restore();
     println!("\x1b[2m── shell in {name} · exit to return to isb ──\x1b[0m");
     let r = sandbox_client(client, name)
         .and_then(|(c, n)| Sandbox::get(&c, &n))
@@ -300,7 +336,7 @@ fn shell(terminal: &mut DefaultTerminal, client: &Client, name: &str) -> Result<
         eprintln!("isb: {e}");
         std::thread::sleep(Duration::from_secs(2));
     }
-    *terminal = ratatui::init();
+    *terminal = init();
     terminal.clear()?;
     Ok(())
 }
