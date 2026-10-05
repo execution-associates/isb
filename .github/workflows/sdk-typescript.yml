@@ -2,10 +2,11 @@ name: SDK (TypeScript)
 
 # The TypeScript SDK in sdk/typescript: typecheck, lint and unit tests against
 # a cargo-built isb on every PR and push to main. On v* tags, also build the
-# npm packages (the SDK and the two platform packages carrying the static musl
-# binary), upload the packed tarballs as artifacts, then publish them to npm
-# (secret NPM_TOKEN: an automation token that skips 2FA; a package version that
-# is already on npm is skipped, so a failed run can be re-run).
+# npm packages (the SDK and the two platform packages carrying the tag's signed
+# release binary, fetched and verified by scripts/release-binary.sh once
+# release.yml has published it), upload the packed tarballs as artifacts, then
+# publish them to npm by trusted publishing, which records provenance (a
+# package version already on npm is skipped, so a failed run can be re-run).
 
 on:
   push:
@@ -82,17 +83,11 @@ jobs:
             v="v$(grep -m1 '"version"' "$p" | cut -d'"' -f4)"
             [ "$v" = "$want" ] || { echo "$p is $v, want $want"; exit 1; }
           done
-      - run: sudo apt-get update && sudo apt-get install -y musl-tools
-        working-directory: .
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - run: cargo build --release --locked --target ${{ matrix.target }}
-        working-directory: .
-      - name: check the binary is static and runs
+      - name: the signed release binary is static and runs
         working-directory: .
         run: |
-          bin=target/${{ matrix.target }}/release/isb
+          scripts/release-binary.sh "${{ inputs.tag || github.ref_name }}" "$RUNNER_TEMP/isb"
+          bin=$RUNNER_TEMP/isb/isb
           file "$bin"
           file "$bin" | grep -qE 'statically linked|static-pie linked'
           "$bin" --version
@@ -101,7 +96,7 @@ jobs:
       - name: pack the platform package
         run: |
           dir=npm/${{ matrix.npm }}
-          install -m 0755 ../../target/${{ matrix.target }}/release/isb "$dir/bin/isb"
+          install -m 0755 "$RUNNER_TEMP/isb/isb" "$dir/bin/isb"
           cp LICENSE "$dir/"
           mkdir -p "$RUNNER_TEMP/npm"
           (cd "$dir" && bun pm pack --destination "$RUNNER_TEMP/npm")

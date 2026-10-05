@@ -25,10 +25,11 @@ host.
 pip install isb-sdk          # imported as `isb`
 ```
 
-Python 3.10 or later on Linux, no runtime dependencies, typed. The platform
-wheels (x86_64 and aarch64 Linux) bundle a static isb binary; otherwise the
-binary is found as `Client(isb_bin=...)`, then `$ISB_BIN`, then the bundled
-one, then `isb` on `PATH`.
+Python 3.10 or later on Linux or macOS, no runtime dependencies, typed. The
+platform wheels (x86_64 and aarch64 Linux, Apple silicon and Intel macOS)
+bundle the release's signed isb binary; the binary is found as
+`Client(isb_bin=...)`, then `$ISB_BIN`, then the bundled one, then `isb` on
+`PATH`.
 
 ```python
 import asyncio
@@ -89,8 +90,15 @@ bun add @execution-associates/isb      # or npm install
 
 Bun first; Node 20 or later works too. ESM only, no runtime dependencies. The
 optional packages `@execution-associates/isb-linux-x64` and `-linux-arm64`
-carry the binary; otherwise it is found as `new Client({ isbBin })`, then
-`$ISB_BIN`, then the platform package, then `isb` on `PATH`.
+carry the release's signed binary; it is found as `new Client({ isbBin })`,
+then `$ISB_BIN`, then the platform package, then `isb` on `PATH`.
+
+The bundled binary is the same file the installer installs, checked against
+the release signature when the package is built. pip and npm then check only
+their registry's hashes, and npm also carries provenance tying each package to
+the workflow run that published it. To have an SDK use the isb you installed
+with the installer, kept current by `isb update`, set
+`ISB_BIN=$(command -v isb)`; it must speak the SDK's protocol (1).
 
 ```ts
 import { Sandbox, Volume } from "@execution-associates/isb";

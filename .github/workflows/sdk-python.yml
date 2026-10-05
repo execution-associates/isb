@@ -2,9 +2,10 @@ name: Python SDK
 
 # Lint, type check and test sdk/python on every PR and push to main. On a v*
 # tag, build the sdist, the pure wheel and platform wheels that bundle the
-# isb binary (static musl on Linux; built the same way as release.yml), and upload them
-# as workflow artifacts, then publish them to PyPI (secret PYPI_TOKEN; files
-# already on PyPI are skipped, so a failed run can be re-run).
+# isb binary, and upload them as workflow artifacts, then publish them to PyPI
+# (secret PYPI_TOKEN; files already on PyPI are skipped, so a failed run can
+# be re-run). The bundled binary is the tag's signed release binary, fetched
+# and verified by scripts/release-binary.sh once release.yml has published it.
 
 on:
   push:
@@ -109,16 +110,14 @@ jobs:
             plat: macosx_10_12_x86_64
     steps:
       - uses: actions/checkout@v4
-      - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - name: build isb
+      - if: runner.os == 'macOS'
+        name: OpenSSL 3 (install.sh checks the signature with it)
+        run: brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
+      - name: the signed release binary
         working-directory: .
         run: |
-          cargo build --release --locked --target ${{ matrix.target }}
-          bin=target/${{ matrix.target }}/release/isb
+          scripts/release-binary.sh "$GITHUB_REF_NAME" "$RUNNER_TEMP/isb"
+          bin=$RUNNER_TEMP/isb/isb
           if [ "$RUNNER_OS" = Linux ]; then
             file "$bin" | grep -qE 'statically linked|static-pie linked'
           fi
@@ -126,7 +125,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - name: build platform wheel
         env:
-          ISB_WHEEL_BINARY: ${{ github.workspace }}/target/${{ matrix.target }}/release/isb
+          ISB_WHEEL_BINARY: ${{ runner.temp }}/isb/isb
           ISB_WHEEL_PLAT: ${{ matrix.plat }}
         run: uv build --wheel --out-dir dist
       - name: the bundled binary runs from an installed wheel

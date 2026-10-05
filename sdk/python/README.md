@@ -17,9 +17,12 @@ package starts it, sends requests and maps the answers to Python types.
 pip install isb-sdk
 ```
 
-Platform wheels (x86_64 and aarch64 Linux) bundle a static isb binary at
-`isb/_bin/isb`, so nothing else is needed. The pure wheel and the sdist do not;
-they use an isb binary from elsewhere.
+Platform wheels (x86_64 and aarch64 Linux, Apple silicon and Intel macOS)
+bundle the isb binary at `isb/_bin/isb`, so nothing else is needed. It is the
+release's signed binary, checked against the release signature when the wheel
+is built; pip itself checks only PyPI's hashes. The pure wheel and the sdist
+bundle none; they use an isb binary from elsewhere. To use the isb you
+installed with the installer instead, set `ISB_BIN=$(command -v isb)`.
 
 The binary is looked up in this order:
 

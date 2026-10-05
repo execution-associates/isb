@@ -19,8 +19,11 @@ bun add @execution-associates/isb
 ```
 
 The package has optional dependencies `@execution-associates/isb-linux-x64`
-and `@execution-associates/isb-linux-arm64`, each carrying the static isb
-binary for that platform. The binary is found in this order:
+and `@execution-associates/isb-linux-arm64`, each carrying the release's
+signed isb binary for that platform, checked against the release signature
+when the package is built and published with npm provenance. To use the isb
+you installed with the installer instead, set `ISB_BIN=$(command -v isb)`. The
+binary is found in this order:
 
 1. `new Client({ isbBin })`
 2. `$ISB_BIN`
