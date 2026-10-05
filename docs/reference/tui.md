@@ -84,7 +84,7 @@ table.
 | `↑` `↓` `j` `k`, `g` `G` | move |
 | `⏎` `tab` `→` | into a stack's services, then its replicas |
 | `esc` `←` `⇧tab` | back out (and `esc` clears a filter) |
-| `l` | logs: the service's replicas interleaved by time, or one replica's when a replica is selected, or a sandbox's journal or console. `f` follows, `w` wraps, `1`-`9` picks a replica, `a` shows all |
+| `l` | logs: the service's replicas interleaved by time, or one replica's when a replica is selected, or a sandbox's journal or console. `f` follows, `w` wraps, `1`-`9` picks a replica, `a` shows all. `/` searches (case-insensitive unless the search has a capital letter), `⏎` jumps to the newest match, `n` and `N` step to older and newer ones, `esc` clears it |
 | `e` | a shell in the selected replica or sandbox (root, bash if it has one); exit to come back |
 | `s` | scale the service |
 | `r` | redeploy the service: fresh replicas, rolling |
