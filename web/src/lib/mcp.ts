@@ -16,21 +16,20 @@ export type McpEndpoint = "superadmin" | "org";
 
 /**
  * Which endpoint the MCP page shows, from `?endpoint=`: a superadmin gets
- * tabs, the superadmin one first and chosen unless the URL says `org`,
- * since it is the one a superadmin's agent usually wants; anyone else gets
- * the org's alone, with no tabs (null).
+ * tabs, the org one first and chosen unless the URL says `superadmin`;
+ * anyone else gets the org's alone, with no tabs (null).
  */
 export function mcpEndpoint(superadmin: boolean, param: string | null): McpEndpoint | null {
   if (!superadmin) return null;
-  return param === "org" ? "org" : "superadmin";
+  return param === "superadmin" ? "superadmin" : "org";
 }
 
 /** A superadmin's tabs on the MCP page, in order, each linked by its `?endpoint=`. */
 export function mcpEndpointTabs(org: string): { id: McpEndpoint; label: string; to: string }[] {
   const page = `/orgs/${encodeURIComponent(org)}/agents`;
   return [
-    { id: "superadmin", label: "Superadmin (/mcp)", to: `${page}?endpoint=superadmin` },
-    { id: "org", label: `This org (/orgs/${org}/mcp)`, to: `${page}?endpoint=org` },
+    { id: "org", label: "Organization", to: `${page}?endpoint=org` },
+    { id: "superadmin", label: "Superadmin", to: `${page}?endpoint=superadmin` },
   ];
 }
 

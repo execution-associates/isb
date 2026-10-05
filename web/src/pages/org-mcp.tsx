@@ -68,8 +68,8 @@ export function McpPage() {
   const { org, me, redirect } = useOrgPage();
   const [params] = useSearchParams();
   if (redirect) return redirect;
-  // A superadmin picks an endpoint with tabs, the superadmin one first; the
-  // rest see the org's alone.
+  // A superadmin picks an endpoint with tabs, the org one first; the rest
+  // see the org's alone.
   const endpoint = mcpEndpoint(!!me.superadmin, params.get("endpoint"));
   return (
     <>

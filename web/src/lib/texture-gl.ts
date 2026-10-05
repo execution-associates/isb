@@ -9,7 +9,7 @@
 //
 // It is cheap by construction: it draws once, then again only when the page
 // scrolls or resizes, never on a timer, and not at all while the tab is hidden.
-import { levelParams, type Texture } from "@/lib/texture";
+import { LEVEL } from "@/lib/texture";
 
 const VS = "attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}";
 
@@ -63,7 +63,7 @@ export interface Gl {
 }
 
 /** Start the layer on `canvas`; null when WebGL or the shader is unavailable. */
-export function startGl(canvas: HTMLCanvasElement, texture: Texture, onLost: () => void): Gl | null {
+export function startGl(canvas: HTMLCanvasElement, onLost: () => void): Gl | null {
   const gl = canvas.getContext("webgl", {
     alpha: true,
     premultipliedAlpha: true,
@@ -102,7 +102,7 @@ export function startGl(canvas: HTMLCanvasElement, texture: Texture, onLost: () 
   gl.enableVertexAttribArray(loc);
   gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
   const U = Object.fromEntries(["uRes", "uScroll", "uGrain", "uGlow", "uStep", "uSide"].map((n) => [n, gl.getUniformLocation(prog, n)]));
-  const { grain, glow } = levelParams(texture);
+  const { grain, glow } = LEVEL;
 
   let W = 0;
   let H = 0;
