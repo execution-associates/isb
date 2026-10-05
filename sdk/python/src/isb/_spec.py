@@ -17,6 +17,7 @@ InstanceType = Literal["container", "virtual-machine", "vm"]
 IntOrString = Union[int, str]
 MapOrList = Union[Mapping[str, Scalar], Sequence[str]]
 MountType = Literal["bind", "volume"]
+OnChange = Literal["none", "restart", "roll"]
 PortBind = Literal["host", "guest"]
 RestartCondition = Literal["none", "on-failure", "any"]
 RestartMode = Literal["no", "always", "on-failure", "unless-stopped"]
@@ -100,7 +101,9 @@ class _EnvValueSecretRequired(TypedDict):
 
 
 class EnvValueSecret(_EnvValueSecretRequired, total=False):
-    pass
+    #: What a new version of the secret does to this service (overrides
+    #: the top-level secret's `on_change`).
+    on_change: Optional[OnChange]
 
 
 class ExecSpec(TypedDict, total=False):
@@ -368,10 +371,22 @@ class SecretDef(TypedDict, total=False):
     #: With `external`: the store's name for it. With `driver`: the
     #: driver's reference (a 1Password `op://` path, say).
     name: Optional[str]
+    #: What a new version does to the services using it under `isb serve`:
+    #: `roll` (default), `restart` or `none`. A service's own reference
+    #: (`secrets: [{source, on_change}]`, `{secret, on_change}`) overrides it.
+    on_change: Optional[OnChange]
     #: With `driver`: how often `isb serve` checks the driver for a new
     #: version (`30m`, `1h`; default 1h). A new version rolls the services
     #: using it.
     refresh: Optional[str]
+    #: Under `isb serve`: argv run in one running replica of each service
+    #: using the secret when it gets a new version, before any replica is
+    #: given it, to make the new value take effect where the old one is
+    #: stored (a database user's password). It reads the new value on stdin
+    #: and runs with the replica's own environment, which still holds the
+    #: old one. A failure stops the change: `isb secret set` stores nothing,
+    #: and a driver's new version is not taken up.
+    rotate: Optional[Sequence[str]]
 
 
 class _SecretRefRequired(TypedDict):
@@ -384,6 +399,9 @@ class SecretRef(_SecretRefRequired, total=False):
     gid: Optional[int]
     #: Octal mode, e.g. `0400` (default) or `"0440"`.
     mode: Optional[IntOrString]
+    #: What a new version of the secret does to this service (overrides the
+    #: top-level secret's `on_change`).
+    on_change: Optional[OnChange]
     #: File name under `/run/secrets`, or an absolute path. Default: `source`.
     target: Optional[str]
     #: Owner in the guest: a uid. Default: the service's numeric `user`, else 0.
@@ -599,6 +617,7 @@ __all__ = [
     "MapOrList",
     "MountType",
     "NamedVolumeSpec",
+    "OnChange",
     "PortBind",
     "PortMapping",
     "PortSpec",
