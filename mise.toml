@@ -4,9 +4,16 @@
 # UI, with hot reload, on this host's tailnet over https. The tasks run on
 # the host and only drive isb and tailscale; everything they build or install
 # happens inside the VM, so this file pins no toolchains for the host.
+#
+# Brought up by an agent, the preview lives as long as that agent: when its
+# process exits, the URL goes off and the VM stops (scripts/preview/tie.sh).
+#
+# The tailnet port is PREVIEW_PORT, 8510 by default; a second preview beside
+# another session's takes another: `PREVIEW_PORT=8511 USER=other mise run
+# preview`. It is read in each task rather than set under [env], where mise
+# would override the caller's value.
 
 [env]
-PREVIEW_PORT = "8510"
 # Every browser is signed in as superadmin dev@dev.com, with no sign-in page.
 # `PREVIEW_AUTH=password mise run preview` exercises the sign-in page instead.
 PREVIEW_AUTH = "superadmin"
@@ -16,6 +23,7 @@ description = "Create or update the preview VM and serve its UI on the tailnet"
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
+export PREVIEW_PORT=${PREVIEW_PORT:-8510}
 host=$(tailscale status --self --json | jq -r '.Self.DNSName | rtrimstr(".")')
 url="https://$host:$PREVIEW_PORT"
 # A login session, so ubuntu has the incus-admin group provision.sh added.
@@ -36,6 +44,7 @@ as_ubuntu env PREVIEW_URL="$url" PREVIEW_AUTH="$PREVIEW_AUTH" bash /src/scripts/
 ip=$(incus query "/1.0/instances/isb-preview-$USER/state" </dev/null |
   jq -r '.network.enp5s0.addresses[] | select(.family == "inet") | .address')
 tailscale serve --bg --https="$PREVIEW_PORT" "http://$ip:5173" >/dev/null
+bash scripts/preview/tie.sh
 echo "preview: $url"
 '''
 
@@ -47,6 +56,7 @@ run = '''
 # once `preview` has made the VM. Starts a stopped VM, makes sure the daemon
 # and vite are running, and puts the tailnet URL back.
 set -euo pipefail
+export PREVIEW_PORT=${PREVIEW_PORT:-8510}
 if ! incus info "isb-preview-$USER" </dev/null >/dev/null 2>&1; then
   echo "no preview VM: run \`mise run preview\` once first" >&2
   exit 1
@@ -57,6 +67,7 @@ isb exec -u root preview -- sudo -iu ubuntu env XDG_RUNTIME_DIR=/run/user/1000 s
 ip=$(incus query "/1.0/instances/isb-preview-$USER/state" </dev/null |
   jq -r '.network.enp5s0.addresses[] | select(.family == "inet") | .address')
 tailscale serve --bg --https="$PREVIEW_PORT" "http://$ip:5173" >/dev/null
+bash scripts/preview/tie.sh
 echo "preview: https://$host:$PREVIEW_PORT"
 '''
 
@@ -87,6 +98,8 @@ description = "Stop serving the preview and delete its VM"
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
+export PREVIEW_PORT=${PREVIEW_PORT:-8510}
+systemctl --user stop "isb-preview-$USER-owner" 2>/dev/null || true
 tailscale serve --https="$PREVIEW_PORT" off || true
 isb down
 '''
