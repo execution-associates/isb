@@ -19,7 +19,8 @@
   `history_query`, `events`.
 - Alerts: `notification_channel_*`, `notification_test`; uptime checks:
   `monitor_*`.
-- Servers the control plane places orgs on (superadmin): `server_*`.
+- Servers the control plane places orgs on (superadmin): `server_*`; live
+  CPU, memory, disk and network of the host or one server: `host_monitor`.
 
 Superadmin identities, superadmin tokens and an org's bind roots are set on
 the host only too (`isb superadmin`, `isb token create --superadmin`,
