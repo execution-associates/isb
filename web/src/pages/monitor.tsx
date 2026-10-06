@@ -14,7 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Segmented } from "@/apps/segmented";
 import { relativeTime } from "@/lib/format";
 import { errorMessage } from "@/lib/messages";
-import { bps, MONITOR_POLL, MONITOR_RANGES, parseRange, pctText, serverKind, sparkPoints, STALE_AFTER } from "@/lib/monitor";
+import { bps, MONITOR_POLL, MONITOR_RANGES, parseRange, pctText, plate, serverKind, sparkPoints, STALE_AFTER } from "@/lib/monitor";
 import { healthTone, meterTone, percent } from "@/lib/servers";
 import { useMe } from "@/lib/session";
 import { cn } from "@/lib/utils";
@@ -93,7 +93,7 @@ export function MonitorPage() {
         <MonitorSkeleton />
       ) : (
         <div className="grid gap-6">
-          <ServerCards servers={d.servers} selected={d.server} onSelect={(s) => set("server", s.local ? null : s.name)} />
+          {d.servers.length > 1 && <ServerCards servers={d.servers} selected={d.server} onSelect={(s) => set("server", s.local ? null : s.name)} />}
           {d.monitor ? (
             <>
               {d.partial && (
@@ -172,6 +172,7 @@ function ServerCard({ s, active, onClick }: { s: MonitorServer; active: boolean;
       aria-checked={active}
       onClick={onClick}
       className={cn(
+        plate,
         "flex min-w-0 flex-col gap-2 rounded-xl border bg-card px-3.5 py-3 text-left shadow-xs transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
         active && "border-brand/50 ring-2 ring-brand/25",
       )}

@@ -417,9 +417,10 @@ with the state: `unknown` (not heard from yet), `up`, `unreachable`. The web
 UI's Servers page shows the same, with how long since the last heartbeat.
 
 For the live detail, superadmins have the web UI's **Monitor** page
-(Platform, Monitor) and the `host_monitor` tool: a card per server, and for
-the one picked, CPU per core, memory and swap, pools, disk I/O, interfaces
-and every instance's rates, polled from the agent
+(Platform, Monitor) and the `host_monitor` tool: a card per server (the page
+shows them once there is more than this host), and for the one picked, CPU
+per core, memory and swap, pools, disk I/O, interfaces and every instance's
+rates, polled from the agent
 (`POST /internal/v1/monitor`). A server whose isb predates that route shows
 its heartbeat's numbers until it is upgraded.
 

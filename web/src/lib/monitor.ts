@@ -133,3 +133,6 @@ export function instanceLink(i: Pick<MonitorInstance, "name" | "org" | "stack">)
   if (i.name === "workspace") return `/orgs/${o}/workspace`;
   return null;
 }
+
+/** The monitor's cards: a faint wash of the brand colour from the top left, over the card's own fill. */
+export const plate = "bg-linear-160 from-brand/[0.07] via-transparent via-50% to-foreground/[0.025]";

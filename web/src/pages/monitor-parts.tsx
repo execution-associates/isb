@@ -23,6 +23,7 @@ import {
   load,
   pctText,
   pickInstances,
+  plate,
   sparkPoints,
   uptime,
 } from "@/lib/monitor";
@@ -63,7 +64,7 @@ export function CpuPanel({ m }: { m: Monitor }) {
   const s = historySeries(m.history.points);
   const cores = m.host.cpu_cores;
   return (
-    <Panel title="CPU" icon={<Cpu />} action={<Figure>{pctText(m.host.cpu_pct)}</Figure>}>
+    <Panel className={plate} title="CPU" icon={<Cpu />} action={<Figure>{pctText(m.host.cpu_pct)}</Figure>}>
       <div className="grid gap-4 p-5">
         <MetricChart times={s.times} lines={[{ name: "CPU", values: s.cpu }]} format={pctText} label="CPU use over the range" max={100} filled />
         {cores.length > 0 && (
@@ -117,7 +118,7 @@ export function MemoryPanel({ m }: { m: Monitor }) {
   const h = m.host;
   const s = historySeries(m.history.points);
   return (
-    <Panel title="Memory" icon={<MemoryStick />} action={<Figure>{pctText(percent(h.mem_used, h.mem_total))}</Figure>}>
+    <Panel className={plate} title="Memory" icon={<MemoryStick />} action={<Figure>{pctText(percent(h.mem_used, h.mem_total))}</Figure>}>
       <div className="grid gap-4 p-5">
         <UsageBar label="RAM" used={h.mem_used} total={h.mem_total} />
         <UsageBar label="Swap" used={h.swap_used} total={h.swap_total} extra={h.swap_total === 0 ? <span>no swap</span> : undefined} />
@@ -132,6 +133,7 @@ export function NetworkPanel({ m }: { m: Monitor }) {
   const s = historySeries(m.history.points);
   return (
     <Panel
+      className={plate}
       title="Network"
       icon={<Network />}
       action={
@@ -182,7 +184,7 @@ export function DiskPanel({ m }: { m: Monitor }) {
   const h = m.host;
   const pools = h.pools.length ? h.pools : [{ name: "Disk", driver: "", used: h.disk_used, total: h.disk_total }];
   return (
-    <Panel title="Disk" icon={<HardDrive />} action={<Figure>{pctText(percent(h.disk_used, h.disk_total))}</Figure>}>
+    <Panel className={plate} title="Disk" icon={<HardDrive />} action={<Figure>{pctText(percent(h.disk_used, h.disk_total))}</Figure>}>
       <div className="grid gap-4 p-5">
         {pools.map((p) => (
           <UsageBar
@@ -238,6 +240,7 @@ export function InstancesPanel({ m, partial }: { m: Monitor; partial: boolean })
   const running = m.instances.filter(isRunning).length;
   return (
     <Panel
+      className={plate}
       title={
         <>
           Instances
