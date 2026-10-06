@@ -548,6 +548,20 @@ pub(crate) fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
                     "--delete-vm: org {id} runs on this host, not in a dedicated VM"
                 )));
             }
+            // With a daemon, it deletes the org's apps and stacks first: on
+            // their own, removed instances would be brought back by their
+            // stacks.
+            if force && isb::server::default_socket_path().exists() {
+                let v = call(
+                    "org_delete",
+                    serde_json::json!({"org": id, "force": true}),
+                    Duration::from_secs(300),
+                )?;
+                for n in v["notes"].as_array().into_iter().flatten() {
+                    eprintln!("{}", n.as_str().unwrap_or(""));
+                }
+                return Ok(0);
+            }
             org::remove(&c, &id, force, &mut rep)?;
             // Memberships, invitations and tokens for it go with it.
             open_auth(&AuthDb {

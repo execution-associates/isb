@@ -258,7 +258,8 @@ what the org's instances are allocated against it
 and `udp`, and `--ingress` and `--cloudflare-*` its `ingress`,
 `cloudflare_account` and `cloudflare_zone` (platform admins). `--server` and `--vm` place the org once, through the local
 daemon (`--vm` takes a few minutes; rerun to retry). `org rm` refuses an
-org with instances unless `--force`; `--delete-vm` also deletes a dedicated
+org with stacks or instances unless `--force`, which deletes its apps, stacks
+and sandboxes first; `--delete-vm` also deletes a dedicated
 VM. See [Orgs](../concepts/orgs.md), [Placement](../concepts/placement.md)
 and [Host firewall](../operations/host-setup.md#host-firewall).
 
@@ -329,9 +330,9 @@ See [Secrets](../guides/secrets.md).
 ```text
 isb project create NAME [--env E]... [--description D]    environments default to production
 isb project ls [--json]                                   alias list
-isb project rm NAME                                       a project with no apps
+isb project rm NAME [-f [--volumes]]                      -f deletes its apps and compose stacks too; --volumes their data
 isb project env-add PROJECT ENV
-isb project env-rm PROJECT ENV
+isb project env-rm PROJECT ENV [-f [--volumes]]           the same, for one environment
 
 isb app create NAME --project P [--environment E]
                (--image REF | --git URL [--ref main] [--subdir D]

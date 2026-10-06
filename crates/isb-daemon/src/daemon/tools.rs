@@ -476,6 +476,53 @@ pub(super) fn stack_rollback_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) 
     Ok(())
 }
 
+/// Remove a stack: its instances and published ports (named volumes too
+/// with `volumes`), its settings, its place in a project, and the secrets it
+/// made that no other stack uses. Returns the secrets removed.
+pub(super) fn remove_stack(d: &Daemon, q: &str, volumes: bool) -> Result<Vec<String>> {
+    let def = d.ctl.definition(q)?;
+    d.ctl.remove(q, volumes, Duration::from_secs(300))?;
+    // Its environment, managed domains and deployments go with it.
+    if let Err(e) = d.meta.remove(&def.org, &def.name) {
+        d.ctl
+            .note("warn", q, format!("stack settings not removed: {e}"));
+    }
+    // It belongs to no environment any more.
+    if let Err(e) = d.apps.compose_detach(&def.org, &def.name) {
+        d.ctl
+            .note("warn", q, format!("project record not updated: {e}"));
+    }
+    // As swarm does: the secrets the stack made go with it, unless
+    // another stack has come to use them.
+    let mut removed: Vec<String> = Vec::new();
+    let owned = def
+        .secrets
+        .values()
+        .chain(def.previous.iter().flat_map(|p| p.secrets.values()))
+        .filter(|b| b.owned);
+    for b in owned {
+        if removed.contains(&b.name) {
+            continue;
+        }
+        let used = d
+            .ctl
+            .definitions()
+            .iter()
+            .any(|o| o.org == def.org && o.store_secrets().contains(&b.name));
+        if used {
+            continue;
+        }
+        match d.secrets.delete(&def.org, &b.name) {
+            Ok(()) => removed.push(b.name.clone()),
+            Err(e) if e.is_not_found() => {}
+            Err(e) => d
+                .ctl
+                .note("warn", q, format!("secret {}: not removed: {e}", b.name)),
+        }
+    }
+    Ok(removed)
+}
+
 pub(super) fn stack_remove_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> {
     tool!(
         r,
@@ -499,47 +546,7 @@ pub(super) fn stack_remove_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) ->
             }
             let a: A = args(a)?;
             let q = qname(&a.org, &a.name)?;
-            let def = d.ctl.definition(&q)?;
-            d.ctl.remove(&q, a.volumes, Duration::from_secs(300))?;
-            // Its environment, managed domains and deployments go with it.
-            if let Err(e) = d.meta.remove(&def.org, &def.name) {
-                d.ctl
-                    .note("warn", &q, format!("stack settings not removed: {e}"));
-            }
-            // It belongs to no environment any more.
-            if let Err(e) = d.apps.compose_detach(&def.org, &def.name) {
-                d.ctl
-                    .note("warn", &q, format!("project record not updated: {e}"));
-            }
-            // As swarm does: the secrets the stack made go with it, unless
-            // another stack has come to use them.
-            let mut removed: Vec<String> = Vec::new();
-            let owned = def
-                .secrets
-                .values()
-                .chain(def.previous.iter().flat_map(|p| p.secrets.values()))
-                .filter(|b| b.owned);
-            for b in owned {
-                if removed.contains(&b.name) {
-                    continue;
-                }
-                let used = d
-                    .ctl
-                    .definitions()
-                    .iter()
-                    .any(|o| o.org == def.org && o.store_secrets().contains(&b.name));
-                if used {
-                    continue;
-                }
-                match d.secrets.delete(&def.org, &b.name) {
-                    Ok(()) => removed.push(b.name.clone()),
-                    Err(e) if e.is_not_found() => {}
-                    Err(e) => {
-                        d.ctl
-                            .note("warn", &q, format!("secret {}: not removed: {e}", b.name))
-                    }
-                }
-            }
+            let removed = remove_stack(d, &q, a.volumes)?;
             Ok(json!({"ok": true, "secrets_removed": removed}))
         }
     );

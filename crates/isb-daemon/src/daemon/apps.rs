@@ -3,7 +3,10 @@
 
 use std::time::Duration;
 
+mod delete;
 pub(crate) mod manifest;
+
+pub(super) use delete::{delete_tools, empty_org};
 
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -262,11 +265,9 @@ pub fn register(r: &mut Registry, apps: Apps, ingress: bool) -> Result<()> {
 
     project_create_tool(r, &apps, &ann)?;
     project_list_tool(r, &apps, &ann)?;
-    project_delete_tool(r, &apps, &ann)?;
 
     environment_create_tool(r, &apps, &ann)?;
     environment_list_tool(r, &apps, &ann)?;
-    environment_delete_tool(r, &apps, &ann)?;
 
     app_create_tool(r, &apps, &ann, ingress)?;
     app_get_tool(r, &apps, &ann, ingress)?;
@@ -383,25 +384,6 @@ fn project_list_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
     Ok(())
 }
 
-fn project_delete_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
-    tool!(
-        r,
-        apps,
-        "project_delete",
-        "Delete a project",
-        "Delete a project that has no apps and no compose stacks left.",
-        obj(json!({"name": {"type": "string"}}), &["name"]),
-        ann.destructive,
-        |ap: &Apps, a: Value, _c: &Caller| -> Result<Value> {
-            let org = org_of(&a)?;
-            let a: Named = args(a)?;
-            ap.project_delete(&org, &a.name)?;
-            Ok(json!({"ok": true}))
-        }
-    );
-    Ok(())
-}
-
 fn environment_create_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
     tool!(
         r,
@@ -438,28 +420,6 @@ fn environment_list_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()>
             let a: EnvArgs = args(a)?;
             let p = ap.project_get(&org, &a.project)?;
             Ok(json!({"environments": p.environments}))
-        }
-    );
-    Ok(())
-}
-
-fn environment_delete_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
-    tool!(
-        r,
-        apps,
-        "environment_delete",
-        "Delete an environment",
-        "Remove an environment that has no apps and no compose stacks left from a project.",
-        obj(
-            json!({"project": {"type": "string"}, "name": {"type": "string"}}),
-            &["project", "name"]
-        ),
-        ann.destructive,
-        |ap: &Apps, a: Value, _c: &Caller| -> Result<Value> {
-            let org = org_of(&a)?;
-            let a: EnvArgs = args(a)?;
-            let name = a.name.ok_or_else(|| Error::invalid("name is required"))?;
-            Ok(json!(ap.environment_delete(&org, &a.project, &name)?))
         }
     );
     Ok(())

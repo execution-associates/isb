@@ -560,30 +560,31 @@ export function DeleteOrgDialog({
   onDeleted: () => void;
 }) {
   const qc = useQueryClient();
-  const [force, setForce] = useState(false);
   const [deleteVm, setDeleteVm] = useState(true);
   const vm = o?.placement?.kind === "vm" ? o.placement : null;
+  const what = [
+    o?.stacks ? `${o.stacks} stack${o.stacks === 1 ? "" : "s"}` : "",
+    o?.instances ? `${o.instances} instance${o.instances === 1 ? "" : "s"}` : "",
+  ].filter(Boolean);
   return (
     <ConfirmDialog
       open={open}
       onOpenChange={(v) => {
         onOpenChange(v);
-        if (!v) {
-          setForce(false);
-          setDeleteVm(true);
-        }
+        if (!v) setDeleteVm(true);
       }}
       title={`Delete ${org}?`}
       description={
         <>
           Its project, volumes, network and service names go, with its members, invitations and API tokens.
-          {o && o.stacks > 0 && ` It still has ${o.stacks} stack${o.stacks === 1 ? "" : "s"}: remove them first.`}
+          {what.length > 0 && ` Everything running in it is deleted first: its apps and ${what.join(" across ")}.`}
         </>
       }
       confirm="Delete org"
       typed={org}
       onConfirm={async () => {
-        const r = await callTool<{ notes?: string[]; deleted_vm?: string }>("org_delete", vm ? { org, force, delete_vm: deleteVm } : { org, force });
+        // The typed name is the confirmation: everything in it goes too.
+        const r = await callTool<{ notes?: string[]; deleted_vm?: string }>("org_delete", vm ? { org, force: true, delete_vm: deleteVm } : { org, force: true });
         toast.success(`Org ${org} deleted`, { description: r?.deleted_vm ? `Its VM ${r.deleted_vm} was deleted too.` : undefined });
         for (const n of r?.notes ?? []) toast.info(n);
         // Leave the org's pages before they learn it is gone.
@@ -593,16 +594,6 @@ export function DeleteOrgDialog({
         await qc.invalidateQueries({ queryKey: ["tool"] });
       }}
     >
-      <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
-        <input type="checkbox" className="mt-0.5 size-4 accent-destructive" checked={force} onChange={(e) => setForce(e.target.checked)} />
-        <span>
-          Also delete its sandboxes
-          <span className="block text-xs text-muted-foreground">
-            {o ? `${o.instances} instance${o.instances === 1 ? "" : "s"} now. ` : ""}Without this, an org with instances is
-            refused.
-          </span>
-        </span>
-      </label>
       {vm && (
         <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
           <input type="checkbox" className="mt-0.5 size-4 accent-destructive" checked={deleteVm} onChange={(e) => setDeleteVm(e.target.checked)} />

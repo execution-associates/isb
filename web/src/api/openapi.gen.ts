@@ -1803,7 +1803,7 @@ export interface paths {
         put?: never;
         /**
          * Delete an environment
-         * @description Remove an environment that has no apps and no compose stacks left from a project.
+         * @description Remove an environment from a project. Refused while it has apps or compose stacks, unless force=true: then its apps are deleted (as app_delete) and its compose stacks removed (as stack_remove) first. Their named volumes are kept unless volumes=true. Returns the project and what was deleted; dry_run=true only says what would be.
          */
         post: operations["environment_delete"];
         delete?: never;
@@ -2763,7 +2763,7 @@ export interface paths {
         put?: never;
         /**
          * Delete an org
-         * @description Platform admins: delete an org: its project with its volumes, its network, ACL and service names, its members, invitations and tokens, and its metrics history. Refused while stacks are deployed in it (remove them first); with force=true its remaining sandboxes are deleted too. Its secrets stay on disk under the state directory.
+         * @description Platform admins: delete an org: its project with its volumes, its network, ACL and service names, its members, invitations and tokens, and its metrics history. Refused while it has stacks or instances, unless force=true: then its apps are deleted (as app_delete), its stacks removed (as stack_remove) and its remaining sandboxes deleted first. Its secrets stay on disk under the state directory.
          */
         post: operations["org_delete"];
         delete?: never;
@@ -3003,7 +3003,7 @@ export interface paths {
         put?: never;
         /**
          * Delete a project
-         * @description Delete a project that has no apps and no compose stacks left.
+         * @description Delete a project. Refused while it has apps or compose stacks, unless force=true: then every app in it is deleted (as app_delete) and every compose stack removed (as stack_remove), in every environment, before the project goes. Their named volumes are kept unless volumes=true. Returns what was deleted; dry_run=true only says what would be.
          */
         post: operations["project_delete"];
         delete?: never;
@@ -9401,10 +9401,16 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description Only report what force (and volumes) would delete. */
+                    dry_run?: boolean;
+                    /** @description Delete its apps and compose stacks too (default false). */
+                    force?: boolean;
                     name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
                     project: string;
+                    /** @description With force: delete their named volumes too, the data in them for good (default false: kept). A volume another stack still uses is kept. Org admins and owners. */
+                    volumes?: boolean;
                 };
             };
         };
@@ -11586,7 +11592,7 @@ export interface operations {
                 "application/json": {
                     /** @description For an org in a dedicated VM: delete the VM and its server registration too (default false: the VM keeps running as an empty server). */
                     delete_vm?: boolean;
-                    /** @description Also delete the org's sandboxes. */
+                    /** @description Delete its apps, stacks and sandboxes first (default false). */
                     force?: boolean;
                     /** @description The org to delete. */
                     org: string;
@@ -12121,9 +12127,15 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description Only report what force (and volumes) would delete. */
+                    dry_run?: boolean;
+                    /** @description Delete its apps and compose stacks too (default false). */
+                    force?: boolean;
                     name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
+                    /** @description With force: delete their named volumes too, the data in them for good (default false: kept). A volume another stack still uses is kept. Org admins and owners. */
+                    volumes?: boolean;
                 };
             };
         };
