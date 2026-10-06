@@ -211,6 +211,9 @@ pub struct Snapshot {
     pub instances: BTreeMap<String, crate::metrics::InstanceSample>,
     /// Unix milliseconds; 0 before the first sample.
     pub at: u64,
+    /// The host's last hour, oldest first (shared: snapshots are copied
+    /// per request).
+    pub host_history: Arc<[crate::metrics::HostPoint]>,
 }
 
 pub fn now_ms() -> u64 {
@@ -427,6 +430,7 @@ impl Controller {
                                     .map(|i| (format!("{}/{}", i.project, i.name), i))
                                     .collect(),
                                 at: now_ms(),
+                                host_history: sampler.host_points().into(),
                             };
                         }
                         Err(e) => eprintln!("isb serve: metrics: {e}"),

@@ -142,6 +142,7 @@ gets, platform admins included:
 | Host tool | Does |
 |---|---|
 | `host_inventory` | every incus project and instance on the host, isb's or not: project, org, type, status, addresses, isb's stack and owner labels |
+| `host_monitor` | live resource use of the host or one remote server (CPU per core, load, memory and swap, pools, disk I/O, interfaces with addresses and rates, the last hour) and each instance's rates; the web UI's **Monitor** page |
 | `host_policy` | how the daemon serves: listen addresses, Access, the remote tool policy, what remote specs may ask for, and each superadmin source with its allow list and token count |
 | `superadmin_token_list`, `superadmin_token_revoke` | superadmin tokens' metadata, and revoking one by id |
 | `superadmin_list` | every tailnet and Access superadmin identity, from the flags and from `isb.db`, with whether the daemon can match it (read only) |
@@ -357,7 +358,7 @@ A request carrying `Authorization` is judged by it alone: a bad token is a
   a server is judged on the control plane, then again by the server's agent
   ([Placement](placement.md#how-the-control-plane-works)).
 - The unix socket is the daemon's own user and reaches everything; so does a
-  superadmin. `host_inventory`, `host_policy`, `superadmin_token_list`,
+  superadmin. `host_inventory`, `host_monitor`, `host_policy`, `superadmin_token_list`,
   `superadmin_token_revoke` and `superadmin_list` are for superadmins only.
 - `--allow-tools` and `--deny-tools` (names or globs, deny wins) choose which
   tools remote callers see at all; the local socket always has every tool

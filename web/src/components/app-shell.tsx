@@ -1,4 +1,4 @@
-import { BookOpen, Check, ChevronsUpDown, Crown, HardDrive, LogOut, Menu, Search, ShieldCheck, UserRound } from "lucide-react";
+import { Activity, BookOpen, Check, ChevronsUpDown, Crown, HardDrive, LogOut, Menu, Search, ShieldCheck, UserRound } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
@@ -375,6 +375,11 @@ function SidebarContent({ me, onNavigate }: { me: Me; onNavigate?: () => void })
             <NavItem to="/admin" icon={ShieldCheck} onNavigate={onNavigate}>
               Orgs, users, servers
             </NavItem>
+            {me.superadmin && (
+              <NavItem to="/monitor" icon={Activity} onNavigate={onNavigate}>
+                Monitor
+              </NavItem>
+            )}
             {me.superadmin && (
               <NavItem to="/host" icon={HardDrive} onNavigate={onNavigate}>
                 Host

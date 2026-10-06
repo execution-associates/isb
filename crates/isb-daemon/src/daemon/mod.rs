@@ -36,6 +36,7 @@ mod default_org;
 mod dns;
 mod egress;
 mod guide;
+mod host_monitor;
 mod kube;
 mod monitors;
 mod notify;
@@ -808,6 +809,7 @@ fn caller_name(c: &Caller) -> String {
 fn registry(d: Arc<Daemon>) -> Result<Registry> {
     let mut r = Registry::new().instructions(guide::INSTRUCTIONS);
     superadmin::register(&mut r, d.clone())?;
+    host_monitor::register(&mut r, d.clone())?;
     let ann = Ann {
         ro: json!({"readOnlyHint": true, "openWorldHint": false}),
         destructive: json!({"destructiveHint": true, "openWorldHint": false}),

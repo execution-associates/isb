@@ -277,7 +277,7 @@ be reached as a sandbox.
 
 A superadmin has the unix socket's reach over HTTP: every tool, no
 remote-spec policy, any instance on the host, and the host tools
-(`host_inventory`, `host_policy`, `superadmin_token_list`,
+(`host_inventory`, `host_monitor`, `host_policy`, `superadmin_token_list`,
 `superadmin_token_revoke`, `superadmin_list`). It is for agents that
 administer the host itself, across orgs, and it is root on the host in all
 but name. It comes from exactly three remote sources

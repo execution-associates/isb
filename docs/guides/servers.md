@@ -412,10 +412,18 @@ with the rest of its state: the CA is what every agent trusts.
 Every 10 s the control plane asks each agent for its heartbeat
 (`GET /internal/v1/heartbeat`): isb and incus versions, the agent's build,
 architecture and protocol, its upgrade helper, CPU, load, memory,
-incus storage, the orgs placed there, the number of stacks, and the agent's
-last error event. `isb server ls` and `server_show` show it with the state:
-`unknown` (not heard from yet), `up`, `unreachable`. The web UI's Servers
-page shows the same, with how long since the last heartbeat.
+incus storage, network rates, the orgs placed there, the number of stacks,
+and the agent's last error event. `isb server ls` and `server_show` show it
+with the state: `unknown` (not heard from yet), `up`, `unreachable`. The web
+UI's Servers page shows the same, with how long since the last heartbeat.
+
+For the live detail, superadmins have the web UI's **Monitor** page
+(Platform, Monitor) and the `host_monitor` tool: a card per server (the page
+shows them once there is more than this host), and for the one picked, CPU
+per core, memory and swap, pools, disk I/O, interfaces and every instance's
+rates, polled from the agent
+(`POST /internal/v1/monitor`). A server whose isb predates that route shows
+its heartbeat's numbers until it is upgraded.
 
 Three misses in a row (30 s) make a server `unreachable`: an event of kind
 `server.unreachable` (level error) on stack `<org>/@servers` for each org on

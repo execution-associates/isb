@@ -14,7 +14,7 @@ use crate::metrics::Sampler;
 
 pub enum Source {
     Daemon { socket: PathBuf },
-    Direct { sampler: Sampler },
+    Direct { sampler: Box<Sampler> },
 }
 
 const CALL: Duration = Duration::from_secs(30);
@@ -45,7 +45,7 @@ impl Source {
         ) {
             Ok(_) => Source::Daemon { socket },
             Err(_) => Source::Direct {
-                sampler: Sampler::new(),
+                sampler: Box::new(Sampler::new()),
             },
         }
     }
