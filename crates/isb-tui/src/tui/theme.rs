@@ -3,6 +3,11 @@
 //!
 //! Glyphs carry the meaning and colour only adds to it, so the dashboard
 //! reads the same with `NO_COLOR` set.
+//!
+//! Every colour is one of the terminal's own sixteen ANSI colours or its
+//! default foreground, never an RGB value, so the dashboard follows whatever
+//! theme the terminal has, light or dark. Dim text uses the DIM attribute,
+//! which the terminal blends toward its own background.
 
 use ratatui::style::{Color, Modifier, Style};
 
@@ -16,7 +21,6 @@ pub struct Theme {
     pub warn: Color,
     pub err: Color,
     pub info: Color,
-    pub sel_bg: Color,
     pub color: bool,
 }
 
@@ -26,15 +30,15 @@ impl Theme {
             return Theme::mono();
         }
         Theme {
-            fg: Color::Rgb(0xdd, 0xe3, 0xea),
-            dim: Color::Rgb(0x8a, 0x94, 0xa3),
-            faint: Color::Rgb(0x4a, 0x52, 0x5e),
-            accent: Color::Rgb(0x7a, 0xc8, 0xff),
-            ok: Color::Rgb(0x5f, 0xd3, 0x8d),
-            warn: Color::Rgb(0xf2, 0xc1, 0x4e),
-            err: Color::Rgb(0xff, 0x6b, 0x6b),
-            info: Color::Rgb(0xa8, 0x9b, 0xff),
-            sel_bg: Color::Rgb(0x23, 0x2b, 0x36),
+            fg: Color::Reset,
+            dim: Color::Reset,
+            // Bright black: the palette slot themes reserve for muted text.
+            faint: Color::DarkGray,
+            accent: Color::Blue,
+            ok: Color::Green,
+            warn: Color::Yellow,
+            err: Color::Red,
+            info: Color::Magenta,
             color: true,
         }
     }
@@ -49,7 +53,6 @@ impl Theme {
             warn: Color::Reset,
             err: Color::Reset,
             info: Color::Reset,
-            sel_bg: Color::Reset,
             color: false,
         }
     }
@@ -58,7 +61,12 @@ impl Theme {
         Style::default().fg(self.fg)
     }
     pub fn dim(&self) -> Style {
-        Style::default().fg(self.dim)
+        let s = Style::default().fg(self.dim);
+        if self.color {
+            s.add_modifier(Modifier::DIM)
+        } else {
+            s
+        }
     }
     pub fn faint(&self) -> Style {
         Style::default().fg(self.faint)
@@ -71,21 +79,19 @@ impl Theme {
     }
     /// A section heading: small caps by convention.
     pub fn heading(&self) -> Style {
-        self.dim().add_modifier(Modifier::BOLD)
+        Style::default().fg(self.dim).add_modifier(Modifier::BOLD)
     }
+    /// Reversed video rather than a background colour: no palette slot is
+    /// guaranteed to contrast with the default foreground on every theme.
     pub fn selected(&self) -> Style {
-        if self.color {
-            Style::default().bg(self.sel_bg)
-        } else {
-            Style::default().add_modifier(Modifier::REVERSED)
-        }
+        Style::default().add_modifier(Modifier::REVERSED)
     }
     pub fn level(&self, level: &str) -> Style {
-        Style::default().fg(match level {
-            "error" => self.err,
-            "warn" => self.warn,
-            _ => self.dim,
-        })
+        match level {
+            "error" => Style::default().fg(self.err),
+            "warn" => Style::default().fg(self.warn),
+            _ => self.dim(),
+        }
     }
 
     /// Glyph and style for a state word: instance status, health, service
@@ -99,7 +105,7 @@ impl Theme {
             "starting" | "waiting" | "activating" => ("◌", s(self.warn)),
             "paused" => ("◫", s(self.warn)),
             "failing" | "unhealthy" | "failed" | "error" => ("✖", s(self.err)),
-            "stopped" | "retired" | "inactive" => ("○", s(self.dim)),
+            "stopped" | "retired" | "inactive" => ("○", self.dim()),
             "frozen" => ("❄", s(self.info)),
             _ => ("·", s(self.faint)),
         }

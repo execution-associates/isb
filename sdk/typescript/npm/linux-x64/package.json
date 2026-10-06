@@ -1,6 +1,6 @@
 {
   "name": "@execution-associates/isb-linux-x64",
-  "version": "1.6.10",
+  "version": "1.7.2",
   "description": "The static isb binary for Linux x64 (x86_64-unknown-linux-musl), used by @execution-associates/isb",
   "license": "MIT",
   "repository": {

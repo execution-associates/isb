@@ -17,9 +17,9 @@ name: Release
 # tarball also gets a GitHub build attestation (`gh attestation verify`).
 # install.sh checks the same signature before it installs anything; the
 # install job then runs the published installer on Linux and macOS.
-# After the release, the seven crates go to crates.io (secret
-# CARGO_REGISTRY_TOKEN); a crate version that is already there is skipped, so a
-# failed run can be re-run. Run it by hand (workflow_dispatch) on a branch to
+# The crates go to crates.io from crates.yml, not from here: crates.io limits
+# how many versions a day it takes, and a release never waits on that.
+# Run it by hand (workflow_dispatch) on a branch to
 # build the artifacts without releasing. Tag only after main's CI is green.
 
 on:
@@ -178,31 +178,3 @@ jobs:
           curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/install.sh" -o install.sh
           ISB_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh "$v"
           [ "$("$RUNNER_TEMP/bin/isb" --version)" = "isb $v" ]
-
-  # --no-verify: main's CI already ran `cargo package` (which builds every
-  # crate as packaged) on this commit, and the gate refuses a commit it did
-  # not pass, so compiling all seven again here would only add minutes.
-  crates:
-    name: publish to crates.io
-    needs: release
-    # A job skipped upstream (the rebuild or `check` a tag skips) fails an
-    # implicit success(), so this names the result it depends on.
-    if: ${{ !cancelled() && needs.release.result == 'success' }}
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      # Dependency order: everything needs isb-core; isb-daemon needs the
-      # others; isb needs them all.
-      - name: publish
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          [ -n "$CARGO_REGISTRY_TOKEN" ] || { echo "secret CARGO_REGISTRY_TOKEN is not set"; exit 1; }
-          v="${GITHUB_REF_NAME#v}"
-          for c in isb-core isb-egress isb-apps isb-server isb-tui isb-daemon isb; do
-            code=$(curl -s -o /dev/null -w '%{http_code}' -A "isb-release (github.com/$GITHUB_REPOSITORY)" \
-              "https://crates.io/api/v1/crates/$c/$v")
-            if [ "$code" = 200 ]; then echo "$c $v is already on crates.io"; continue; fi
-            cargo publish --locked --no-verify -p "$c"
-          done

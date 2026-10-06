@@ -284,6 +284,80 @@ impl VolumeBackups {
         Ok(())
     }
 
+    /// Create an empty volume in the org's pool, `size` or (under a disk
+    /// limit) the default. False when it already exists, as `isb volume
+    /// create` says.
+    pub fn create(&self, org: &OrgId, volume: &str, size: Option<&str>) -> Result<bool> {
+        model::validate_volume_name(volume)?;
+        let (oc, pool) = org_pool(self.client(), org)?;
+        let config = size
+            .map(|s| [("size".to_string(), s.to_string())].into())
+            .unwrap_or_default();
+        let created = crate::volume::ensure(&oc, &pool, volume, &config)?;
+        if created {
+            self.event(
+                org,
+                volume,
+                "volume.created",
+                "info",
+                format!("volume {volume} created"),
+            );
+        }
+        Ok(created)
+    }
+
+    /// Delete a volume and its snapshots, and forget its settings and runs.
+    /// Refused while an instance uses it (as incus refuses), while a
+    /// snapshot of it is being taken, while a backup names it, and for a
+    /// staged restore, which `staged_discard` detaches first.
+    pub fn delete(&self, org: &OrgId, volume: &str) -> Result<()> {
+        let info = self.info(org, volume)?;
+        if info.config.contains_key(model::KEY_RESTORE_OF) {
+            return Err(Error::invalid(format!(
+                "{volume} is a staged restore: volume_restore_discard removes it"
+            )));
+        }
+        if info.config.contains_key(model::KEY_TEMPORARY) {
+            return Err(Error::invalid(format!(
+                "{volume} is isb's own, for a backup or restore in progress"
+            )));
+        }
+        // A backup of a deleted volume would fail on every run.
+        if let Some(b) = self
+            .backups()
+            .list(org)?
+            .into_iter()
+            .find(|b| b.spec.volume.as_deref() == Some(volume))
+        {
+            return Err(Error::invalid(format!(
+                "backup {} backs {volume} up; delete it first (backup_delete)",
+                b.spec.name
+            )));
+        }
+        let Some(_guard) = self.inner.running.enter(org, "volume", volume, true) else {
+            return Err(Error::invalid(format!(
+                "a snapshot of {volume} is being taken; try again when it is done"
+            )));
+        };
+        let (oc, pool) = org_pool(self.client(), org)?;
+        crate::volume::remove(&oc, &pool, volume)?;
+        let _g = self.inner.edit.lock().unwrap();
+        match std::fs::remove_dir_all(self.dir(org, volume)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                eprintln!("isb serve: volume {volume}: settings not removed: {e}")
+            }
+            _ => {}
+        }
+        self.event(
+            org,
+            volume,
+            "volume.deleted",
+            "info",
+            format!("volume {volume} deleted"),
+        );
+        Ok(())
+    }
+
     /// Take a snapshot in the background (hook first). `None` when one of
     /// this volume is already being taken.
     pub fn snapshot(

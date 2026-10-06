@@ -14,6 +14,12 @@ nothing else, and the [remote-spec
 policy](../concepts/security.md#the-remote-spec-policy) keeps even a careless
 or compromised agent off the host.
 
+The server teaches an agent to use it: its MCP `instructions` hold the
+safety rules and the way in, and the `guide` tool returns the rest of the
+manual a topic at a time (`start`, `safety`, `sandboxes`, `apps`, `inspect`,
+`data`, `workspace`, `admin`, `cli`). An agent connected to isb needs no
+skill.
+
 ## Two endpoints
 
 | Endpoint | For | Every tool's `org` |
@@ -146,7 +152,7 @@ a role:
 | Scope | Allows |
 |---|---|
 | `read` | read-only tools, never secret material (as a viewer) |
-| `deploy` | `read`, plus `stack_deploy`, `stack_redeploy`, `stack_rollback`, `stack_scale`, `app_scale`, `app_restart`, `instance_restart`, `app_deploy`, `app_rollback`, `build_run` |
+| `deploy` | `read`, plus `stack_deploy`, `stack_redeploy`, `stack_rollback`, `stack_scale`, `app_scale`, `app_restart`, `instance_restart`, `sandbox_start`, `sandbox_stop`, `app_deploy`, `app_rollback`, `build_run` |
 | `admin` | everything the role allows (the same as no scopes) |
 | `tool:GLOB` | tools whose name matches, e.g. `tool:app_*`, `tool:stack_status` |
 
@@ -305,5 +311,7 @@ Prefer an org token wherever one org is enough.
 On the host itself an agent can use the `isb` CLI directly (it talks to the
 daemon's unix socket, as the daemon's user, with every tool), or run sandboxes
 from an `isb.yaml` with `isb up` ([A dev environment per
-worktree](dev-environments.md)). The agent skill in the repository's
-[`SKILL.md`](https://github.com/execution-associates/isb/blob/main/SKILL.md) teaches an agent both.
+worktree](dev-environments.md)). With no MCP connection, the agent skill in
+the repository's
+[`SKILL.md`](https://github.com/execution-associates/isb/blob/main/SKILL.md)
+teaches an agent both.

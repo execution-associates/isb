@@ -210,8 +210,8 @@ export function HistoryPanel({
         </>
       }
     >
-      <form onSubmit={apply} className="flex flex-col gap-2 border-b bg-muted/20 px-4 py-3 sm:px-5 lg:flex-row lg:items-center" aria-label="Filters">
-        <div className="flex min-w-0 gap-2 lg:flex-1">
+      <form onSubmit={apply} className="flex flex-col gap-2 border-b bg-muted/20 px-4 py-3 sm:px-5 lg:flex-row lg:flex-wrap lg:items-center" aria-label="Filters">
+        <div className="flex min-w-0 gap-2 lg:min-w-64 lg:flex-1">
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -228,7 +228,7 @@ export function HistoryPanel({
             {extra > 0 && <span className="rounded-full bg-foreground px-1.5 text-[10px] font-semibold text-background tabular-nums">{extra}</span>}
           </Button>
         </div>
-        <div className={cn("grid grid-cols-2 gap-2 lg:flex lg:items-center", !more && "hidden lg:flex")}>
+        <div className={cn("grid grid-cols-2 gap-2 lg:flex lg:flex-wrap lg:items-center", !more && "hidden lg:flex")}>
           {!org && (
             <Select value={scope} onValueChange={(v) => (setScope(v), reset())}>
               <SelectTrigger size="sm" className="col-span-2 w-full text-[13px] lg:w-44" aria-label="Scope">

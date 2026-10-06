@@ -102,7 +102,8 @@ log](../operations/audit.md)).
 With `--url` (or `ISB_URL`) and a token (`ISB_TOKEN`, or `--token-file`),
 the commands act on the token's own account. Without, they open the
 identity store on the host, like `isb token create`, for `--user EMAIL`
-(default: the only platform admin).
+(default: the only platform admin). A platform admin does the same over MCP
+with `ssh_key_list`, `ssh_key_add` and `ssh_key_remove` and their `user`.
 
 Accepted: `ssh-ed25519`, `ecdsa-sha2-nistp256/384/521`, the `sk-` (security
 key) variants, and `ssh-rsa` of 2048 bits or more. A key is stored as its

@@ -63,11 +63,14 @@ fills it in and refuses any other value. Then, in order:
   `org_list`, `org_create`, `org_update`, `org_delete`, every `server_*`
   tool, `server_status`, `registry_gc`, `notification_settings`,
   `template_catalog_add`, `template_catalog_remove`, `audit_verify`,
-  `user_list` and `user_update`. `secret_reencrypt` with `all: true` too.
+  `user_list` and `user_update`. `secret_reencrypt` with `all: true` too,
+  and the account tools' `user` and `all_orgs` arguments (listing and
+  removing another user's SSH keys, every org's tokens).
 - **Cross-org reads** (`overview`, `events`, `stack_list`,
   `ingress_status`) are open to anyone signed in and show only the caller's
   orgs, or only the one their `org` names (an org-bound endpoint names its
-  own). `audit_list` and `history_query` filter themselves the same way.
+  own). `audit_list` and `history_query` filter themselves the same way, and
+  `guide` holds nothing of any org's.
 - **Superadmin tools** (`host_inventory`, `host_monitor`, `host_policy`,
   `superadmin_token_list`, `superadmin_token_revoke`, `superadmin_list`,
   `org_nesting`) are
@@ -75,12 +78,13 @@ fills it in and refuses any other value. Then, in order:
 - **API token scopes** narrow a token below its role: `read` (read-only
   tools), `deploy` (`read` plus `stack_deploy`, `stack_redeploy`,
   `stack_rollback`, `stack_scale`, `app_scale`, `app_restart`,
-  `instance_restart`, `app_deploy`, `app_rollback`, `build_run`), `admin` (the whole role) and `tool:GLOB`. See
+  `instance_restart`, `sandbox_start`, `sandbox_stop`, `app_deploy`, `app_rollback`, `build_run`), `admin` (the whole role) and `tool:GLOB`. See
   [Scopes](../concepts/access.md#scopes).
 - **Account tools** ([below](#accounts)) are judged by the identity
   endpoints' own rules rather than a role in `org`: a workspace token reaches
   none of them but `whoami`, a token scoped short of `admin` only reads them,
-  and a token never mints a token.
+  and a token never mints a token, nor creates a user, sets a password or
+  adds a key for someone else.
 - Some tools check more themselves; the **Who** column says so.
 
 In the tables, **Who** is the least role that may call the tool: *viewer*
@@ -143,6 +147,13 @@ There is no `port-forward` tool: run `curl` with `app_exec`, or reach an instanc
 | `sandbox_exec` | member | Run argv in a sandbox: exit code, stdout, stderr (each capped at 256 KiB, keeping the end), optional `stdin` text, `user`, `cwd`, `env`, `timeout` (default 10m). |
 | `sandbox_extend` | the sandbox's creator, or admin | Push the expiry out (`by`, default 24h, at most 30 days from now) or change `idle_timeout`. |
 | `sandbox_remove` | member | Delete a sandbox (not a stack replica, nor the workspace). |
+| `sandbox_start` | member | Start a stopped sandbox and wait until it runs. Not a stack replica, nor the workspace. |
+| `sandbox_stop` | member | Stop a sandbox and keep it: a clean shutdown within `timeout` (default 30s, at most 10m), or `force`. Not a stack replica, nor the workspace. |
+| `sandbox_logs` | viewer | The journal of the command a sandbox supervises (`restart:`; `service` picks one of several), or an OCI image's console: `tail` (default 200, at most 5000), `since`. |
+| `sandbox_port_list` | viewer | A sandbox's proxy devices by name, with `listen`, `connect`, `bind` and the rest. |
+| `sandbox_port_add` | member | Add a proxy device to a sandbox and answer its listen address: `spec` as `isb port add` takes it (`[IP:]HOST:GUEST[/udp]` or `listen=..,connect=..`), `device`, `search`. Remote callers are held to the [remote-spec policy](../concepts/security.md#the-remote-spec-policy)'s port rules. |
+| `sandbox_port_remove` | member | Remove one proxy device (`device`). |
+| `sandbox_device_remove` | member | Remove one of a sandbox's own devices (`device`; `instance_get` lists them). Not the root disk; not its NIC for a remote caller, nor for anyone when `egress` confines it. |
 | `ssh_host_keys` | viewer | An instance's SSH host public keys, for pinning, and the user `isb ssh-config` logs in as by default. |
 | `workspace_get` | viewer | The workspace (or `null`) and the org's settings: definition, status, resources, home, live sessions, last activity, token metadata, `connect` (`url`, `mcp_url`), sandbox count. |
 | `workspace_list` | viewer | Every workspace in the org. |
@@ -257,6 +268,8 @@ and owners.
 |---|---|---|
 | `volume_list` | viewer | The org's named volumes: instances using each, snapshot schedule, staged restores. |
 | `volume_get` | viewer | One volume: instances, settings and next run, snapshots, staged restores, backups of it. |
+| `volume_create` | admin | Create an empty volume in the org's pool (`size`); an existing one is left as it is (`created: false`). |
+| `volume_delete` | admin | Delete a volume with its snapshots and settings. Refused while an instance has it attached, while a snapshot of it runs, while a backup names it, and for a staged restore. |
 | `volume_snapshot_list` | viewer | Snapshots, newest first, with kind (`auto`, `manual`, `other`). |
 | `volume_snapshot_create` | admin | Snapshot now (`snapshot` name, `wait`, `timeout`), after the pre-snapshot hook. |
 | `volume_snapshot_delete` | admin | Delete a snapshot. |
@@ -319,12 +332,13 @@ and owners.
 |---|---|---|
 | `org_get` | viewer | Limits with `allocation` (per limited `cpu`, `memory`, `disk`, `instances`: `limit`, `allocated`, `free`; allocated is the sum of every instance's limit, stopped ones included; bytes for memory and disk), per-instance defaults (`default_disk`, the root size a new instance gets, while the org has a disk limit), bridge and subnet, egress exceptions, bind roots, service-name domain, counts, and `placement` (`kind`, `server`, `isolation`). |
 | `org_list` | platform admin | Every org, as `org_get` shows one, with the server it runs on. |
-| `org_create` | platform admin | `org`, `cpus`, `memory`, `disk`, `instances`, `default_cpus`, `default_memory`, `egress`, `udp`, `placement` (`"local"`, `{"server": NAME}`, `{"vm": {cpus, memory, disk}}`), `wait`. Bind roots are set on the host only. |
-| `org_update` | platform admin | Limits (`"none"` or `null` lifts one: `cpus`, `memory`, `disk`, `instances`; a `disk` limit is refused while an instance has no root size, naming each, and under it each new instance gets its own root size: `raw_devices.root.size`, else 10GiB), defaults, `egress` or `udp` (UDP ports its stacks may publish, `IP:PORT`; each replaces its list, `[]` clears it); a different placement is refused. |
+| `org_create` | platform admin | `org`, `cpus`, `memory`, `disk`, `instances`, `default_cpus`, `default_memory`, `egress`, `udp`, `domains` (the domain allowlist: `example.com`, `*.example.com`), `ingress` (`caddy`, `cloudflare-tunnel`), `cloudflare_account`, `cloudflare_zone`, `placement` (`"local"`, `{"server": NAME}`, `{"vm": {cpus, memory, disk}}`), `wait`. Bind roots are set on the host only. |
+| `org_update` | platform admin | Limits (`"none"` or `null` lifts one: `cpus`, `memory`, `disk`, `instances`; a `disk` limit is refused while an instance has no root size, naming each, and under it each new instance gets its own root size: `raw_devices.root.size`, else 10GiB), defaults, `egress`, `udp` (UDP ports its stacks may publish, `IP:PORT`) or `domains` (each replaces its list, `[]` clears it), `ingress`, `cloudflare_account`, `cloudflare_zone` (`""` clears one); a different placement is refused. |
 | `org_delete` | platform admin | Refused while stacks are deployed; `force` deletes remaining sandboxes; `delete_vm` deletes a dedicated VM. Its members, invitations, tokens, metrics history and hosts directory go; its secrets stay. |
 | `ingress_status` | anyone signed in | Listeners, CA, the Caddy process, every routed domain (URL, certificate state, upstreams), conflicts and refusals, each tunnel org's cloudflared. The caller's orgs only. |
 | `overview` | anyone signed in | Everything a dashboard shows in one call: host CPU and memory with history, every stack in detail, sandboxes with CPU and memory, the latest event number. |
 | `events` | anyone signed in | The event feed after a `since` cursor (`limit`), waiting up to 30 s (`wait`) for one. Numbering restarts with the daemon: a `since` past the newest `seq` starts over from the kept events. |
+| `guide` | anyone signed in | The manual for agents, one Markdown topic at a time (`topic`: `start`, `safety`, `sandboxes`, `apps`, `inspect`, `data`, `workspace`, `admin`, `cli`; default `start`). The server's MCP `instructions` point here, so an agent connected to isb needs no skill. |
 | `server_status` | platform admin | isb's and incus' versions, and the balancer's routes with live counters. |
 
 ## Audit and history
@@ -378,17 +392,24 @@ platform admin) touches an owner or makes one.
 | `agent_identity_list` | viewer | The org's tailnet and Access agent identities (kind, subject, role, note) and `available`: the server's tailnet listen addresses, whether Access guards a listener, its public URL, and `reach` (who gets in with no mapping: counts, and names for owners and admins only). |
 | `agent_identity_set` | admin | `kind` (`tailnet`, `access`), `subject` (a tailnet login or `tag:name`; an Access service token client id or the email of someone who is not an isb user), `role` (`viewer`, `member`, `admin`: never owner, at most your own), `note`. An existing subject changes role. |
 | `agent_identity_remove` | admin | `id`. |
-| `token_list` | anyone signed in | Your tokens' metadata (only `org`'s when given; an org token sees its org's). `all: true`: every token in `org`, with its holder (admins). |
-| `token_create` | a session, or an Access or tailnet identity | `name`, `expires` (`90d`; none: never), `scopes`; confined to `org`. Returns `{token, info}`, the token shown once. **A token cannot mint tokens** (an API, workspace or superadmin token is refused), so revoking a leaked token always ends it. |
+| `token_list` | anyone signed in | Your tokens' metadata (only `org`'s when given; an org token sees its org's). `all: true`: every token in `org`, with its holder (admins). `all_orgs: true`: every token on the platform, with its holder (platform admins; superadmin tokens are `superadmin_token_list`'s). |
+| `token_create` | a session, or an Access or tailnet identity | `name`, `expires` (`90d`; none: never), `scopes`; confined to `org`. Returns `{token, info}`, the token shown once. **A token cannot mint tokens** (an API, workspace or superadmin token is refused), so revoking a leaked token always ends it. Minting for another user is `isb token create --user` on the host only. |
 | `token_revoke` | its holder; the org's admins | `id`. |
-| `ssh_key_list`, `ssh_key_add`, `ssh_key_remove` | anyone with an account | The caller's SSH keys for [isb ssh-proxy](../guides/ssh.md): `public_key` and `name`; `id`. |
+| `ssh_key_list`, `ssh_key_add`, `ssh_key_remove` | anyone with an account | The caller's SSH keys for [isb ssh-proxy](../guides/ssh.md): `public_key` and `name`; `id`. A platform admin may list or remove another user's (`user`: their email), as `isb key ls/rm --user` does; adding one to someone else's account is on the host only. |
 | `session_list`, `session_revoke` | anyone with an account | The caller's browser sessions; end one by `id`. |
 | `user_list` | platform admin | Every user with their orgs and last activity. |
 | `user_update` | platform admin | `user_id` or `email`; `disabled`, `platform_admin`. Not yourself, and never the last enabled platform admin. |
 
+Creating users, setting someone's password, and minting tokens or adding
+SSH keys for someone else are on the host only (`isb user create`,
+`isb user passwd`, `isb token create --user`, `isb key add --user`): each
+hands out a way into an account that revoking the token that made it would
+not undo. Over MCP a person joins through `invitation_create` and sets
+their own password.
+
 Signing in (passwords, passkeys, providers), sign-up, password resets,
-accepting an invitation and changing a way in stay in the browser, and
-superadmin tokens are minted on the host only.
+accepting an invitation and changing your own way in stay in the browser,
+and superadmin tokens and superadmin identities are made on the host only.
 
 ## Superadmins
 

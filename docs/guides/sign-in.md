@@ -231,7 +231,11 @@ EMAIL`.
 Platform admins manage users from the web UI's **Platform** page (or the
 `admin/users` endpoints): disable and enable them, and make or unmake
 platform admins. Nobody does either to themselves, and an enabled platform
-admin always remains.
+admin always remains. Creating users, setting someone's password, and
+minting tokens or adding SSH keys for someone happen on the host, with the
+commands below: each hands out a way into an account, which revoking a
+leaked token would not undo
+([MCP tools](../reference/mcp-tools.md#accounts)).
 
 On the host, as the daemon's user, these commands open `<state>/isb.db`
 directly, so they work before any user exists and while the daemon is down.

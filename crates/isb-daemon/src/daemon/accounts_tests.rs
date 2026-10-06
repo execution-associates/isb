@@ -127,3 +127,34 @@ fn user_tools_are_account_tools() {
         assert!(TOOLS.contains(t), "{t}");
     }
 }
+
+#[test]
+fn only_platform_admins_reach_other_accounts() {
+    let admin = user(&[("acme", Role::Admin)], false);
+    let owner = user(&[("acme", Role::Owner)], false);
+    let root = user(&[], true);
+    let named = [
+        ("ssh_key_list", json!({"user": "m@x.io"})),
+        ("ssh_key_remove", json!({"id": 1, "user": "m@x.io"})),
+        ("token_list", json!({"all_orgs": true})),
+    ];
+    for (tool, args) in &named {
+        for c in [&admin, &owner] {
+            let e = auth(c, tool, args.clone(), None);
+            assert!(matches!(e, Err(Error::Forbidden(_))), "{tool}");
+        }
+        assert!(auth(&root, tool, args.clone(), None).is_ok(), "{tool}");
+        assert!(
+            auth(&Caller::Local { uid: None }, tool, args.clone(), None).is_ok(),
+            "{tool}"
+        );
+        // A platform admin on an org's endpoint is that org's admin only.
+        let bound = root.clone().downscoped_to(&OrgId::new("acme").unwrap());
+        let e = auth(&bound, tool, args.clone(), Some("acme"));
+        assert!(matches!(e, Err(Error::Forbidden(_))), "{tool} downscoped");
+    }
+    // Without `user` (or with it null) they are the caller's own, as before.
+    assert!(ok(&admin, "ssh_key_list"));
+    assert!(auth(&admin, "ssh_key_list", json!({"user": null}), None).is_ok());
+    assert!(auth(&admin, "token_list", json!({"all_orgs": false}), None).is_ok());
+}

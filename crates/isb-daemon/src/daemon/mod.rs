@@ -35,6 +35,7 @@ pub mod data;
 mod default_org;
 mod dns;
 mod egress;
+mod guide;
 mod host_monitor;
 mod kube;
 mod monitors;
@@ -806,7 +807,7 @@ fn caller_name(c: &Caller) -> String {
 
 /// Build the tool registry.
 fn registry(d: Arc<Daemon>) -> Result<Registry> {
-    let mut r = Registry::new().instructions(INSTRUCTIONS);
+    let mut r = Registry::new().instructions(guide::INSTRUCTIONS);
     superadmin::register(&mut r, d.clone())?;
     host_monitor::register(&mut r, d.clone())?;
     let ann = Ann {
@@ -815,6 +816,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
         write: json!({"destructiveHint": false, "openWorldHint": false}),
     };
 
+    guide::register(&mut r, &d, &ann)?;
     tools::stack_deploy_tool(&mut r, &d, &ann)?;
     tools::overview_tool(&mut r, &d, &ann)?;
     tools::events_tool(&mut r, &d, &ann)?;
@@ -865,21 +867,6 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
     accounts::register(&mut r, d.clone())?;
     Ok(r)
 }
-
-const INSTRUCTIONS: &str = "isb runs incus containers and VMs on this host. Two uses: \
-stacks (long-running services from a docker-compose-style file, with replicas, health checks, \
-rolling updates and a load balancer: stack_deploy, then stack_status) and sandboxes \
-(an isolated machine to run code in: sandbox_create, sandbox_exec, sandbox_remove). \
-Images: local incus aliases (dev-base), images:debian/12, OCI images (docker:nginx:1.27, ghcr:org/app:tag), \
-or the org's own builds in the local registry (registry:APP:TAG; build_run makes them, registry_list lists them). \
-Deploys return immediately; poll stack_status, or pass wait=true. \
-Each org also has a secret store (secret_create, secret_set, secret_list; values are base64). \
-Apps (Dokploy-style): project_create, then app_create (an image, or a repository with a builder), \
-app_env_set, app_deploy (or app_apply: a YAML definition that creates or updates, dry_run to diff first); each project environment runs as one stack <project>-<env>. \
-One-click apps: template_list, template_get, then template_deploy (dry_run first shows the plan). \
-Databases are apps too (database_create; connection details via database_get), backed up to S3-compatible \
-destinations on a cron schedule (backup_destination_create, backup_create, backup_run, backup_restore). \
-Scheduled jobs run commands against an app on a cron schedule (job_create, job_runs, job_run_log).";
 
 impl Daemon {
     /// May this caller touch this instance? Local callers: always. Remote:

@@ -7101,6 +7101,78 @@
         "x-isb-tool": "events"
       }
     },
+    "/api/v1/tools/guide": {
+      "post": {
+        "description": "The isb manual, one topic at a time (Markdown): start (where you are, what you may do, the topics), safety, sandboxes, apps, inspect, data, workspace, admin, cli. Read start and safety before your first change.",
+        "operationId": "guide",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "topic": {
+                    "description": "Default: start.",
+                    "enum": [
+                      "start",
+                      "safety",
+                      "sandboxes",
+                      "apps",
+                      "inspect",
+                      "data",
+                      "workspace",
+                      "admin",
+                      "cli"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Guide",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "guide"
+      }
+    },
     "/api/v1/tools/history_query": {
       "post": {
         "description": "What happened, merged into one timeline: the stack controller's events (deploys, rollouts, health, restarts), incus lifecycle events in every project including changes made outside isb (instance-created/deleted, image-alias-deleted, ...) with who requested them, audit rows (tool calls, sign-ins), and markers for when isb was not watching (serve.started, serve.stopped, incus.gap). Newest first, or oldest first with ascending=true; page with `before` = the `next` you got. `object` finds everything about an instance, image, volume, stack, app or service (substring, or exact=true). correlate=true links incus instance events to the audit row that likely caused them (inferred, by time and name). Org members see their orgs; host-level rows (images, pools, other projects) are for platform admins; audit rows for org owners and admins.",
@@ -10378,7 +10450,7 @@
     },
     "/api/v1/tools/org_create": {
       "post": {
-        "description": "Platform admins: create an org (an incus project with its own bridge and network ACL), with optional limits and egress exceptions. Fails if it exists. Bind roots are set from the host's CLI only.",
+        "description": "Platform admins: create an org (an incus project with its own bridge and network ACL), with optional limits, egress exceptions, domain allowlist and ingress provider. Fails if it exists. Bind roots are set from the host's CLI only.",
         "operationId": "org_create",
         "requestBody": {
           "content": {
@@ -10386,6 +10458,14 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "cloudflare_account": {
+                    "description": "Cloudflare account id for the tunnel's API calls (default: the tunnel token's); \"\" clears it.",
+                    "type": "string"
+                  },
+                  "cloudflare_zone": {
+                    "description": "Cloudflare zone id the org's hostnames are in (default: looked up per hostname); \"\" clears it.",
+                    "type": "string"
+                  },
                   "cpus": {
                     "anyOf": [
                       {
@@ -10424,12 +10504,27 @@
                     ],
                     "description": "Disk across the org, e.g. 100GiB: the sum of every root disk's and volume's size. While set, each instance isb creates gets a root size of its own (raw_devices.root.size, else 10GiB); setting it is refused while an instance has none, naming each. \"none\" or null lifts the limit."
                   },
+                  "domains": {
+                    "description": "Domain suffixes the org's services may serve: example.com allows it and every name under it, *.example.com wildcard hosts too. Replaces the list; [] clears it (any concrete name, no wildcards). The same as `isb org create --allow-domain`.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
                   "egress": {
                     "description": "Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/concepts/orgs.md). Replaces the list; [] clears it.",
                     "items": {
                       "type": "string"
                     },
                     "type": "array"
+                  },
+                  "ingress": {
+                    "description": "How the org's domains are reached: caddy (the server's public listeners) or cloudflare-tunnel (the org's own tunnel, token in its secret cloudflare-tunnel-token).",
+                    "enum": [
+                      "caddy",
+                      "cloudflare-tunnel"
+                    ],
+                    "type": "string"
                   },
                   "instances": {
                     "anyOf": [
@@ -10821,7 +10916,7 @@
     },
     "/api/v1/tools/org_update": {
       "post": {
-        "description": "Platform admins: change an org's limits, per-instance defaults, egress exceptions or the UDP ports its stacks may publish. Fields left out keep their value; a limit given as \"none\" (or null) is lifted; `egress` and `udp` replace their lists. The same as `isb org update`.",
+        "description": "Platform admins: change an org's limits, per-instance defaults, egress exceptions, the UDP ports its stacks may publish, its domain allowlist or its ingress provider. Fields left out keep their value; a limit given as \"none\" (or null) is lifted; `egress`, `udp` and `domains` replace their lists. The same as `isb org update` (and `isb org create`'s --allow-domain, --ingress and --cloudflare-* on an existing org).",
         "operationId": "org_update",
         "requestBody": {
           "content": {
@@ -10829,6 +10924,14 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "cloudflare_account": {
+                    "description": "Cloudflare account id for the tunnel's API calls (default: the tunnel token's); \"\" clears it.",
+                    "type": "string"
+                  },
+                  "cloudflare_zone": {
+                    "description": "Cloudflare zone id the org's hostnames are in (default: looked up per hostname); \"\" clears it.",
+                    "type": "string"
+                  },
                   "cpus": {
                     "anyOf": [
                       {
@@ -10867,12 +10970,27 @@
                     ],
                     "description": "Disk across the org, e.g. 100GiB: the sum of every root disk's and volume's size. While set, each instance isb creates gets a root size of its own (raw_devices.root.size, else 10GiB); setting it is refused while an instance has none, naming each. \"none\" or null lifts the limit."
                   },
+                  "domains": {
+                    "description": "Domain suffixes the org's services may serve: example.com allows it and every name under it, *.example.com wildcard hosts too. Replaces the list; [] clears it (any concrete name, no wildcards). The same as `isb org create --allow-domain`.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
                   "egress": {
                     "description": "Private destinations the org may reach, CIDR[:PORTS[/tcp|udp]] (docs/concepts/orgs.md). Replaces the list; [] clears it.",
                     "items": {
                       "type": "string"
                     },
                     "type": "array"
+                  },
+                  "ingress": {
+                    "description": "How the org's domains are reached: caddy (the server's public listeners) or cloudflare-tunnel (the org's own tunnel, token in its secret cloudflare-tunnel-token).",
+                    "enum": [
+                      "caddy",
+                      "cloudflare-tunnel"
+                    ],
+                    "type": "string"
                   },
                   "instances": {
                     "anyOf": [
@@ -11823,6 +11941,73 @@
         "x-isb-tool": "sandbox_create"
       }
     },
+    "/api/v1/tools/sandbox_device_remove": {
+      "post": {
+        "description": "Remove one of a sandbox's own devices (instance_get lists them): a disk, a port, a GPU. Not the root disk, nor a profile's device; and not its network card for a remote caller, nor for anyone when an egress policy confines it. Not a stack replica nor the workspace. Members and up.",
+        "operationId": "sandbox_device_remove",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "device": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "The sandbox, from sandbox_list.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "device"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Remove a sandbox device",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "sandbox_device_remove"
+      }
+    },
     "/api/v1/tools/sandbox_exec": {
       "post": {
         "description": "Run argv in a sandbox (no shell unless you run one: [\"sh\", \"-c\", \"...\"]) and return its exit code and output (each stream capped at 256 KiB, keeping the end). Uses the sandbox's user and working_dir unless given.",
@@ -12056,6 +12241,290 @@
         "x-isb-tool": "sandbox_list"
       }
     },
+    "/api/v1/tools/sandbox_logs": {
+      "post": {
+        "description": "Recent output of the command a sandbox supervises (its spec's `restart:`; the journal of its isb-<service> unit), or of an OCI image's console. `service` picks the unit when it supervises more than one. `tail` lines (default 200, at most 5000); `since` keeps lines newer than a duration like 10m or an RFC 3339 time (not for an OCI console, which has no timestamps).",
+        "operationId": "sandbox_logs",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The sandbox, from sandbox_list.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "service": {
+                    "description": "The compose service the sandbox was made from (default: the one it supervises).",
+                    "type": "string"
+                  },
+                  "since": {
+                    "description": "A duration back from now (10m, 2h) or an RFC 3339 time.",
+                    "type": "string"
+                  },
+                  "tail": {
+                    "maximum": 5000,
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "A sandbox's logs",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "sandbox_logs"
+      }
+    },
+    "/api/v1/tools/sandbox_port_add": {
+      "post": {
+        "description": "Add a proxy device to a running sandbox (one already as asked is left alone) and answer its listen address. `spec` is `[IP:]HOST:GUEST[/udp]` (IP defaults to 127.0.0.1) or `listen=..,connect=..[,bind=guest][,search=N]`. Remote callers are held to the remote-spec policy, as sandbox_create's ports are: loopback only unless the operator lists the address, no unix sockets, no guest-bound ports. Not a stack replica nor the workspace (workspace_port_add). Members and up.",
+        "operationId": "sandbox_port_add",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "device": {
+                    "description": "The device's name (default port-<bind>-<listen port>).",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "The sandbox, from sandbox_list.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "search": {
+                    "description": "Step past up to this many taken host ports.",
+                    "maximum": 1000,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "spec": {
+                    "description": "e.g. 8080:80, 127.0.0.1:5173:5173, or listen=tcp:127.0.0.1:9000,connect=tcp:127.0.0.1:9000.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "spec"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Publish a sandbox port",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "sandbox_port_add"
+      }
+    },
+    "/api/v1/tools/sandbox_port_list": {
+      "post": {
+        "description": "A sandbox's proxy devices (its published ports) by device name, each with its properties: listen, connect, bind and the rest.",
+        "operationId": "sandbox_port_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The sandbox, from sandbox_list.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "List a sandbox's ports",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "sandbox_port_list"
+      }
+    },
+    "/api/v1/tools/sandbox_port_remove": {
+      "post": {
+        "description": "Remove one proxy device (sandbox_port_list names them) from a sandbox. Members and up.",
+        "operationId": "sandbox_port_remove",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "device": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "The sandbox, from sandbox_list.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "device"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Unpublish a sandbox port",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "sandbox_port_remove"
+      }
+    },
     "/api/v1/tools/sandbox_remove": {
       "post": {
         "description": "Delete a sandbox (stopping it first). Not for stack replicas: remove or scale the stack.",
@@ -12116,6 +12585,140 @@
           "tools"
         ],
         "x-isb-tool": "sandbox_remove"
+      }
+    },
+    "/api/v1/tools/sandbox_start": {
+      "post": {
+        "description": "Start a stopped sandbox and wait until it runs. Not a stack replica (scale its stack) nor the workspace (workspace_start). Members and up.",
+        "operationId": "sandbox_start",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The sandbox, from sandbox_list.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Start a sandbox",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "sandbox_start"
+      }
+    },
+    "/api/v1/tools/sandbox_stop": {
+      "post": {
+        "description": "Stop a sandbox, keeping it and its disk (sandbox_start starts it again): a clean shutdown of at most `timeout` (default 30s, at most 10m), or `force` to kill it. Not a stack replica (scale its stack to 0) nor the workspace (workspace_stop). Members and up.",
+        "operationId": "sandbox_stop",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "force": {
+                    "description": "Kill instead of a clean shutdown.",
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "description": "The sandbox, from sandbox_list.",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "timeout": {
+                    "description": "The clean shutdown's deadline, e.g. 30s.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Stop a sandbox",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "sandbox_stop"
       }
     },
     "/api/v1/tools/secret_create": {
@@ -13526,7 +14129,7 @@
     },
     "/api/v1/tools/ssh_key_list": {
       "post": {
-        "description": "The SSH public keys on your account: what `isb ssh-proxy` lets in to your orgs' workspaces and sandboxes (id, name, algorithm, fingerprint, last use).",
+        "description": "The SSH public keys on your account: what `isb ssh-proxy` lets in to your orgs' workspaces and sandboxes (id, name, algorithm, fingerprint, last use). A platform admin may list another user's (`user`).",
         "operationId": "ssh_key_list",
         "requestBody": {
           "content": {
@@ -13536,6 +14139,10 @@
                 "properties": {
                   "org": {
                     "description": "Ignored: this is about the caller, not an org.",
+                    "type": "string"
+                  },
+                  "user": {
+                    "description": "Platform admins: act on this user's account (their email) instead of yours, as `--user` does on the host.",
                     "type": "string"
                   }
                 },
@@ -13583,7 +14190,7 @@
     },
     "/api/v1/tools/ssh_key_remove": {
       "post": {
-        "description": "Remove one of your SSH keys by id; sessions it opened end within seconds.",
+        "description": "Remove one of your SSH keys by id (a platform admin: another user's, with `user`); sessions it opened end within seconds.",
         "operationId": "ssh_key_remove",
         "requestBody": {
           "content": {
@@ -13596,6 +14203,10 @@
                   },
                   "org": {
                     "description": "Ignored: this is about the caller, not an org.",
+                    "type": "string"
+                  },
+                  "user": {
+                    "description": "Platform admins: act on this user's account (their email) instead of yours, as `--user` does on the host.",
                     "type": "string"
                   }
                 },
@@ -15736,7 +16347,7 @@
     },
     "/api/v1/tools/token_list": {
       "post": {
-        "description": "Your API tokens' metadata (id, name, org, scopes, created, last used, expiry; never the secret), only one org's when `org` is given (an org token sees only its org's). With all=true, every token in `org`, with who holds each: owners and admins.",
+        "description": "Your API tokens' metadata (id, name, org, scopes, created, last used, expiry; never the secret), only one org's when `org` is given (an org token sees only its org's). With all=true, every token in `org`, with who holds each: owners and admins. With all_orgs=true, every token on the platform, in every org and none, with who holds each: platform admins (superadmin tokens: superadmin_token_list).",
         "operationId": "token_list",
         "requestBody": {
           "content": {
@@ -15746,6 +16357,10 @@
                 "properties": {
                   "all": {
                     "description": "Every token in the org, not just yours (owners and admins).",
+                    "type": "boolean"
+                  },
+                  "all_orgs": {
+                    "description": "Every token on the platform (platform admins), as `isb token ls` lists them on the host.",
                     "type": "boolean"
                   },
                   "org": {
@@ -15983,6 +16598,135 @@
           "tools"
         ],
         "x-isb-tool": "user_update"
+      }
+    },
+    "/api/v1/tools/volume_create": {
+      "post": {
+        "description": "Create an empty named volume in the org's pool, for a sandbox spec or an app to mount by name. `size` (e.g. 10GiB) bounds it; under the org's disk limit it defaults to the root disk's size. An existing volume is left as it is (`created`: false). Org admins and owners.",
+        "operationId": "volume_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "description": "The volume: letters, digits, _, - and .",
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  },
+                  "size": {
+                    "description": "e.g. 10GiB.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Create a volume",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "volume_create"
+      }
+    },
+    "/api/v1/tools/volume_delete": {
+      "post": {
+        "description": "Delete a named volume, its snapshots and its snapshot settings, for good. Refused while an instance has it attached, running or not (sandbox_device_remove, or remove the instance, first), while a snapshot of it is being taken, while a backup names it (backup_delete), and for a staged restore (volume_restore_discard). Org admins and owners.",
+        "operationId": "volume_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "org": {
+                    "description": "The org to act in (default: default).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {}
+                  },
+                  "required": [
+                    "result"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The tool's result"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolError"
+                }
+              }
+            },
+            "description": "An error: {error, message, data}"
+          }
+        },
+        "summary": "Delete a volume",
+        "tags": [
+          "tools"
+        ],
+        "x-isb-tool": "volume_delete"
       }
     },
     "/api/v1/tools/volume_get": {

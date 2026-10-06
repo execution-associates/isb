@@ -5,6 +5,7 @@ use std::time::Instant;
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+pub use super::logs::{LogLine, LogTarget, LogView, find_matches, merge_logs};
 use super::model::{Change, Event, Overview, Sandbox, Service, Stack};
 use super::theme::Theme;
 
@@ -95,44 +96,6 @@ pub enum Effect {
         file: Option<String>,
         name: Option<String>,
     },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum LogTarget {
-    Service { stack: String, service: String },
-    Sandbox { name: String, oci: bool },
-}
-
-impl LogTarget {
-    pub fn title(&self) -> String {
-        match self {
-            LogTarget::Service { stack, service } => format!("{stack}/{service}"),
-            LogTarget::Sandbox { name, .. } => name.clone(),
-        }
-    }
-}
-
-/// One line of a log view, with the replica slot it came from (0: none).
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogLine {
-    pub slot: u32,
-    pub time: String,
-    pub text: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct LogView {
-    pub target: LogTarget,
-    pub lines: Vec<LogLine>,
-    pub follow: bool,
-    pub wrap: bool,
-    /// Lines up from the bottom.
-    pub scroll: usize,
-    /// Show only this slot.
-    pub only: Option<u32>,
-    pub loading: bool,
-    pub error: Option<String>,
-    pub fetched: Option<Instant>,
 }
 
 /// A yes/no question; `require` makes the user type that word first.
@@ -452,6 +415,8 @@ impl App {
             wrap: false,
             scroll: 0,
             only,
+            query: String::new(),
+            typing: None,
             loading: true,
             error: None,
             fetched: None,
@@ -765,77 +730,31 @@ impl App {
         Effect::None
     }
 
-    fn key_logs(&mut self, k: KeyEvent, mut v: LogView) -> Effect {
-        match k.code {
-            KeyCode::Esc | KeyCode::Char('q') => return Effect::None,
-            KeyCode::Char('f') => {
-                v.follow = !v.follow;
-                v.scroll = 0;
-            }
-            KeyCode::Char('w') => v.wrap = !v.wrap,
-            KeyCode::Char('0') | KeyCode::Char('a') => v.only = None,
-            KeyCode::Char(c @ '1'..='9') => v.only = c.to_digit(10),
-            KeyCode::Up | KeyCode::Char('k') => {
-                v.follow = false;
-                v.scroll += 1;
-            }
-            KeyCode::Down | KeyCode::Char('j') => v.scroll = v.scroll.saturating_sub(1),
-            KeyCode::PageUp => {
-                v.follow = false;
-                v.scroll += 20;
-            }
-            KeyCode::PageDown => v.scroll = v.scroll.saturating_sub(20),
-            KeyCode::Char('G') | KeyCode::End => {
-                v.scroll = 0;
-                v.follow = true;
-            }
-            KeyCode::Char('R') => {
-                let t = v.target.clone();
-                v.loading = true;
-                self.mode = Mode::Logs(v);
-                return Effect::Logs(t);
-            }
-            _ => {}
-        }
-        let lines = v.lines.len();
-        v.scroll = v.scroll.min(lines.saturating_sub(1));
-        self.mode = Mode::Logs(v);
-        Effect::None
-    }
-
-    /// Log lines arrived for the open view.
-    pub fn logs_loaded(&mut self, target: &LogTarget, r: Result<Vec<LogLine>, String>) {
-        if let Mode::Logs(v) = &mut self.mode {
-            if v.target != *target {
-                return;
-            }
-            v.loading = false;
-            v.fetched = Some(Instant::now());
-            match r {
-                Ok(lines) => {
-                    // Keep the reader's place when not following.
-                    if !v.follow && lines.len() >= v.lines.len() {
-                        v.scroll += lines.len() - v.lines.len();
-                    }
-                    v.lines = lines;
-                    v.error = None;
-                }
-                Err(e) => v.error = Some(e),
-            }
-        }
-    }
-
     /// Keys the bar at the bottom offers right now.
     pub fn hints(&self) -> Vec<(&'static str, &'static str)> {
         match &self.mode {
-            Mode::Logs(_) => vec![
-                ("f", "follow"),
-                ("w", "wrap"),
-                ("1-9", "replica"),
-                ("a", "all"),
-                ("↑↓", "scroll"),
-                ("esc", "back"),
-            ],
+            Mode::Logs(v) if v.typing.is_some() => {
+                vec![("⏎", "search"), ("esc", "cancel")]
+            }
+            Mode::Logs(v) => {
+                let mut h = vec![("/", "search")];
+                if !v.query.is_empty() {
+                    h.push(("n N", "older/newer match"));
+                }
+                h.extend([
+                    ("f", "follow"),
+                    ("w", "wrap"),
+                    ("1-9", "replica"),
+                    ("a", "all"),
+                    ("↑↓", "scroll"),
+                ]);
+                h.push(if v.query.is_empty() {
+                    ("esc", "back")
+                } else {
+                    ("esc", "clear search")
+                });
+                h
+            }
             Mode::Palette(_) => vec![("tab", "complete"), ("⏎", "run"), ("esc", "cancel")],
             Mode::Filter(_) => vec![("⏎", "keep"), ("esc", "clear")],
             Mode::Confirm(c) if c.require.is_some() => {
@@ -871,54 +790,6 @@ impl App {
                 v
             }
         }
-    }
-}
-
-/// Merge each replica's journal into one time-ordered view. Journal lines
-/// (`short-iso`) start with a timestamp, host and unit, which are split off;
-/// a console log has no timestamps and keeps its order.
-pub fn merge_logs(
-    by_instance: Vec<(String, String)>,
-    slot_of: &dyn Fn(&str) -> u32,
-) -> Vec<LogLine> {
-    let mut out: Vec<LogLine> = Vec::new();
-    for (inst, text) in by_instance {
-        let slot = slot_of(&inst);
-        for l in text.lines() {
-            if l.starts_with("-- ") {
-                continue;
-            }
-            out.push(parse_journal_line(l, slot));
-        }
-    }
-    // Stable: lines without a time stay in their own order.
-    out.sort_by(|a, b| a.time.cmp(&b.time));
-    out
-}
-
-fn parse_journal_line(l: &str, slot: u32) -> LogLine {
-    // 2026-10-03T01:13:02+0000 host isb-web[123]: message
-    let mut parts = l.splitn(3, ' ');
-    let (Some(ts), Some(_host), Some(rest)) = (parts.next(), parts.next(), parts.next()) else {
-        return LogLine {
-            slot,
-            time: String::new(),
-            text: l.to_string(),
-        };
-    };
-    let looks_like_time = ts.len() >= 19 && ts.as_bytes().get(10) == Some(&b'T');
-    if !looks_like_time {
-        return LogLine {
-            slot,
-            time: String::new(),
-            text: l.to_string(),
-        };
-    }
-    let text = rest.split_once(": ").map(|(_, m)| m).unwrap_or(rest);
-    LogLine {
-        slot,
-        time: ts.to_string(),
-        text: text.to_string(),
     }
 }
 
@@ -1043,25 +914,5 @@ mod tests {
         });
         a.set_overview(ov);
         assert_eq!(a.sandbox().map(|s| s.name.as_str()), Some("box"));
-    }
-
-    #[test]
-    fn merges_journals() {
-        let lines = merge_logs(
-            vec![
-                (
-                    "a".into(),
-                    "2026-10-03T01:00:02+0000 h isb-web[1]: two\n".into(),
-                ),
-                (
-                    "b".into(),
-                    "-- No entries --\n2026-10-03T01:00:01+0000 h isb-web[2]: one\n".into(),
-                ),
-            ],
-            &|n| if n == "a" { 1 } else { 2 },
-        );
-        assert_eq!(lines.len(), 2);
-        assert_eq!((lines[0].slot, lines[0].text.as_str()), (2, "one"));
-        assert_eq!((lines[1].slot, lines[1].text.as_str()), (1, "two"));
     }
 }

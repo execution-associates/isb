@@ -17,7 +17,7 @@ endpoint has neither a tool nor a documented reason in the
 |---|---|
 | Tools in the web UI and MCP | 159 |
 | Account tools, the web UI through the identity endpoints | 20 |
-| Tools for MCP and the CLI only | 26 |
+| Tools for MCP and the CLI only | 36 |
 | Identity endpoints with a tool | 21 |
 | Identity endpoints for the browser only | 23 |
 | Other routes with no tool | 4 |
@@ -48,6 +48,8 @@ a person on the web does not need it.
 | List sandboxes | Workspace, Sandboxes | `sandbox_list` |
 | Extend or remove a sandbox | Workspace, Sandboxes: Extend by, Delete | `sandbox_extend`, `sandbox_remove` |
 | Create a sandbox, run a command in it | *MCP/CLI only*: sandboxes are agents' scratch machines; a person opens a shell in one from Workspace, Sandboxes, Shell (the terminal websocket) | `sandbox_create`, `sandbox_exec` |
+| Start or stop a sandbox, read its logs | *MCP/CLI only*: what `isb start`, `isb stop` and `isb logs` do, for an agent's own sandboxes; a person deletes one from Workspace, Sandboxes | `sandbox_start`, `sandbox_stop`, `sandbox_logs` |
+| A sandbox's ports and devices | *MCP/CLI only*: `isb port` and `isb device rm` for an agent's sandbox; a person publishes the workspace's ports (Workspace, Ports) | `sandbox_port_list`, `sandbox_port_add`, `sandbox_port_remove`, `sandbox_device_remove` |
 | Sandbox defaults (lifetime, idle limit) | Workspace, Sandboxes: Defaults (admins) | `workspace_settings` |
 
 ### Instances: look inside and act on what runs
@@ -125,6 +127,7 @@ cluster's pods. A person has the app page.
 | Backup destinations | Backups: Destinations | `backup_destination_list`, `backup_destination_create`, `backup_destination_delete`, `backup_destination_test` |
 | Backups: schedule, change, run, restore, runs and logs | Database and volume Backups tabs; Backups page | `backup_list`, `backup_create`, `backup_update`, `backup_delete`, `backup_run`, `backup_restore`, `backup_runs`, `backup_run_log` |
 | Volumes | Volumes; a volume's page | `volume_list`, `volume_get` |
+| Create or delete an empty volume | *MCP/CLI only*: `isb volume create` and `isb volume rm`, for a sandbox spec to mount by name; an app's volumes come and go with the app | `volume_create`, `volume_delete` |
 | Snapshots: take, schedule, delete, runs and logs | A volume's page | `volume_snapshot_create`, `volume_snapshot_schedule`, `volume_snapshot_delete`, `volume_snapshot_runs`, `volume_snapshot_run_log` |
 | List snapshots, list staged restores | Shown on a volume's page (from `volume_get`) | `volume_snapshot_list`, `volume_restore_list` |
 | Restore (staged), discard a staged restore | A volume's page: Restore; Restores | `volume_restore`, `volume_restore_discard` |
@@ -159,8 +162,9 @@ cluster's pods. A person has the app page.
 
 | Capability | Web UI | MCP |
 |---|---|---|
-| Orgs: show, list, create, change, delete | Org settings; Admin, Orgs | `org_get`, `org_list`, `org_create`, `org_update`, `org_delete` |
+| Orgs: show, list, create, change, delete (the domain allowlist and ingress provider: `domains`, `ingress` and `cloudflare_*`, MCP and the CLI only) | Org settings; Admin, Orgs | `org_get`, `org_list`, `org_create`, `org_update`, `org_delete` |
 | Dashboard and events | Org overview; every app page (live, over the event stream) | `overview`, `events` |
+| The manual for agents | *MCP/CLI only*: what the server's MCP instructions point an agent at; people read the docs | `guide` |
 | Ingress and domains | App, Domains | `ingress_status` |
 | Server status | Admin, Servers | `server_status` |
 | Servers: list, add, follow, remove | Admin, Servers | `server_list`, `server_add`, `server_provision_get`, `server_remove` |
