@@ -88,26 +88,37 @@ impl Apps {
         Ok(out)
     }
 
+    /// What runs in a project, or in one of its environments: its apps and
+    /// its live compose stacks, by name.
+    pub fn contents(
+        &self,
+        org: &OrgId,
+        project: &str,
+        env: Option<&str>,
+    ) -> Result<(Vec<String>, Vec<String>)> {
+        let apps = self
+            .list(org)?
+            .into_iter()
+            .filter(|a| a.spec.project == project && env.is_none_or(|e| a.spec.environment == e))
+            .map(|a| a.spec.name)
+            .collect();
+        Ok((apps, self.live_compose(org, project, env)))
+    }
+
     /// Delete an empty project (its apps go first).
     pub fn project_delete(&self, org: &OrgId, name: &str) -> Result<()> {
         let _g = self.inner.edit.lock().unwrap();
         self.project_get(org, name)?;
-        let apps: Vec<String> = self
-            .list(org)?
-            .into_iter()
-            .filter(|a| a.spec.project == name)
-            .map(|a| a.spec.name)
-            .collect();
+        let (apps, stacks) = self.contents(org, name, None)?;
         if !apps.is_empty() {
             return Err(Error::invalid(format!(
-                "project {name} still has apps: {}; delete them first",
+                "project {name} still has apps: {}; delete them first, or pass force",
                 apps.join(", ")
             )));
         }
-        let stacks = self.live_compose(org, name, None);
         if !stacks.is_empty() {
             return Err(Error::invalid(format!(
-                "project {name} still has compose stacks: {}; remove them first (isb stack rm)",
+                "project {name} still has compose stacks: {}; remove them first (isb stack rm), or pass force",
                 stacks.join(", ")
             )));
         }
@@ -150,22 +161,16 @@ impl Apps {
                 "environment {env} in project {project}"
             )));
         }
-        let apps: Vec<String> = self
-            .list(org)?
-            .into_iter()
-            .filter(|a| a.spec.project == project && a.spec.environment == env)
-            .map(|a| a.spec.name)
-            .collect();
+        let (apps, stacks) = self.contents(org, project, Some(env))?;
         if !apps.is_empty() {
             return Err(Error::invalid(format!(
-                "environment {env} still has apps: {}; delete them first",
+                "environment {env} still has apps: {}; delete them first, or pass force",
                 apps.join(", ")
             )));
         }
-        let stacks = self.live_compose(org, project, Some(env));
         if !stacks.is_empty() {
             return Err(Error::invalid(format!(
-                "environment {env} still has compose stacks: {}; remove them first (isb stack rm)",
+                "environment {env} still has compose stacks: {}; remove them first (isb stack rm), or pass force",
                 stacks.join(", ")
             )));
         }

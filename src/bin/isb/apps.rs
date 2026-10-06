@@ -29,13 +29,30 @@ pub enum ProjectCmd {
         #[arg(long)]
         json: bool,
     },
-    /// Delete a project with no apps.
+    /// Delete a project with no apps or compose stacks.
     #[command(alias = "remove")]
-    Rm { name: String },
+    Rm {
+        name: String,
+        /// Delete its apps and compose stacks too (named volumes are kept).
+        #[arg(short, long)]
+        force: bool,
+        /// With --force: delete their named volumes too, data and all.
+        #[arg(long, requires = "force")]
+        volumes: bool,
+    },
     /// Add an environment to a project.
     EnvAdd { project: String, env: String },
-    /// Remove an environment with no apps from a project.
-    EnvRm { project: String, env: String },
+    /// Remove an environment with no apps or compose stacks from a project.
+    EnvRm {
+        project: String,
+        env: String,
+        /// Delete its apps and compose stacks too (named volumes are kept).
+        #[arg(short, long)]
+        force: bool,
+        /// With --force: delete their named volumes too, data and all.
+        #[arg(long, requires = "force")]
+        volumes: bool,
+    },
 }
 
 #[derive(Args)]
@@ -343,8 +360,15 @@ pub fn project(org: &Option<String>, cmd: ProjectCmd) -> Result<u8> {
             }
             table(rows);
         }
-        ProjectCmd::Rm { name } => {
-            call("project_delete", json!({"name": name}))?;
+        ProjectCmd::Rm {
+            name,
+            force,
+            volumes,
+        } => {
+            call(
+                "project_delete",
+                json!({"name": name, "force": force, "volumes": volumes}),
+            )?;
         }
         ProjectCmd::EnvAdd { project, env } => {
             call(
@@ -352,10 +376,15 @@ pub fn project(org: &Option<String>, cmd: ProjectCmd) -> Result<u8> {
                 json!({"project": project, "name": env}),
             )?;
         }
-        ProjectCmd::EnvRm { project, env } => {
+        ProjectCmd::EnvRm {
+            project,
+            env,
+            force,
+            volumes,
+        } => {
             call(
                 "environment_delete",
-                json!({"project": project, "name": env}),
+                json!({"project": project, "name": env, "force": force, "volumes": volumes}),
             )?;
         }
     }

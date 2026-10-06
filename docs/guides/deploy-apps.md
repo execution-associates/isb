@@ -39,7 +39,7 @@ API token deploys an app. The web UI's Projects pages use the same tools
 
 ```text
 isb project create NAME [--env E]... [--description D]   environments default to production
-isb project ls [--json] | rm NAME | env-add PROJECT ENV | env-rm PROJECT ENV
+isb project ls [--json] | rm NAME [-f [--volumes]] | env-add PROJECT ENV | env-rm PROJECT ENV [-f [--volumes]]
 ```
 
 - Project and environment names are lowercase letters, digits and `-`,
@@ -383,8 +383,8 @@ See [Reach isb serve remotely](remote-access.md).
 
 | Tool | Does |
 |---|---|
-| `project_create`, `project_list`, `project_delete` | Projects; `project_list` shows each environment's stack, apps, compose stacks and name `conflicts`. A project with apps or compose stacks cannot be deleted. |
-| `environment_create`, `environment_list`, `environment_delete` | A project's environments (stored with the project). One with apps or compose stacks cannot be deleted. |
+| `project_create`, `project_list`, `project_delete` | Projects; `project_list` shows each environment's stack, apps, compose stacks and name `conflicts`. A project with apps or compose stacks is refused unless `force` is set, which deletes them first; their named volumes are kept unless `volumes` is set too, and `dry_run` lists what would go. |
+| `environment_create`, `environment_list`, `environment_delete` | A project's environments (stored with the project). One with apps or compose stacks is refused unless `force` is set, which deletes them first. |
 | `app_create` | Create an app (`deploy: true` deploys it too). Returns the app and its webhook secret. |
 | `app_get`, `app_list` | Settings, stack, service name, current deployment, webhook path, `domains_served`; env as a map with `{secret: NAME}` references. |
 | `app_update` | A merge patch of settings (`deploy: true` deploys after). |

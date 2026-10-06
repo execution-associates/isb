@@ -793,6 +793,16 @@ mod tests {
         let e = ap.project_delete(&org, "docs").unwrap_err();
         assert!(e.to_string().contains("compose stacks: wiki"), "{e}");
         assert!(ap.environment_delete(&org, "docs", "staging").is_err());
+        // What a forced delete would take, per environment and in all.
+        let (apps, stacks) = ap.contents(&org, "docs", Some("staging")).unwrap();
+        assert!(apps.is_empty() && stacks == ["wiki"]);
+        assert!(
+            ap.contents(&org, "docs", Some("production"))
+                .unwrap()
+                .1
+                .is_empty()
+        );
+        assert_eq!(ap.contents(&org, "docs", None).unwrap().1, ["wiki"]);
         ap.environment_delete(&org, "docs", "production").unwrap();
         // Old JSON (no compose) and new JSON both read.
         let p = ap.project_get(&org, "docs").unwrap();

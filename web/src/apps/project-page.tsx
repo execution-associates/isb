@@ -1,6 +1,6 @@
 // /orgs/:org/projects/:project/:env: a project, its environments as tabs, and
 // the services (apps, databases and compose stacks) of the one selected, as cards.
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Box, Boxes, ChevronDown, Database, GitBranch, Globe, Layers, LayoutTemplate, MoreHorizontal, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router";
@@ -21,7 +21,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { engineLabel } from "@/data/api";
 import { NewDatabaseDialog } from "@/data/new-database";
-import { canWrite } from "@/lib/admin";
+import { canWrite, maxGrant } from "@/lib/admin";
 import { relativeTime } from "@/lib/format";
 import { useMe } from "@/lib/session";
 import type { Tone } from "@/lib/status";
@@ -51,7 +51,10 @@ import { imageName, shortSha } from "./util";
 
 export function ProjectPage() {
   const { org = "", project = "", env } = useParams();
-  const writer = canWrite(useMe().data!, org);
+  const me = useMe().data!;
+  const writer = canWrite(me, org);
+  // Deleting volumes is for org admins and owners, as volume_delete is.
+  const admin = maxGrant(me, org) !== null;
   const projects = useProjects(org);
   const apps = useApps(org);
   const navigate = useNavigate();
@@ -61,6 +64,7 @@ export function ProjectPage() {
   const [newDb, setNewDb] = useState(false);
   const [delEnv, setDelEnv] = useState(false);
   const [delProject, setDelProject] = useState(false);
+  const [wipe, setWipe] = useState(false);
 
   const p = projects.data?.find((x) => x.name === project);
   const environment = p?.environments.find((e) => e.name === env);
@@ -92,7 +96,18 @@ export function ProjectPage() {
   }
   if (!environment) return <Navigate to={`/orgs/${o}/projects/${project}/${p.environments[0]?.name ?? ""}`} replace />;
 
-  const total = p.environments.reduce((n, e) => n + e.apps.length + e.compose.length, 0);
+  const servicesOf = (e: (typeof p.environments)[number]): Doomed[] => [
+    ...e.apps.map((name) => ({ name, kind: "app" as const, env: e.name })),
+    ...e.compose.map((c) => ({ name: c.name, kind: "compose" as const, env: e.name })),
+  ];
+  const envServices = servicesOf(environment);
+  const projectServices = p.environments.flatMap(servicesOf);
+  const refresh = () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: keys.projects(org) }),
+      qc.invalidateQueries({ queryKey: keys.apps(org) }),
+      qc.invalidateQueries({ queryKey: ["tool", "stack_list"] }),
+    ]);
   const templateLink = `/orgs/${o}/templates?project=${encodeURIComponent(project)}&env=${encodeURIComponent(environment.name)}`;
   const composeLink = `/orgs/${o}/projects/${encodeURIComponent(project)}/${encodeURIComponent(environment.name)}/compose/new`;
   const compose = environment.compose.map((c) => ({ ...c, status: (stacks.data?.stacks ?? []).find((s) => s.org === org && s.name === c.name) }));
@@ -154,11 +169,13 @@ export function ProjectPage() {
                     Add environment
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem variant="destructive" disabled={environment.apps.length + environment.compose.length > 0 || p.environments.length < 2} onSelect={() => setDelEnv(true)}>
-                    <Trash2 />
-                    Delete {environment.name}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem variant="destructive" disabled={total > 0} onSelect={() => setDelProject(true)}>
+                  {p.environments.length > 1 && (
+                    <DropdownMenuItem variant="destructive" onSelect={() => setDelEnv(true)}>
+                      <Trash2 />
+                      Delete {environment.name}
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem variant="destructive" onSelect={() => setDelProject(true)}>
                     <Trash2 />
                     Delete project
                   </DropdownMenuItem>
@@ -257,42 +274,146 @@ export function ProjectPage() {
           </div>
         </>
       )}
-      {writer && (total > 0 || p.environments.length < 2) && (
-        <p className="mt-6 text-xs text-muted-foreground">
-          {total > 0 ? "A project or environment can be deleted once its services are." : "A project keeps at least one environment."}
-        </p>
-      )}
-
       <NewAppDialog org={org} project={project} environment={environment.name} open={newApp} onOpenChange={setNewApp} />
       <NewEnvironmentDialog org={org} project={project} open={newEnv} onOpenChange={setNewEnv} />
       <NewDatabaseDialog org={org} project={project} environment={environment.name} open={newDb} onOpenChange={setNewDb} />
       <ConfirmDialog
         open={delEnv}
-        onOpenChange={setDelEnv}
+        onOpenChange={(v) => {
+          setDelEnv(v);
+          if (!v) setWipe(false);
+        }}
         title={`Delete environment ${environment.name}?`}
-        description={`It has no services; this removes it from ${project}.`}
+        description={envServices.length ? "Its services are deleted with it." : `It has no services; this removes it from ${project}.`}
         confirmLabel="Delete environment"
+        typed={envServices.length ? environment.name : undefined}
         onConfirm={async () => {
-          await callTool("environment_delete", { project, name: environment.name }, org);
-          await qc.invalidateQueries({ queryKey: keys.projects(org) });
+          const force = envServices.length > 0;
+          await callTool("environment_delete", { project, name: environment.name, force, volumes: force && wipe }, org);
+          await refresh();
           toast.success(`Environment ${environment.name} deleted`);
           navigate(`/orgs/${o}/projects/${project}`);
         }}
-      />
+      >
+        <DoomedServices
+          org={org}
+          tool="environment_delete"
+          args={{ project, name: environment.name }}
+          services={envServices}
+          admin={admin}
+          wipe={wipe}
+          onWipe={setWipe}
+        />
+      </ConfirmDialog>
       <ConfirmDialog
         open={delProject}
-        onOpenChange={setDelProject}
+        onOpenChange={(v) => {
+          setDelProject(v);
+          if (!v) setWipe(false);
+        }}
         title={`Delete project ${project}?`}
-        description="It has no services left. Its environments go with it."
+        description={
+          projectServices.length
+            ? `Its ${p.environments.length === 1 ? "environment" : `${p.environments.length} environments`} and every service in them are deleted with it.`
+            : "It has no services left. Its environments go with it."
+        }
         confirmLabel="Delete project"
+        typed={projectServices.length ? project : undefined}
         onConfirm={async () => {
-          await callTool("project_delete", { name: project }, org);
-          await qc.invalidateQueries({ queryKey: keys.projects(org) });
+          const force = projectServices.length > 0;
+          await callTool("project_delete", { name: project, force, volumes: force && wipe }, org);
+          await refresh();
           toast.success(`Project ${project} deleted`);
           navigate(`/orgs/${o}/projects`);
         }}
-      />
+      >
+        <DoomedServices org={org} tool="project_delete" args={{ name: project }} services={projectServices} admin={admin} wipe={wipe} onWipe={setWipe} />
+      </ConfirmDialog>
     </>
+  );
+}
+
+type Doomed = { name: string; kind: "app" | "compose"; env: string };
+
+type DryRun = { volumes: string[]; volumes_kept: { name: string; reason: string }[] };
+
+/** What a delete takes with it, so the confirmation names it, and the
+ * choice to delete the data in their volumes too (kept by default). */
+function DoomedServices({
+  org,
+  tool,
+  args,
+  services,
+  admin,
+  wipe,
+  onWipe,
+}: {
+  org: string;
+  tool: "project_delete" | "environment_delete";
+  args: Record<string, string>;
+  services: Doomed[];
+  admin: boolean;
+  wipe: boolean;
+  onWipe: (v: boolean) => void;
+}) {
+  // The server knows which volumes go: the ones these stacks made that no other stack uses.
+  const plan = useQuery({
+    queryKey: ["tool", tool, "dry_run", org, args],
+    queryFn: () => callTool<DryRun>(tool, { ...args, force: true, volumes: true, dry_run: true }, org),
+    enabled: services.length > 0,
+  });
+  if (!services.length) return null;
+  const envs = new Set(services.map((s) => s.env)).size;
+  const volumes = plan.data?.volumes ?? [];
+  const shared = plan.data?.volumes_kept ?? [];
+  return (
+    <div className="grid gap-3 text-sm">
+      <div className="grid gap-2">
+        <p className="text-muted-foreground">
+          {services.length} service{services.length === 1 ? "" : "s"} will be deleted:
+        </p>
+        <ul className="max-h-48 divide-y overflow-y-auto rounded-md border">
+          {services.map((s) => (
+            <li key={`${s.env}/${s.kind}/${s.name}`} className="flex items-center gap-2 px-3 py-1.5">
+              {s.kind === "compose" ? <Layers className="size-3.5 shrink-0 text-muted-foreground" /> : <Box className="size-3.5 shrink-0 text-muted-foreground" />}
+              <span className="truncate font-mono text-xs">{s.name}</span>
+              {envs > 1 && <span className="ml-auto shrink-0 text-xs text-muted-foreground">{s.env}</span>}
+            </li>
+          ))}
+        </ul>
+      </div>
+      {plan.isLoading ? (
+        <Skeleton className="h-14 w-full" />
+      ) : volumes.length > 0 && !admin ? (
+        <p className="text-xs text-muted-foreground">
+          Their data is kept: <span className="font-mono">{volumes.join(", ")}</span>. Only org admins and owners can delete volumes.
+        </p>
+      ) : volumes.length > 0 ? (
+        <label className="flex items-start gap-3 rounded-md border p-3">
+          <input
+            type="checkbox"
+            className="mt-0.5 size-4 accent-destructive"
+            checked={wipe}
+            onChange={(e) => onWipe(e.target.checked)}
+          />
+          <span className="min-w-0">
+            Also delete their data
+            <span className="block text-xs text-muted-foreground">
+              {wipe ? "Deleted for good: " : "Kept unless you tick this: "}
+              <span className="font-mono">{volumes.join(", ")}</span>.
+              {!wipe && " A new service with the same name picks the old data up again."}
+            </span>
+            {shared.length > 0 && (
+              <span className="block text-xs text-muted-foreground">
+                Kept either way, other stacks use them: <span className="font-mono">{shared.map((v) => v.name).join(", ")}</span>.
+              </span>
+            )}
+          </span>
+        </label>
+      ) : (
+        <p className="text-xs text-muted-foreground">They have no named volumes.</p>
+      )}
+    </div>
   );
 }
 

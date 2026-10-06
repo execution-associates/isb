@@ -839,6 +839,7 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
     )?;
     tools::sandbox_tools(&mut r, &d, &ann)?;
     apps::register(&mut r, d.apps.clone(), d.ingress.is_some())?;
+    apps::delete_tools(&mut r, &d)?;
     previews::register(&mut r, d.apps.clone())?;
     let mut t = templates::Templates::new(
         &d.state_dir,

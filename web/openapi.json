@@ -848,7 +848,7 @@
   "info": {
     "description": "isb serve's HTTP surface: the tools (also MCP), the workspace resource, the identity endpoints, streams, websockets and webhooks. docs/reference/http-api.md.",
     "title": "isb",
-    "version": "1.6.5"
+    "version": "1.8.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -6904,7 +6904,7 @@
     },
     "/api/v1/tools/environment_delete": {
       "post": {
-        "description": "Remove an environment that has no apps and no compose stacks left from a project.",
+        "description": "Remove an environment from a project. Refused while it has apps or compose stacks, unless force=true: then its apps are deleted (as app_delete) and its compose stacks removed (as stack_remove) first. Their named volumes are kept unless volumes=true. Returns the project and what was deleted; dry_run=true only says what would be.",
         "operationId": "environment_delete",
         "requestBody": {
           "content": {
@@ -6912,6 +6912,14 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "dry_run": {
+                    "description": "Only report what force (and volumes) would delete.",
+                    "type": "boolean"
+                  },
+                  "force": {
+                    "description": "Delete its apps and compose stacks too (default false).",
+                    "type": "boolean"
+                  },
                   "name": {
                     "type": "string"
                   },
@@ -6921,6 +6929,10 @@
                   },
                   "project": {
                     "type": "string"
+                  },
+                  "volumes": {
+                    "description": "With force: delete their named volumes too, the data in them for good (default false: kept). A volume another stack still uses is kept. Org admins and owners.",
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -10672,7 +10684,7 @@
     },
     "/api/v1/tools/org_delete": {
       "post": {
-        "description": "Platform admins: delete an org: its project with its volumes, its network, ACL and service names, its members, invitations and tokens, and its metrics history. Refused while stacks are deployed in it (remove them first); with force=true its remaining sandboxes are deleted too. Its secrets stay on disk under the state directory.",
+        "description": "Platform admins: delete an org: its project with its volumes, its network, ACL and service names, its members, invitations and tokens, and its metrics history. Refused while it has stacks or instances, unless force=true: then its apps are deleted (as app_delete), its stacks removed (as stack_remove) and its remaining sandboxes deleted first. Its secrets stay on disk under the state directory.",
         "operationId": "org_delete",
         "requestBody": {
           "content": {
@@ -10685,7 +10697,7 @@
                     "type": "boolean"
                   },
                   "force": {
-                    "description": "Also delete the org's sandboxes.",
+                    "description": "Delete its apps, stacks and sandboxes first (default false).",
                     "type": "boolean"
                   },
                   "org": {
@@ -11629,7 +11641,7 @@
     },
     "/api/v1/tools/project_delete": {
       "post": {
-        "description": "Delete a project that has no apps and no compose stacks left.",
+        "description": "Delete a project. Refused while it has apps or compose stacks, unless force=true: then every app in it is deleted (as app_delete) and every compose stack removed (as stack_remove), in every environment, before the project goes. Their named volumes are kept unless volumes=true. Returns what was deleted; dry_run=true only says what would be.",
         "operationId": "project_delete",
         "requestBody": {
           "content": {
@@ -11637,12 +11649,24 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "dry_run": {
+                    "description": "Only report what force (and volumes) would delete.",
+                    "type": "boolean"
+                  },
+                  "force": {
+                    "description": "Delete its apps and compose stacks too (default false).",
+                    "type": "boolean"
+                  },
                   "name": {
                     "type": "string"
                   },
                   "org": {
                     "description": "The org to act in (default: default).",
                     "type": "string"
+                  },
+                  "volumes": {
+                    "description": "With force: delete their named volumes too, the data in them for good (default false: kept). A volume another stack still uses is kept. Org admins and owners.",
+                    "type": "boolean"
                   }
                 },
                 "required": [

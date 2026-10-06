@@ -443,10 +443,10 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
     tool!(
         "org_delete",
         "Delete an org",
-        "Platform admins: delete an org: its project with its volumes, its network, ACL and service names, its members, invitations and tokens, and its metrics history. Refused while stacks are deployed in it (remove them first); with force=true its remaining sandboxes are deleted too. Its secrets stay on disk under the state directory.",
+        "Platform admins: delete an org: its project with its volumes, its network, ACL and service names, its members, invitations and tokens, and its metrics history. Refused while it has stacks or instances, unless force=true: then its apps are deleted (as app_delete), its stacks removed (as stack_remove) and its remaining sandboxes deleted first. Its secrets stay on disk under the state directory.",
         schema(
             json!({
-                "force": {"type": "boolean", "description": "Also delete the org's sandboxes."},
+                "force": {"type": "boolean", "description": "Delete its apps, stacks and sandboxes first (default false)."},
                 "delete_vm": {"type": "boolean", "description": "For an org in a dedicated VM: delete the VM and its server registration too (default false: the VM keeps running as an empty server)."}
             }),
             &["org"],
@@ -479,13 +479,16 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
                 .filter(|s| s.org == id)
                 .map(|s| s.name.clone())
                 .collect();
-            if !stacks.is_empty() {
+            if !stacks.is_empty() && !a.force {
                 return Err(Error::invalid(format!(
-                    "org {id} has stacks deployed ({}); remove them first",
+                    "org {id} has stacks deployed ({}); remove them first, or pass force",
                     stacks.join(", ")
                 )));
             }
             let mut notes = Vec::new();
+            if a.force {
+                super::apps::empty_org(d, &id, &mut notes)?;
+            }
             org::remove(&d.client, &id, a.force, &mut |m: &str| {
                 notes.push(m.to_string())
             })?;
