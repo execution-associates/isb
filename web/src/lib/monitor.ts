@@ -136,3 +136,107 @@ export function instanceLink(i: Pick<MonitorInstance, "name" | "org" | "stack">)
 
 /** The monitor's cards: a faint wash of the brand colour from the top left, over the card's own fill. */
 export const plate = "bg-linear-160 from-brand/[0.07] via-transparent via-50% to-foreground/[0.025]";
+
+/** One org limit's budget (org_list `allocation`): bytes for memory and disk. */
+export interface Budget {
+  limit: number;
+  allocated: number;
+  free: number;
+}
+
+/**
+ * An org on the Monitor's Orgs tab: what its instances use now (from its
+ * server's host_monitor) beside what they are allocated against its limits.
+ * A `used` of null means no live numbers (the server is unreachable or too
+ * old); a missing budget means the org sets no limit there.
+ */
+export interface OrgUsage {
+  name: string;
+  /** The server it runs on, as host_monitor names it: null for this host. */
+  server: string | null;
+  live: boolean;
+  running: number;
+  total: number;
+  /** Cores in use (the sum of each instance's percent of one core, over 100). */
+  cpu: { used: number | null; budget?: Budget };
+  mem: { used: number | null; budget?: Budget };
+  disk: { budget?: Budget };
+  instances: { budget?: Budget };
+  net_rx: number | null;
+  net_tx: number | null;
+  /** The org's summed CPU samples (percent of one core), oldest first. */
+  cpu_history: number[];
+  /** The fullest budget, allocated over limit as a percentage; null with no limits. */
+  pressure: number | null;
+}
+
+/** Sums equal-length tails: the series' last samples line up. */
+function sumTails(series: number[][]): number[] {
+  const n = Math.max(0, ...series.map((s) => s.length));
+  const out = Array.from({ length: n }, () => 0);
+  for (const s of series) s.forEach((v, i) => (out[n - s.length + i] += v));
+  return out;
+}
+
+const sumOf = (xs: (number | null)[]): number | null => (xs.some((x) => x !== null) ? xs.reduce<number>((a, x) => a + (x ?? 0), 0) : null);
+
+/**
+ * Each org's usage: `orgs` from org_list, `live` each server's instances by
+ * host_monitor name (null for this host), or null when that server gave none.
+ */
+export function orgUsage(
+  orgs: { name: string; instances: number; allocation?: Record<string, Budget>; placement?: { server: string } }[],
+  live: Map<string | null, MonitorInstance[] | null>,
+): OrgUsage[] {
+  return orgs.map((o) => {
+    const server = !o.placement || o.placement.server === "local" ? null : o.placement.server;
+    const all = live.get(server) ?? null;
+    const mine = all?.filter((i) => i.org === o.name) ?? [];
+    const run = mine.filter(isRunning);
+    const a = o.allocation ?? {};
+    const budgets = [a.cpu, a.memory, a.disk, a.instances].filter((b): b is Budget => !!b && b.limit > 0);
+    return {
+      name: o.name,
+      server,
+      live: all !== null,
+      running: run.length,
+      total: all ? mine.length : o.instances,
+      cpu: { used: all ? (sumOf(run.map((i) => i.cpu_pct)) ?? 0) / 100 : null, budget: a.cpu },
+      mem: { used: all ? (sumOf(run.map((i) => i.mem_bytes)) ?? 0) : null, budget: a.memory },
+      disk: { budget: a.disk },
+      instances: { budget: a.instances },
+      net_rx: all ? sumOf(run.map((i) => i.net_rx_rate)) : null,
+      net_tx: all ? sumOf(run.map((i) => i.net_tx_rate)) : null,
+      cpu_history: sumTails(run.map((i) => i.cpu_history)),
+      pressure: budgets.length ? Math.max(...budgets.map((b) => (b.allocated / b.limit) * 100)) : null,
+    };
+  });
+}
+
+export type OrgSort = "pressure" | "cpu" | "mem" | "name";
+
+/** The orgs whose name has every word of `q`, ordered by `by` (largest first, name for ties). */
+export function pickOrgs(list: OrgUsage[], q: string, by: OrgSort): OrgUsage[] {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const key = (o: OrgUsage): number => {
+    switch (by) {
+      case "pressure":
+        return o.pressure ?? -1;
+      case "cpu":
+        return o.cpu.used ?? -1;
+      case "mem":
+        return o.mem.used ?? -1;
+      default:
+        return 0;
+    }
+  };
+  return list
+    .filter((o) => words.every((w) => [o.name, o.server].some((x) => x?.toLowerCase().includes(w))))
+    .toSorted((a, b) => key(b) - key(a) || a.name.localeCompare(b.name));
+}
+
+/** A count, to one decimal under ten: CPU cores. A trace shows as "<0.1", not 0. */
+export function cores(n: number): string {
+  if (n > 0 && n < 0.05) return "<0.1";
+  return n < 10 ? String(Number(n.toFixed(1))) : String(Math.round(n));
+}

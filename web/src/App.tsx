@@ -76,6 +76,7 @@ export function App() {
                 <Route path="/admin" element={<AdminPage />} />
                 <Route path="/admin/:tab" element={<AdminPage />} />
                 <Route path="/monitor" element={<MonitorPage />} />
+                <Route path="/monitor/:tab" element={<MonitorPage />} />
                 <Route path="/host" element={<HostPage />} />
                 <Route path="/host/:tab" element={<HostPage />} />
                 <Route path="/account" element={<AccountPage />} />
