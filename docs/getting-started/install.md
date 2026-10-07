@@ -64,7 +64,7 @@ Some features need more on the host:
 | For | Needs |
 |---|---|
 | OCI images (`docker:`, `ghcr:`, `registry:` ...) | `skopeo` on the host, and incus 6.3 or later (the `instance_oci` API extension; not Ubuntu 24.04's own 6.0 package) |
-| VMs (`type: vm`, untrusted builds, dedicated VMs) | KVM (`/dev/kvm`) |
+| VMs (`type: vm`, untrusted builds) | KVM (`/dev/kvm`) |
 | Org networks on a host with a default-deny firewall (ufw) | `sudo isb host setup` once ([host setup](../operations/host-setup.md#host-firewall)) |
 
 ### 2. The binary
@@ -107,9 +107,8 @@ isb serve install    # if you run the daemon as a service: points the unit at ~/
 
 Each release's `SHA256SUMS` is signed with the isb release key (Ed25519;
 the signature is `SHA256SUMS.sig`, 64 raw bytes), and isb has the public key
-built in: the installer, `isb update`, `isb machine init` and `isb server`
-upgrades install nothing whose signature does not verify, so a release changed after it was
-built is refused even when its checksums were changed to match. Releases
+built in: the installer, `isb update` and `isb machine init` install nothing
+whose signature does not verify, so a release changed after it was built is refused even when its checksums were changed to match. Releases
 before 1.1.1 are unsigned and cannot be installed that way. The public key
 is
 

@@ -37,7 +37,7 @@ export function CreateWorkspace({
 }) {
   const qc = useQueryClient();
   const images = options?.images ?? [{ image: REMOTE_DEFAULT, description: "", source: "remote" as const }];
-  const info = useQuery({ queryKey: ["tool", "org_get", org], queryFn: () => callTool<OrgView & { server?: string }>("org_get", {}, org) });
+  const info = useQuery({ queryKey: ["tool", "org_get", org], queryFn: () => callTool<OrgView>("org_get", {}, org) });
   const [f, setF] = useState({ image: options?.default_image ?? REMOTE_DEFAULT, name: "workspace", user: "dev", cpus: "", memory: "", root: "", home: "20GiB", env: "", setup: "" });
   const me = useMe();
   const [custom, setCustom] = useState(false);
@@ -89,10 +89,9 @@ export function CreateWorkspace({
     }
   };
 
-  const placement = (
+  const orgFacts = (
     <Meta
       items={[
-        ["Runs on", info.data ? (info.data.server ?? "this server") : null],
         ["incus project", info.data ? <code key="p" className="font-mono text-xs">{info.data.project}</code> : null],
         ["Network", info.data?.subnet ? <code key="n" className="font-mono text-xs">{info.data.subnet}</code> : info.data?.network],
         ["Org limits", info.data ? [info.data.cpus && `${info.data.cpus} CPUs`, info.data.memory, info.data.disk && `${info.data.disk} disk`].filter(Boolean).join(", ") || "none" : null],
@@ -103,7 +102,7 @@ export function CreateWorkspace({
   if (!admin) {
     return (
       <Section title="No workspace yet" description={`${org}'s workspace is its long-lived machine, where its people and agents work. The org's admins and owners create it.`}>
-        {placement}
+        {orgFacts}
       </Section>
     );
   }
@@ -235,8 +234,8 @@ export function CreateWorkspace({
             {(id, d) => <Textarea id={id} aria-describedby={d} value={f.env} onChange={set("env")} rows={3} spellCheck={false} className="font-mono text-[13px]" placeholder="EDITOR=vim" />}
           </Field>
           <div className="grid gap-2 rounded-lg border bg-muted/30 p-4">
-            <div className="text-xs font-medium text-muted-foreground">Placement, from the org</div>
-            {info.isLoading ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : placement}
+            <div className="text-xs font-medium text-muted-foreground">From the org</div>
+            {info.isLoading ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : orgFacts}
           </div>
           <FormError title="The workspace was not created">{error}</FormError>
         </div>

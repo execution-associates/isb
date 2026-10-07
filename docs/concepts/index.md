@@ -1,6 +1,6 @@
 ---
 title: Concepts
-description: The ideas isb is built on, from a single sandbox up to orgs placed on other machines.
+description: The ideas isb is built on, from a single sandbox up to orgs on a shared host.
 order: 2
 ---
 
@@ -28,15 +28,16 @@ which command to type.
   work, and it is itself an actor in the org. **Sandboxes** made through the
   daemon are its short-lived companions. See
   [Workspaces and sandboxes](workspaces.md).
-- **Placement** decides where an org runs: on this host, on another server,
-  or in a dedicated VM with its own kernel. See [Placement](placement.md).
+- One isb manages **one host**, and every org on it shares the host's
+  kernel. Several hosts are several isbs, each connected to the same agent
+  over MCP. See [Several hosts](../guides/agents.md#several-hosts).
 - **Users, roles and superadmins** decide who may do what
   ([Users, roles and superadmins](access.md)), and
   [the security model](security.md) explains what keeps orgs apart from each
   other and from the host.
 
 ```text
-host (or a server, or a dedicated VM)
+host
 └── org              incus project + bridge + network ACL + quotas
     ├── workspace    the org's machine, with a home and an org token
     ├── sandboxes    short-lived instances, made by people or agents
@@ -52,6 +53,5 @@ host (or a server, or a dedicated VM)
 - [Projects, environments and apps](apps.md)
 - [Stacks](stacks.md)
 - [Workspaces and sandboxes](workspaces.md)
-- [Placement](placement.md)
 - [Security model](security.md)
 - [Users, roles and superadmins](access.md)

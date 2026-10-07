@@ -1,37 +1,31 @@
-// Platform > Monitor: live resource use of this host and every remote
-// server, like `bottom`. One card per server; the selected one fills the
-// panels below. host_monitor is polled every 2s while the tab is visible.
-// The Orgs tab (monitor-orgs.tsx) shows each org's use against its limits.
+// Platform > Monitor: live resource use of this host, like `bottom`.
+// host_monitor is polled every 2s while the tab is visible. The Orgs tab
+// (monitor-orgs.tsx) shows each org's use against its limits.
 import { useQuery } from "@tanstack/react-query";
-import { Building2, Server, ServerOff, TriangleAlert } from "lucide-react";
+import { Building2, Server, ServerOff } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, Navigate, useParams, useSearchParams } from "react-router";
-import { callTool, type HostMonitor, type MonitorServer } from "@/api/tools";
+import { Navigate, useParams, useSearchParams } from "react-router";
+import { callTool, type Monitor } from "@/api/tools";
 import { PageHeader } from "@/components/app-shell";
 import { Empty, Panel } from "@/components/confirm";
 import { StatusBadge, StatusDot } from "@/components/status";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TabLinks } from "@/apps/components";
 import { Segmented } from "@/apps/segmented";
-import { relativeTime } from "@/lib/format";
 import { errorMessage } from "@/lib/messages";
-import { bps, MONITOR_POLL, MONITOR_RANGES, parseRange, pctText, plate, serverKind, sparkPoints, STALE_AFTER } from "@/lib/monitor";
-import { healthTone, meterTone, percent } from "@/lib/servers";
+import { MONITOR_POLL, MONITOR_RANGES, parseRange, STALE_AFTER } from "@/lib/monitor";
 import { useMe } from "@/lib/session";
-import { cn } from "@/lib/utils";
 import { CpuPanel, DiskPanel, HostLine, InstancesPanel, MemoryPanel, NetworkPanel } from "@/pages/monitor-parts";
 import { OrgsMonitor, useOrgUsage } from "@/pages/monitor-orgs";
-import { Sparkline } from "@/uptime/components";
 
-function useMonitor(server: string | null, range: number, enabled: boolean) {
+function useMonitor(range: number, enabled: boolean) {
   return useQuery({
     enabled,
-    queryKey: ["tool", "host_monitor", server, range],
-    queryFn: () => callTool<HostMonitor, string>("host_monitor", server ? { server, range } : { range }),
+    queryKey: ["tool", "host_monitor", range],
+    queryFn: () => callTool<Monitor, string>("host_monitor", { range }),
     refetchInterval: MONITOR_POLL,
-    // Another range of the same server keeps showing; another server does not.
-    placeholderData: (prev, q) => (q && q.queryKey[2] === server ? prev : undefined),
+    // Another range keeps showing the last answer until its own arrives.
+    placeholderData: (prev) => prev,
   });
 }
 
@@ -46,18 +40,17 @@ function useNow(): number {
 }
 
 const TABS = [
-  { id: "servers", label: "Servers", to: "/monitor", icon: Server },
+  { id: "host", label: "This host", to: "/monitor", icon: Server },
   { id: "orgs", label: "Orgs", to: "/monitor/orgs", icon: Building2 },
 ];
 
 export function MonitorPage() {
   const me = useMe().data!;
-  const { tab = "servers" } = useParams();
+  const { tab = "host" } = useParams();
   const [params, setParams] = useSearchParams();
-  const server = params.get("server");
   const range = parseRange(params.get("range"));
   const orgs = tab === "orgs";
-  const q = useMonitor(server, range, !!me.superadmin && !orgs);
+  const q = useMonitor(range, !!me.superadmin && !orgs);
   const o = useOrgUsage(!!me.superadmin && orgs);
   if (!me.superadmin) return <Navigate to="/" replace />;
   if (!TABS.some((t) => t.id === tab)) return <Navigate to="/monitor" replace />;
@@ -72,7 +65,7 @@ export function MonitorPage() {
       },
       { replace: key === "range" || key === "layout" },
     );
-  const d = q.data;
+  const m = q.data;
   return (
     <>
       <PageHeader
@@ -85,7 +78,7 @@ export function MonitorPage() {
         description={
           orgs
             ? "What each org's instances use now, beside what they are allocated against the org's limits."
-            : "CPU, memory, network and disk of this host and every connected server, live, and what each instance uses."
+            : "CPU, memory, network and disk of this host, live, and what each instance uses."
         }
         actions={
           <>
@@ -102,51 +95,26 @@ export function MonitorPage() {
       <TabLinks tabs={TABS} active={tab} />
       {orgs ? (
         <OrgsMonitor data={o} layout={params.get("layout") === "table" ? "table" : "cards"} setLayout={(l) => set("layout", l === "cards" ? null : l)} />
-      ) : q.error && !d ? (
+      ) : q.error && !m ? (
         <Panel title="Monitor">
           <Empty icon={<ServerOff />} title="Couldn't load the monitor">
             {errorMessage(q.error)}
           </Empty>
         </Panel>
-      ) : !d ? (
+      ) : !m ? (
         <MonitorSkeleton />
       ) : (
         <div className="grid gap-6">
-          {d.servers.length > 1 && <ServerCards servers={d.servers} selected={d.server} onSelect={(s) => set("server", s.local ? null : s.name)} />}
-          {d.monitor ? (
-            <>
-              {d.partial && (
-                <Alert role="note">
-                  <TriangleAlert />
-                  <AlertDescription>
-                    <p>
-                      {d.server}'s isb is too old for live detail: these are its heartbeat's numbers, without history or instances. Upgrade it from{" "}
-                      <Link to="/admin/servers" className="font-medium text-foreground underline underline-offset-2">
-                        Orgs, users, servers
-                      </Link>
-                      .
-                    </p>
-                  </AlertDescription>
-                </Alert>
-              )}
-              <HostLine h={d.monitor.host} />
-              <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-                <CpuPanel m={d.monitor} />
-                <MemoryPanel m={d.monitor} />
-              </div>
-              <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-                <NetworkPanel m={d.monitor} />
-                <DiskPanel m={d.monitor} />
-              </div>
-              <InstancesPanel key={`${d.server}/${params.get("org")}`} m={d.monitor} partial={d.partial} org={params.get("org")} />
-            </>
-          ) : (
-            <Panel title={d.server}>
-              <Empty icon={<ServerOff />} title={`Can't reach ${d.server}`}>
-                {d.error ?? "The server did not answer."}
-              </Empty>
-            </Panel>
-          )}
+          <HostLine h={m.host} />
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+            <CpuPanel m={m} />
+            <MemoryPanel m={m} />
+          </div>
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+            <NetworkPanel m={m} />
+            <DiskPanel m={m} />
+          </div>
+          <InstancesPanel key={params.get("org")} m={m} org={params.get("org")} />
         </div>
       )}
     </>
@@ -169,77 +137,9 @@ function Live({ updatedAt }: { updatedAt: number }) {
   );
 }
 
-function ServerCards({ servers, selected, onSelect }: { servers: MonitorServer[]; selected: string; onSelect: (s: MonitorServer) => void }) {
-  return (
-    <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 md:grid-cols-[repeat(auto-fill,minmax(13.5rem,1fr))]" role="radiogroup" aria-label="Server">
-      {servers.map((s) => (
-        <ServerCard key={s.name} s={s} active={s.name === selected} onClick={() => onSelect(s)} />
-      ))}
-    </div>
-  );
-}
-
-function ServerCard({ s, active, onClick }: { s: MonitorServer; active: boolean; onClick: () => void }) {
-  const t = healthTone(s.state);
-  const h = s.host;
-  const mem = percent(h?.mem_used, h?.mem_total);
-  const down = s.state !== "up";
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={active}
-      onClick={onClick}
-      className={cn(
-        plate,
-        "flex min-w-0 flex-col gap-2 rounded-xl border bg-card px-3.5 py-3 text-left shadow-xs transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
-        active && "border-brand/50 ring-2 ring-brand/25",
-      )}
-    >
-      <div className="flex min-w-0 items-center justify-between gap-2">
-        <span className="truncate font-medium">{s.name}</span>
-        <span className="inline-flex h-5 shrink-0 items-center rounded border bg-muted/50 px-1.5 font-mono text-[11px] text-muted-foreground">{serverKind(s)}</span>
-      </div>
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <StatusDot tone={t.tone} pulse={s.state === "up"} />
-        {t.label}
-        {down && s.last_ok ? <span className="truncate">· last ok {relativeTime(s.last_ok)}</span> : null}
-      </div>
-      {h && !down ? (
-        <div className="grid gap-1.5 text-xs tabular-nums">
-          <div className="flex items-center gap-2">
-            <span className="w-7 shrink-0 text-muted-foreground">cpu</span>
-            <Sparkline points={sparkPoints(h.cpu_history ?? [])} max={100} label="CPU over the last samples" className="h-5 min-w-0 flex-1 text-brand" />
-            <span className="w-9 shrink-0 text-right">{pctText(h.cpu_pct)}</span>
-            <span className="w-8 shrink-0 text-right text-muted-foreground">{h.cpus ? `${h.cpus}c` : ""}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="w-7 shrink-0 text-muted-foreground">mem</span>
-            <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
-              {mem !== null && <span className={cn("block h-full rounded-full", meterTone(mem))} style={{ width: `${Math.max(mem, 3)}%` }} />}
-            </span>
-            <span className="w-9 shrink-0 text-right">{pctText(mem)}</span>
-            <span className="w-8 shrink-0" />
-          </div>
-          <div className="truncate text-muted-foreground">
-            ↓ {bps(h.net_rx_rate)} <span className="ml-1">↑ {bps(h.net_tx_rate)}</span>
-          </div>
-        </div>
-      ) : (
-        <div className="text-xs text-muted-foreground">{down ? "No live numbers" : "No heartbeat yet"}</div>
-      )}
-    </button>
-  );
-}
-
 function MonitorSkeleton() {
   return (
     <div className="grid gap-6">
-      <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 md:grid-cols-4">
-        {Array.from({ length: 3 }, (_, i) => (
-          <Skeleton key={i} className="h-32 rounded-xl" />
-        ))}
-      </div>
       <Skeleton className="h-4 w-80 max-w-full" />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <Skeleton className="h-64 rounded-xl" />

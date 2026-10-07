@@ -9,8 +9,8 @@
 //!
 //! They are ordinary registry tools, so the one authorizer judges them as it
 //! does every other (members and up change things, viewers read, a token's
-//! scopes narrow that), `--deny-tools` applies, the audit hook records them,
-//! and a control plane forwards them to the server an org lives on.
+//! scopes narrow that), `--deny-tools` applies and the audit hook records
+//! them.
 //!
 //! [`exec`] runs commands, [`files`] copies files, [`look`] describes and
 //! reads, [`act`] restarts and scales.

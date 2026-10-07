@@ -19,13 +19,6 @@ pub(super) const PLATFORM_TOOLS: &[&str] = &[
     "template_catalog_add",
     "template_catalog_remove",
     "audit_verify",
-    "server_add",
-    "server_list",
-    "server_show",
-    "server_remove",
-    "server_rotate_cert",
-    "server_provision_get",
-    "server_upgrade",
     "user_list",
     "user_update",
 ];

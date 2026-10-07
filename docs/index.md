@@ -47,8 +47,8 @@ $ isb down      # delete it; the host is untouched
   deployments, one-click templates, databases, backups and a web UI, with no
   account, no cloud and no per-minute bill.
 - **Anyone hosting several tenants on one box.** Each org is its own incus
-  project with its own network, quotas and secrets; an org that needs more
-  gets a server or a VM of its own.
+  project with its own network, quotas and secrets. A tenant that needs a
+  kernel of its own gets its own isb in a VM, managed by the same agent.
 
 ## Why it is worth it
 

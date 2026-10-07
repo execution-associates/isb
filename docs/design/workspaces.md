@@ -36,9 +36,8 @@ exist.
 | Reached by | HTTP through ingress | Terminal, SSH (and so herdr), published ports | `sandbox_exec`, or the terminal |
 | Identity | None; it is managed | It **is** an actor: its agents hold the org's MCP credentials (full admin by default) | None of its own; it belongs to whoever created it |
 
-All three live in the org's incus project, on its network, under its quotas
-and its placement (local, a server, or a dedicated VM). The workspace's
-agents administer the org through the org MCP and reach nothing outside it.
+All three live in the org's incus project, on its network, under its
+quotas. The workspace's agents administer the org through the org MCP and reach nothing outside it.
 
 **One workspace per org** because "the org's box" should be a single place:
 one token, one SSH line, one herdr line, one home to back up. Several agents
@@ -125,8 +124,8 @@ template catalog.
 
 Per org, attended, one at a time:
 
-1. `isb org create <org>` (local, or `--vm` for a tenant that should get its
-   own kernel).
+1. `isb org create <org>` (a tenant that should get its own kernel gets a
+   separate isb inside a VM instead).
 2. Secrets: copy the org's vault items the apps and box need into the org's
    isb secrets (by name; values never pass through a chat or log).
 3. Workspace: create it from the workspace image; import the home with a

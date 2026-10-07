@@ -65,9 +65,6 @@ pub enum ListenerKind {
     /// `host:port`, which must resolve to loopback only.
     Tcp(String),
     Unix(PathBuf),
-    /// `host:port` on any address, TLS with required client certificates:
-    /// an agent's listener for its control plane (docs/guides/servers.md).
-    Mtls(String, http::TlsConfig),
 }
 
 impl std::fmt::Debug for ListenerKind {
@@ -75,7 +72,6 @@ impl std::fmt::Debug for ListenerKind {
         match self {
             ListenerKind::Tcp(a) => write!(f, "Tcp({a:?})"),
             ListenerKind::Unix(p) => write!(f, "Unix({p:?})"),
-            ListenerKind::Mtls(a, _) => write!(f, "Mtls({a:?})"),
         }
     }
 }
@@ -121,12 +117,6 @@ impl Listener {
 
     pub fn unix(path: impl Into<PathBuf>) -> Self {
         Self::new(ListenerKind::Unix(path.into()))
-    }
-
-    /// TLS on any address, admitting only clients whose certificate `tls`
-    /// verifies.
-    pub fn mtls(addr: impl Into<String>, tls: http::TlsConfig) -> Self {
-        Self::new(ListenerKind::Mtls(addr.into(), tls))
     }
 
     fn new(kind: ListenerKind) -> Self {
@@ -208,9 +198,6 @@ impl Listener {
                 "unix socket {}: Cloudflare Access applies to TCP listeners only",
                 p.display()
             ))),
-            (ListenerKind::Mtls(a, _), Some(_)) => Err(Error::invalid(format!(
-                "{a}: Cloudflare Access does not apply to an mTLS listener"
-            ))),
             (ListenerKind::Tcp(a), Some(_)) if self.tailnet => Err(Error::invalid(format!(
                 "{a}: Cloudflare Access applies to loopback listeners (behind the tunnel), not a tailnet one"
             ))),
@@ -228,9 +215,6 @@ impl Listener {
         match (&self.kind, &self.access) {
             (ListenerKind::Unix(p), _) => {
                 format!("unix:{} (trusted local, {tools} tools)", p.display())
-            }
-            (ListenerKind::Mtls(a, _), _) => {
-                format!("https://{a} (control plane mTLS only, {tools} tools)")
             }
             (ListenerKind::Tcp(a), Some(v)) => format!(
                 "http://{a}/mcp (Cloudflare Access: {}, {tools} tools)",
@@ -358,7 +342,6 @@ pub fn serve_until_shared(
             ListenerKind::Tcp(a) if l.tailnet => HttpListener::bind_tcp_tailnet(a)?,
             ListenerKind::Tcp(a) => HttpListener::bind_tcp(a)?,
             ListenerKind::Unix(p) => HttpListener::bind_unix(p)?,
-            ListenerKind::Mtls(a, t) => HttpListener::bind_tls(a, t.clone())?,
         };
         let tools = registry
             .tools()
@@ -366,8 +349,7 @@ pub fn serve_until_shared(
             .filter(|t| l.policy.allows(&t.name))
             .count();
         let line = l.describe(tools);
-        let mtls = matches!(l.kind, ListenerKind::Mtls(..));
-        if l.access.is_none() && !l.is_trusted() && !mtls && l.hooks.authorize.is_none() {
+        if l.access.is_none() && !l.is_trusted() && l.hooks.authorize.is_none() {
             eprintln!("isb serve: WARNING: {line}");
         } else {
             eprintln!("isb serve: listening on {line}");

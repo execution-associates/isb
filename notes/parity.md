@@ -15,7 +15,7 @@ endpoint has neither a tool nor a documented reason in the
 
 | Category | Count |
 |---|---|
-| Tools in the web UI and MCP | 159 |
+| Tools in the web UI and MCP | 152 |
 | Account tools, the web UI through the identity endpoints | 20 |
 | Tools for MCP and the CLI only | 36 |
 | Identity endpoints with a tool | 21 |
@@ -158,7 +158,7 @@ cluster's pods. A person has the app page.
 | Apps' own monitors | Uptime, Apps' own monitors | `monitor_settings` |
 | Metrics history | App, Monitoring | `metrics_query` |
 
-### Orgs, the dashboard and servers
+### Orgs, the dashboard and this host
 
 | Capability | Web UI | MCP |
 |---|---|---|
@@ -166,11 +166,7 @@ cluster's pods. A person has the app page.
 | Dashboard and events | Org overview; every app page (live, over the event stream) | `overview`, `events` |
 | The manual for agents | *MCP/CLI only*: what the server's MCP instructions point an agent at; people read the docs | `guide` |
 | Ingress and domains | App, Domains | `ingress_status` |
-| Server status | Admin, Servers | `server_status` |
-| Servers: list, add, follow, remove | Admin, Servers | `server_list`, `server_add`, `server_provision_get`, `server_remove` |
-| Rotate a server's certificate | Admin, Servers, a server: Rotate certificate | `server_rotate_cert` |
-| Upgrade a server's agent | Admin, Servers, a server: Upgrade (shown when its build differs) | `server_upgrade` |
-| One server | The server sheet on Admin, Servers (from `server_list`) | `server_show` |
+| Server status | Admin, This host | `server_status` |
 
 ### Audit, history and the host
 
@@ -180,7 +176,7 @@ cluster's pods. A person has the app page.
 | Verify the hash chains | Admin, History: Verify chain | `audit_verify` |
 | History | Org, History; Admin, History | `history_query` |
 | Host inventory and policy | Host (superadmins) | `host_inventory`, `host_policy` |
-| Live resource use of the host and each server | Monitor (superadmins) | `host_monitor` |
+| Live resource use of the host | Monitor (superadmins) | `host_monitor` |
 | Superadmin tokens: list, revoke | Host, Tokens | `superadmin_token_list`, `superadmin_token_revoke` |
 
 ### Accounts

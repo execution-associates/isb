@@ -19,8 +19,11 @@
   `history_query`, `events`.
 - Alerts: `notification_channel_*`, `notification_test`; uptime checks:
   `monitor_*`.
-- Servers the control plane places orgs on (superadmin): `server_*`; live
-  CPU, memory, disk and network of the host or one server: `host_monitor`.
+- Live CPU, memory, disk and network of this host (superadmin):
+  `host_monitor`.
+- One isb manages one host, and every org on it is an incus project sharing
+  its kernel. Other hosts run their own isb, each with its own MCP server: a
+  task on another host goes to that host's isb.
 
 Superadmin identities, superadmin tokens and an org's bind roots are set on
 the host only too (`isb superadmin`, `isb token create --superadmin`,

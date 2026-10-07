@@ -43,8 +43,6 @@ mod registry;
 mod secret;
 #[path = "isb/serve.rs"]
 mod serve;
-#[path = "isb/servers.rs"]
-mod servers;
 #[path = "isb/ssh.rs"]
 mod ssh;
 #[path = "isb/stack.rs"]
@@ -347,10 +345,6 @@ enum Cmd {
     /// Slack, Discord, Telegram, email (docs/guides/notifications.md).
     #[command(subcommand)]
     Notify(notify::NotifyCmd),
-    /// Servers this control plane places orgs on: add one over SSH, list,
-    /// show, remove, rotate its certificate (docs/guides/servers.md).
-    #[command(subcommand)]
-    Server(servers::ServerCmd),
     /// The org's workspace on the `isb serve` daemon: its long-lived
     /// machine with a home and an org token, and the sandboxes beside it
     /// (docs/concepts/workspaces.md).
@@ -588,7 +582,6 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         Cmd::Build(a) => build_cmd(ctx, a),
         Cmd::Registry(r) => registry_cmd(ctx, r),
         Cmd::Notify(n) => notify::notify(&ctx.global.org, n),
-        Cmd::Server(c) => servers::server(c),
         Cmd::Workspace(w) => workspaces::workspace(&ctx.global.org, w),
         Cmd::Tui => {
             isb::tui::run(ctx.client(None), isb::server::default_socket_path())?;

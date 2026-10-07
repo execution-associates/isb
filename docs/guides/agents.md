@@ -306,6 +306,19 @@ superadmins are ambient credentials, so their `/mcp` calls must be
 
 Prefer an org token wherever one org is enough.
 
+## Several hosts
+
+isb manages one host. To run several, install isb on each and connect each
+host's superadmin `/mcp` to the same agent, as one MCP server per host
+(`isb-hel-1`, `isb-nbg-2`, ...). The agent then administers every host, and
+each host keeps its own orgs, identity store, audit log and state, so one
+host's outage leaves the others running.
+
+Every org on a host is an incus project there, sharing the host's kernel
+([What an org is in incus](../concepts/orgs.md#what-an-org-is-in-incus)). An
+org that should have a kernel of its own runs on a separate isb: inside a VM
+on the same machine, or on another machine, connected the same way.
+
 ## Locally, without the daemon's HTTP
 
 On the host itself an agent can use the `isb` CLI directly (it talks to the

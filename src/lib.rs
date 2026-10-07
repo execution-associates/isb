@@ -42,7 +42,7 @@ pub use isb_daemon::{daemon, workspace};
 #[doc(inline)]
 pub use isb_egress as egress_proxy;
 #[doc(inline)]
-pub use isb_server::{audit, auth, history, server, servers, web};
+pub use isb_server::{audit, auth, history, server, web};
 #[doc(inline)]
 pub use isb_tui::tui;
 

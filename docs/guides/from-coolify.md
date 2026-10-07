@@ -17,7 +17,7 @@ through each org's MCP server ([Agents and MCP](agents.md)).
 | Coolify | isb |
 |---|---|
 | Team | An [org](../concepts/orgs.md): an incus project with its own bridge, network ACL and quotas; members are `owner`, `admin`, `member` or `viewer` ([Users, roles and superadmins](../concepts/access.md)). |
-| Server | The host `isb serve` runs on, or a [server](servers.md) added with `isb server add`. An org lives on one of them. |
+| Server | The host `isb serve` runs on. Several servers each run their own isb, connected to the same agent over MCP ([Several hosts](agents.md#several-hosts)). |
 | Project, environment | The same: a [project](deploy-apps.md#projects-and-environments) with environments. Each runs as one stack, `<project>-<env>`. |
 | Application (git or image) | An [app](deploy-apps.md): `--image REF` or `--git URL` with Nixpacks, Railpack or a Dockerfile ([Builds](builds.md)). |
 | Database | A [database](databases.md): Postgres, MySQL, MariaDB, MongoDB or Redis, with generated credentials and S3 [backups](databases.md#backups). |

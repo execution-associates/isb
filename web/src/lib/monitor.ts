@@ -1,6 +1,6 @@
 // Monitor (host_monitor): the words and numbers the live view shows, and
 // the instance list's filter, sort and links. Pure, so it is tested.
-import type { HistoryPoint, MonitorInstance, MonitorServer } from "@/api/tools";
+import type { HistoryPoint, MonitorInstance } from "@/api/tools";
 
 export const MONITOR_POLL = 2000;
 
@@ -52,6 +52,23 @@ export function uptime(secs: number | null | undefined): string {
   return `${s}s`;
 }
 
+/** Used over total as a percentage (0-100), or null when either is unknown. */
+export function percent(used: number | undefined | null, total: number | undefined | null): number | null {
+  if (used == null || !total) return null;
+  return Math.max(0, Math.min(100, Math.round((used / total) * 100)));
+}
+
+/** A usage bar's fill: destructive from 90%, warning from 75%, else the brand. */
+export function meterTone(pct: number): string {
+  return pct >= 90 ? "bg-destructive" : pct >= 75 ? "bg-warning" : "bg-brand";
+}
+
+/** Bytes in GiB once past one (the host's memory and disk), else MiB. */
+export function size(n: number): string {
+  const gib = n / 2 ** 30;
+  return gib >= 1 ? `${gib.toFixed(1)} GiB` : `${(n / 2 ** 20).toFixed(0)} MiB`;
+}
+
 /** A whole percentage, or "—". */
 export function pctText(n: number | null | undefined): string {
   return none(n) ? "—" : `${Math.round(n)}%`;
@@ -75,12 +92,6 @@ export function historySeries(points: HistoryPoint[]) {
 
 /** Samples as sparkline points: [index, value]. */
 export const sparkPoints = (values: number[]): [number, number][] => values.map((v, i) => [i, v]);
-
-/** How a server is reached, in a word: local, ssh, or vm·<org>. */
-export function serverKind(s: Pick<MonitorServer, "kind" | "vm_org">): string {
-  if (s.kind === "vm") return s.vm_org ? `vm·${s.vm_org}` : "vm";
-  return s.kind;
-}
 
 export const isRunning = (i: Pick<MonitorInstance, "status">) => i.status.toLowerCase() === "running";
 
@@ -145,15 +156,13 @@ export interface Budget {
 }
 
 /**
- * An org on the Monitor's Orgs tab: what its instances use now (from its
- * server's host_monitor) beside what they are allocated against its limits.
- * A `used` of null means no live numbers (the server is unreachable or too
- * old); a missing budget means the org sets no limit there.
+ * An org on the Monitor's Orgs tab: what its instances use now (from
+ * host_monitor) beside what they are allocated against its limits. A `used`
+ * of null means no live numbers yet; a missing budget means the org sets no
+ * limit there.
  */
 export interface OrgUsage {
   name: string;
-  /** The server it runs on, as host_monitor names it: null for this host. */
-  server: string | null;
   live: boolean;
   running: number;
   total: number;
@@ -180,24 +189,18 @@ function sumTails(series: number[][]): number[] {
 
 const sumOf = (xs: (number | null)[]): number | null => (xs.some((x) => x !== null) ? xs.reduce<number>((a, x) => a + (x ?? 0), 0) : null);
 
-/**
- * Each org's usage: `orgs` from org_list, `live` each server's instances by
- * host_monitor name (null for this host), or null when that server gave none.
- */
+/** Each org's usage: `orgs` from org_list, `all` the host's instances from host_monitor (null before it answers). */
 export function orgUsage(
-  orgs: { name: string; instances: number; allocation?: Record<string, Budget>; placement?: { server: string } }[],
-  live: Map<string | null, MonitorInstance[] | null>,
+  orgs: { name: string; instances: number; allocation?: Record<string, Budget> }[],
+  all: MonitorInstance[] | null,
 ): OrgUsage[] {
   return orgs.map((o) => {
-    const server = !o.placement || o.placement.server === "local" ? null : o.placement.server;
-    const all = live.get(server) ?? null;
     const mine = all?.filter((i) => i.org === o.name) ?? [];
     const run = mine.filter(isRunning);
     const a = o.allocation ?? {};
     const budgets = [a.cpu, a.memory, a.disk, a.instances].filter((b): b is Budget => !!b && b.limit > 0);
     return {
       name: o.name,
-      server,
       live: all !== null,
       running: run.length,
       total: all ? mine.length : o.instances,
@@ -231,7 +234,7 @@ export function pickOrgs(list: OrgUsage[], q: string, by: OrgSort): OrgUsage[] {
     }
   };
   return list
-    .filter((o) => words.every((w) => [o.name, o.server].some((x) => x?.toLowerCase().includes(w))))
+    .filter((o) => words.every((w) => o.name.toLowerCase().includes(w)))
     .toSorted((a, b) => key(b) - key(a) || a.name.localeCompare(b.name));
 }
 

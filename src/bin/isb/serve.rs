@@ -191,16 +191,6 @@ pub(crate) struct ServeArgs {
     /// A Caddy binary to run instead of the pinned release isb downloads.
     #[arg(long, env = "ISB_CADDY_BIN")]
     pub(crate) caddy_bin: Option<PathBuf>,
-    /// Run as a server's agent for a control plane (`isb server add` sets
-    /// this up): no identity store or web UI, an mTLS listener instead.
-    #[arg(long, env = "ISB_AGENT", value_parser = BoolishValueParser::new(), action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_value = "false", default_missing_value = "true", requires_all = ["agent_listen", "agent_tls"])]
-    pub(crate) agent: bool,
-    /// The agent's mTLS listener, e.g. 0.0.0.0:7443.
-    #[arg(long, env = "ISB_AGENT_LISTEN", requires = "agent")]
-    pub(crate) agent_listen: Option<String>,
-    /// The agent's TLS directory: ca.crt, tls.crt, tls.key.
-    #[arg(long, env = "ISB_AGENT_TLS", requires = "agent")]
-    pub(crate) agent_tls: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -372,12 +362,6 @@ pub(crate) fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
             a.acme_email,
             a.caddy_bin,
         )?,
-        agent: match (a.agent, a.agent_listen, a.agent_tls) {
-            (true, Some(listen), Some(tls_dir)) => {
-                Some(isb::daemon::AgentConfig { listen, tls_dir })
-            }
-            _ => None,
-        },
         // Given but empty is refused: it would read as "superadmins on"
         // while granting nobody.
         superadmin_tailnet: a

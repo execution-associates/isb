@@ -1,6 +1,6 @@
 ---
 title: Upgrading isb
-description: What to do after installing a new isb binary on a host, on a Mac, and on the servers a control plane manages, and what an upgrade changes on its own.
+description: What to do after installing a new isb binary on a host and on a Mac, and what an upgrade changes on its own.
 order: 2
 ---
 
@@ -81,35 +81,7 @@ The binary must be a `*-unknown-linux-musl` build for the Mac's architecture
 `isb machine rm` followed by `isb machine init` also gets the current
 release, but deletes everything in the VM.
 
-## Servers and dedicated VMs
+## Several hosts
 
-Upgrade the control plane first, then its servers:
-
-```sh
-isb server ls                 # ISB says "(differs)" for a server on another build
-isb server upgrade --all      # each to the control plane's own build, one after another
-```
-
-`isb server upgrade` (the Servers page's **Upgrade** button) sends the
-control plane's binary over the agent's mTLS connection (a dedicated VM:
-through incus), and a root helper on the box installs it, restarts the
-agent and puts the old binary back unless the new agent answers within two
-minutes ([Upgrading servers](../guides/servers.md#upgrading-servers)). While an
-agent restarts, its orgs' workloads keep running and calls for them fail
-with "reach server NAME"; the control plane follows the agent's new event
-feed from the start once it answers again. A control plane refuses to
-forward to an agent that speaks a newer protocol than it does, so upgrade
-the control plane before its servers.
-
-A server added by an isb without `server_upgrade` has no helper (a dedicated
-VM gets one with its first upgrade). Replace its binary by hand once:
-
-```sh
-# on the server
-sudo install -m 0755 ./isb /usr/local/bin/isb
-sudo systemctl restart isb-agent
-```
-
-Only the bootstrap installs the helper on a server added over SSH, so such a
-server is upgraded by hand until it is added again (`isb server rm` once no
-org is placed on it, then `isb server add`).
+Each host runs its own isb ([Several hosts](../guides/agents.md#several-hosts)),
+so upgrade each one as above, in any order.

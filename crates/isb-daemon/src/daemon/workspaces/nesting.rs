@@ -101,11 +101,6 @@ fn org_nesting(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     if !c.is_trusted() {
         return Err(Error::Forbidden("org_nesting is for superadmins".into()));
     }
-    if d.remote(&org).is_some() {
-        return Err(Error::invalid(format!(
-            "org {org} runs on another server: set nesting on that server's host (isb org nesting)"
-        )));
-    }
     crate::org::check_exists(&d.client, &org)?;
     let wsm = &d.workspaces;
     let oc = wsm.oc(&org);

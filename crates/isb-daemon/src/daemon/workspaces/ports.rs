@@ -75,9 +75,6 @@ pub(super) fn sync(d: &Daemon) {
     let mut extras = Vec::new();
     let mut index = std::collections::HashMap::new();
     for org in wsm.store.orgs() {
-        if d.remote(&org).is_some() {
-            continue;
-        }
         for w in wsm.store.list(&org).unwrap_or_default() {
             let ip = ip_of(&snap, &org, &w.name);
             for p in &w.ports {

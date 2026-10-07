@@ -120,7 +120,7 @@ new bridges, so org networks would come up without addresses or internet.
   stays on one bridge, so traffic between two orgs (routed between bridges)
   is still denied.
 - **The same for `incusbr0`**, incus' own default bridge, where isb builds
-  workspace images and builder images and runs dedicated VMs: DHCP and
+  workspace images and builder images: DHCP and
   same-bridge traffic in the `before.rules` block, `ufw allow in on incusbr0
   to any port 53` and `ufw route allow in on incusbr0 out on <uplink>`
   (commented `isb image builds: DNS` and `...: egress`). Without them a build
@@ -190,7 +190,7 @@ watches.
 - `isb org rm` deletes the org's directory.
 - `ISB_DNS_DIR` moves the directory, for `isb org` and `isb serve` alike.
 - When the directory is inside the daemon's state directory (a daemon running
-  as root keeps its state in `/var/lib/isb`, as a server's agent does),
+  as root keeps its state in `/var/lib/isb`),
   `isb serve` makes the state directories on the way traversable (mode 0711:
   others may pass through, not list) so dnsmasq can reach the hosts files;
   everything in them stays 0600/0700.
@@ -257,8 +257,6 @@ always under `orgs/<org>/`, the default org included.
 | `ingress/` | Caddy: `bin/caddy-<version>`, `caddy/` (certificates, the ACME account, the generated config, the internal CA under `pki/`), `caddy-home/` (the `HOME`, `XDG_DATA_HOME` and `XDG_CONFIG_HOME` Caddy is started with, whatever the daemon's own environment; certificates and the ACME account stay in `caddy/`, set by the config's `storage`), `run/admin.sock`, and `claims.json` (which org holds which hostname). |
 | `templates/catalogs.json` | Template catalogs added to the built-in one. |
 | `templates/logos/` | Cached template logos (a week). |
-| `servers/` | A control plane's servers: `pki/` (its CA and client certificate), `servers.json`, `placement.json`, `known_hosts` ([Servers](../guides/servers.md#what-each-side-keeps)). |
-| `agent/orgs.json` | On a server's agent: the orgs placed on it. |
 | `<org root>/stacks/<stack>.json` | Stack definitions (secret references, never values). |
 | `<org root>/apps/` | Projects, apps, deployments with their logs, previews. |
 | `<org root>/sources/<app>/` | Git checkouts and per-app `known_hosts`. |

@@ -45,7 +45,6 @@ pub mod policy;
 pub mod previews;
 mod secret_hooks;
 pub mod secrets;
-mod servers;
 mod ssh;
 mod stack_deploy;
 pub mod superadmin;
@@ -137,9 +136,6 @@ pub struct ServeConfig {
     /// How long, and how many, history rows are kept.
     pub history_retention: Duration,
     pub history_max_rows: i64,
-    /// Run as a server's agent for a control plane (docs/guides/servers.md): an
-    /// mTLS listener instead of the identity store, web UI and `--listen`.
-    pub agent: Option<AgentConfig>,
     /// `--superadmin-tailnet`: tailnet logins and tags with the unix
     /// socket's reach.
     pub superadmin_tailnet: Option<crate::server::tailnet::AllowList>,
@@ -156,15 +152,6 @@ pub struct ServeConfig {
     pub egress_pins: Vec<String>,
     /// `--egress-ca FILE`: roots the egress proxy trusts besides the system's.
     pub egress_ca: Vec<PathBuf>,
-}
-
-/// `isb serve --agent`.
-#[derive(Debug, Clone)]
-pub struct AgentConfig {
-    /// `host:port` on any address; only the control plane's client certificate gets through.
-    pub listen: String,
-    /// `ca.crt`, `tls.crt`, `tls.key` from the control plane.
-    pub tls_dir: PathBuf,
 }
 
 /// The identity endpoints over `<state>/isb.db`, and the web UI. Provider
@@ -250,9 +237,6 @@ struct Daemon {
     /// Named volumes' snapshots and staged restores.
     volumes: crate::volume_backup::VolumeBackups,
     audit: Arc<crate::audit::AuditLog>,
-    /// The servers orgs can be placed on (a control plane; `None` on an
-    /// agent).
-    servers: Option<Arc<crate::servers::Servers>>,
     /// Who is a superadmin, and what `host_policy` reports.
     gate: Arc<superadmin::Gate>,
     host: Value,
@@ -282,10 +266,8 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     let store = Store::open(&cfg.state_dir)?;
     dns::open_dns_path(&cfg.state_dir);
     // The default org is the incus project `isb-default`, made here when
-    // it is missing. A server's agent has no default org of its own.
-    if cfg.agent.is_none() {
-        default_org::ensure(&client, &store);
-    }
+    // it is missing.
+    default_org::ensure(&client, &store);
     let secrets_config = crate::secrets::SecretsConfig::load(&cfg.secrets_config)?;
     let opened = crate::secrets::Secrets::open(&cfg.state_dir, &cfg.keys, &secrets_config)?;
     for n in &opened.notes {
@@ -327,20 +309,11 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
             ""
         }
     );
-    if cfg.agent.is_some() && !cfg.listen.is_empty() {
-        return Err(Error::invalid(
-            "--agent serves its control plane only: drop --listen (users reach the control plane)",
-        ));
-    }
     let access = match &cfg.access {
         Some((team, aud)) => Some(Arc::new(AccessValidator::new(team, aud)?)),
         None => None,
     };
     let gate = Arc::new(superadmin::gate(&cfg, users.clone(), access.clone())?);
-    let servers = match &cfg.agent {
-        None => Some(crate::servers::Servers::open(&cfg.state_dir)?),
-        Some(_) => None,
-    };
     let auth = if cfg.listen.is_empty() {
         None
     } else {
@@ -350,7 +323,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
             &secrets,
             &audit_log,
             gate.clone(),
-            orgs::existing_fn(client.clone(), servers.clone()),
+            orgs::existing_fn(client.clone()),
         )?)
     };
     // The local registry, when set up: this daemon pushes to it and keeps
@@ -477,7 +450,6 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         },
         volumes,
         audit: audit_log.clone(),
-        servers: servers.clone(),
         gate: gate.clone(),
         host: superadmin::host_summary(&cfg, &gate),
         catalogs: Arc::new(crate::template::catalog::Catalogs::new(&cfg.state_dir)),
@@ -486,26 +458,13 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         egress,
         meta,
     });
-    if let Some(s) = &servers {
-        s.start(ctl.clone());
-    }
     let registry = registry(d.clone())?;
     let mut hooks = hooks(d.clone(), users.clone(), cfg.allow_unauthenticated);
     superadmin::announce(&cfg, &gate, &users);
     hooks.audit = Some(audit::hook(audit_log.clone(), cfg.audit_all));
-    if servers.is_some() {
-        hooks.route = Some(servers::route(d.clone()));
-    }
     // Webhooks carry their own credential (a signature), and come from
-    // senders that hold no session; a control plane hands those for orgs on servers to the server.
-    let webhooks = {
-        let w = apps::webhook_routes(apps.clone());
-        let w = match &servers {
-            Some(s) => servers::forward_webhooks(w, s.clone()),
-            None => w,
-        };
-        audit::audited_webhooks(w, audit_log.clone())
-    };
+    // senders that hold no session.
+    let webhooks = audit::audited_webhooks(apps::webhook_routes(apps.clone()), audit_log.clone());
     // Template logos from isb's own cache, ahead of the web UI.
     let auth = auth.map(|a| -> crate::server::Routes {
         let logo = templates::logo::route(
@@ -520,14 +479,6 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         Arc::new(move |r| logo(r).or_else(|| a(r)))
     });
     let mut listeners = vec![Listener::unix(&cfg.socket).hooks(hooks.clone())];
-    if let Some(ac) = &cfg.agent {
-        listeners.push(servers::agent_listener(
-            d.clone(),
-            &hooks,
-            ac,
-            webhooks.clone(),
-        )?);
-    }
     for addr in &cfg.listen {
         let tailnet = superadmin::is_tailnet_listen(addr);
         let mut l = Listener::tcp(addr.clone())
@@ -573,11 +524,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         registry.clone(),
         healthz.clone(),
     );
-    let local: workspaces::LocalOrg = {
-        let d = d.clone();
-        Arc::new(move |o: &crate::org::OrgId| d.remote(o).is_none())
-    };
-    workspaces.start(ctl.clone(), local);
+    workspaces.start(ctl.clone());
     workspaces::start_ports(d.clone());
     let r = crate::server::serve_shared(listeners, registry, healthz);
     workspaces.shutdown();
@@ -589,9 +536,6 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
         json!({"version": env!("CARGO_PKG_VERSION")}),
     ));
     recorder.shutdown();
-    if let Some(s) = &servers {
-        s.shutdown();
-    }
     notifier.shutdown();
     monitors.shutdown();
     scheduler.shutdown();
@@ -769,7 +713,6 @@ fn hooks(d: Arc<Daemon>, users: Arc<AuthStore>, allow_anonymous: bool) -> crate:
         terminal: Some(term),
         ssh: Some(ssh),
         audit: None,
-        route: None,
         listed: Some(Arc::new(tool_listed)),
         refuse_anonymous: !allow_anonymous,
     }
@@ -862,7 +805,6 @@ fn registry(d: Arc<Daemon>) -> Result<Registry> {
     monitors::register(&mut r, d.monitors.clone())?;
     audit::register(&mut r, d.audit.clone())?;
     audit::register_history(&mut r, d.audit.clone())?;
-    servers::register(&mut r, d.clone())?;
     ssh::register(&mut r, d.clone())?;
     workspaces::register(&mut r, d.clone())?;
     accounts::register(&mut r, d.clone())?;

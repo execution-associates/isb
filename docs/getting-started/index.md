@@ -28,5 +28,5 @@ On a Mac, isb runs incus in a Linux VM it manages: read
 [isb on macOS](macos.md) after installing.
 
 When you know what you want to build, the [concepts](../concepts/index.md)
-explain the model (orgs, apps, stacks, workspaces, placement, security) and
+explain the model (orgs, apps, stacks, workspaces, security) and
 the [guides](../guides/index.md) walk through each task.

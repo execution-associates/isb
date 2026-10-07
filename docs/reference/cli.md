@@ -47,8 +47,8 @@ directory's file; with none, the command says so and names the directory.
   `port`, ...) talk to incusd over its socket. Access to that socket is
   root-equivalent on the host.
 - **Platform commands** (`stack`, `app`, `project`, `secret`, `db`,
-  `backup`, `job`, `build`, `template`, `notify`, `org` with a server or VM,
-  `server`, `workspace`, `volume snapshot|show|restore`, `ingress`,
+  `backup`, `job`, `build`, `template`, `notify`, `org update`,
+  `workspace`, `volume snapshot|show|restore`, `ingress`,
   `registry ls|gc`) call tools on the `isb serve` daemon over its unix socket
   (`$ISB_SERVE_SOCKET`, else `$XDG_RUNTIME_DIR/isb/serve.sock`, else
   `<tmp>/isb-<uid>/serve.sock`; on macOS the machine's
@@ -234,13 +234,12 @@ isb org create NAME [--cpus N] [--memory SIZE] [--disk SIZE] [--instances N]
                     [--default-cpus N] [--default-memory SIZE] [--bind-root DIR]...
                     [--allow-egress DEST]... [--allow-domain SUFFIX]... [--allow-udp IP:PORT]...
                     [--ingress caddy|cloudflare-tunnel] [--cloudflare-account ID] [--cloudflare-zone ID]
-                    [--server SERVER | --vm [--vm-cpus 2] [--vm-memory 4GiB] [--vm-disk 40GiB]]
 isb org update NAME [--cpus N|none] [--memory SIZE|none] [--disk SIZE|none] [--instances N|none]
                     [--default-cpus N] [--default-memory SIZE]
                     [--allow-egress DEST]... [--allow-udp IP:PORT]... [--json]
 isb org ls [--json]                                    alias list
 isb org show NAME [--json]
-isb org rm NAME [--force] [--delete-vm]
+isb org rm NAME [--force]
 sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run] [--public-ingress] [--sandbox-egress]
 ```
 
@@ -256,28 +255,10 @@ what the org's instances are allocated against it
 `--allow-egress`, `--allow-domain` and `--allow-udp` replace the org's lists
 (`none` clears them); over the API they are `org_update`'s `egress`, `domains`
 and `udp`, and `--ingress` and `--cloudflare-*` its `ingress`,
-`cloudflare_account` and `cloudflare_zone` (platform admins). `--server` and `--vm` place the org once, through the local
-daemon (`--vm` takes a few minutes; rerun to retry). `org rm` refuses an
-org with stacks or instances unless `--force`, which deletes its apps, stacks
-and sandboxes first; `--delete-vm` also deletes a dedicated
-VM. See [Orgs](../concepts/orgs.md), [Placement](../concepts/placement.md)
-and [Host firewall](../operations/host-setup.md#host-firewall).
-
-## Servers
-
-```text
-isb server add NAME --ssh USER@HOST --key FILE [--port 22] [--address A] [--agent-port 7443]
-               [--allow-from CIDR]... [--isb-binary FILE | --isb-version V | --self-binary]
-               [--public-ingress]
-isb server ls [--json]                  alias list
-isb server show NAME [--json]           JSON either way
-isb server rm NAME                      refused while orgs are placed on it; alias remove
-isb server rotate-cert NAME
-isb server upgrade NAME|--all [--isb-version V | --isb-binary FILE]
-```
-
-Platform admins, through the local daemon (the control plane). See
-[Servers and dedicated VMs](../guides/servers.md).
+`cloudflare_account` and `cloudflare_zone` (platform admins). `org rm`
+refuses an org with stacks or instances unless `--force`, which deletes its
+apps, stacks and sandboxes first. See [Orgs](../concepts/orgs.md) and
+[Host firewall](../operations/host-setup.md#host-firewall).
 
 ## Workspaces
 

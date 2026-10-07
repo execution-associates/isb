@@ -45,37 +45,6 @@ pub struct SshRequest {
     /// (the unix socket, a superadmin token): an account's email. Anyone
     /// else may only name themselves.
     pub keys_of: Option<String>,
-    /// The public keys to let in, as a control plane forwarding the
-    /// session sends them in [`KEYS_HEADER`]. Only a server's agent reads
-    /// this (its listener admits nothing but the control plane); every other
-    /// listener takes the keys from the caller's own account.
-    pub forwarded_keys: Option<Vec<String>>,
-}
-
-/// The header a control plane puts the caller's SSH public keys in when it
-/// forwards a session to a server's agent: base64url JSON, a list of
-/// `authorized_keys` lines.
-pub const KEYS_HEADER: &str = "X-Isb-Ssh-Keys";
-
-/// [`KEYS_HEADER`]'s value for `keys`.
-pub fn keys_header(keys: &[String]) -> String {
-    use base64::Engine;
-    base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(serde_json::to_vec(keys).unwrap_or_default())
-}
-
-fn parse_keys_header(v: &str) -> std::result::Result<Vec<String>, String> {
-    use base64::Engine;
-    let b = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(v.trim())
-        .map_err(|_| "the forwarded SSH keys are not base64url")?;
-    let keys: Vec<String> =
-        serde_json::from_slice(&b).map_err(|_| "the forwarded SSH keys are not a JSON list")?;
-    // One authorized_keys line each: nothing that could start another.
-    if keys.is_empty() || keys.len() > 64 || keys.iter().any(|k| k.contains(['\n', '\r', '\0'])) {
-        return Err("the forwarded SSH keys are not a list of keys".into());
-    }
-    Ok(keys)
 }
 
 impl SshRequest {
@@ -121,15 +90,7 @@ pub fn ssh_request(req: &Request) -> std::result::Result<SshRequest, String> {
             Some(e)
         }
     };
-    let forwarded_keys = match req.header(KEYS_HEADER) {
-        Some(h) => Some(parse_keys_header(h)?),
-        None => None,
-    };
-    Ok(SshRequest {
-        instance,
-        keys_of,
-        forwarded_keys,
-    })
+    Ok(SshRequest { instance, keys_of })
 }
 
 /// The unix socket and bearer tokens need no `Origin`; a cookie needs one
@@ -536,17 +497,8 @@ mod tests {
             SshRequest {
                 instance: "box".into(),
                 keys_of: None,
-                forwarded_keys: None,
             }
         );
-        let k = vec!["ssh-ed25519 AAAA".to_string()];
-        let h = keys_header(&k);
-        let r = ssh_request(&req("instance=box", tcp(), &[(KEYS_HEADER, &h)])).unwrap();
-        assert_eq!(r.forwarded_keys, Some(k));
-        let two_lines = keys_header(&["a\nb".to_string()]);
-        for bad in ["!", &two_lines, &keys_header(&[])] {
-            assert!(ssh_request(&req("instance=box", tcp(), &[(KEYS_HEADER, bad)])).is_err());
-        }
         let r = ssh_request(&req("instance=box&as=a%2Bb%40example.com", tcp(), &[])).unwrap();
         assert_eq!(r.keys_of.as_deref(), Some("a+b@example.com"));
         assert_eq!(r.query(), "instance=box&as=a%2Bb@example.com");

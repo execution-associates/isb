@@ -109,7 +109,7 @@ which re-exports the internal crates' modules under their original paths
 |---|---|
 | `crates/isb-core` | the incus client, spec, plan, sandbox, compose, stack, org, registry, ingress, secrets, rpc, machine, metrics, net (outbound connections under the SSRF policy), egress (the policy, bridge and ACL of [sandbox egress](../guides/egress.md)), `serve_client` (the CLI's client for `isb serve`) |
 | `crates/isb-egress` | the egress proxy: name sniffing, pass-through, TLS interception and secret substitution, and the manager that runs one proxy per egress network (exposed as `isb::egress_proxy`) |
-| `crates/isb-server` | auth, audit, history, server, servers, web (its `build.rs` embeds `web/dist`) |
+| `crates/isb-server` | auth, audit, history, server, web (its `build.rs` embeds `web/dist`) |
 | `crates/isb-apps` | app, build, jobs, backup, s3, template, notify, volume_backup |
 | `crates/isb-tui` | tui |
 | `crates/isb-daemon` | daemon, workspace |

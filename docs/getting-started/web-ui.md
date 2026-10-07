@@ -150,11 +150,8 @@ what an event in its org touches.
   trust boundary); the UI keeps them off screen. See [secrets](../guides/secrets.md).
 - **Settings** (`/orgs/ORG/settings`): quota and per-instance defaults,
   network (bridge, subnet, service-name domain, bind roots) and egress
-  exceptions, and the org's placement and isolation. Platform admins edit
-  the quota and egress exceptions and delete the org (typing its name; for
-  an org in a dedicated VM, a switch deletes the VM too); everyone else sees
-  them read-only. Moving an org is not supported, and the page says so with
-  the manual procedure ([moving an org](../concepts/placement.md#moving-an-org)).
+  exceptions. Platform admins edit the quota and egress exceptions and
+  delete the org (typing its name); everyone else sees them read-only.
   **Docker in the workspace** shows whether the org's workspace may nest,
   with the warning badge when it may; superadmins get the switch.
 - **History** (`/orgs/ORG/history`, every member): what happened in the org
@@ -174,8 +171,7 @@ the create form: image (the host's images with their descriptions,
 `isb-workspace` first when it is built, or another), name, user, CPUs,
 memory, root size, home size, the token's role (viewer, member, admin; admin
 by default, with what each grants), a first-boot script and environment,
-with the org's placement (where it runs, its project, network and limits)
-shown read-only. When the host lacks isb's default image, the form says so
+with the org's project, network and limits shown read-only. When the host lacks isb's default image, the form says so
 and platform admins get **Build the default image**, which follows the
 build's log and picks the image when it is published ([Workspace
 images](../guides/workspace-images.md)). Members and viewers see the form
@@ -380,37 +376,14 @@ one), with a one-click fill for Dokploy's and for Coolify's. See [templates](../
 ## Platform
 
 Platform admins get **Platform** (`/admin`, with tabs Orgs, Users, This
-host, Servers and History: `/admin/orgs`, `/admin/users`, `/admin/server`,
-`/admin/servers`, `/admin/history`): every org (create, delete), every user
-(disable, enable, make or unmake platform admin), this host's status, the
-servers, and the whole history (every org and the host, host-level rows
-only, or one org).
+host and History: `/admin/orgs`, `/admin/users`, `/admin/server`,
+`/admin/history`): every org (create, delete), every user (disable, enable,
+make or unmake platform admin), this host's status, and the whole history
+(every org and the host, host-level rows only, or one org).
 
-- **Orgs** shows where each org runs (this host, a server, or a dedicated
-  VM). **New org** asks where it should run, each choice with what keeps the
-  org apart: this host (an incus project; containers share the host's
-  kernel), each server that is up (another machine), or a dedicated VM (its
-  own kernel; with the VM's CPUs, memory and disk), disabled with the reason
-  when this host cannot run VMs ([placement](../concepts/placement.md)). A
-  dedicated VM takes minutes: the dialog follows its steps and log and
-  offers Retry on a failure. The org's quota and egress are set alongside.
-- **Servers**: each server with its kind (added over SSH, or a dedicated VM
-  and its org), health (up, unreachable, unknown, and how long since its
-  last heartbeat), isb version, CPU, memory and disk from the heartbeat, and
-  the orgs on it; servers being added, with their progress. A server's
-  details (address, how it was added, certificate fingerprint and expiry,
-  firewall sources, last error, and its isb build next to the control
-  plane's, with **Upgrade** when they differ; a badge on the row says so)
-  open from its row, with **Remove**, offered
-  only while no org is placed on it (a dedicated VM is deleted with it).
-  **Add server** is a wizard over `server_add`: name, `user@host`, the SSH
-  private key (pasted, sent once, never stored, cleared from the form on
-  submit), the addresses allowed to reach the agent port (prefilled with the
-  addresses this control plane's traffic leaves from), and the binary to
-  install (this version's release, the control plane's own build, or another
-  release). It then follows the bootstrap step by step and, on a failure,
-  shows the error with **Retry**, which keeps everything but the key. See
-  [servers](../guides/servers.md).
+- **Orgs** lists every org on this host. **New org** creates one, with its
+  quota and egress set alongside. Every org is an incus project whose
+  containers share the host's kernel ([orgs](../concepts/orgs.md)).
 
 ## Host (superadmins)
 

@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight, Boxes, Cpu, Globe, HardDrive, Info, MemoryStick, Network, Pencil, ServerCog, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
+import { ArrowUpRight, Boxes, Cpu, Globe, HardDrive, MemoryStick, Network, Pencil, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
@@ -12,7 +12,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { limitLabel, parseEgress } from "@/lib/admin";
-import { isolationText, placementLabel } from "@/lib/servers";
 import { errorMessage } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 import { useOrgPage } from "@/pages/org-common";
@@ -55,7 +54,6 @@ export function SettingsPage() {
         <FormError>{errorMessage(info.error)}</FormError>
       ) : o ? (
         <div className="grid gap-6">
-          {o.placement && !(isDefault && o.placement.kind === "local") && <PlacementPanel o={o} />}
           <LimitsPanel org={org} o={o} editable={platform} />
           <NetworkPanel o={o} />
           <EgressPanel org={org} o={o} editable={platform} />
@@ -328,45 +326,6 @@ function KeyValue({ label, value, children, hint }: { label: string; value?: str
   );
 }
 
-const MOVING_DOCS = "https://github.com/execution-associates/isb/blob/main/docs/concepts/placement.md#moving-an-org";
-
-/** Where the org runs and what keeps it apart from the others. */
-function PlacementPanel({ o }: { o: OrgView }) {
-  const p = o.placement;
-  const { where, isolation } = placementLabel(p);
-  return (
-    <Panel icon={<ServerCog />} title="Placement" description="Where this org's workloads run, and how they're kept apart from other orgs'.">
-      <dl className="divide-y">
-        <KeyValue label="Runs on">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="font-medium">{p?.kind === "vm" ? `Dedicated VM ${p.vm?.instance ?? p.server}` : where}</span>
-            <span className="inline-flex h-5 items-center rounded-md border bg-muted/50 px-1.5 text-[11px] font-medium text-muted-foreground">{isolation}</span>
-          </div>
-          {p?.kind === "vm" && p.vm && (
-            <div className="mt-0.5 text-xs text-muted-foreground">
-              Server {p.server} · {p.vm.cpus} CPU{p.vm.cpus === 1 ? "" : "s"}, {p.vm.memory} memory, {p.vm.disk} disk
-            </div>
-          )}
-        </KeyValue>
-        <KeyValue label="Isolation">
-          <p className="text-[13px] leading-relaxed">{isolationText(p)}</p>
-        </KeyValue>
-      </dl>
-      <div className="flex items-start gap-2.5 border-t bg-muted/30 px-5 py-3 text-[13px] leading-relaxed text-muted-foreground">
-        <Info className="mt-0.5 size-4 shrink-0" />
-        <p>
-          Moving an org to another placement isn't supported yet. To move it by hand: back up its data, remove its workloads, delete it and create it
-          where it should run.{" "}
-          <a href={MOVING_DOCS} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 font-medium text-foreground underline-offset-4 hover:underline">
-            How to move an org
-            <ArrowUpRight className="size-3.5" />
-          </a>
-        </p>
-      </div>
-    </Panel>
-  );
-}
-
 function NetworkPanel({ o }: { o: OrgView }) {
   const svc = `<service>.<stack>.${o.domain}`;
   return (
@@ -553,14 +512,12 @@ export function DeleteOrgDialog({
   onDeleted,
 }: {
   org: string;
-  o?: Pick<OrgView, "instances" | "stacks" | "placement">;
+  o?: Pick<OrgView, "instances" | "stacks">;
   open: boolean;
   onOpenChange: (o: boolean) => void;
   onDeleted: () => void;
 }) {
   const qc = useQueryClient();
-  const [deleteVm, setDeleteVm] = useState(true);
-  const vm = o?.placement?.kind === "vm" ? o.placement : null;
   const what = [
     o?.stacks ? `${o.stacks} stack${o.stacks === 1 ? "" : "s"}` : "",
     o?.instances ? `${o.instances} instance${o.instances === 1 ? "" : "s"}` : "",
@@ -568,10 +525,7 @@ export function DeleteOrgDialog({
   return (
     <ConfirmDialog
       open={open}
-      onOpenChange={(v) => {
-        onOpenChange(v);
-        if (!v) setDeleteVm(true);
-      }}
+      onOpenChange={onOpenChange}
       title={`Delete ${org}?`}
       description={
         <>
@@ -583,8 +537,8 @@ export function DeleteOrgDialog({
       typed={org}
       onConfirm={async () => {
         // The typed name is the confirmation: everything in it goes too.
-        const r = await callTool<{ notes?: string[]; deleted_vm?: string }>("org_delete", vm ? { org, force: true, delete_vm: deleteVm } : { org, force: true });
-        toast.success(`Org ${org} deleted`, { description: r?.deleted_vm ? `Its VM ${r.deleted_vm} was deleted too.` : undefined });
+        const r = await callTool<{ notes?: string[] }>("org_delete", { org, force: true });
+        toast.success(`Org ${org} deleted`);
         for (const n of r?.notes ?? []) toast.info(n);
         // Leave the org's pages before they learn it is gone.
         onDeleted();
@@ -592,17 +546,7 @@ export function DeleteOrgDialog({
         await qc.invalidateQueries({ queryKey: ["me"] });
         await qc.invalidateQueries({ queryKey: ["tool"] });
       }}
-    >
-      {vm && (
-        <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
-          <input type="checkbox" className="mt-0.5 size-4 accent-destructive" checked={deleteVm} onChange={(e) => setDeleteVm(e.target.checked)} />
-          <span>
-            Also delete its VM ({vm.vm?.instance ?? vm.server}) and server registration
-            <span className="block text-xs text-muted-foreground">Without this, the VM keeps running as an empty server you can remove later.</span>
-          </span>
-        </label>
-      )}
-    </ConfirmDialog>
+    />
   );
 }
 

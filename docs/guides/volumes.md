@@ -38,10 +38,6 @@ volumes, and a volume's page (the Volume panel, also on a workspace's Home
 tab) shows its snapshots, schedule and hook, backups and staged restores
 ([The web UI](../getting-started/web-ui.md)).
 
-For an org placed on a [server](servers.md), all of this runs on the server's
-agent, through the control plane as usual; the org's destinations must be
-reachable from that server.
-
 ## Snapshots
 
 incus snapshots of the volume, on its own pool (cheap, and lost with the

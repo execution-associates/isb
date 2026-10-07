@@ -2,10 +2,10 @@
 # its line LIMIT (`path max-lines`), and how many times each ratcheted clippy
 # lint may be named in an exemption (`lint:<name> max-count`). Numbers only go
 # down: run `scripts/ratchet.sh --update` after shrinking something.
-crates/isb-apps/src/app/deploy.rs 1788
-crates/isb-apps/src/app/preview.rs 1816
+crates/isb-apps/src/app/deploy.rs 1744
+crates/isb-apps/src/app/preview.rs 1812
 crates/isb-apps/src/backup.rs 1675
-crates/isb-apps/src/build/mod.rs 1094
+crates/isb-apps/src/build/mod.rs 1093
 crates/isb-apps/src/notify/mod.rs 1263
 crates/isb-apps/src/s3.rs 1263
 crates/isb-core/src/ingress/caddy.rs 1130
@@ -14,19 +14,19 @@ crates/isb-core/src/plan.rs 1517
 crates/isb-core/src/registry/oci.rs 1081
 crates/isb-core/src/sandbox.rs 1352
 crates/isb-core/src/spec.rs 1521
-crates/isb-core/src/stack/controller.rs 2395
-crates/isb-daemon/src/daemon/mod.rs 1286
-crates/isb-daemon/src/daemon/workspaces.rs 1864
+crates/isb-core/src/stack/controller.rs 2332
+crates/isb-daemon/src/daemon/mod.rs 1206
+crates/isb-daemon/src/daemon/workspaces.rs 1855
 crates/isb-server/src/audit.rs 1154
-crates/isb-server/src/auth/http.rs 1108
+crates/isb-server/src/auth/http.rs 1040
 crates/isb-server/src/auth/mod.rs 1668
 crates/isb-server/src/history.rs 1581
-crates/isb-server/src/server/http.rs 1163
-crates/isb-server/src/server/mcp.rs 2271
-crates/isb-tui/src/tui/ui.rs 1628
+crates/isb-server/src/server/http.rs 1085
+crates/isb-server/src/server/mcp.rs 2251
+crates/isb-tui/src/tui/ui.rs 1564
 lint:cognitive_complexity 14
-lint:excessive_nesting 10
-lint:too_many_arguments 13
-lint:too_many_lines 80
+lint:excessive_nesting 9
+lint:too_many_arguments 12
+lint:too_many_lines 77
 lint:type_complexity 0
 tests/integration.rs 2092

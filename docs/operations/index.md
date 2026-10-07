@@ -13,7 +13,7 @@ and where to look when something goes wrong.
   the host firewall for org bridges, and know what lives in the state
   directory.
 - [Upgrading isb](upgrades.md): what to do after installing a new binary, on
-  a host, a Mac and the servers a control plane manages.
+  a host and on a Mac.
 - [Backing up isb](backups.md): what to copy so the platform itself can be
   restored, and what to keep out of backups.
 - [The audit log](audit.md): who did what, through which door, with a hash

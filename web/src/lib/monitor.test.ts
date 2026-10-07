@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MonitorInstance } from "@/api/tools";
-import { bps, cores, historySeries, instanceLink, instanceOrgs, load, orgUsage, parseRange, pctText, pickInstances, pickOrgs, serverKind, uptime } from "./monitor";
-import { meterTone, size } from "./servers";
+import { bps, cores, historySeries, instanceLink, instanceOrgs, load, meterTone, orgUsage, parseRange, pctText, percent, pickInstances, pickOrgs, size, uptime } from "./monitor";
 
 describe("monitor units", () => {
   it("formats rates in decimal units", () => {
@@ -31,6 +30,10 @@ describe("monitor units", () => {
     expect(size(251 * 2 ** 30)).toBe("251.0 GiB");
     expect(size(512 * 2 ** 20)).toBe("512 MiB");
     expect([meterTone(10), meterTone(75), meterTone(90)]).toEqual(["bg-brand", "bg-warning", "bg-destructive"]);
+    expect(percent(1, 4)).toBe(25);
+    expect(percent(5, 4)).toBe(100);
+    expect(percent(undefined, 4)).toBeNull();
+    expect(percent(1, 0)).toBeNull();
   });
 
   it("reads the range param, falling back to 5m", () => {
@@ -38,11 +41,6 @@ describe("monitor units", () => {
     expect(parseRange("3600")).toBe(3600);
     expect(parseRange("42")).toBe(300);
     expect(parseRange(null)).toBe(300);
-  });
-
-  it("names how a server is reached", () => {
-    expect(serverKind({ kind: "local", vm_org: null })).toBe("local");
-    expect(serverKind({ kind: "vm", vm_org: "acme" })).toBe("vm·acme");
   });
 });
 
@@ -133,16 +131,12 @@ describe("org usage", () => {
       },
     },
     { name: "free", instances: 1 },
-    { name: "far", instances: 2, placement: { server: "box" } },
+    { name: "idle", instances: 0 },
   ];
-  const live = new Map<string | null, MonitorInstance[] | null>([
-    [null, [inst("lab"), inst("lab", { cpu_pct: 150, cpu_history: [30] }), inst("lab", { status: "Stopped", cpu_pct: null, mem_bytes: null }), inst("free")]],
-    ["box", null],
-  ]);
-  const [lab, free, far] = orgUsage(orgs, live);
+  const live = [inst("lab"), inst("lab", { cpu_pct: 150, cpu_history: [30] }), inst("lab", { status: "Stopped", cpu_pct: null, mem_bytes: null }), inst("free")];
+  const [lab, free, idle] = orgUsage(orgs, live);
 
   it("sums running instances' live use and keeps each budget", () => {
-    expect(lab.server).toBeNull();
     expect(lab.live).toBe(true);
     expect([lab.running, lab.total]).toEqual([2, 3]);
     expect(lab.cpu.used).toBe(2);
@@ -161,18 +155,19 @@ describe("org usage", () => {
     expect(free.pressure).toBeNull();
   });
 
-  it("has no live use when its server gave none", () => {
-    expect(far.server).toBe("box");
-    expect(far.live).toBe(false);
-    expect(far.cpu.used).toBeNull();
-    expect(far.total).toBe(2);
+  it("has no live use before host_monitor answers", () => {
+    const [early] = orgUsage([{ name: "early", instances: 2 }], null);
+    expect(early.live).toBe(false);
+    expect(early.cpu.used).toBeNull();
+    expect(early.total).toBe(2);
+    expect([idle.live, idle.running, idle.cpu.used]).toEqual([true, 0, 0]);
   });
 
-  it("filters by name or server and sorts largest first", () => {
-    const all = [lab, free, far];
-    expect(pickOrgs(all, "", "pressure").map((o) => o.name)).toEqual(["lab", "far", "free"]);
-    expect(pickOrgs(all, "", "cpu").map((o) => o.name)).toEqual(["lab", "free", "far"]);
-    expect(pickOrgs(all, "box", "name").map((o) => o.name)).toEqual(["far"]);
+  it("filters by name and sorts largest first", () => {
+    const all = [lab, free, idle];
+    expect(pickOrgs(all, "", "pressure").map((o) => o.name)).toEqual(["lab", "free", "idle"]);
+    expect(pickOrgs(all, "", "cpu").map((o) => o.name)).toEqual(["lab", "free", "idle"]);
+    expect(pickOrgs(all, "fr", "name").map((o) => o.name)).toEqual(["free"]);
   });
 
   it("formats cores", () => {

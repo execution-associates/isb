@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use super::{LocalOrg, Workspaces};
+use super::Workspaces;
 use crate::client::encode_segment;
 use crate::error::Result;
 use crate::org::OrgId;
@@ -131,12 +131,9 @@ impl Workspaces {
     /// new version into each running workspace that takes it, with a
     /// `secret.rotated` event (stack `<org>/@workspaces`). Store secrets
     /// need no polling: `isb secret set` delivers them.
-    pub(super) fn poll_secrets(&self, ctl: &crate::stack::Controller, local: &LocalOrg) {
+    pub(super) fn poll_secrets(&self, ctl: &crate::stack::Controller) {
         let now = Instant::now();
         for org in self.store.orgs() {
-            if !local(&org) {
-                continue;
-            }
             let every = self
                 .store
                 .settings(&org)

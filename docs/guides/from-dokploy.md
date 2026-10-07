@@ -26,7 +26,7 @@ first-class operators, through each org's MCP server
 | Database service | A [database](databases.md): Postgres, MySQL, MariaDB, MongoDB or Redis, with generated credentials. libSQL is not offered. |
 | Template | A [template](templates.md); Dokploy's own catalog can be added and is translated strictly. |
 | Docker Swarm on one host | The `isb serve` daemon: replicas, health checks, a load balancer, rolling updates and rollbacks ([Stacks](../concepts/stacks.md)). |
-| Remote servers over SSH | [Servers](servers.md): `isb server add` bootstraps a box over SSH once, then talks to its agent over mutual TLS. An org is placed on one server for good, or in a [dedicated VM](../concepts/placement.md). |
+| Remote servers over SSH | One isb per host. Install isb on each and connect each host's MCP server to the same agent ([Several hosts](agents.md#several-hosts)). |
 
 ## Day to day
 

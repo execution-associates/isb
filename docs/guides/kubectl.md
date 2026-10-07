@@ -150,9 +150,6 @@ audit log with the **argv** (up to 64 arguments), the names of the `env`
 variables and the size of `stdin`, never their values. Treat argv as logged:
 pass a password in `env` or on `stdin`, not in the command line.
 
-On an org placed on [another server](servers.md) the call is forwarded to it
-like any other.
-
 ## Copy small files
 
 ```sh

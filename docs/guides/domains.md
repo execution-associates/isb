@@ -188,9 +188,8 @@ on the service (the `events` tool, `/api/v1/events`), and `cert.issued` /
 An org that cannot (or should not) use the server's public ports gets its
 names through its own [Cloudflare
 Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/).
-It needs no inbound port at all, and it is how an org in a [dedicated
-VM](servers.md#dedicated-vms) serves its domains. Any org can use it, the
-`default` org included.
+It needs no inbound port at all. Any org can use it, the `default` org
+included.
 
 ```sh
 isb org create acme --ingress cloudflare-tunnel --allow-domain acme.com

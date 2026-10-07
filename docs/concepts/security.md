@@ -1,7 +1,7 @@
 ---
 title: Security model and trust boundaries
 description: What keeps orgs apart from each other and from the host, what a remote caller may ask for, and what isb does not protect against.
-order: 7
+order: 6
 nav_title: Security model
 ---
 
@@ -61,9 +61,9 @@ Limits, egress exceptions and domain allowlists are what keep orgs apart, so
 only platform admins change them. Bind roots are host paths, set only on the
 host.
 
-Local orgs share the host's kernel. When that is not enough, an org can run
-on another machine or in a dedicated VM with its own kernel
-([Placement](placement.md)).
+Orgs share the host's kernel. When that is not enough, give the org a
+separate isb in a VM or on another machine
+([Several hosts](../guides/agents.md#several-hosts)).
 
 ## The Docker exception
 
@@ -98,8 +98,9 @@ refused, and every change is in the audit log and the history).
 
 The workspace and org settings pages show the warning badge **Nesting
 allowed: this workspace can run Docker; more of the host kernel is
-exposed.** An org that runs untrusted code and needs Docker belongs in a
-dedicated VM ([Placement](placement.md)), where the kernel is its own.
+exposed.** An org that runs untrusted code and needs Docker belongs on a
+separate isb inside a VM ([Several hosts](../guides/agents.md#several-hosts)),
+where the kernel is its own.
 
 ## The remote-spec policy
 
@@ -324,10 +325,11 @@ every project, including changes made outside isb, with who requested them.
 
 ## What isb does not protect against
 
-- **A kernel exploit** in a container escapes to the host and every local
+- **A kernel exploit** in a container escapes to the host and every
   org, and a workspace allowed to nest ([The Docker
   exception](#the-docker-exception)) reaches more of the kernel to try. Use a VM (`type: vm`, `--untrusted` builds) for code you do not trust,
-  and a dedicated VM or another server for an org that must share no kernel.
+  and a separate isb in a VM or on another machine for an org that must
+  share no kernel.
   A VM's host bind mounts are translated to the invoking user, so guest root
   cannot own files on the host ([Host directories in a
   VM](../reference/compose.md#host-directories-in-a-vm)); setuid bits set by the

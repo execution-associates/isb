@@ -55,11 +55,6 @@ The guest user is yours to pick (`User` in the config, `ssh user@...`):
 anyone admitted may already exec as root in the org's instances, so SSH
 adds no reach.
 
-For an org placed on a server, the control plane bridges the websocket to
-that server's agent, sending the caller's keys as it reads them, and checks
-the session here as for a local one; the agent runs `sshd -i` in the
-instance ([SSH to an org on a server](servers.md#ssh-to-an-org-on-a-server)).
-
 ## Who gets in
 
 The websocket is admitted exactly like the web terminal: as if calling

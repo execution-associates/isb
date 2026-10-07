@@ -1923,7 +1923,7 @@ export interface paths {
         put?: never;
         /**
          * Host monitor
-         * @description Live resource use of this host or one remote server, as `top`/`bottom` show it: CPU (overall and per core), load, uptime, memory and swap, each storage pool, disk I/O and every network interface with its addresses and rates, the last `range` seconds (60-3600, default 300) of CPU, memory and network, and every instance's CPU, memory, network and disk rates. `servers` has a card per server (this host first) with its health and latest heartbeat numbers; `server` picks a remote one by name. Superadmins only.
+         * @description Live resource use of this host, as `top`/`bottom` show it: CPU (overall and per core), load, uptime, memory and swap, each storage pool, disk I/O and every network interface with its addresses and rates, the last `range` seconds (60-3600, default 300) of CPU, memory and network, and every instance's CPU, memory, network and disk rates. Superadmins only.
          */
         post: operations["host_monitor"];
         delete?: never;
@@ -3512,126 +3512,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/tools/server_add": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Add a server
-         * @description Platform admins: make a Linux box (Ubuntu/Debian, x86_64 or aarch64) a server orgs can be placed on. Over SSH (root or passwordless sudo) it installs incus from Zabbly's stable channel and the isb binary (checksum checked), runs `isb host setup`, issues the agent a certificate from this control plane's CA and starts `isb serve --agent` as a systemd unit; with allow_from it closes the box's firewall to SSH and the agent port from those addresses. The SSH key is used for this only. Takes minutes on a fresh box.
-         */
-        post: operations["server_add"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tools/server_list": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * List servers
-         * @description Platform admins: the servers orgs can be placed on, with their health (up, unreachable, unknown), last heartbeat (versions, CPU, memory, disk) and the orgs on each; `provisions`, servers being added (and recent failures); `dedicated_vm`, whether this host can run dedicated VMs; `suggested_allow_from`, addresses this control plane's traffic leaves from.
-         */
-        post: operations["server_list"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tools/server_provision_get": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Follow a server being added
-         * @description Platform admins: how far adding a server (server_add with wait=false) or making an org's dedicated VM (org_create with placement vm) got: its steps, log, state (running, done, failed) and error. Kept for an hour after a failure.
-         */
-        post: operations["server_provision_get"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tools/server_remove": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Remove a server
-         * @description Platform admins: forget a server. Refused while orgs are placed on it (delete them first). A box added over SSH keeps running its agent until it is stopped there (systemctl disable --now isb-agent); a dedicated VM this control plane made is deleted with it.
-         */
-        post: operations["server_remove"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tools/server_rotate_cert": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Rotate a server's certificate
-         * @description Platform admins: issue the server's agent a new certificate (and key) over the current mTLS connection; the agent switches to it for new connections, and the control plane checks it does.
-         */
-        post: operations["server_rotate_cert"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tools/server_show": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Show a server
-         * @description Platform admins: one server: address, port, how it was bootstrapped, its certificate's fingerprint and expiry, health with the last heartbeat, and its orgs.
-         */
-        post: operations["server_show"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/tools/server_status": {
         parameters: {
             query?: never;
@@ -3646,26 +3526,6 @@ export interface paths {
          * @description isb's version, incus' version, and the load balancer's routes with their backends and counters.
          */
         post: operations["server_status"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tools/server_upgrade": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Upgrade servers
-         * @description Platform admins: upgrade a server's agent (name) or every server's (all: true) to this control plane's own build, a release (version, checked against its SHA256SUMS) or a Linux binary on this host (isb_binary, local CLI only). The binary goes over the agent's mTLS connection (a dedicated VM: through incus); a root helper on the box checks its SHA-256, installs it with the old one kept, restarts the agent, and puts the old one back unless this control plane sees the new build answer within 120 s. Each takes a minute or two; calls for the server's orgs fail while its agent restarts, its workloads keep running.
-         */
-        post: operations["server_upgrade"];
         delete?: never;
         options?: never;
         head?: never;
@@ -9666,8 +9526,6 @@ export interface operations {
                     org?: string;
                     /** @description Seconds of history (default 300) */
                     range?: number;
-                    /** @description A remote server's name; omitted: this host */
-                    server?: string;
                 };
             };
         };
@@ -11536,24 +11394,8 @@ export interface operations {
                     memory?: string | null;
                     /** @description The new org's name: [a-z0-9-], starts with a letter. */
                     org: string;
-                    /** @description Where the org runs, set at creation: "local" (this host: an incus project sharing its kernel), {"server": NAME} (another host, server_list), or {"vm": {"cpus", "memory", "disk"}} (a dedicated VM this control plane makes on its own host: the org's own kernel; defaults 2 CPUs, 4GiB, 40GiB). An org is not moved afterwards. */
-                    placement?: "local" | {
-                        server: string;
-                    } | {
-                        vm: {
-                            cpus?: number;
-                            /** @description At least 10GiB (default 40GiB). */
-                            disk?: string;
-                            /** @description At least 2GiB (default 4GiB). */
-                            memory?: string;
-                        };
-                    };
-                    /** @description Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. Same as placement {"server": NAME}. */
-                    server?: string;
                     /** @description UDP ports the org's stacks may publish on the host, IP:PORT each (a specific host address, e.g. 203.0.113.7:10000), forwarded by incus to the service's one replica with the client's address kept (docs/concepts/stacks.md). Replaces the list; [] clears it. */
                     udp?: string[];
-                    /** @description With a dedicated VM: wait until it is made and the org created (default true; minutes). false answers at once with `provision`; follow it with server_provision_get (name vm-<org>). */
-                    wait?: boolean;
                 };
             };
         };
@@ -11590,8 +11432,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description For an org in a dedicated VM: delete the VM and its server registration too (default false: the VM keeps running as an empty server). */
-                    delete_vm?: boolean;
                     /** @description Delete its apps, stacks and sandboxes first (default false). */
                     force?: boolean;
                     /** @description The org to delete. */
@@ -11775,24 +11615,8 @@ export interface operations {
                     memory?: string | null;
                     /** @description The org. */
                     org: string;
-                    /** @description Where the org runs, set at creation: "local" (this host: an incus project sharing its kernel), {"server": NAME} (another host, server_list), or {"vm": {"cpus", "memory", "disk"}} (a dedicated VM this control plane makes on its own host: the org's own kernel; defaults 2 CPUs, 4GiB, 40GiB). An org is not moved afterwards. */
-                    placement?: "local" | {
-                        server: string;
-                    } | {
-                        vm: {
-                            cpus?: number;
-                            /** @description At least 10GiB (default 40GiB). */
-                            disk?: string;
-                            /** @description At least 2GiB (default 4GiB). */
-                            memory?: string;
-                        };
-                    };
-                    /** @description Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. Same as placement {"server": NAME}. */
-                    server?: string;
                     /** @description UDP ports the org's stacks may publish on the host, IP:PORT each (a specific host address, e.g. 203.0.113.7:10000), forwarded by incus to the service's one replica with the client's address kept (docs/concepts/stacks.md). Replaces the list; [] clears it. */
                     udp?: string[];
-                    /** @description With a dedicated VM: wait until it is made and the org created (default true; minutes). false answers at once with `provision`; follow it with server_provision_get (name vm-<org>). */
-                    wait?: boolean;
                 };
             };
         };
@@ -13201,250 +13025,6 @@ export interface operations {
             };
         };
     };
-    server_add: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description What this control plane dials (default: the SSH host). */
-                    address?: string;
-                    /** @description The agent's mTLS port (default 7443). */
-                    agent_port?: number;
-                    /** @description Addresses or CIDRs that may reach the agent port (this control plane's egress address); the box's firewall then allows only SSH and these. */
-                    allow_from?: string[];
-                    /** @description A Linux isb binary on this host to install (local CLI only); default the release of this version. */
-                    isb_binary?: string;
-                    /** @description Private key file on this host (local CLI only). */
-                    key?: string;
-                    /** @description [a-z0-9-], a letter first. */
-                    name: string;
-                    /** @description Serve the server's orgs' domains on its own ports 80 and 443 (opened in its firewall). */
-                    public_ingress?: boolean;
-                    /** @description Install this control plane's own isb executable instead of a release (same version and build; the box must have the same architecture). */
-                    self_binary?: boolean;
-                    /** @description user@host */
-                    ssh: string;
-                    /** @description The private key itself (kept only for the bootstrap). */
-                    ssh_key?: string;
-                    ssh_port?: number;
-                    /** @description The isb release to install (default this daemon's). */
-                    version?: string;
-                    /** @description Wait for the bootstrap to finish (default true). false answers at once with `provision`; follow it with server_provision_get. */
-                    wait?: boolean;
-                };
-            };
-        };
-        responses: {
-            /** @description The tool's result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        result: unknown;
-                    };
-                };
-            };
-            /** @description An error: {error, message, data} */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ToolError"];
-                };
-            };
-        };
-    };
-    server_list: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": Record<string, never>;
-            };
-        };
-        responses: {
-            /** @description The tool's result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        result: unknown;
-                    };
-                };
-            };
-            /** @description An error: {error, message, data} */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ToolError"];
-                };
-            };
-        };
-    };
-    server_provision_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    name: string;
-                };
-            };
-        };
-        responses: {
-            /** @description The tool's result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        result: unknown;
-                    };
-                };
-            };
-            /** @description An error: {error, message, data} */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ToolError"];
-                };
-            };
-        };
-    };
-    server_remove: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    name: string;
-                };
-            };
-        };
-        responses: {
-            /** @description The tool's result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        result: unknown;
-                    };
-                };
-            };
-            /** @description An error: {error, message, data} */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ToolError"];
-                };
-            };
-        };
-    };
-    server_rotate_cert: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    name: string;
-                };
-            };
-        };
-        responses: {
-            /** @description The tool's result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        result: unknown;
-                    };
-                };
-            };
-            /** @description An error: {error, message, data} */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ToolError"];
-                };
-            };
-        };
-    };
-    server_show: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    name: string;
-                };
-            };
-        };
-        responses: {
-            /** @description The tool's result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        result: unknown;
-                    };
-                };
-            };
-            /** @description An error: {error, message, data} */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ToolError"];
-                };
-            };
-        };
-    };
     server_status: {
         parameters: {
             query?: never;
@@ -13457,50 +13037,6 @@ export interface operations {
                 "application/json": {
                     /** @description The org to act in (default: default). */
                     org?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description The tool's result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        result: unknown;
-                    };
-                };
-            };
-            /** @description An error: {error, message, data} */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ToolError"];
-                };
-            };
-        };
-    };
-    server_upgrade: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description Every server, one after another. */
-                    all?: boolean;
-                    /** @description A Linux isb binary on this host (local CLI only). */
-                    isb_binary?: string;
-                    /** @description The server. */
-                    name?: string;
-                    /** @description The isb release to install (default: this control plane's own binary). */
-                    version?: string;
                 };
             };
         };

@@ -27,8 +27,6 @@ ureq.workspace = true
 rustls.workspace = true
 rusqlite.workspace = true
 argon2.workspace = true
-rcgen.workspace = true
-time.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc.workspace = true

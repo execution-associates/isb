@@ -122,7 +122,6 @@ shortest globs (`*`, `deploy.*`, `*.failed`).
 | `monitor.down`, `monitor.up` | An [uptime monitor](uptime.md) went down (its failure threshold reached), or came back (with the downtime). Once per incident; a flapping monitor is held until it settles. The body's `details` carry the URL, status, latency, error and a link. |
 | `monitor.cert_expiring` | An HTTPS certificate a monitor sees expires within its `cert_expiry_days`; once per certificate. |
 | `secret.rotated` | A new secret version reached a stack service (or an app): the message says the versions and what its `on_change` does (rolling, restarting in place, or not cycled, at `warn`). A workspace using it is reported under stack `<org>/@workspaces`. See [When a secret changes](secrets.md#when-a-secret-changes). |
-| `server.unreachable`, `server.recovered` | On a control plane: a [server](servers.md) stopped answering its heartbeat, or answers again (stack `<org>/@servers` for each org on it, and `system/@servers`). |
 
 The list is the `kind` field on the event feed (the `events` tool, the SSE
 stream); a producer adding a kind adds it there, and a `*` rule hears it.
@@ -202,7 +201,3 @@ written as an object with a `type`:
 {"name": "oncall", "provider": {"type": "telegram", "token_secret": "TG_BOT", "chat_id": "-1001234567890"},
  "rules": [{"events": ["deploy.failed", "health.*"], "projects": ["shop"]}]}
 ```
-
-An org placed on a server keeps its channels on that server
-([Servers](servers.md#health)), so they hear about the server being
-unreachable only once it is back.

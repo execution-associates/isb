@@ -1,6 +1,6 @@
 ---
 title: Troubleshooting
-description: Symptoms you may meet with isb, what causes them, and the fix, from a stalled create to a server that stopped answering.
+description: Symptoms you may meet with isb, what causes them, and the fix, from a stalled create to a notification that never arrives.
 order: 7
 ---
 
@@ -69,6 +69,7 @@ More in [isb on macOS](../getting-started/macos.md).
 | A warning about no break-glass recipient at start-up | Losing the key would lose every secret. | Add one ([Backing up isb](backups.md#the-secrets-key)). |
 | A password reset link never arrives | No mailer is configured: the daemon writes the reset link (or token) to its journal. | Read it from `journalctl --user -u isb` and hand it over. |
 | Provider sign-in returns `/login?error=CODE` | See the codes in [Sign-in](../guides/sign-in.md#signing-in-with-github-google-or-oidc); details of a `provider_error` are in the journal. | |
+| `isb ssh-proxy` fails behind Cloudflare Access | It sends only the isb token, not Access credentials. | Reach the daemon on a tailnet or loopback `--listen` address ([SSH](../guides/ssh.md)). |
 
 ## Stacks and apps
 
@@ -106,18 +107,3 @@ More in [isb on macOS](../getting-started/macos.md).
 | A delivery fails at once with a 3xx | Redirects are never followed. | Point the channel at the final URL. |
 | A delivery is `dropped` | The channel's queue (100) was full. | Fix or disable the slow destination. |
 | Deliveries queued before a restart never arrive | The queue is in memory and starts over with each daemon run. | Expected; the delivery log shows what was sent. |
-
-## Servers
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| Calls for an org fail with `reach server NAME (connect)` | Its server is down or cut off; other orgs are untouched, and after 30 s the org sees `server.unreachable`. | Check the box and `systemctl status isb-agent` on it; merged reads list it under `unreachable`. |
-| Nothing can be changed anywhere | The control plane is down. Servers keep running their orgs (reconcile, restart, ingress, jobs, backups). | Bring the control plane back. |
-| The control plane's state directory is lost | The CA every agent trusts went with it. | Restore it from backup, or re-run `isb server add` on each box and recreate the placement ([Servers](../guides/servers.md#failure-modes)). |
-| A certificate nears expiry | Agent certificates last 397 days. | `isb server rotate-cert NAME`; `server_show` has `cert_not_after`. |
-| `isb server add` says the name exists | A recorded server is never re-bootstrapped. | `isb server rm NAME` (refused while orgs are placed on it) or pick another name. |
-| A dedicated VM cannot be created | The host cannot run VMs: no `qemu` driver or no `/dev/kvm` (a cloud VM without nested virtualization). | Use a server or this host instead; the reason is in `server_list`'s `dedicated_vm`. |
-| SSH or calls for an org on a server are refused with "agent protocol N" | The server's agent and the control plane are on builds that do not speak the same protocol (SSH needs 2). | Upgrade the older side: `isb server upgrade NAME`, or the control plane. |
-| `isb server upgrade` says the server restored its previous binary | The new agent did not answer within the helper's window; the box put the old binary back. | `isb server show NAME` (`version.last_upgrade`), and `journalctl -u isb-agent -u isb-agent-upgrade` on the box. |
-| `isb server upgrade` says the server has no upgrade helper | It was added by an isb without `server_upgrade`. | Replace its binary by hand once ([Upgrading isb](upgrades.md#servers-and-dedicated-vms)). |
-| `isb ssh-proxy` fails behind Cloudflare Access | It sends only the isb token, not Access credentials. | Reach the daemon on a tailnet or loopback `--listen` address ([SSH](../guides/ssh.md)). |
