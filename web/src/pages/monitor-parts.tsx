@@ -229,9 +229,10 @@ function kindTag(kind: string): string | null {
   return null;
 }
 
-export function InstancesPanel({ m, partial }: { m: Monitor; partial: boolean }) {
+/** `org` starts the org filter there (the Orgs tab links here with it). */
+export function InstancesPanel({ m, partial, org: initialOrg = null }: { m: Monitor; partial: boolean; org?: string | null }) {
   const [q, setQ] = useState("");
-  const [org, setOrg] = useState<string | null>(null);
+  const [org, setOrg] = useState<string | null>(initialOrg);
   const [sort, setSort] = useState<InstanceSort>("cpu");
   const [all, setAll] = useState(false);
   const navigate = useNavigate();

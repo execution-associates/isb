@@ -73,8 +73,7 @@ const count = (v: string | null) => (v && /^\d+$/.test(v.trim()) ? Number(v) : n
 
 /** One limit's budget: what every instance's own limit adds up to, stopped ones included (bytes for memory and disk). */
 type Budget = { limit: number; allocated: number; free: number };
-const budgetOf = (o: OrgView, name: string): Budget | undefined =>
-  (o as OrgView & { allocation?: Record<string, Budget> }).allocation?.[name];
+const budgetOf = (o: OrgView, name: string): Budget | undefined => o.allocation?.[name];
 
 /** Bytes as incus writes sizes: 512MiB, 3.5GiB. */
 function size(n: number): string {

@@ -1,16 +1,18 @@
 // Platform > Monitor: live resource use of this host and every remote
 // server, like `bottom`. One card per server; the selected one fills the
 // panels below. host_monitor is polled every 2s while the tab is visible.
+// The Orgs tab (monitor-orgs.tsx) shows each org's use against its limits.
 import { useQuery } from "@tanstack/react-query";
-import { ServerOff, TriangleAlert } from "lucide-react";
+import { Building2, Server, ServerOff, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, Navigate, useSearchParams } from "react-router";
+import { Link, Navigate, useParams, useSearchParams } from "react-router";
 import { callTool, type HostMonitor, type MonitorServer } from "@/api/tools";
 import { PageHeader } from "@/components/app-shell";
 import { Empty, Panel } from "@/components/confirm";
 import { StatusBadge, StatusDot } from "@/components/status";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
+import { TabLinks } from "@/apps/components";
 import { Segmented } from "@/apps/segmented";
 import { relativeTime } from "@/lib/format";
 import { errorMessage } from "@/lib/messages";
@@ -19,6 +21,7 @@ import { healthTone, meterTone, percent } from "@/lib/servers";
 import { useMe } from "@/lib/session";
 import { cn } from "@/lib/utils";
 import { CpuPanel, DiskPanel, HostLine, InstancesPanel, MemoryPanel, NetworkPanel } from "@/pages/monitor-parts";
+import { OrgsMonitor, useOrgUsage } from "@/pages/monitor-orgs";
 import { Sparkline } from "@/uptime/components";
 
 function useMonitor(server: string | null, range: number, enabled: boolean) {
@@ -42,13 +45,22 @@ function useNow(): number {
   return now;
 }
 
+const TABS = [
+  { id: "servers", label: "Servers", to: "/monitor", icon: Server },
+  { id: "orgs", label: "Orgs", to: "/monitor/orgs", icon: Building2 },
+];
+
 export function MonitorPage() {
   const me = useMe().data!;
+  const { tab = "servers" } = useParams();
   const [params, setParams] = useSearchParams();
   const server = params.get("server");
   const range = parseRange(params.get("range"));
-  const q = useMonitor(server, range, !!me.superadmin);
+  const orgs = tab === "orgs";
+  const q = useMonitor(server, range, !!me.superadmin && !orgs);
+  const o = useOrgUsage(!!me.superadmin && orgs);
   if (!me.superadmin) return <Navigate to="/" replace />;
+  if (!TABS.some((t) => t.id === tab)) return <Navigate to="/monitor" replace />;
 
   const set = (key: string, value: string | null) =>
     setParams(
@@ -58,7 +70,7 @@ export function MonitorPage() {
         else next.set(key, value);
         return next;
       },
-      { replace: key === "range" },
+      { replace: key === "range" || key === "layout" },
     );
   const d = q.data;
   return (
@@ -70,20 +82,27 @@ export function MonitorPage() {
             <StatusBadge tone="warning">Superadmin</StatusBadge>
           </>
         }
-        description="CPU, memory, network and disk of this host and every connected server, live, and what each instance uses."
+        description={
+          orgs
+            ? "What each org's instances use now, beside what they are allocated against the org's limits."
+            : "CPU, memory, network and disk of this host and every connected server, live, and what each instance uses."
+        }
         actions={
           <>
-            <Live updatedAt={q.dataUpdatedAt} />
-            <Segmented
+            <Live updatedAt={orgs ? o.at : q.dataUpdatedAt} />
+            {!orgs && <Segmented
               label="Range"
               value={String(range)}
               onChange={(v) => set("range", v === String(300) ? null : v)}
               options={MONITOR_RANGES.map((r) => ({ value: String(r.value), label: r.label }))}
-            />
+            />}
           </>
         }
       />
-      {q.error && !d ? (
+      <TabLinks tabs={TABS} active={tab} />
+      {orgs ? (
+        <OrgsMonitor data={o} layout={params.get("layout") === "table" ? "table" : "cards"} setLayout={(l) => set("layout", l === "cards" ? null : l)} />
+      ) : q.error && !d ? (
         <Panel title="Monitor">
           <Empty icon={<ServerOff />} title="Couldn't load the monitor">
             {errorMessage(q.error)}
@@ -119,7 +138,7 @@ export function MonitorPage() {
                 <NetworkPanel m={d.monitor} />
                 <DiskPanel m={d.monitor} />
               </div>
-              <InstancesPanel key={d.server} m={d.monitor} partial={d.partial} />
+              <InstancesPanel key={`${d.server}/${params.get("org")}`} m={d.monitor} partial={d.partial} org={params.get("org")} />
             </>
           ) : (
             <Panel title={d.server}>

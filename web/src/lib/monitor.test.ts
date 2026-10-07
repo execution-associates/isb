@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MonitorInstance } from "@/api/tools";
-import { bps, historySeries, instanceLink, instanceOrgs, load, parseRange, pctText, pickInstances, serverKind, uptime } from "./monitor";
+import { bps, cores, historySeries, instanceLink, instanceOrgs, load, orgUsage, parseRange, pctText, pickInstances, pickOrgs, serverKind, uptime } from "./monitor";
 import { meterTone, size } from "./servers";
 
 describe("monitor units", () => {
@@ -100,5 +100,86 @@ describe("monitor instances", () => {
     expect(instanceLink(inst("workspace"))).toBe("/orgs/acme/workspace");
     expect(instanceLink(inst("sandbox-1"))).toBeNull();
     expect(instanceLink(inst("web", { org: null, stack: "x" }))).toBeNull();
+  });
+});
+
+describe("org usage", () => {
+  const inst = (org: string, over: Partial<MonitorInstance> = {}): MonitorInstance => ({
+    name: `${org}-${Math.random()}`,
+    project: `isb-${org}`,
+    org,
+    kind: "container",
+    status: "Running",
+    ip: null,
+    stack: null,
+    cpu_pct: 50,
+    cpu_history: [10, 20],
+    mem_bytes: 2 ** 30,
+    net_rx_rate: 100,
+    net_tx_rate: 10,
+    disk_read_rate: null,
+    disk_write_rate: null,
+    ...over,
+  });
+  const GiB = 2 ** 30;
+  const orgs = [
+    {
+      name: "lab",
+      instances: 3,
+      allocation: {
+        cpu: { limit: 12, allocated: 11, free: 1 },
+        memory: { limit: 32 * GiB, allocated: 8 * GiB, free: 24 * GiB },
+        instances: { limit: 10, allocated: 3, free: 7 },
+      },
+    },
+    { name: "free", instances: 1 },
+    { name: "far", instances: 2, placement: { server: "box" } },
+  ];
+  const live = new Map<string | null, MonitorInstance[] | null>([
+    [null, [inst("lab"), inst("lab", { cpu_pct: 150, cpu_history: [30] }), inst("lab", { status: "Stopped", cpu_pct: null, mem_bytes: null }), inst("free")]],
+    ["box", null],
+  ]);
+  const [lab, free, far] = orgUsage(orgs, live);
+
+  it("sums running instances' live use and keeps each budget", () => {
+    expect(lab.server).toBeNull();
+    expect(lab.live).toBe(true);
+    expect([lab.running, lab.total]).toEqual([2, 3]);
+    expect(lab.cpu.used).toBe(2);
+    expect(lab.mem.used).toBe(2 * GiB);
+    expect([lab.net_rx, lab.net_tx]).toEqual([200, 20]);
+    expect(lab.cpu.budget?.limit).toBe(12);
+    expect(lab.disk.budget).toBeUndefined();
+  });
+
+  it("lines CPU samples up at their latest", () => {
+    expect(lab.cpu_history).toEqual([10, 50]);
+  });
+
+  it("takes the fullest budget as the pressure, none without limits", () => {
+    expect(lab.pressure).toBeCloseTo((11 / 12) * 100);
+    expect(free.pressure).toBeNull();
+  });
+
+  it("has no live use when its server gave none", () => {
+    expect(far.server).toBe("box");
+    expect(far.live).toBe(false);
+    expect(far.cpu.used).toBeNull();
+    expect(far.total).toBe(2);
+  });
+
+  it("filters by name or server and sorts largest first", () => {
+    const all = [lab, free, far];
+    expect(pickOrgs(all, "", "pressure").map((o) => o.name)).toEqual(["lab", "far", "free"]);
+    expect(pickOrgs(all, "", "cpu").map((o) => o.name)).toEqual(["lab", "free", "far"]);
+    expect(pickOrgs(all, "box", "name").map((o) => o.name)).toEqual(["far"]);
+  });
+
+  it("formats cores", () => {
+    expect(cores(1.44)).toBe("1.4");
+    expect(cores(2)).toBe("2");
+    expect(cores(12.6)).toBe("13");
+    expect(cores(0.004)).toBe("<0.1");
+    expect(cores(0)).toBe("0");
   });
 });

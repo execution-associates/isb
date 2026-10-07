@@ -120,6 +120,8 @@ export interface OrgView {
   egress: string[];
   dns_dir: string | null;
   instances: number;
+  /** Each limit's budget (`cpu`, `memory`, `disk`, `instances`), bytes for memory and disk; a limit the org does not set is absent. */
+  allocation?: Record<string, { limit: number; allocated: number; free: number }>;
   domain: string;
   service_names: boolean;
   members: number;
