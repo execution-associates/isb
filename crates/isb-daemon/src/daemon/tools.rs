@@ -239,7 +239,7 @@ pub(super) fn stack_config_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) ->
         d,
         "stack_config",
         "Stack config",
-        "The compose file a stack runs, as it resolved at its last deploy: `${VAR}` filled from the deploy's vars and the stack's environment, a secret variable as a `{secret}` reference, and the stack's managed domains merged into its services (`domains`: those, per service). Also the compose text it was deployed from when the daemon kept it as written (`source`, as stack_export gives it; null for a resolved deploy), and its secrets as references (store name, driver, version; never values).",
+        "The compose file a stack runs, as it resolved at its last deploy: `${VAR}` filled from the deploy's vars and the stack's environment, a secret variable as a `{secret}` reference, and the stack's managed domains merged into its services (`domains`: those, per service). `file` is what runs, so a `$$` written for a shell in a command is a single `$` in it: it is not text to deploy again (that is `source`, or stack_export). Also the compose text it was deployed from when the daemon kept it as written (`source`, as stack_export gives it; null for a resolved deploy), and its secrets as references (store name, driver, version; never values).",
         obj(json!({"name": {"type": "string"}}), &["name"]),
         ann.ro,
         |d: &Daemon, a: Value, _c: &Caller| -> Result<Value> {
