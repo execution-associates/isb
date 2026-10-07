@@ -10,7 +10,7 @@ use isb_apps::{app, backup, build, jobs, monitor, notify, s3, template, volume_b
 #[allow(unused_imports)]
 use isb_core::*;
 #[allow(unused_imports)]
-use isb_server::{audit, auth, history, server, servers, web};
+use isb_server::{audit, auth, history, server, web};
 
 pub mod daemon;
 pub mod workspace;

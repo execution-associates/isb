@@ -359,7 +359,6 @@ pub fn proxy(
     let req = isb::server::ssh::SshRequest {
         instance: i,
         keys_of,
-        forwarded_keys: None,
     };
     let mut ws = r.websocket(&format!("/orgs/{o}/api/v1/ssh?{}", req.query()))?;
     isb::server::ssh::pump(&mut ws, std::io::stdin(), std::io::stdout())?;

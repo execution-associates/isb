@@ -20,13 +20,12 @@ isb org create NAME [--cpus N] [--memory 16GiB] [--disk 100GiB] [--instances N]
                     [--bind-root DIR]... [--allow-egress DEST]...
                     [--allow-domain SUFFIX]... [--ingress caddy|cloudflare-tunnel]
                     [--cloudflare-account ID] [--cloudflare-zone ID]
-                    [--server SERVER | --vm [--vm-cpus N] [--vm-memory 4GiB] [--vm-disk 40GiB]]
 isb org update NAME [--cpus N|none] [--memory SIZE|none] [--disk SIZE|none] [--instances N|none]
                     [--default-cpus N] [--default-memory SIZE]
                     [--allow-egress DEST]... [--allow-udp IP:PORT]...
 isb org ls [--json]
 isb org show NAME [--json]
-isb org rm NAME [--force] [--delete-vm]
+isb org rm NAME [--force]
 isb org nesting NAME [on|off]
 sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run] [--public-ingress]
 ```
@@ -35,24 +34,12 @@ sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run] [--public-ingress
 changes an existing org through the daemon: flags left out keep their value,
 and `none` lifts a limit (`isb org update lab --disk none`). `system`
 is not an org name: the incus project `isb-system` holds isb's own services
-(the local registry, dedicated VMs).
+(the local registry).
 
-Where an org runs is chosen once, when it is created
-([Placement](placement.md)):
-
-- by default, on this host;
-- `--server SERVER` creates it on another host instead, one the local daemon
-  (a control plane) added with `isb server add`
-  ([Servers and dedicated VMs](../guides/servers.md)). The org's project,
-  network and workloads then live on that server, and every call for it goes
-  there; `isb org show` and `isb org rm` find it through the daemon;
-- `--vm` runs it in a **dedicated VM**: the local daemon makes a VM on this
-  host for the org alone, with its own kernel and its own incus, registers it
-  as server `vm-NAME` and places the org there. `isb org rm NAME --delete-vm`
-  deletes the VM with the org.
-
-An org does not move between placements afterwards
-([Moving an org](placement.md#moving-an-org)).
+Every org runs on this host, as an incus project of its own. isb manages one
+host; to run orgs on several, or to give an org a kernel of its own, run a
+separate isb on each host or VM and connect their MCP servers to the same
+agent ([Several hosts](../guides/agents.md#several-hosts)).
 
 An org's builds ([Builds and the local registry](../guides/builds.md)) run in
 its own project too, as ordinary unprivileged containers (or VMs for
@@ -67,11 +54,11 @@ and the web UI's org Settings and Platform pages use them:
 
 | Tool | Who | Does |
 |---|---|---|
-| `org_get` | the org's members | limits with what is allocated against each (`allocation`), defaults, network, egress, bind roots, service-name domain (`<org>.isb`), counts, `placement` |
-| `org_list` | platform admins | every org, each with the `server` it runs on (`local` for this daemon) and its `placement` |
-| `org_create` | platform admins | `isb org create` without `--bind-root`; `placement` puts it on a server or in a dedicated VM |
-| `org_update` | platform admins | `isb org update`: limits (`"none"` or `null` lifts one), per-instance defaults, egress exceptions, UDP ports, the domain allowlist (`domains`) and ingress provider (`ingress`, `cloudflare_account`, `cloudflare_zone`) (a different `server` or `placement` is refused) |
-| `org_delete` | platform admins | `isb org rm`, refused while stacks are deployed in the org, and while it has sandboxes unless `force`; `delete_vm` also deletes a dedicated VM |
+| `org_get` | the org's members | limits with what is allocated against each (`allocation`), defaults, network, egress, bind roots, service-name domain (`<org>.isb`), counts |
+| `org_list` | platform admins | every org |
+| `org_create` | platform admins | `isb org create` without `--bind-root` |
+| `org_update` | platform admins | `isb org update`: limits (`"none"` or `null` lifts one), per-instance defaults, egress exceptions, UDP ports, the domain allowlist (`domains`) and ingress provider (`ingress`, `cloudflare_account`, `cloudflare_zone`) |
+| `org_delete` | platform admins | `isb org rm`, refused while stacks are deployed in the org, and while it has sandboxes unless `force` |
 | `org_nesting` | superadmins | whether the org's workspace may run Docker (`isb org nesting ORG on\|off`); `org_get` shows it as `allow_nesting` |
 
 Limits, egress exceptions and the domain allowlist are what keep one org from
@@ -94,11 +81,8 @@ and hosts directory then.
 
 ## What an org is in incus
 
-An org on this host shares the host's kernel with every other local org: the
-project, bridge and ACL below keep them apart, and the kernel is what they
-all trust. `org_get` says so as `placement.isolation`: `shared-kernel` here,
-`own-host` on a server, `own-kernel` in a dedicated VM
-([Placement](placement.md)).
+An org shares the host's kernel with every other org: the project, bridge
+and ACL below keep them apart, and the kernel is what they all trust.
 
 Org `acme` is the incus project `isb-acme` (config `user.isb.org=acme`), its
 bridge `isbbr<hash>` and its network ACL `isb-acme`. A project named `isb-*`
@@ -324,7 +308,7 @@ The hostnames an org's stacks may serve through the ingress
   the first to claim it keeps it.
 
 `--ingress` picks how the org's domains are reached: `caddy` (default) on
-the server's public listeners, or `cloudflare-tunnel` through the org's own
+the daemon's public listeners, or `cloudflare-tunnel` through the org's own
 Cloudflare Tunnel, whose token the org keeps in its secret
 `cloudflare-tunnel-token`. With an API token in `cloudflare-api-token` as
 well, isb manages the tunnel's ingress rules and the hostnames' DNS records;
@@ -361,8 +345,7 @@ changing it later restarts the org's dnsmasq.
 - `isb org rm` deletes the org's directory.
 - `ISB_DNS_DIR` moves the directory, for `isb org` and `isb serve` alike.
 - When the directory is inside the daemon's state directory (a daemon
-  running as root keeps its state in `/var/lib/isb`, as does a server's
-  agent), `isb serve` makes the state directories on the way traversable
+  running as root keeps its state in `/var/lib/isb`), `isb serve` makes the state directories on the way traversable
   (mode 0711: others may pass through, not list) so dnsmasq can reach the
   hosts files; everything in them stays 0600/0700.
 
@@ -374,5 +357,4 @@ directory. dnsmasq still drops to the `incus` user.
 
 `isb org rm NAME` refuses an org that has instances; `--force` deletes them,
 then the project (with its volumes, profiles and buckets), the bridge, the
-ACL and the service-name directory. For an org in a dedicated VM,
-`--delete-vm` deletes the VM too.
+ACL and the service-name directory.

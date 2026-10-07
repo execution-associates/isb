@@ -1442,7 +1442,6 @@ dependencies = [
  "httparse",
  "isb-core",
  "libc",
- "rcgen",
  "ring",
  "rusqlite",
  "rustix 1.1.5",
@@ -1452,7 +1451,6 @@ dependencies = [
  "signal-hook 0.4.4",
  "tempfile",
  "thiserror 2.0.21",
- "time",
  "tungstenite",
  "ureq",
 ]

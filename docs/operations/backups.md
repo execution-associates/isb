@@ -69,19 +69,11 @@ the state directory and the key decrypts everything in it, so:
 Workspace tokens (`<org root>/workspaces/<name>.token.age`) are encrypted to
 the same key.
 
-## A control plane and its servers
+## Several hosts
 
-A control plane's `<state>/servers/pki/` holds the CA every agent trusts. Lose
-it and the control plane can no longer reach its servers: restore it from
-backup, or re-run `isb server add` on each box (which reissues the agent's
-certificate under a new CA) and recreate the placement
-([Servers](../guides/servers.md#failure-modes)).
-
-The control plane stores no secret value, stack definition or workload state
-of an org placed on a server. Each server keeps those itself, under
-`/var/lib/isb/state`, with its own age key at
-`/var/lib/isb/.config/isb/age.txt`. Back up each server the same way, and give
-each its own break-glass recipient (`isb secret reencrypt` there).
+Each host's isb keeps its own state directory and its own age key
+([Several hosts](../guides/agents.md#several-hosts)). Back up each host as
+above, and give each its own break-glass recipient.
 
 ## The audit log's head
 

@@ -1,7 +1,7 @@
 ---
 title: Users, roles and superadmins
 description: Who may do what in isb serve, from an org viewer to a superadmin with the host's reach.
-order: 8
+order: 7
 nav_title: Users and roles
 ---
 
@@ -76,7 +76,7 @@ org's owners and admins map identities to a role in **that org**
   client id>`, with no isb account (no sessions, passkeys or tokens;
   `POST tokens` is `403`). It holds a role in each org that maps it and
   nothing anywhere else: a tool call for another org is refused, `/orgs/<org>/mcp`
-  pins its own org, and the platform, `server_*`, org-management and host
+  pins its own org, and the platform, org-management and host
   tools are never reachable. It is never a superadmin; an identity on the
   superadmin lists is judged as a superadmin first.
 - The mapping alone decides. A tailnet login that is also an isb user's
@@ -122,7 +122,7 @@ Platform admins also:
   remains (creating users, setting passwords, and minting tokens or adding
   SSH keys for someone are on the host only, `isb user` and `isb token`);
 - are the only callers of `server_status`, `org_list`, `org_create`,
-  `org_update`, `org_delete`, the `server_*` tools, `audit_verify`,
+  `org_update`, `org_delete`, `audit_verify`,
   `registry_gc`, `notification_settings`, adding and removing template
   catalogs, and re-encrypting every org's secrets, whatever their role in an
   org (an org owner's token is refused);
@@ -142,7 +142,7 @@ gets, platform admins included:
 | Host tool | Does |
 |---|---|
 | `host_inventory` | every incus project and instance on the host, isb's or not: project, org, type, status, addresses, isb's stack and owner labels |
-| `host_monitor` | live resource use of the host or one remote server (CPU per core, load, memory and swap, pools, disk I/O, interfaces with addresses and rates, the last hour) and each instance's rates; the web UI's **Monitor** page |
+| `host_monitor` | live resource use of this host (CPU per core, load, memory and swap, pools, disk I/O, interfaces with addresses and rates, the last hour) and each instance's rates; the web UI's **Monitor** page |
 | `host_policy` | how the daemon serves: listen addresses, Access, the remote tool policy, what remote specs may ask for, and each superadmin source with its allow list and token count |
 | `superadmin_token_list`, `superadmin_token_revoke` | superadmin tokens' metadata, and revoking one by id |
 | `superadmin_list` | every tailnet and Access superadmin identity, from the flags and from `isb.db`, with whether the daemon can match it (read only) |
@@ -354,9 +354,6 @@ A request carrying `Authorization` is judged by it alone: a bad token is a
 - `org_get` is for the org's members.
 - `audit_list` shows an org's owners and admins their org's entries and
   platform admins everything; `audit_verify` is for platform admins.
-- The `server_*` tools are for platform admins. A call for an org placed on
-  a server is judged on the control plane, then again by the server's agent
-  ([Placement](placement.md#how-the-control-plane-works)).
 - The unix socket is the daemon's own user and reaches everything; so does a
   superadmin. `host_inventory`, `host_monitor`, `host_policy`, `superadmin_token_list`,
   `superadmin_token_revoke` and `superadmin_list` are for superadmins only.

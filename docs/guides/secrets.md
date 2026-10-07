@@ -418,6 +418,3 @@ Remote callers reach these tools in every org they belong to, values
 included, unless the operator hides them with `--deny-tools 'secret_*'`.
 Viewers and tokens scoped to `read` or `deploy` never get secret values
 (`secret_get`, `secret_resolve` are refused to them).
-
-For an org placed on a server, the secrets live on that server, encrypted to
-its agent's own key ([Servers](servers.md#secrets)).

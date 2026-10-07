@@ -77,44 +77,10 @@ pub(super) struct Settings {
     pub cloudflare_account: Option<String>,
     #[serde(default)]
     pub cloudflare_zone: Option<String>,
-    /// Where the org runs: `local` (this daemon) or a server's name. A
-    /// control plane routes a server placement before the tool runs.
-    #[serde(default)]
-    pub server: Option<String>,
-    /// Where the org runs: `"local"`, `{"server": NAME}` or `{"vm": {cpus,
-    /// memory, disk}}` (a dedicated VM). A control plane routes anything
-    /// but local before the tool runs.
-    #[serde(default)]
-    pub placement: Option<Value>,
-    /// With a dedicated VM: wait for it (default), or answer at once with
-    /// the provisioning to follow. Read by the control plane's router.
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub wait: Option<bool>,
 }
 
 impl Settings {
     fn org(&self) -> Result<OrgId> {
-        let mut where_ = json!({});
-        if let Some(s) = &self.server {
-            where_["server"] = json!(s);
-        }
-        if let Some(p) = &self.placement {
-            where_["placement"] = p.clone();
-        }
-        match crate::servers::vm::placement(&where_)? {
-            crate::servers::vm::Placement::Local => {}
-            crate::servers::vm::Placement::Server(s) => {
-                return Err(Error::invalid(format!(
-                    "server {s}: this daemon places no orgs on servers (only a control plane does: docs/guides/servers.md)"
-                )));
-            }
-            crate::servers::vm::Placement::Vm(_) => {
-                return Err(Error::invalid(
-                    "a dedicated VM is made by a control plane; this daemon is a server's agent (docs/guides/servers.md)",
-                ));
-            }
-        }
         let o = OrgId::new(
             self.org
                 .clone()
@@ -246,38 +212,27 @@ fn check_size(what: &str, v: &str) -> Result<()> {
     Ok(())
 }
 
-/// An org as the tools answer it: the incus side, the service-name domain,
-/// and how many members it has.
-/// The orgs that exist: this host's (incus projects with isb's marker)
-/// and, on a control plane, the ones it placed on its servers. What
-/// `whoami` lists, rather than the identity store's org rows, which an org
-/// made or removed past this daemon leaves behind.
-pub(super) fn existing(
-    client: &crate::client::Client,
-    servers: Option<&crate::servers::Servers>,
-) -> Result<Vec<OrgId>> {
+/// The orgs that exist: this host's incus projects with isb's marker.
+/// What `whoami` lists, rather than the identity store's org rows, which an
+/// org made or removed past this daemon leaves behind.
+pub(super) fn existing(client: &crate::client::Client) -> Result<Vec<OrgId>> {
     let mut v = org::names(client)?;
-    if let Some(s) = servers {
-        v.extend(s.placements().into_keys());
-    }
     v.sort();
     v.dedup();
     Ok(v)
 }
 
 /// [`existing`] for the identity endpoints and `whoami`.
-pub(super) fn existing_fn(
-    client: crate::client::Client,
-    servers: Option<Arc<crate::servers::Servers>>,
-) -> crate::auth::ops::OrgsFn {
-    Arc::new(move || existing(&client, servers.as_deref()).map_err(|e| e.to_string()))
+pub(super) fn existing_fn(client: crate::client::Client) -> crate::auth::ops::OrgsFn {
+    Arc::new(move || existing(&client).map_err(|e| e.to_string()))
 }
 
+/// An org as the tools answer it: the incus side, the service-name domain,
+/// and how many members it has.
 fn view(d: &Daemon, o: &OrgInfo) -> Value {
     let mut v = serde_json::to_value(o).unwrap_or_default();
     v["domain"] = json!(format!("{}.isb", o.name));
     v["service_names"] = json!(o.dns_dir.is_some());
-    v["placement"] = super::servers::placement_view(d.servers.as_ref(), &o.name);
     v["members"] = json!(d.users.list_members(&o.name).map(|m| m.len()).unwrap_or(0));
     v["stacks"] = json!(
         d.ctl
@@ -308,21 +263,7 @@ fn settings_props() -> Value {
         "domains": {"type": "array", "items": {"type": "string"}, "description": "Domain suffixes the org's services may serve: example.com allows it and every name under it, *.example.com wildcard hosts too. Replaces the list; [] clears it (any concrete name, no wildcards). The same as `isb org create --allow-domain`."},
         "ingress": {"type": "string", "enum": ["caddy", "cloudflare-tunnel"], "description": "How the org's domains are reached: caddy (the server's public listeners) or cloudflare-tunnel (the org's own tunnel, token in its secret cloudflare-tunnel-token)."},
         "cloudflare_account": {"type": "string", "description": "Cloudflare account id for the tunnel's API calls (default: the tunnel token's); \"\" clears it."},
-        "cloudflare_zone": {"type": "string", "description": "Cloudflare zone id the org's hostnames are in (default: looked up per hostname); \"\" clears it."},
-        "server": {"type": "string", "description": "Where the org runs: local (default) or a server's name (server_list). Set at creation; an org is not moved between servers. Same as placement {\"server\": NAME}."},
-        "placement": {
-            "description": "Where the org runs, set at creation: \"local\" (this host: an incus project sharing its kernel), {\"server\": NAME} (another host, server_list), or {\"vm\": {\"cpus\", \"memory\", \"disk\"}} (a dedicated VM this control plane makes on its own host: the org's own kernel; defaults 2 CPUs, 4GiB, 40GiB). An org is not moved afterwards.",
-            "oneOf": [
-                {"type": "string", "enum": ["local"]},
-                {"type": "object", "properties": {"server": {"type": "string"}}, "required": ["server"], "additionalProperties": false},
-                {"type": "object", "properties": {"vm": {"type": "object", "properties": {
-                    "cpus": {"type": "integer", "minimum": 1, "maximum": 256},
-                    "memory": {"type": "string", "description": "At least 2GiB (default 4GiB)."},
-                    "disk": {"type": "string", "description": "At least 10GiB (default 40GiB)."}
-                }, "additionalProperties": false}}, "required": ["vm"], "additionalProperties": false}
-            ]
-        },
-        "wait": {"type": "boolean", "description": "With a dedicated VM: wait until it is made and the org created (default true; minutes). false answers at once with `provision`; follow it with server_provision_get (name vm-<org>)."}
+        "cloudflare_zone": {"type": "string", "description": "Cloudflare zone id the org's hostnames are in (default: looked up per hostname); \"\" clears it."}
     })
 }
 
@@ -446,8 +387,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
         "Platform admins: delete an org: its project with its volumes, its network, ACL and service names, its members, invitations and tokens, and its metrics history. Refused while it has stacks or instances, unless force=true: then its apps are deleted (as app_delete), its stacks removed (as stack_remove) and its remaining sandboxes deleted first. Its secrets stay on disk under the state directory.",
         schema(
             json!({
-                "force": {"type": "boolean", "description": "Delete its apps, stacks and sandboxes first (default false)."},
-                "delete_vm": {"type": "boolean", "description": "For an org in a dedicated VM: delete the VM and its server registration too (default false: the VM keeps running as an empty server)."}
+                "force": {"type": "boolean", "description": "Delete its apps, stacks and sandboxes first (default false)."}
             }),
             &["org"],
             "The org to delete."
@@ -460,10 +400,6 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
                 org: String,
                 #[serde(default)]
                 force: bool,
-                // An org on this host has no VM of its own.
-                #[serde(default)]
-                #[allow(dead_code)]
-                delete_vm: bool,
             }
             let a: A = args(a)?;
             let id = OrgId::new(a.org)?;
@@ -638,28 +574,5 @@ mod tests {
         };
         assert!(s.org().unwrap().is_default());
         assert!(Settings::default().org().is_err());
-    }
-
-    #[test]
-    fn only_local_placements_reach_the_tool() {
-        let with = |p: Value| Settings {
-            org: Some("acme".into()),
-            placement: Some(p),
-            ..Default::default()
-        };
-        assert!(with(json!("local")).org().is_ok());
-        let e = with(json!({"vm": {}})).org().unwrap_err();
-        assert!(e.to_string().contains("control plane"), "{e}");
-        let e = with(json!({"server": "hel-1"})).org().unwrap_err();
-        assert!(e.to_string().contains("server hel-1"), "{e}");
-        let e = with(json!({"vm": {"memory": "1GiB"}})).org().unwrap_err();
-        assert!(e.to_string().contains("at least 2 GiB"), "{e}");
-        let both = Settings {
-            org: Some("acme".into()),
-            server: Some("x".into()),
-            placement: Some(json!("local")),
-            ..Default::default()
-        };
-        assert!(both.org().is_err());
     }
 }

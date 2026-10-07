@@ -10,9 +10,6 @@
 //!   Access or tailnet identity; the host CLI mints too).
 //! - Org rules (members see their org; owners and admins manage it; only an
 //!   owner touches an owner) are [`crate::auth::ops`]'s.
-//!
-//! The control plane runs them itself (the identity store is its own); an
-//! agent refuses them.
 
 use std::sync::Arc;
 
@@ -109,12 +106,7 @@ fn err(e: AuthError) -> Error {
 
 /// Who a call acts as: the signed-in user, a superadmin's principal, or
 /// (the unix socket) a platform-wide principal with no account.
-fn acting(d: &Daemon, c: &Caller) -> Result<Principal> {
-    if d.servers.is_none() {
-        return Err(Error::Forbidden(
-            "accounts are kept by the control plane: call it, not this server".into(),
-        ));
-    }
+fn acting(c: &Caller) -> Result<Principal> {
     match c {
         Caller::User { principal } => Ok((**principal).clone()),
         Caller::Superadmin(s) => Ok(s.principal.clone()),
@@ -202,7 +194,7 @@ macro_rules! account_tool {
         let f = $f;
         $r.register(
             Tool::new($name, $desc, $schema, move |a, c| {
-                let p = acting(&d, c)?;
+                let p = acting(c)?;
                 f(&d, &p, a, c)
             })
             .title($title)
@@ -233,7 +225,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
         schema(json!({}), &[], NO_ORG),
         ann.ro,
         |d: &Daemon, p: &Principal, _a: Value, c: &Caller| -> Result<Value> {
-            let orgs = super::orgs::existing_fn(d.client.clone(), d.servers.clone());
+            let orgs = super::orgs::existing_fn(d.client.clone());
             let mut v = ops::me(&d.users, p, Some(&orgs)).map_err(err)?;
             if c.is_local() {
                 v["user"] = Value::Null;

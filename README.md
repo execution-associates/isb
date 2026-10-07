@@ -78,9 +78,9 @@ $ isb app create web --project shop --image docker:traefik/whoami -p 127.0.0.1:8
 - [Getting started](docs/getting-started/index.md): install, your first
   sandbox, your first org and app, the web UI
 - [Concepts](docs/concepts/index.md): sandboxes, orgs, apps, stacks,
-  workspaces, placement, the security model, users and roles
+  workspaces, the security model, users and roles
 - [Guides](docs/guides/index.md): deploying apps, builds, databases and
-  backups, domains, secrets, agents and MCP, SSH, servers, dev environments
+  backups, domains, secrets, agents and MCP, SSH, dev environments
 - [Reference](docs/reference/index.md): the CLI, `isb.yaml`, MCP tools, the
   HTTP API, configuration, the rpc protocol
 - [Operations](docs/operations/index.md): host setup, upgrades, backups,

@@ -111,8 +111,7 @@ with `isb.recipe-sha256`, `isb.base`, `isb.built-by` and `isb.built-at`.
 That is what `ls` lists and what `rm` insists on. Images are the host's,
 shared by every org on it (org projects use the host's images), so the image
 tools are for platform admins and superadmins; every org's create form lists
-the host's images with their descriptions. An org placed on another server
-([Servers](servers.md)) uses that server's images.
+the host's images with their descriptions.
 
 | Tool | Does |
 |---|---|

@@ -628,7 +628,7 @@ function SuperadminMcp({ me }: { me: Me }) {
           {source === "access" && (policy.isLoading ? <RowsSkeleton rows={2} /> : <AccessSource allow={p?.superadmin.access ?? null} publicUrl={p?.public_url ?? null} />)}
         </div>
       </Panel>
-      <ToolList filter={(t) => isHostTool(t)} title="Host and platform tools, /mcp only" hint="On top of every tool an org endpoint lists, at /mcp only: the host and superadmin tools for a superadmin, the platform tools (orgs, servers, users) for a platform admin." />
+      <ToolList filter={(t) => isHostTool(t)} title="Host and platform tools, /mcp only" hint="On top of every tool an org endpoint lists, at /mcp only: the host and superadmin tools for a superadmin, the platform tools (orgs, users) for a platform admin." />
     </>
   );
 }

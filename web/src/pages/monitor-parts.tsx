@@ -1,4 +1,4 @@
-// The Monitor page's panels for one server: its summary line, CPU, memory,
+// The Monitor page's panels for this host: its summary line, CPU, memory,
 // network, disk, and the instances table.
 import { Boxes, Cpu, HardDrive, MemoryStick, Network } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -21,13 +21,15 @@ import {
   instanceOrgs,
   isRunning,
   load,
+  meterTone,
   pctText,
+  percent,
   pickInstances,
   plate,
+  size,
   sparkPoints,
   uptime,
 } from "@/lib/monitor";
-import { meterTone, percent, size } from "@/lib/servers";
 import { cn } from "@/lib/utils";
 import { Tag } from "@/pages/org-ui";
 import { Sparkline } from "@/uptime/components";
@@ -230,7 +232,7 @@ function kindTag(kind: string): string | null {
 }
 
 /** `org` starts the org filter there (the Orgs tab links here with it). */
-export function InstancesPanel({ m, partial, org: initialOrg = null }: { m: Monitor; partial: boolean; org?: string | null }) {
+export function InstancesPanel({ m, org: initialOrg = null }: { m: Monitor; org?: string | null }) {
   const [q, setQ] = useState("");
   const [org, setOrg] = useState<string | null>(initialOrg);
   const [sort, setSort] = useState<InstanceSort>("cpu");
@@ -286,11 +288,7 @@ export function InstancesPanel({ m, partial, org: initialOrg = null }: { m: Moni
         </>
       }
     >
-      {partial ? (
-        <Empty icon={<Boxes />} title="No instance detail">
-          This server's isb is too old to report its instances.
-        </Empty>
-      ) : rows.length === 0 ? (
+      {rows.length === 0 ? (
         <Empty icon={<Boxes />} title={q || org || (!all && m.instances.length) ? "Nothing matches" : "No instances"} />
       ) : (
         <Table className="min-w-[46rem]">

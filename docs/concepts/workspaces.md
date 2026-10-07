@@ -284,13 +284,6 @@ That is `$ISB_URL`.
   ([Host firewall](../operations/host-setup.md#host-firewall)). It must
   differ from the ingress's tunnel port (8480).
 
-For an org placed on a server, the server's agent runs the workspace, keeps
-its token and serves the listener on that server's bridge, which takes the
-workspace's token only (org API tokens live on the control plane); the
-control plane forwards the `workspace_*` tools, the terminal and SSH like
-any org call, and the agent reaps the org's sandboxes
-([Servers](../guides/servers.md)).
-
 A `default` org that is incus' own `default` project (no org network) has no
 workspace: create one in an org of its own.
 
@@ -411,9 +404,8 @@ activity, limits and use, and whether the caller made it (`mine`).
 either deadline, recording `sandbox.reaped` in the history with the reason.
 It only takes instances that carry isb's deadlines and are neither a
 workspace, a stack replica nor a build, re-reads each before deleting it,
-skips one with a terminal open, and leaves orgs placed on servers to their
-agents. Sandboxes made by `isb create` and `isb up` on the host have no
-deadlines and are never reaped.
+and skips one with a terminal open. Sandboxes made by `isb create` and
+`isb up` on the host have no deadlines and are never reaped.
 
 The workspace cannot be reached as a sandbox: `sandbox_create` over its name
 and `sandbox_remove` of it are refused.

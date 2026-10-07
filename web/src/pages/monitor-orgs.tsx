@@ -1,12 +1,12 @@
 // Monitor > Orgs: each org's live use beside its limits. An org's limits
 // are incus budgets on what its instances are allocated (stopped ones
 // included), not on what they use, so each bar shows both: live use from
-// its server's host_monitor, allocated against the limit from org_list.
-import { useQueries, useQuery } from "@tanstack/react-query";
+// host_monitor, allocated against the limit from org_list.
+import { useQuery } from "@tanstack/react-query";
 import { Building2, TriangleAlert } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { Link } from "react-router";
-import { callTool, type HostMonitor, type MonitorInstance, type OrgView } from "@/api/tools";
+import { callTool, type Monitor, type OrgView } from "@/api/tools";
 import { Empty, Panel } from "@/components/confirm";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -14,12 +14,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Segmented } from "@/apps/segmented";
 import { errorMessage } from "@/lib/messages";
-import { type Budget, bps, cores, MONITOR_POLL, type OrgSort, type OrgUsage, orgUsage, pctText, pickOrgs, plate, sparkPoints } from "@/lib/monitor";
-import { meterTone, size } from "@/lib/servers";
+import { type Budget, bps, cores, meterTone, MONITOR_POLL, type OrgSort, type OrgUsage, orgUsage, pctText, pickOrgs, plate, size, sparkPoints } from "@/lib/monitor";
 import { cn } from "@/lib/utils";
 import { Sparkline } from "@/uptime/components";
 
-/** The live window asked of each server: the shortest, as only its latest sample is shown. */
+/** The live window asked of host_monitor: the shortest, as only its latest sample is shown. */
 const RANGE = 60;
 
 const SORTS: { value: OrgSort; label: string }[] = [
@@ -31,10 +30,7 @@ const SORTS: { value: OrgSort; label: string }[] = [
 
 type Host = { cpus: number; mem_total: number };
 
-/** host_monitor's answers, in the order asked, and when the latest came. */
-const combine = (rs: { data?: HostMonitor; dataUpdatedAt: number }[]) => ({ data: rs.map((r) => r.data), at: Math.max(0, ...rs.map((r) => r.dataUpdatedAt)) });
-
-/** org_list, and host_monitor of every server an org runs on, polled together. */
+/** org_list and host_monitor, polled together. */
 export function useOrgUsage(enabled: boolean) {
   const list = useQuery({
     enabled,
@@ -42,35 +38,21 @@ export function useOrgUsage(enabled: boolean) {
     queryFn: () => callTool<{ orgs: OrgView[] }>("org_list"),
     refetchInterval: 10_000,
   });
-  const orgs = useMemo(() => list.data?.orgs ?? [], [list.data]);
-  const servers = useMemo(() => [...new Set(orgs.map((o) => (!o.placement || o.placement.server === "local" ? null : o.placement.server)))], [orgs]);
-  const live = useQueries({
-    queries: servers.map((server) => ({
-      enabled: enabled && list.isSuccess,
-      queryKey: ["tool", "host_monitor", server, RANGE],
-      queryFn: () => callTool<HostMonitor, string>("host_monitor", server ? { server, range: RANGE } : { range: RANGE }),
-      refetchInterval: MONITOR_POLL,
-    })),
-    combine,
+  const live = useQuery({
+    enabled,
+    queryKey: ["tool", "host_monitor", RANGE],
+    queryFn: () => callTool<Monitor, string>("host_monitor", { range: RANGE }),
+    refetchInterval: MONITOR_POLL,
   });
-  const { usage, hosts } = useMemo(() => {
-    // Each server's instances; an unreachable or too-old server gives none.
-    const m = new Map<string | null, MonitorInstance[] | null>();
-    const h = new Map<string | null, Host>();
-    servers.forEach((s, i) => {
-      const d = live.data[i];
-      m.set(s, d?.monitor && !d.partial ? d.monitor.instances : null);
-      if (d?.monitor) h.set(s, d.monitor.host);
-    });
-    return { usage: orgUsage(orgs, m), hosts: h };
-  }, [orgs, servers, live.data]);
-  return { list, usage, hosts, at: live.at || list.dataUpdatedAt };
+  const m = live.data;
+  const usage = useMemo(() => orgUsage(list.data?.orgs ?? [], m?.instances ?? null), [list.data, m]);
+  return { list, usage, host: m?.host, at: live.dataUpdatedAt || list.dataUpdatedAt };
 }
 
 export type OrgUsageQuery = ReturnType<typeof useOrgUsage>;
 
 export function OrgsMonitor({ data, layout, setLayout }: { data: OrgUsageQuery; layout: "cards" | "table"; setLayout: (l: "cards" | "table") => void }) {
-  const { list, usage, hosts } = data;
+  const { list, usage, host } = data;
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<OrgSort>("pressure");
   const rows = useMemo(() => pickOrgs(usage, q, sort), [usage, q, sort]);
@@ -94,7 +76,6 @@ export function OrgsMonitor({ data, layout, setLayout }: { data: OrgUsageQuery; 
 
   const running = usage.reduce((a, o) => a + o.running, 0);
   const total = usage.reduce((a, o) => a + o.total, 0);
-  const remote = usage.some((o) => o.server);
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -133,23 +114,19 @@ export function OrgsMonitor({ data, layout, setLayout }: { data: OrgUsageQuery; 
       ) : layout === "cards" ? (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
           {rows.map((o) => (
-            <OrgCard key={o.name} o={o} host={hosts.get(o.server)} />
+            <OrgCard key={o.name} o={o} host={host} />
           ))}
         </div>
       ) : (
-        <OrgTable rows={rows} hosts={hosts} remote={remote} />
+        <OrgTable rows={rows} host={host} />
       )}
       <Legend />
     </div>
   );
 }
 
-/** The Servers tab, on the org's server, its instances filtered to the org. */
-const instancesLink = (o: OrgUsage) => {
-  const p = new URLSearchParams({ org: o.name });
-  if (o.server) p.set("server", o.server);
-  return `/monitor?${p}`;
-};
+/** The host tab, its instances filtered to the org. */
+const instancesLink = (o: OrgUsage) => `/monitor?${new URLSearchParams({ org: o.name })}`;
 
 function PressureTag({ pct }: { pct: number | null }) {
   if (pct === null) return <span className="text-xs text-muted-foreground">no limits</span>;
@@ -181,7 +158,6 @@ function OrgCard({ o, host }: { o: OrgUsage; host?: Host }) {
       <div className="-mt-2 text-xs text-muted-foreground tabular-nums">
         {o.total} {o.total === 1 ? "instance" : "instances"}
         {o.live && ` · ${o.running} running`}
-        {o.server && <span className="font-mono"> · on {o.server}</span>}
       </div>
       <div className="grid gap-2.5">
         <Resource label="CPU" used={o.cpu.used} budget={o.cpu.budget} scale={host?.cpus} text={cpuText(o, host)} />
@@ -202,7 +178,7 @@ function OrgCard({ o, host }: { o: OrgUsage; host?: Host }) {
           </div>
         </div>
       ) : (
-        <div className="border-t pt-2.5 text-xs text-muted-foreground">No live use: its server did not answer</div>
+        <div className="border-t pt-2.5 text-xs text-muted-foreground">No live use yet</div>
       )}
     </Link>
   );
@@ -270,14 +246,13 @@ function Legend() {
   );
 }
 
-function OrgTable({ rows, hosts, remote }: { rows: OrgUsage[]; hosts: Map<string | null, Host>; remote: boolean }) {
+function OrgTable({ rows, host }: { rows: OrgUsage[]; host?: Host }) {
   return (
     <Panel title="Orgs" className={plate}>
       <Table className="min-w-[56rem]">
         <TableHeader className="bg-muted/30">
           <TableRow className="hover:bg-transparent">
             <TableHead className="pl-5">Org</TableHead>
-            {remote && <TableHead>Server</TableHead>}
             <TableHead className="text-right">Instances</TableHead>
             <TableHead className="w-48">CPU</TableHead>
             <TableHead className="w-72">Memory</TableHead>
@@ -288,7 +263,6 @@ function OrgTable({ rows, hosts, remote }: { rows: OrgUsage[]; hosts: Map<string
         </TableHeader>
         <TableBody>
           {rows.map((o) => {
-            const host = hosts.get(o.server);
             const ib = o.instances.budget;
             return (
               <TableRow key={o.name}>
@@ -297,7 +271,6 @@ function OrgTable({ rows, hosts, remote }: { rows: OrgUsage[]; hosts: Map<string
                     {o.name}
                   </Link>
                 </TableCell>
-                {remote && <TableCell className="font-mono text-xs">{o.server ?? "this host"}</TableCell>}
                 <TableCell className="text-right text-[13px] whitespace-nowrap tabular-nums">
                   {o.live ? `${o.running}/${o.total}` : o.total}
                   {ib && <span className="text-muted-foreground"> of {ib.limit}</span>}

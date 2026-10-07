@@ -236,16 +236,6 @@ the org bridge's gateway address, `http://<gateway>:8481`
 
 See [Reaching isb from inside](../concepts/workspaces.md#reaching-isb-from-inside-the-bridge-listener).
 
-## Agents' listener (servers)
-
-A server's agent (`isb serve --agent`) has no public API: its mTLS listener
-admits only the control plane's client certificate, and each request carries
-the control plane's assertion of the caller (`Authorization: IsbAssert
-<base64url JSON>`). It serves the org-scoped routes above for the orgs
-placed on it, plus internal routes the control plane uses
-(`/internal/v1/heartbeat`, `/internal/v1/orgs`, `/internal/v1/cert`). See
-[Servers and dedicated VMs](../guides/servers.md#mtls).
-
 ## Audit
 
 Every call that changes something, every refusal, every secret read,

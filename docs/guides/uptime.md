@@ -260,14 +260,9 @@ metadata. isb recognises all three and never counts them as up:
 
 ## Where checks run, and what they may reach
 
-Checks run in the daemon that runs the org's apps: `isb serve` on a single
-host; for an org placed on a [server](servers.md), that server's agent (the
-`monitor_*` tools follow the org there like every other org tool, and so do
-its monitors, history and channels). The agent sees the app's real URL from
-the network the app lives on, and keeps checking and notifying if the control
-plane is down. What the agent cannot report is its own death: the control
-plane raises `server.unreachable` when a server stops answering its heartbeat
-(3 misses in a row, 10 s apart) and `server.recovered` when it answers again, and a
+Checks run in the daemon that runs the org's apps, `isb serve` on the host,
+which sees the app's real URL from the network the app lives on. What the
+daemon cannot report is its own death: a
 [heartbeat](#host-down-a-dead-mans-switch) covers a host that dies outright.
 
 - A scheduler hands due checks to 8 workers through a bounded queue, so slow
@@ -317,8 +312,8 @@ ISB_HEARTBEAT_URL=https://hc-ping.com/<uuid> isb serve ...
 | `--heartbeat-interval` | `ISB_HEARTBEAT_INTERVAL` | `60s` | 10 s to 1 h; set the outside check's period a little longer |
 
 A 2xx or 3xx answer counts. The daemon logs when the heartbeat starts and
-stops working. Agents take the same flags, so each server can have its own
-check.
+stops working. With [several hosts](agents.md#several-hosts), give each its
+own check.
 
 ## Tools
 

@@ -138,17 +138,6 @@ settings for it.
 | `--history-retention` | `ISB_HISTORY_RETENTION` | `365d` | how long history rows are kept |
 | `--history-max-rows` | `ISB_HISTORY_MAX_ROWS` | `5000000` | past it, the oldest history rows go first |
 
-### Servers
-
-| Flag | Environment | Default | |
-|---|---|---|---|
-| `--agent` | `ISB_AGENT` | off | run as a server's agent for a control plane: no identity store, web UI or `--listen`, an mTLS listener instead; needs the two below |
-| `--agent-listen` | `ISB_AGENT_LISTEN` | | the agent's mTLS address, e.g. `0.0.0.0:7443` (any address: the client certificate is the gate) |
-| `--agent-tls` | `ISB_AGENT_TLS` | | the agent's TLS directory: `ca.crt`, `tls.crt`, `tls.key` |
-
-`isb server add` writes these into the agent's unit; see
-[Servers and dedicated VMs](../guides/servers.md).
-
 ### `isb serve install`
 
 | Flag | Default | |

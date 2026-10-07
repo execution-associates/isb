@@ -33,8 +33,8 @@ pub(crate) enum HostCmd {
     },
 }
 
-/// incus' own default bridge, which isb's image builds, builder images,
-/// dedicated VMs and `isb machine` run on (never an org's bridge).
+/// incus' own default bridge, which isb's image builds, builder images
+/// and `isb machine` run on (never an org's bridge).
 pub(crate) const INCUS_BRIDGE: &str = "incusbr0";
 
 /// The ufw rules org bridges and incus' default bridge need on a
@@ -110,8 +110,7 @@ pub(crate) const EGRESS_SYSCTL_TEXT: &str = "# isb serve's sandbox egress proxy 
 ///   bridged copy of a DHCP broadcast is dropped in FORWARD, and once the
 ///   bridge carries an incus ACL the copy meant for dnsmasq then counts as
 ///   INVALID; a `ufw allow` rule comes too late to see it.
-/// - The same two for `incusbr0`, incus' default bridge (image builds,
-///   dedicated VMs).
+/// - The same two for `incusbr0`, incus' default bridge (image builds).
 /// - Traffic between instances of one org. With br_netfilter on, frames
 ///   bridged within an org's bridge traverse FORWARD, where ufw's routed
 ///   default-deny drops them (only ICMP got through). `--physdev-is-bridged`
@@ -429,7 +428,7 @@ pub(crate) fn host_setup(
         return Err(Error::Invalid("ufw reload failed".into()));
     }
     println!(
-        "org bridges (isbbr*) and {INCUS_BRIDGE} (image builds, dedicated VMs) may now reach DHCP and DNS on this host and egress through {uplink}"
+        "org bridges (isbbr*) and {INCUS_BRIDGE} (image builds) may now reach DHCP and DNS on this host and egress through {uplink}"
     );
     Ok(0)
 }

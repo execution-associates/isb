@@ -1,8 +1,8 @@
 # TASKS
 
 The work plan for turning isb into a multi-tenant platform: orgs as the trust
-boundary, built-in auth, pluggable secrets, a deploy loop, a web UI, day-2
-operations and remote servers. On Linux and macOS. Dokploy is the UX bar; its
+boundary, built-in auth, pluggable secrets, a deploy loop, a web UI and
+day-2 operations, on one host. On Linux and macOS. Dokploy is the UX bar; its
 Apache-2.0 code is a reference for requirements, never copied (nothing under
 any `proprietary/` directory is read at all). `notes/dokploy-requirements.md`
 condenses what it does.
@@ -35,7 +35,7 @@ condenses what it does.
 |---|---|---|
 | titan (Linux, incus 7.5) | integration tests, daemon | the dev host |
 | minime (macOS 27, arm64, 16 GB) | macOS support: `isb machine`, CLI, TUI, web UI in Safari/Chrome | `ssh minime`; installs go through mise or brew, and anything installed for testing is listed here |
-| hcloud EU box (Linux, cheapest that runs incus) | a clean-install target: installer, remote server, public ingress + ACME, federation | `hcloud` with `HCLOUD_TOKEN`; label `owner=isb-platform`; delete when idle |
+| hcloud EU box (Linux, cheapest that runs incus) | a clean-install target: installer, public ingress + ACME | `hcloud` with `HCLOUD_TOKEN`; label `owner=isb-platform`; delete when idle |
 | isb-test (hcloud cx23, nbg1, 2.28.124.127) | Stephan's standing test box: incus 7.5.1 (Zabbly stable), isb at `/usr/local/bin/isb`, `isb host setup` applied, ufw SSH-only | `ssh isb-test` (root); herdr machine `isb-test`; tailnet `isb-test.tail9dd8e.ts.net:8192` (tailnet superadmin); public `https://isb-test.execution.associates` through Cloudflare (EXA account: tunnel `isb-test` 14ac70ec-c3e7-4f72-9f0f-621082636701 run by `cloudflared-isb.service`, proxied CNAME, Access app `isb-test` 5ed14d80-a368-4288-9476-53728c8c6214 with Managed OAuth, allow + `--superadmin-access` knowsuchagency@gmail.com); delete those three with the box; public ingress on (`ISB_INGRESS_HTTP=:80`, `ISB_INGRESS_HTTPS=:443`, `ISB_INGRESS_TUNNELS=true`; ufw allows 80/443), so `host: auto` apps are public at `*.2-28-124-127.sslip.io` with Let's Encrypt certificates; org `tun` uses the Cloudflare Tunnel provider (EXA tunnel `isb-test-org-tun` 8ba64147-a4fe-4f1a-9b6f-96ecbddb190b, proxied CNAME `whoami-isb-test.execution.associates`, rules set by hand, no `cloudflare-api-token`), serving `whoami` there; delete that tunnel and record with the box too; kept, not deleted when idle |
 | browser | web UI end to end | lasso's shared browser (titan-local URLs) or minime-chrome (tailnet/public URLs); close every page opened |
 
@@ -265,15 +265,6 @@ minime only runs binaries downloaded from our CI runs.
   probes made ~48 rows/min per stack otherwise); ~1,800 rows/day on titan,
   ~1.5 KB/row, 365 days or 5M rows. Members see their org's controller and
   incus rows; host objects are platform-admin only.
-- **Servers** (P5.1/P5.2): the control plane authorizes and audits, then
-  forwards to the agent's `/orgs/<org>/...` over mTLS with its statement of
-  the caller, and the agent authorizes again (org pinned twice; an agent
-  refuses orgs not placed on it). Dedicated CA: agents get serverAuth-only
-  certs, the control plane a clientAuth-only one, so no agent can call
-  another. Server events are copied into the control plane's feed (only for
-  orgs placed there). An org is placed once; the default org is local. The
-  SSH key is used only for bootstrap. A remote org's secrets and history
-  live on its server; `audit_list` stays on the control plane.
 - **GitHub sign-in on titan:** the OAuth app "isb (titan)" (owner
   knowsuchagency, client id `Ov23liG4tb3bUknJiwrt`) has callbacks for
   `http://localhost:8192` (titan's isb.service) and `http://localhost:18990`
@@ -299,14 +290,18 @@ minime only runs binaries downloaded from our CI runs.
   `default` project get a startup warning, nothing more: the controller
   recreates them in `isb-default` with new volumes and leaves the old
   instances and volumes in `default` for the operator to delete.
-- **Service names need dnsmasq to reach the DNS root**: a root daemon (or
-  agent) keeps state in `/var/lib/isb` (0700) around `/var/lib/isb/dns`, so
+- **Service names need dnsmasq to reach the DNS root**: a root daemon
+  keeps state in `/var/lib/isb` (0700) around `/var/lib/isb/dns`, so
   names never resolved there; `isb serve` now makes those dirs 0711.
 - **Shared types:** `isb::org::OrgId` (validated name, `incus_project()`,
   `dir(state)`) is the key every org-scoped module uses.
-- **Remote servers: federation, not incus clustering.** Each server runs incus
-  and `isb serve` as an agent; the control plane places orgs on servers and
-  proxies to them over mTLS.
+- **isb is single-host.** One `isb serve` manages the host it runs on, and
+  every org there is an incus project (shared kernel, unprivileged
+  containers). isb has a superadmin MCP server, so managing several hosts is
+  connecting each host's isb MCP server to the same agent; an org that needs
+  its own kernel gets a separate isb inside a VM (or on another machine),
+  connected the same way. There is no control plane, remote server or
+  placement.
 - **Local registry (P2.3) is TLS with an isb CA.** incus pulls OCI images
   only from `https` remotes (plain HTTP is refused) and does not import an
   OCI archive directly. It pulls through skopeo, which trusts a per-registry
@@ -523,8 +518,7 @@ minime only runs binaries downloaded from our CI runs.
   bucket staged and diffed; restore while stopped left detached; discard
   refused a volume that was not a staged restore; the UI restored a backup
   file staged.
-- [ ] W4 follow-ups: a restore's byte count in its run record. (Volumes for
-  orgs on a server: done under Release 1.0, remote-server gaps.)
+- [ ] W4 follow-ups: a restore's byte count in its run record.
 - [x] (workspaces-core) W1 the workspace and its sandboxes, W2 the
   workspace as an org actor, W7 the web UI (docs/concepts/workspaces.md): one
   workspace per org (`max_workspaces`), a container with a home volume
@@ -616,12 +610,9 @@ minime only runs binaries downloaded from our CI runs.
   superadmin identity; the CLI and API were used).
 - [ ] Workspace follow-ups: `isb host setup` on titan for port 8481 (not
   run: the rule is in the code); titan's `--workspace-home-root
-  /srv/workspaces` and migrating clem with `home_bind`; ports and nesting for
-  orgs placed on a server (org_nesting runs on that server's host); workspace
-  images on a server-placed org's server (the image tools build on the control
-  plane's host); a Setup panel on the workspace page (re-run, edit; today the
-  CLI and tools); Access credentials in `isb ssh-proxy`. (Workspaces and SSH
-  on orgs placed on a server: done under Release 1.0.)
+  /srv/workspaces` and migrating clem with `home_bind`; a Setup panel on the
+  workspace page (re-run, edit; today the CLI and tools); Access credentials
+  in `isb ssh-proxy`.
 
 ## Release 1.0
 
@@ -663,12 +654,12 @@ Finishing this workstream is isb **1.0.0** (Stephan, 2026-10-03), not another 0.
 - [ ] PR `platform` → `main` with release notes (the user-visible changes since 0.7, and breaking changes: the default org, the crate split).
 - [ ] Bump to 1.0.0 everywhere the release process lists, for all six crates together; tag; publish (crates.io `cargo publish --workspace`, PyPI, npm) per the release process.
 - [ ] Upgrade titan's `isb.service` from 0.7.0; `isb host setup`; `--workspace-home-root /srv/workspaces`.
-- [x] (branch `sandbox-egress`) lasso plugin sandboxing: per-sandbox egress allowlist (`egress: [host[:port]]` / `none`, domains and `*.` suffixes; a bridge, ACL and filtering dnsmasq per sandbox plus a host-side proxy in `isb serve`; containers and VMs) and secrets that never enter the guest (placeholder env var, swapped on the wire only towards approved hosts, per-sandbox CA, verified upstream TLS); surfaces: compose, `isb create --egress/--secret`, rpc and both SDKs, `sandbox_create`; docs/guides/egress.md. **Verify:** integration tests `tests/egress.rs` (container and VM: DNS, direct public and private IPs, `none`, secret substitution to a local HTTPS server with its own CA, placeholder unchanged to a non-approved host, teardown) and a scratch `isb serve` on titan (default org too, daemon restart, live list edit, orphan sweep); `isb exec -T` into a VM: p50 0.9-1.4 ms, p95 2.4-4.7 ms per line over 300 lines (container p50 0.3-0.5 ms). Left: `egress` on an existing open sandbox needs a recreate; remote servers' bootstrap does not run `host setup --sandbox-egress`; request bodies are not rewritten and h2 is not offered to intercepted hosts. On release run `lasso notify "isb <version>: per-sandbox egress allowlist + on-the-wire secrets ready for lasso plugins"`.
+- [x] (branch `sandbox-egress`) lasso plugin sandboxing: per-sandbox egress allowlist (`egress: [host[:port]]` / `none`, domains and `*.` suffixes; a bridge, ACL and filtering dnsmasq per sandbox plus a host-side proxy in `isb serve`; containers and VMs) and secrets that never enter the guest (placeholder env var, swapped on the wire only towards approved hosts, per-sandbox CA, verified upstream TLS); surfaces: compose, `isb create --egress/--secret`, rpc and both SDKs, `sandbox_create`; docs/guides/egress.md. **Verify:** integration tests `tests/egress.rs` (container and VM: DNS, direct public and private IPs, `none`, secret substitution to a local HTTPS server with its own CA, placeholder unchanged to a non-approved host, teardown) and a scratch `isb serve` on titan (default org too, daemon restart, live list edit, orphan sweep); `isb exec -T` into a VM: p50 0.9-1.4 ms, p95 2.4-4.7 ms per line over 300 lines (container p50 0.3-0.5 ms). Left: `egress` on an existing open sandbox needs a recreate; request bodies are not rewritten and h2 is not offered to intercepted hosts. On release run `lasso notify "isb <version>: per-sandbox egress allowlist + on-the-wire secrets ready for lasso plugins"`.
 - [x] (branch `isb-vm-mounts-no-root-owned-or-setuid-files-on-the-host`) VM host bind mounts are translated by virtiofsd: isb sets `raw.idmap` on every VM with a host bind mount (incus 7.5+ runs virtiofsd with `--translate-uid/gid` map + forbid-guest), so exactly one guest uid/gid (the service user; root when `user:` is unset) reads and writes as the invoking user and every other guest id is refused; refuses incus < 7.5 or unreadable; `idmap: none` opts out with a warning. Found by lasso's plugin work: before, guest root made root-owned setuid files and device nodes on titan. Setuid bits on the mapped id's own files remain (invoker-owned); `nosuid` host mount or `:ro` closes that. **Verify:** `tests/integration.rs` `virtual_machine` (chown/mknod/other-uid refused, files owned by the invoker) on titan incus 7.5.1. Not released.
 - [ ] Marketing site pulls isb docs from `main` (or the v1.0.0 tag) instead of `platform`.
 - [x] Uptime monitoring (branch `uptime`): `monitor_*` tools (HTTP(S), TCP and app monitors; thresholds, hysteresis, flap damping), apps with a served domain get `app-<name>` automatically, `monitor.down` / `monitor.up` / `monitor.cert_expiring` with details to channels, 7 d raw and 90 d hourly history with incidents, the Uptime section, monitor pages, the app card and the overview banner, and `--heartbeat-url` as a dead man's switch (docs/guides/uptime.md).
 - [x] (coolify-templates) Coolify's template catalog next to Dokploy's: `--format coolify` (a checkout of coollabsio/coolify, or its raw files at a URL, listed with GitHub's directory listing and a read of each header), a translator from a template's compose file (header comments to metadata and logo; `SERVICE_URL_*`/`SERVICE_FQDN_*` to domain variables on the declaring service, the generated `SERVICE_*` kinds to generated variables, `${VAR:-default}`/`:?` to inputs, inline `content:` to files; the same refusals and notes as Dokploy's, whose compose rules moved to `template/shared.rs`), the same report in the UI and CLI, a one-click "Fill in Coolify's catalog" in the catalogs dialog, docs (`guides/templates.md`, `guides/from-coolify.md`). Over all 386 files of `templates/compose`: 27 `# ignore: true`, 359 offered: 231 clean, 52 with notes, 76 refused (a volume shared by several services 22, the container socket 20, a one-shot job 11, `cap_add` 10, a host path 10); every deployable one plans. **Verified** on titan with a scratch daemon (own state dir, socket and loopback ports, an org `cooltest`, internal ACME): `coolify/umami` (Postgres, generated secrets, heartbeat 200), `coolify/searxng` (inline `settings.yml`: `format=json` answered, which the image refuses by default), `coolify/gotify` served through the ingress, then everything removed. Left: a relative-path health check (`extra/healthcheck`) is dropped with a note because isb runs health checks from `/` rather than the image's working directory; a volume shared by several services, one-shot init jobs and a dotted environment name are refused (isb has no equivalent).
-- [ ] Uptime follow-ups: a public status page per org (off by default); `isb monitor` CLI commands; the control plane's `server.*` events reach only the control plane's channels for an org placed on a server, whose channels live on the agent.
+- [ ] Uptime follow-ups: a public status page per org (off by default); `isb monitor` CLI commands.
 
 ## Log
 

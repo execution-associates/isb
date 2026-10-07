@@ -59,24 +59,6 @@ pub(crate) enum OrgCmd {
         /// per hostname).
         #[arg(long, value_name = "ID")]
         cloudflare_zone: Option<String>,
-        /// Run the org on this server (`isb server ls`) instead of this
-        /// host, through the local daemon. Set once: orgs do not move.
-        #[arg(long, value_name = "SERVER")]
-        server: Option<String>,
-        /// Run the org in a dedicated VM the local daemon makes on this
-        /// host: its own kernel, registered as server vm-<org>. Takes a few
-        /// minutes; rerun to retry.
-        #[arg(long, conflicts_with = "server")]
-        vm: bool,
-        /// The dedicated VM's CPUs (default 2).
-        #[arg(long, requires = "vm", value_name = "N")]
-        vm_cpus: Option<u32>,
-        /// The dedicated VM's memory (default 4GiB, at least 2GiB).
-        #[arg(long, requires = "vm", value_name = "SIZE")]
-        vm_memory: Option<String>,
-        /// The dedicated VM's disk (default 40GiB, at least 10GiB).
-        #[arg(long, requires = "vm", value_name = "SIZE")]
-        vm_disk: Option<String>,
     },
     /// Change an existing org's limits, per-instance defaults, egress
     /// exceptions or UDP ports, through the daemon (the org_update tool).
@@ -140,10 +122,6 @@ pub(crate) enum OrgCmd {
         name: String,
         #[arg(long)]
         force: bool,
-        /// For an org in a dedicated VM: delete the VM (and its server
-        /// registration) too.
-        #[arg(long)]
-        delete_vm: bool,
     },
 }
 
@@ -175,85 +153,7 @@ pub(crate) fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
             ingress,
             cloudflare_account,
             cloudflare_zone,
-            server,
-            vm,
-            vm_cpus,
-            vm_memory,
-            vm_disk,
         } => {
-            let placement = if vm {
-                let mut size = serde_json::json!({});
-                if let Some(c) = vm_cpus {
-                    size["cpus"] = serde_json::json!(c);
-                }
-                if let Some(m) = vm_memory {
-                    size["memory"] = serde_json::json!(m);
-                }
-                if let Some(d) = vm_disk {
-                    size["disk"] = serde_json::json!(d);
-                }
-                Some(serde_json::json!({"vm": size}))
-            } else {
-                server
-                    .filter(|s| s != "local")
-                    .map(|s| serde_json::json!({"server": s}))
-            };
-            if let Some(placement) = placement {
-                if !bind_root.is_empty()
-                    || !allow_domain.is_empty()
-                    || ingress.is_some()
-                    || cloudflare_account.is_some()
-                    || cloudflare_zone.is_some()
-                {
-                    return Err(Error::Invalid(
-                        "--server, --vm: bind roots, domains and the ingress provider of an org on a server are not set from here yet".into(),
-                    ));
-                }
-                let mut a = serde_json::json!({"org": name, "placement": placement});
-                for (k, v) in [
-                    ("cpus", cpus),
-                    ("instances", instances),
-                    ("default_cpus", default_cpus),
-                ] {
-                    if let Some(v) = v {
-                        a[k] = serde_json::json!(v);
-                    }
-                }
-                for (k, v) in [
-                    ("memory", memory),
-                    ("disk", disk),
-                    ("default_memory", default_memory),
-                ] {
-                    if let Some(v) = v {
-                        a[k] = serde_json::json!(v);
-                    }
-                }
-                for (k, list) in [("egress", allow_egress), ("udp", allow_udp)] {
-                    if !list.is_empty() {
-                        let e: Vec<String> = if list == ["none"] { vec![] } else { list };
-                        a[k] = serde_json::json!(e);
-                    }
-                }
-                let v = if vm {
-                    a["wait"] = serde_json::json!(false);
-                    eprintln!(
-                        "making a dedicated VM for {name} (vm-{name}; a few minutes the first time)"
-                    );
-                    call("org_create", a, SHORT)?;
-                    servers::follow(&format!("vm-{name}"))?
-                } else {
-                    call("org_create", a, Duration::from_secs(300))?
-                };
-                println!(
-                    "{} on server {} (project {}, network {} {})",
-                    v["name"].as_str().unwrap_or(""),
-                    v["server"].as_str().unwrap_or(""),
-                    v["project"].as_str().unwrap_or(""),
-                    v["network"].as_str().unwrap_or(""),
-                    v["subnet"].as_str().unwrap_or("")
-                );
-                return Ok(0);
-            }
             let domains = if allow_domain.is_empty() {
                 None
             } else if allow_domain == ["none"] {
@@ -413,16 +313,7 @@ pub(crate) fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
         }
         OrgCmd::Show { name, json } => {
             let id = OrgId::new(name)?;
-            let o = match org::get(&c, &id) {
-                Err(e) if e.is_not_found() => {
-                    // Perhaps an org on a server: the daemon knows.
-                    let v =
-                        call("org_get", serde_json::json!({"org": id}), SHORT).map_err(|_| e)?;
-                    print_json(&v);
-                    return Ok(0);
-                }
-                r => r?,
-            };
+            let o = org::get(&c, &id)?;
             if json {
                 print_json(&o);
             } else {
@@ -519,35 +410,8 @@ pub(crate) fn org(ctx: &Ctx, cmd: OrgCmd) -> Result<u8> {
             }
             Ok(0)
         }
-        OrgCmd::Rm {
-            name,
-            force,
-            delete_vm,
-        } => {
+        OrgCmd::Rm { name, force } => {
             let id = OrgId::new(name)?;
-            if let Err(e) = org::get(&c, &id) {
-                if e.is_not_found() {
-                    // Perhaps an org on a server: the daemon deletes it there.
-                    let v = call(
-                        "org_delete",
-                        serde_json::json!({"org": id, "force": force, "delete_vm": delete_vm}),
-                        Duration::from_secs(300),
-                    )
-                    .map_err(|d| if d.is_not_found() { e } else { d })?;
-                    if let Some(vm) = v["deleted_vm"].as_str() {
-                        eprintln!("deleted its VM {vm}");
-                    }
-                    for n in v["notes"].as_array().into_iter().flatten() {
-                        eprintln!("note: {}", n.as_str().unwrap_or(""));
-                    }
-                    return Ok(0);
-                }
-            }
-            if delete_vm {
-                return Err(Error::Invalid(format!(
-                    "--delete-vm: org {id} runs on this host, not in a dedicated VM"
-                )));
-            }
             // With a daemon, it deletes the org's apps and stacks first: on
             // their own, removed instances would be brought back by their
             // stacks.
@@ -658,7 +522,7 @@ mod tests {
             l[5],
             "defaults   1 CPU, 512MiB memory, 10GiB root disk per instance whose spec sets none"
         );
-        // An org on a server whose daemon reports no allocation: the limit.
+        // A daemon that reports no allocation: the limit.
         let l = limit_lines(&json!({"instances": 0, "cpus": "2"}));
         assert_eq!(l[1], "cpus       2");
         assert!(l[4].starts_with("defaults"));

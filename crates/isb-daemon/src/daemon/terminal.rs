@@ -75,13 +75,6 @@ impl Pty for ExecPty {
 pub(super) fn terminal(d: Arc<Daemon>) -> Terminal {
     Arc::new(
         move |c: &Caller, org: &OrgId, t: &TermRequest| -> Result<Box<dyn Pty>> {
-            // An org on another server: its agent opens the shell.
-            if let Some((s, server)) = d.remote(org) {
-                let who = crate::servers::wire::Assertion::for_caller(c)
-                    .ok_or_else(|| Error::Forbidden(format!("{c} cannot open a terminal")))?;
-                s.check_protocol(&server, crate::servers::upgrade::MIN_PROTOCOL)?;
-                return s.client(&server)?.terminal(&who, org, t);
-            }
             let oc = crate::org::client(&d.client, org);
             // Any instance of the org the caller may exec into (a
             // workspace, a sandbox): the org is the boundary.

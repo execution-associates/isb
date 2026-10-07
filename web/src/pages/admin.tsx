@@ -6,10 +6,8 @@ import {
   MoreHorizontal,
   Network,
   Plus,
-  RotateCcw,
   ScrollText,
   Server,
-  ServerCog,
   ShieldCheck,
   ShieldOff,
   Trash2,
@@ -17,12 +15,11 @@ import {
   UserX,
   Users,
 } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
 import { type AdminUser, auth } from "@/api/auth";
-import { callTool, type OrgView, type ProvisionView, type ServerStatus } from "@/api/tools";
-import { ProvisionProgress, useProvision } from "@/components/provision-progress";
+import { callTool, type OrgView, type ServerStatus } from "@/api/tools";
 import { TabLinks } from "@/apps/components";
 import { PageHeader } from "@/components/app-shell";
 import { ConfirmDialog, Empty, Panel, PersonAvatar } from "@/components/confirm";
@@ -40,7 +37,6 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { limitLabel, orgNameProblem, parseEgress, plural } from "@/lib/admin";
-import { type PlacementChoice, placementArgs, placementLabel } from "@/lib/servers";
 import { dateTime, relativeTime } from "@/lib/format";
 import { errorMessage } from "@/lib/messages";
 import { useMe } from "@/lib/session";
@@ -48,17 +44,15 @@ import { cn } from "@/lib/utils";
 import { HistoryPanel } from "@/pages/history";
 import { DeleteOrgDialog } from "@/pages/org-settings";
 import { RowsSkeleton, Tag } from "@/pages/org-ui";
-import { ServerHealth, ServersTab, useServerList } from "@/pages/servers";
 
 const TABS = [
   { id: "orgs", label: "Orgs", icon: Building2 },
   { id: "users", label: "Users", icon: Users },
   { id: "server", label: "This host", icon: Server },
-  { id: "servers", label: "Servers", icon: ServerCog },
   { id: "history", label: "History", icon: ScrollText },
 ] as const;
 
-/** Platform administration: every org, every user, the server. */
+/** Platform administration: every org, every user, this host. */
 export function AdminPage() {
   const me = useMe().data!;
   const { tab = "orgs" } = useParams();
@@ -66,12 +60,11 @@ export function AdminPage() {
   if (!TABS.some((t) => t.id === tab)) return <Navigate to="/admin/orgs" replace />;
   return (
     <>
-      <PageHeader title="Platform" description="Every org, user and server this control plane runs. Only platform admins see this." />
+      <PageHeader title="Platform" description="Every org and user on this host. Only platform admins see this." />
       <TabLinks tabs={TABS.map((t) => ({ ...t, to: `/admin/${t.id}` }))} active={tab} />
       {tab === "orgs" && <OrgsTab />}
       {tab === "users" && <UsersTab />}
       {tab === "server" && <ServerTab />}
-      {tab === "servers" && <ServersTab />}
       {tab === "history" && <HistoryPanel orgs={me.orgs} />}
     </>
   );
@@ -127,7 +120,6 @@ function OrgsTab() {
               <TableHead className="hidden text-right sm:table-cell">Members</TableHead>
               <TableHead className="hidden text-right sm:table-cell">Stacks</TableHead>
               <TableHead className="hidden w-44 pl-8 lg:table-cell">Instances</TableHead>
-              <TableHead className="hidden md:table-cell">Runs on</TableHead>
               <TableHead className="hidden xl:table-cell">Subnet</TableHead>
               <TableHead className="hidden xl:table-cell">Quota</TableHead>
               <TableHead className="w-12 pr-5" aria-label="Actions" />
@@ -149,7 +141,7 @@ function OrgsTab() {
                           {o.name}
                         </Link>
                         <div className="truncate text-xs text-muted-foreground sm:hidden">
-                          {plural(o.members, "member")} · {plural(o.stacks, "stack")} · {placementLabel(o.placement).where}
+                          {plural(o.members, "member")} · {plural(o.stacks, "stack")}
                         </div>
                       </div>
                     </div>
@@ -168,10 +160,6 @@ function OrgsTab() {
                         </span>
                       )}
                     </div>
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell">
-                    <div className="text-[13px] leading-tight">{placementLabel(o.placement).where}</div>
-                    <div className="text-xs text-muted-foreground">{placementLabel(o.placement).isolation}</div>
                   </TableCell>
                   <TableCell className="hidden font-mono text-xs text-muted-foreground xl:table-cell">{o.subnet ?? "—"}</TableCell>
                   <TableCell className="hidden text-[13px] text-muted-foreground xl:table-cell">
@@ -212,20 +200,14 @@ function OrgsTab() {
 function CreateOrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const servers = useServerList(open);
   const [name, setName] = useState("");
   const [cpus, setCpus] = useState("");
   const [memory, setMemory] = useState("");
   const [egress, setEgress] = useState("");
-  const [where, setWhere] = useState<PlacementChoice>({ kind: "local" });
-  const [vm, setVm] = useState({ cpus: "2", memory: "4GiB", disk: "40GiB" });
   const [touched, setTouched] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [running, setRunning] = useState<ProvisionView | null>(null);
-  const prov = useProvision(running?.name ?? null, running ?? undefined);
   const problem = orgNameProblem(name.trim());
-  const vmOk = servers.data?.dedicated_vm.supported ?? false;
   const close = (v: boolean) => {
     onOpenChange(v);
     if (!v) {
@@ -233,30 +215,17 @@ function CreateOrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
       setCpus("");
       setMemory("");
       setEgress("");
-      setWhere({ kind: "local" });
-      setVm({ cpus: "2", memory: "4GiB", disk: "40GiB" });
       setTouched(false);
       setError(null);
-      setRunning(null);
     }
   };
   const created = async (org: string) => {
     toast.success(`Org ${org} created`);
     await qc.invalidateQueries({ queryKey: ["tool", "org_list"] });
-    await qc.invalidateQueries({ queryKey: ["tool", "server_list"] });
     await qc.invalidateQueries({ queryKey: ["me"] });
     close(false);
     navigate(`/orgs/${encodeURIComponent(org)}/members`);
   };
-  const v = prov.data ?? running;
-  // A dedicated VM's org is ready when its provisioning is: open it.
-  const opened = useRef<string | null>(null);
-  useEffect(() => {
-    if (v?.state === "done" && opened.current !== v.name) {
-      opened.current = v.name;
-      void created(v.org ?? name.trim());
-    }
-  });
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setTouched(true);
@@ -270,19 +239,9 @@ function CreateOrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
     if (memory.trim()) args.memory = memory.trim();
     const e2 = parseEgress(egress);
     if (e2.length) args.egress = e2;
-    try {
-      Object.assign(args, placementArgs(where.kind === "vm" ? { kind: "vm", ...vm } : where));
-    } catch (err) {
-      return setError((err as Error).message);
-    }
     setPending(true);
     setError(null);
     try {
-      if (where.kind === "vm") {
-        const r = await callTool<{ provision: ProvisionView }>("org_create", args);
-        setRunning(r.provision);
-        return;
-      }
       const o = await callTool<OrgView>("org_create", args);
       for (const n of o.notes ?? []) if (/service names are off/.test(n)) toast.warning(n);
       await created(o.name);
@@ -292,150 +251,48 @@ function CreateOrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
       setPending(false);
     }
   };
-  const choice = (id: string, selected: boolean, disabled: boolean, onPick: () => void, title: ReactNode, body: ReactNode, extra?: ReactNode) => (
-    <label
-      key={id}
-      className={cn(
-        "flex items-start gap-3 rounded-md border p-3 text-sm",
-        disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer",
-        selected && "border-brand/50 bg-brand/5",
-      )}
-    >
-      <input type="radio" name="placement" className="mt-0.5 size-4 accent-brand" checked={selected} disabled={disabled} onChange={onPick} />
-      <span className="min-w-0 flex-1">
-        <span className="flex flex-wrap items-center gap-x-2 font-medium">{title}</span>
-        <span className="block text-xs leading-relaxed text-muted-foreground">{body}</span>
-        {extra}
-      </span>
-    </label>
-  );
-  const remote = servers.data?.servers.filter((s) => s.kind === "ssh") ?? [];
   return (
     <Dialog open={open} onOpenChange={close}>
       <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>{v ? `Making ${v.org ?? name}'s VM` : "New org"}</DialogTitle>
-          <DialogDescription>
-            {v
-              ? `A VM of its own on this host (server ${v.name}), with incus and the isb agent inside. A few minutes the first time.`
-              : "An isolated incus project with its own network. Invite its first owner from its Members page."}
-          </DialogDescription>
+          <DialogTitle>New org</DialogTitle>
+          <DialogDescription>An isolated incus project with its own network. Invite its first owner from its Members page.</DialogDescription>
         </DialogHeader>
-        {v ? (
-          <>
-            <ProvisionProgress p={v} error={prov.error} />
-            <DialogFooter>
-              {v.state === "failed" && (
-                <Button variant="outline" onClick={() => setRunning(null)}>
-                  <RotateCcw />
-                  Retry
-                </Button>
-              )}
-              {v.state === "done" ? (
-                <Button onClick={() => void created(v.org ?? name.trim())}>Open {v.org ?? name}</Button>
-              ) : (
-                <Button variant={v.state === "failed" ? "ghost" : "default"} onClick={() => close(false)}>
-                  {v.state === "running" ? "Run in background" : "Close"}
-                </Button>
-              )}
-            </DialogFooter>
-          </>
-        ) : (
-          <form onSubmit={submit} className="grid min-w-0 gap-4">
-            <FormError>{error}</FormError>
-            <Field label="Name" error={touched ? problem : null} hint="Lowercase letters, digits and -, starting with a letter.">
-              {(id, d) => (
-                <Input id={id} aria-describedby={d} autoFocus spellCheck={false} value={name} onChange={(e) => setName(e.target.value)} placeholder="acme" className="font-mono" />
-              )}
+        <form onSubmit={submit} className="grid min-w-0 gap-4">
+          <FormError>{error}</FormError>
+          <Field label="Name" error={touched ? problem : null} hint="Lowercase letters, digits and -, starting with a letter.">
+            {(id, d) => (
+              <Input id={id} aria-describedby={d} autoFocus spellCheck={false} value={name} onChange={(e) => setName(e.target.value)} placeholder="acme" className="font-mono" />
+            )}
+          </Field>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Org CPUs (optional)" hint="Quota across the org.">
+              {(id, d) => <Input id={id} aria-describedby={d} inputMode="numeric" value={cpus} onChange={(e) => setCpus(e.target.value)} placeholder="unlimited" />}
             </Field>
-            <fieldset className="grid gap-2">
-              <legend className="mb-1 text-sm font-medium">Where it runs</legend>
-              {choice(
-                "local",
-                where.kind === "local",
-                false,
-                () => setWhere({ kind: "local" }),
-                <>
-                  This host <span className="font-normal text-muted-foreground">· shared kernel</span>
-                </>,
-                "An incus project with its own network, quotas and firewall rules; containers share this host's kernel.",
-              )}
-              {remote.map((s) =>
-                choice(
-                  `server:${s.name}`,
-                  where.kind === "server" && where.server === s.name,
-                  s.health.state !== "up",
-                  () => setWhere({ kind: "server", server: s.name }),
-                  <>
-                    {s.name} <span className="font-normal text-muted-foreground">· another host</span>
-                    <ServerHealth s={s} />
-                  </>,
-                  `${s.health.heartbeat?.host?.hostname ?? s.address}; the org's workloads run only there.`,
-                ),
-              )}
-              {choice(
-                "vm",
-                where.kind === "vm",
-                !vmOk,
-                () => setWhere({ kind: "vm", ...vm }),
-                <>
-                  Dedicated VM <span className="font-normal text-muted-foreground">· its own kernel</span>
-                </>,
-                vmOk || servers.isLoading ? (
-                  <>
-                    A VM on this host made for this org (server <span className="font-mono">vm-{name.trim() || "name"}</span>), with incus inside; the
-                    strongest isolation here. Takes a few minutes.
-                  </>
-                ) : (
-                  <>Not available: {servers.data?.dedicated_vm.reason ?? (servers.error ? errorMessage(servers.error) : "unknown")}</>
-                ),
-                where.kind === "vm" && (
-                  <span className="mt-2 grid grid-cols-3 gap-2">
-                    {(
-                      [
-                        ["cpus", "CPUs"],
-                        ["memory", "Memory"],
-                        ["disk", "Disk"],
-                      ] as const
-                    ).map(([k, label]) => (
-                      <span key={k} className="grid gap-1">
-                        <span className="text-xs text-muted-foreground">VM {label}</span>
-                        <Input aria-label={`VM ${label}`} value={vm[k]} onChange={(e) => setVm((x) => ({ ...x, [k]: e.target.value }))} className="h-8 font-mono" />
-                      </span>
-                    ))}
-                  </span>
-                ),
-              )}
-            </fieldset>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Org CPUs (optional)" hint="Quota across the org.">
-                {(id, d) => <Input id={id} aria-describedby={d} inputMode="numeric" value={cpus} onChange={(e) => setCpus(e.target.value)} placeholder="unlimited" />}
-              </Field>
-              <Field label="Org memory (optional)" hint="Quota, e.g. 16GiB">
-                {(id, d) => <Input id={id} aria-describedby={d} value={memory} onChange={(e) => setMemory(e.target.value)} placeholder="unlimited" />}
-              </Field>
-            </div>
-            <Field label="Egress exceptions (optional)" hint="Private destinations it may reach, one per line: CIDR[:PORTS[/tcp|udp]].">
-              {(id, d) => (
-                <textarea
-                  id={id}
-                  aria-describedby={d}
-                  rows={2}
-                  spellCheck={false}
-                  value={egress}
-                  onChange={(e) => setEgress(e.target.value)}
-                  className="w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
-                />
-              )}
+            <Field label="Org memory (optional)" hint="Quota, e.g. 16GiB">
+              {(id, d) => <Input id={id} aria-describedby={d} value={memory} onChange={(e) => setMemory(e.target.value)} placeholder="unlimited" />}
             </Field>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => close(false)}>
-                Cancel
-              </Button>
-              <SubmitButton pending={pending}>{where.kind === "vm" ? "Create org and VM" : "Create org"}</SubmitButton>
-            </DialogFooter>
-          </form>
-        )}
+          </div>
+          <Field label="Egress exceptions (optional)" hint="Private destinations it may reach, one per line: CIDR[:PORTS[/tcp|udp]].">
+            {(id, d) => (
+              <textarea
+                id={id}
+                aria-describedby={d}
+                rows={2}
+                spellCheck={false}
+                value={egress}
+                onChange={(e) => setEgress(e.target.value)}
+                className="w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
+              />
+            )}
+          </Field>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => close(false)}>
+              Cancel
+            </Button>
+            <SubmitButton pending={pending}>Create org</SubmitButton>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

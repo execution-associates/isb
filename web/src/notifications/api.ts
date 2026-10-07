@@ -121,14 +121,6 @@ export const EVENT_GROUPS: { subject: string; label: string; kinds: { kind: stri
     ],
   },
   {
-    subject: "server",
-    label: "Servers",
-    kinds: [
-      { kind: "server.unreachable", label: "Unreachable" },
-      { kind: "server.recovered", label: "Recovered" },
-    ],
-  },
-  {
     subject: "secret",
     label: "Secrets",
     kinds: [{ kind: "secret.rotated", label: "Rotated" }],

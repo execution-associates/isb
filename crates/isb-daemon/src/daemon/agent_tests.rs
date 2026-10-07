@@ -51,7 +51,6 @@ fn an_agent_identity_administers_only_the_orgs_that_map_it() {
         "org_delete",
         "org_create",
         "org_list",
-        "server_add",
         "user_list",
     ] {
         assert!(!ok(&admin, t, a("acme")), "{t}");

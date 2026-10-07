@@ -108,7 +108,7 @@ fn host_tools_are_superadmin_only_and_superadmins_reach_everything() {
         assert!(ok(&Caller::Local { uid: None }, t, json!({})), "{t}");
     }
     // Every org, every platform tool, as the socket does.
-    for t in ["org_delete", "server_add", "secret_get", "audit_verify"] {
+    for t in ["org_delete", "user_update", "secret_get", "audit_verify"] {
         assert!(ok(&sa, t, json!({"org": "anything"})), "{t}");
     }
     assert!(sa.is_trusted() && !sa.is_local());
@@ -147,7 +147,7 @@ fn a_workspace_token_administers_its_org_and_nothing_else() {
         !ok(&admin, "secret_get", json!({"name": "x"})),
         "default org"
     );
-    for t in ["org_update", "org_delete", "org_list", "server_add"] {
+    for t in ["org_update", "org_delete", "org_list", "user_list"] {
         assert!(!ok(&admin, t, a("acme")), "{t}");
     }
     for t in superadmin::TOOLS {

@@ -214,11 +214,10 @@ function Palette({ me, org, close }: { me: Me; org: string | null; close: () => 
     if (me.platform_admin) {
       out.push({ id: "admin:orgs", group: "Platform", title: "All orgs", icon: ShieldCheck, keywords: ["platform", "admin"], run: go("/admin/orgs") });
       out.push({ id: "admin:users", group: "Platform", title: "All users", icon: ShieldCheck, keywords: ["platform", "admin"], run: go("/admin/users") });
-      out.push({ id: "admin:server", group: "Platform", title: "Server status", icon: ShieldCheck, keywords: ["platform", "admin"], run: go("/admin/server") });
-      out.push({ id: "admin:servers", group: "Platform", title: "Servers", icon: ShieldCheck, keywords: ["platform", "admin", "servers", "placement", "vm", "agent"], run: go("/admin/servers") });
+      out.push({ id: "admin:server", group: "Platform", title: "Server status", icon: ShieldCheck, keywords: ["platform", "admin", "host", "load balancer"], run: go("/admin/server") });
     }
     if (me.superadmin) {
-      out.push({ id: "monitor", group: "Platform", title: "Monitor: live CPU, memory, network", icon: Activity, keywords: ["superadmin", "monitor", "cpu", "memory", "network", "disk", "bottom", "top", "servers"], run: go("/monitor") });
+      out.push({ id: "monitor", group: "Platform", title: "Monitor: live CPU, memory, network", icon: Activity, keywords: ["superadmin", "monitor", "cpu", "memory", "network", "disk", "bottom", "top", "host"], run: go("/monitor") });
       out.push({ id: "monitor-orgs", group: "Platform", title: "Monitor: each org's use against its limits", icon: Activity, keywords: ["superadmin", "monitor", "orgs", "limits", "quota", "allocation", "budget"], run: go("/monitor/orgs") });
       out.push({ id: "host", group: "Platform", title: "Host: instances, policy, superadmin tokens", icon: ShieldCheck, keywords: ["superadmin", "incus", "host", "policy"], run: go("/host") });
     }

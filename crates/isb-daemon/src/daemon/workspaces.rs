@@ -695,7 +695,7 @@ chown "$u": "$h"
 
     /// Bridges, credential delivery after restarts, and the reaper, on a
     /// thread of their own.
-    pub fn start(self: &Arc<Self>, ctl: crate::stack::Controller, local: LocalOrg) {
+    pub fn start(self: &Arc<Self>, ctl: crate::stack::Controller) {
         let me = self.clone();
         self.setups_interrupted();
         let _ = std::thread::Builder::new()
@@ -703,10 +703,10 @@ chown "$u": "$h"
             .spawn(move || {
                 let mut last_reap = std::time::Instant::now();
                 loop {
-                    me.upkeep(&local);
-                    me.poll_secrets(&ctl, &local);
+                    me.upkeep();
+                    me.poll_secrets(&ctl);
                     if last_reap.elapsed() >= REAP_EVERY {
-                        me.reap(&ctl, &local);
+                        me.reap(&ctl);
                         last_reap = std::time::Instant::now();
                     }
                     std::thread::sleep(UPKEEP_EVERY);
@@ -714,11 +714,8 @@ chown "$u": "$h"
             });
     }
 
-    fn upkeep(self: &Arc<Self>, local: &LocalOrg) {
+    fn upkeep(self: &Arc<Self>) {
         for org in self.store.orgs() {
-            if !local(&org) {
-                continue;
-            }
             self.ensure_bridge(&org);
             for w in self.store.list(&org).unwrap_or_default() {
                 let oc = self.oc(&org);
@@ -762,7 +759,7 @@ chown "$u": "$h"
 
     /// Delete sandboxes past their expiry or idle timeout. Idempotent: an
     /// instance already gone is not an error.
-    fn reap(&self, ctl: &crate::stack::Controller, local: &LocalOrg) {
+    fn reap(&self, ctl: &crate::stack::Controller) {
         let snap = ctl.snapshot();
         let t = now();
         for i in snap.instances.values() {
@@ -782,9 +779,6 @@ chown "$u": "$h"
             let Some(org) = crate::org::OrgId::from_incus_project(&i.project) else {
                 continue;
             };
-            if !local(&org) {
-                continue;
-            }
             let oc = self.oc(&org);
             // Read it again: the sample may be stale, and only an instance
             // that still has the deadline it was sampled with is taken.
@@ -827,9 +821,6 @@ chown "$u": "$h"
         }
     }
 }
-
-/// Is this org served here (not placed on another server)?
-pub type LocalOrg = Arc<dyn Fn(&OrgId) -> bool + Send + Sync>;
 
 /// A new workspace's home snapshot schedule, and how many are kept.
 const HOME_SNAPSHOTS: &str = "@hourly";

@@ -188,10 +188,7 @@ pub struct Event {
     /// `cert.failed`, `secret.rotated` (a new secret version reached a
     /// service, saying what its `on_change` does; a workspace under stack
     /// `<org>/@workspaces`), `preview.created`, `preview.removed` (a preview's
-    /// deploys are `deploy.*` under its own stack), `server.unreachable`,
-    /// `server.recovered` (on a control plane, stack `<org>/@servers` for
-    /// each org on the server and `system/@servers`, service = the server).
-    /// Most events have none.
+    /// deploys are `deploy.*` under its own stack). Most events have none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
 }
@@ -526,21 +523,6 @@ impl Controller {
         eprintln!("isb serve: {stack}: {message}");
         self.inner
             .emit_kind(Some(kind), level, stack, service, None, message);
-    }
-
-    /// Re-emit an event another daemon recorded (a control plane mirroring
-    /// a server's feed), under this feed's numbering.
-    pub fn relay(
-        &self,
-        kind: Option<&str>,
-        level: &str,
-        stack: &str,
-        service: &str,
-        instance: Option<&str>,
-        message: String,
-    ) {
-        self.inner
-            .emit_kind(kind, level, stack, service, instance, message);
     }
 
     pub fn note(&self, level: &str, stack: &str, message: String) {

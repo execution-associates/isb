@@ -127,116 +127,11 @@ export interface OrgView {
   members: number;
   stacks: number;
   notes?: string[];
-  /** The server it runs on (`local` for this daemon), on a control plane. */
-  server?: string;
-  placement?: Placement;
   /** Its workspace may run Docker (security.nesting): set by superadmins (org_nesting). */
   allow_nesting?: boolean;
 }
 
-/** Where an org runs and how it is kept apart (src/daemon/servers.rs placement_view). */
-export interface Placement {
-  kind: "local" | "server" | "vm";
-  server: string;
-  isolation: "shared-kernel" | "own-host" | "own-kernel";
-  vm?: { cpus: number; memory: string; disk: string; project: string; instance: string };
-}
-
-// Servers (src/daemon/servers.rs, src/servers/).
-
-export interface Heartbeat {
-  isb?: string;
-  incus?: string | null;
-  host?: {
-    hostname?: string;
-    cpus?: number;
-    cpu_pct?: number;
-    load1?: number;
-    mem_used?: number;
-    mem_total?: number;
-    disk_used?: number;
-    disk_total?: number;
-  };
-  orgs?: string[];
-  stacks?: number;
-  last_error?: { at: number; stack: string; message: string } | null;
-}
-
-export interface ServerView {
-  name: string;
-  kind: "ssh" | "vm";
-  address: string;
-  port: number;
-  ssh: string;
-  ssh_port: number;
-  added_at: number;
-  fingerprint: string;
-  cert_not_after: number | null;
-  isb_version: string;
-  allow_from: string[];
-  vm?: { org: string; project: string; instance: string; cpus: number; memory: string; disk: string };
-  orgs: string[];
-  version?: ServerVersion;
-  health: {
-    state: "unknown" | "up" | "unreachable";
-    failures: number;
-    last_ok: number | null;
-    last_checked: number | null;
-    last_error: string | null;
-    heartbeat: Heartbeat | null;
-  };
-}
-
-/** What a server's agent runs next to what this control plane runs. */
-export interface ServerVersion {
-  isb: string | null;
-  /** SHA-256 of the agent's binary. */
-  build: string | null;
-  protocol: number | null;
-  control_plane: { isb: string; build: string; protocol: number };
-  /** A different version or build than this control plane's. */
-  skew: boolean;
-  /** Calls are forwarded to it (its protocol is one this control plane speaks). */
-  compatible: boolean;
-  /** SSH sessions are forwarded to it. */
-  ssh: boolean;
-  /** server_upgrade can replace it (a dedicated VM, or a server with the upgrade helper). */
-  upgradable: boolean;
-  last_upgrade: { state: string; sha256: string; at: number; message: string } | null;
-}
-
-export interface ServerUpgrade {
-  name: string;
-  upgraded: boolean;
-  from?: { isb: string | null; build: string | null };
-  to?: { isb: string | null; build: string | null };
-  note?: string;
-}
-
-export type StepState = "pending" | "running" | "done" | "failed";
-
-export interface ProvisionView {
-  name: string;
-  kind: "ssh" | "vm";
-  org?: string;
-  state: "running" | "done" | "failed";
-  started_at: number;
-  finished_at: number | null;
-  steps: { id: string; title: string; state: StepState; started_at: number | null; finished_at: number | null }[];
-  log: string[];
-  /** Lines dropped off the top of `log` (the server keeps the last 400). */
-  log_start?: number;
-  error: string | null;
-  request: Record<string, unknown>;
-  result?: unknown;
-}
-
-export interface ServerList {
-  servers: ServerView[];
-  provisions: ProvisionView[];
-  dedicated_vm: { supported: boolean; reason?: string };
-  suggested_allow_from: { address: string; via: string }[];
-}
+// This host (server_status).
 
 export interface ServerStatus {
   isb: string;
@@ -252,38 +147,8 @@ export interface ServerStatus {
   }[];
 }
 
-// Monitor (host_monitor, superadmin): live resource use of this host or one
-// remote server, its history, and its instances.
-
-/** A server's heartbeat numbers; an older agent leaves fields out. */
-export interface HostCard {
-  hostname?: string;
-  cpus?: number;
-  cpu_pct?: number | null;
-  /** The last ~40 samples, 2s apart, 0-100. */
-  cpu_history?: number[];
-  mem_used?: number;
-  mem_total?: number;
-  disk_used?: number;
-  disk_total?: number;
-  /** Bytes per second. */
-  net_rx_rate?: number | null;
-  net_tx_rate?: number | null;
-  load1?: number;
-}
-
-export interface MonitorServer {
-  name: string;
-  local: boolean;
-  kind: "local" | "ssh" | "vm";
-  /** For a dedicated VM, the org it is for. */
-  vm_org: string | null;
-  state: "up" | "unreachable" | "unknown";
-  /** Unix seconds of the last good heartbeat (null for this host). */
-  last_ok: number | null;
-  /** Null until a first heartbeat. */
-  host: HostCard | null;
-}
+// Monitor (host_monitor, superadmin): live resource use of this host, its
+// history, and its instances.
 
 export interface MonitorInterface {
   name: string;
@@ -359,17 +224,4 @@ export interface Monitor {
   /** `step` in seconds; points oldest first. */
   history: { step: number; points: HistoryPoint[] };
   instances: MonitorInstance[];
-}
-
-export interface HostMonitor {
-  /** This host first, then every remote server. */
-  servers: MonitorServer[];
-  /** The selected entry's name. */
-  server: string;
-  /** Null when the server could not be reached. */
-  monitor: Monitor | null;
-  /** Why `monitor` is null or partial. */
-  error: string | null;
-  /** The agent is too old for live detail: host numbers only, no history or instances. */
-  partial: boolean;
 }

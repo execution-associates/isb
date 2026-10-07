@@ -81,9 +81,6 @@ secret reads, the rest are ordinary reads.
   report `{ok, rows, head: [id, hash], pruned_through, broken: [id, why]}`.
   Anyone who can write the file can rebuild a whole chain; copy the head
   somewhere else (a ticket, another host) to pin the log up to it.
-- On a control plane the audit log is the control plane's: it records every
-  call before forwarding it to a server, and each server's agent keeps its
-  own log as well ([Servers](../guides/servers.md)).
 
 ## Who reads it
 

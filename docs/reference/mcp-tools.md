@@ -28,7 +28,7 @@ Three counts differ for that reason, and none is a fault:
   by role and scopes).
 - An org's `/orgs/<org>/mcp` lists fewer: the host, superadmin and platform
   tools (`host_*`, `superadmin_*`, `org_nesting`, `org_list`, `org_create`,
-  `server_*`, `user_list` and the like) are on `/mcp` only, for anyone but
+  `server_status`, `user_list` and the like) are on `/mcp` only, for anyone but
   the unix socket. `GET /api/v1/tools` marks each tool with `org_endpoint`
   (false for those), and the web UI's MCP page counts the tools an org
   endpoint lists from it.
@@ -60,8 +60,8 @@ fills it in and refuses any other value. Then, in order:
   `deploy` tokens are refused them, and every call is in the audit log.
 - **Platform tools** reach across orgs and are for platform admins only,
   whatever the caller's role in an org (an org owner's token is refused):
-  `org_list`, `org_create`, `org_update`, `org_delete`, every `server_*`
-  tool, `server_status`, `registry_gc`, `notification_settings`,
+  `org_list`, `org_create`, `org_update`, `org_delete`,
+  `server_status`, `registry_gc`, `notification_settings`,
   `template_catalog_add`, `template_catalog_remove`, `audit_verify`,
   `user_list` and `user_update`. `secret_reencrypt` with `all: true` too,
   and the account tools' `user` and `all_orgs` arguments (listing and
@@ -330,11 +330,11 @@ and owners.
 
 | Tool | Who | Does |
 |---|---|---|
-| `org_get` | viewer | Limits with `allocation` (per limited `cpu`, `memory`, `disk`, `instances`: `limit`, `allocated`, `free`; allocated is the sum of every instance's limit, stopped ones included; bytes for memory and disk), per-instance defaults (`default_disk`, the root size a new instance gets, while the org has a disk limit), bridge and subnet, egress exceptions, bind roots, service-name domain, counts, and `placement` (`kind`, `server`, `isolation`). |
-| `org_list` | platform admin | Every org, as `org_get` shows one, with the server it runs on. |
-| `org_create` | platform admin | `org`, `cpus`, `memory`, `disk`, `instances`, `default_cpus`, `default_memory`, `egress`, `udp`, `domains` (the domain allowlist: `example.com`, `*.example.com`), `ingress` (`caddy`, `cloudflare-tunnel`), `cloudflare_account`, `cloudflare_zone`, `placement` (`"local"`, `{"server": NAME}`, `{"vm": {cpus, memory, disk}}`), `wait`. Bind roots are set on the host only. |
-| `org_update` | platform admin | Limits (`"none"` or `null` lifts one: `cpus`, `memory`, `disk`, `instances`; a `disk` limit is refused while an instance has no root size, naming each, and under it each new instance gets its own root size: `raw_devices.root.size`, else 10GiB), defaults, `egress`, `udp` (UDP ports its stacks may publish, `IP:PORT`) or `domains` (each replaces its list, `[]` clears it), `ingress`, `cloudflare_account`, `cloudflare_zone` (`""` clears one); a different placement is refused. |
-| `org_delete` | platform admin | Refused while it has stacks or instances; `force` deletes its apps, stacks and sandboxes first; `delete_vm` deletes a dedicated VM. Its members, invitations, tokens, metrics history and hosts directory go; its secrets stay. |
+| `org_get` | viewer | Limits with `allocation` (per limited `cpu`, `memory`, `disk`, `instances`: `limit`, `allocated`, `free`; allocated is the sum of every instance's limit, stopped ones included; bytes for memory and disk), per-instance defaults (`default_disk`, the root size a new instance gets, while the org has a disk limit), bridge and subnet, egress exceptions, bind roots, service-name domain and counts. |
+| `org_list` | platform admin | Every org, as `org_get` shows one. |
+| `org_create` | platform admin | `org`, `cpus`, `memory`, `disk`, `instances`, `default_cpus`, `default_memory`, `egress`, `udp`, `domains` (the domain allowlist: `example.com`, `*.example.com`), `ingress` (`caddy`, `cloudflare-tunnel`), `cloudflare_account`, `cloudflare_zone`. Bind roots are set on the host only. |
+| `org_update` | platform admin | Limits (`"none"` or `null` lifts one: `cpus`, `memory`, `disk`, `instances`; a `disk` limit is refused while an instance has no root size, naming each, and under it each new instance gets its own root size: `raw_devices.root.size`, else 10GiB), defaults, `egress`, `udp` (UDP ports its stacks may publish, `IP:PORT`) or `domains` (each replaces its list, `[]` clears it), `ingress`, `cloudflare_account`, `cloudflare_zone` (`""` clears one). |
+| `org_delete` | platform admin | Refused while it has stacks or instances; `force` deletes its apps, stacks and sandboxes first. Its members, invitations, tokens, metrics history and hosts directory go; its secrets stay. |
 | `ingress_status` | anyone signed in | Listeners, CA, the Caddy process, every routed domain (URL, certificate state, upstreams), conflicts and refusals, each tunnel org's cloudflared. The caller's orgs only. |
 | `overview` | anyone signed in | Everything a dashboard shows in one call: host CPU and memory with history, every stack in detail, sandboxes with CPU and memory, the latest event number. |
 | `events` | anyone signed in | The event feed after a `since` cursor (`limit`), waiting up to 30 s (`wait`) for one. Numbering restarts with the daemon: a `since` past the newest `seq` starts over from the kept events. |
@@ -350,26 +350,6 @@ and owners.
 | `audit_list` | org owner or admin (their org); platform admin (everything) | Entries filtered by `actor`, `action`, `target` (globs), `outcome`, `surface`, `user_id`, `token_id`, `since`/`until`, `platform`; paged with `before`, tailed with `after`. |
 | `audit_verify` | platform admin | Walk the audit log's and the history's hash chains. |
 | `history_query` | viewer (their orgs); host-level rows: platform admin | Controller events, incus lifecycle events, audit rows (owners and admins) and markers, merged; filter by `object` (`exact`), `kind`, `source`, `actor`, `since`/`until`, `platform`; `correlate` links incus changes to their likely audit row. |
-
-## Servers
-
-[Servers and dedicated VMs](../guides/servers.md). All for platform admins.
-
-| Tool | Does |
-|---|---|
-| `server_add` | Bootstrap a box over SSH (`name`, `ssh`, `ssh_port`, `key` (a path, local CLI only) or `ssh_key` (the key itself), `address`, `agent_port`, `allow_from`, `isb_binary`, `version`, `self_binary`, `public_ingress`); `wait: false` answers at once. |
-| `server_list` | Servers with health, orgs and `version` (build, protocol, skew against this control plane, upgradable, last upgrade); servers being added (`provisions`); `dedicated_vm` (whether this host can run dedicated VMs); `suggested_allow_from`. |
-| `server_show` | One server: address, how it was added, certificate fingerprint and expiry, health, orgs. |
-| `server_remove` | Forget a server (refused while it holds orgs; a dedicated VM is deleted with it). |
-| `server_rotate_cert` | Issue its agent a new certificate. |
-| `server_upgrade` | Replace a server's agent (`name`, or `all: true`) with this control plane's build, a release (`version`) or a binary on this host (`isb_binary`, local CLI only); waits for the new build, and the box rolls back if it does not answer. |
-| `server_provision_get` | Follow a server (or a dedicated VM, `vm-<org>`) being added: steps, log, state, error. |
-
-A call for an org placed on a server is judged on the control plane, then
-again by the server's agent. `events`, `audit_list`, `audit_verify`,
-`registry_gc`, `notification_settings`, `server_status`, `template_list`,
-`template_get`, the `template_catalog_*` tools, the `server_*` tools and
-the [account tools](#accounts) always run on the control plane.
 
 ## Accounts
 
@@ -418,7 +398,7 @@ and superadmin tokens and superadmin identities are made on the host only.
 | Tool | Does |
 |---|---|
 | `host_inventory` | Every incus project and instance on the host, isb's or not: project, org, type, status, addresses, isb's stack and owner labels. |
-| `host_monitor` | Live resource use, as `top` or `bottom` show it, of this host or the remote `server` named: CPU overall and per core, load, uptime, memory and swap, each storage pool, disk I/O, every interface (not loopback, veth or tap) with its addresses and rates, the last `range` seconds (60 to 3600, default 300) of CPU, memory and network, and every instance's CPU, memory, network and disk rates. `servers` has a card per server with its health and heartbeat numbers. A server whose isb predates it answers with its heartbeat's numbers only (`partial`). |
+| `host_monitor` | Live resource use of this host, as `top` or `bottom` show it: CPU overall and per core, load, uptime, memory and swap, each storage pool, disk I/O, every interface (not loopback, veth or tap) with its addresses and rates, the last `range` seconds (60 to 3600, default 300) of CPU, memory and network, and every instance's CPU, memory, network and disk rates. |
 | `host_policy` | How the daemon serves: listen addresses, Access, the remote tool policy, what remote specs may ask for, and each superadmin source with its allow list and token count. |
 | `superadmin_token_list` | Superadmin tokens' metadata, never the token. |
 | `superadmin_token_revoke` | Revoke one by `id`. Minting is `isb token create NAME --superadmin`, on the host only. |
