@@ -104,5 +104,13 @@ fn restart_hint(log: &dyn Fn(&str)) {
         log(
             "isb serve runs from a user unit: `systemctl --user restart isb` to run the new binary",
         );
+    } else if std::path::Path::new(SYSTEM_UNIT).exists() {
+        log(
+            "isb serve runs from a system unit: `sudo systemctl restart isb` to run the new binary",
+        );
     }
 }
+
+/// A system unit that runs isb serve as its user, which keeps the daemon out
+/// of the user's slice and its limits (where agents run as the same user).
+const SYSTEM_UNIT: &str = "/etc/systemd/system/isb.service";

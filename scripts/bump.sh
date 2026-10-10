@@ -40,7 +40,8 @@ sed -i -E "s/(\"@execution-associates\/isb-linux-[a-z0-9]+\": )\"$o\"/\1\"$new\"
 files=(Cargo.toml sdk/python/pyproject.toml sdk/python/src/isb/__init__.py
   sdk/python/tests/test_unit.py docs/reference/rpc.md sdk/typescript/package.json
   sdk/typescript/npm/*/package.json)
-left=$(grep -n -F "$old" "${files[@]}" || true)
+# Not inside a longer version: 2.0.0 must not match "^22.0.0".
+left=$(grep -n -E "(^|[^0-9.])${old//./\\.}([^0-9]|\$)" "${files[@]}" || true)
 left+=$(grep -A1 -E '^name = "isb(-[a-z]+)?"$' Cargo.lock | grep -F "\"$old\"" || true)
 left+=$(grep -A1 '^name = "isb-sdk"$' sdk/python/uv.lock | grep -F "\"$old\"" || true)
 left+=$(grep -F "isb-linux" sdk/typescript/bun.lock | grep -F "\"$old\"" || true)
