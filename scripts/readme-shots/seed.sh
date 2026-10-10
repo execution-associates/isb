@@ -31,8 +31,7 @@ ingress="ISB_INGRESS_HTTP=:80
 ISB_INGRESS_HTTPS=:443
 ISB_INGRESS_PUBLIC_IP=$ip
 ISB_ACME_CA=internal"
-# Restart only for a change: a restart orphans builds in flight, whose
-# sandboxes then hold the build cache volume against every later build.
+# Restart only for a change: a restart fails the builds in flight.
 if [ "$(grep '^ISB_INGRESS_\|^ISB_ACME_CA=' "$env")" != "$ingress" ]; then
   sed -i '/^ISB_INGRESS_\|^ISB_ACME_CA=/d' "$env"
   echo "$ingress" >>"$env"
@@ -103,7 +102,7 @@ EOF
   printf '%s\n' 'STRIPE_API_KEY=${{secret.stripe-api-key}}' 'SMTP_PASSWORD=${{secret.smtp-password}}' \
     'DATABASE_URL=${{secret.db.shop-db.url}}' 'REDIS_URL=${{secret.db.cache.url}}' 'LOG_LEVEL=info' |
     $isb app env-set web - >/dev/null
-  # A build's first DNS lookup sometimes fails in a fresh org; one retry.
+  # One retry, for a download that fails on the way.
   $isb app deploy web -q || $isb app deploy web -q
   # The next deploy comes from GitHub: a push to master.
   printf 'source: {git: {ref: master, url: "https://github.com/traefik/whoami"}}\n' | $isb app update web -f - >/dev/null
@@ -135,9 +134,7 @@ pr() { # NUMBER TITLE BRANCH SHA; real pull requests of traefik/whoami
       base: {ref: "master", repo: {full_name: "traefik/whoami"}}},
     repository: {full_name: "traefik/whoami"}}'
 }
-# One at a time, with retries: a preview build whose sandbox starts while
-# another build still holds the shared preview cache volume fails ("Idmaps
-# of container ... and storage volume ... are not identical").
+# One at a time, each retried: a failed download fails a whole build.
 preview_state() { $isb app previews ls web | awk -v pr="#$1" '$2 == pr { print $3 }'; }
 for spec in "84|Output the version number|dev|9447b0b75ba73409fe8f6a30e104bf8e5c629992" \
   "89|chore: update CI, dependencies, and linter|feat/update-ci|fba895b3b7c0a3888b0956dc59d94fb48f8d2f1b"; do
