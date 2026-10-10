@@ -5,7 +5,8 @@ import { callTool } from "@/api/tools";
 import type { Tone } from "@/lib/status";
 
 export type MonitorKind = "http" | "tcp" | "app" | "service";
-export type MonitorStatus = "up" | "down" | "pending" | "paused";
+/** stopped: its app or stack service is scaled to 0, so it is not checked. */
+export type MonitorStatus = "up" | "down" | "pending" | "paused" | "stopped";
 
 export interface MonitorHeader {
   name: string;
@@ -184,6 +185,7 @@ export const STATUS_TONE: Record<MonitorStatus, Tone> = {
   down: "danger",
   pending: "neutral",
   paused: "muted",
+  stopped: "muted",
 };
 
 export const STATUS_LABEL: Record<MonitorStatus, string> = {
@@ -191,9 +193,11 @@ export const STATUS_LABEL: Record<MonitorStatus, string> = {
   down: "Down",
   pending: "Pending",
   paused: "Paused",
+  stopped: "Stopped",
 };
 
 export const PENDING_HINT = "Waiting for the first successful check";
+export const STOPPED_HINT = "Its app or service is stopped: not checked, no alerts until it starts again";
 export const NEVER_UP_HINT = "Never came up: no successful check in the first 30 minutes";
 
 /** The badge text of a monitor: its status, or why it is still pending. */
@@ -273,3 +277,9 @@ export function statusProblem(s: string): string | null {
 
 /** The monitors watching an app. */
 export const monitorsOfApp = (list: Monitor[] | undefined, app: string) => (list ?? []).filter((m) => m.type === "app" && m.app === app);
+
+/** The monitors watching a compose stack's services. */
+export const monitorsOfStack = (list: Monitor[] | undefined, stack: string) => (list ?? []).filter((m) => m.type === "service" && m.stack === stack);
+
+/** Not checked now: paused, or its app or service is stopped. */
+export const resting = (m: { status: MonitorStatus }) => m.status === "paused" || m.status === "stopped";

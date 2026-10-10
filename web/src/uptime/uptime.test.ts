@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { compactEvents, selectedKinds } from "@/notifications/api";
-import { downtimeText, monitorNameProblem, monitorsOfApp, type Monitor, statusProblem, statusText, statusTone, targetText, uptimeText, uptimeTone } from "./api";
+import { downtimeText, monitorNameProblem, monitorsOfApp, monitorsOfStack, type Monitor, resting, statusProblem, statusText, statusTone, targetText, uptimeText, uptimeTone } from "./api";
 import { argsOf } from "./monitor-dialog";
 
 const form = (p: Record<string, unknown> = {}) =>
@@ -83,6 +83,18 @@ describe("uptime", () => {
   it("finds an app's monitors", () => {
     const ms = [{ type: "app", app: "web", name: "app-web" }, { type: "http", name: "x" }] as Monitor[];
     expect(monitorsOfApp(ms, "web").map((m) => m.name)).toEqual(["app-web"]);
+  });
+
+  it("finds a stack's monitors", () => {
+    const ms = [{ type: "service", stack: "wiki", service: "web", name: "stack-wiki-web" }, { type: "app", app: "wiki", name: "app-wiki" }] as Monitor[];
+    expect(monitorsOfStack(ms, "wiki").map((m) => m.name)).toEqual(["stack-wiki-web"]);
+  });
+
+  it("shows a monitor of a stopped app as stopped, at rest like a paused one", () => {
+    expect(statusText({ status: "stopped" })).toBe("Stopped");
+    expect(statusTone({ status: "stopped" })).toBe("muted");
+    expect(resting({ status: "stopped" }) && resting({ status: "paused" })).toBe(true);
+    expect(resting({ status: "down" })).toBe(false);
   });
 
   it("lets channels pick monitor events", () => {

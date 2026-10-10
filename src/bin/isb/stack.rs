@@ -47,6 +47,9 @@ pub(crate) enum StackCmd {
         name: String,
         #[arg(long)]
         volumes: bool,
+        /// Keep the monitors that follow its services (deleted by default).
+        #[arg(long)]
+        keep_monitors: bool,
     },
     /// Go back to the previous deployment, or --to a kept one.
     Rollback {
@@ -254,10 +257,14 @@ pub(crate) fn stack(ctx: &Ctx, cmd: StackCmd) -> Result<u8> {
             }
             Ok(0)
         }
-        StackCmd::Rm { name, volumes } => {
+        StackCmd::Rm {
+            name,
+            volumes,
+            keep_monitors,
+        } => {
             call(
                 "stack_remove",
-                json!({"name": name, "volumes": volumes}),
+                json!({"name": name, "volumes": volumes, "keep_monitors": keep_monitors}),
                 Duration::from_secs(400),
             )?;
             Ok(0)

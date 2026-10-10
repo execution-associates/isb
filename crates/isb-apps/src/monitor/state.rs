@@ -16,6 +16,10 @@
 //!   is *flapping*: the change that makes it so is still sent (saying so),
 //!   then nothing more until it has held one state for [`FLAP_WINDOW_MS`];
 //!   then the state it settled in is sent if channels last heard otherwise.
+//! - An app or stack service scaled to 0 (stopped) is not checked: its
+//!   monitor is *stopped*, quietly. Stopping closes any open incident
+//!   without telling channels, and starting again begins as a new monitor
+//!   does, pending until its first success.
 
 use serde::{Deserialize, Serialize};
 
@@ -87,6 +91,9 @@ pub struct State {
     /// Pending for [`NEVER_UP_MS`] with only failures.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub never_up: bool,
+    /// Its app or stack service is scaled to 0, since [`State::since`].
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub stopped: bool,
 }
 
 /// What a check changed, and what to tell channels.
@@ -122,6 +129,8 @@ pub enum Notify {
 impl State {
     /// Take one check's result at `now` (unix milliseconds).
     pub fn observe(&mut self, ok: bool, now: u64, t: Thresholds) -> Step {
+        // Checked again: its target runs.
+        self.stopped = false;
         if self.status == Status::Pending && !ok {
             return self.observe_pending(now);
         }
@@ -219,6 +228,21 @@ impl State {
             }
             _ => Notify::None,
         }
+    }
+
+    /// Its target was scaled to 0 at `now`: forget the run it was on, so
+    /// starting again waits for the first success like a new monitor.
+    /// Returns whether it was not stopped already.
+    pub fn stop(&mut self, now: u64) -> bool {
+        if self.stopped {
+            return false;
+        }
+        *self = State {
+            since: now,
+            stopped: true,
+            ..State::default()
+        };
+        true
     }
 
     /// Start counting afresh (a resumed or edited monitor), keeping what
@@ -454,6 +478,27 @@ mod tests {
         }
         assert_eq!(sent.len(), n_before, "{sent:?}");
         assert!(!s.flapping);
+    }
+
+    #[test]
+    fn stopping_is_quiet_and_starting_begins_anew() {
+        let mut s = State::default();
+        run(&mut s, &[(true, 1), (false, 2), (false, 3)]);
+        assert_eq!(s.notified, Status::Down);
+        assert!(s.stop(4));
+        assert!(!s.stop(5), "already stopped");
+        assert_eq!((s.status, s.since, s.stopped), (Status::Pending, 4, true));
+        // Failures while it comes back up are pending, never a down.
+        assert_eq!(
+            run(&mut s, &[(false, 10), (false, 11), (false, 12)]),
+            vec![]
+        );
+        assert!(!s.stopped);
+        assert_eq!(s.status, Status::Pending);
+        // Its first success makes it up, and no up goes out: the down
+        // channels heard belonged to the run before the stop.
+        assert_eq!(run(&mut s, &[(true, 13)]), vec![]);
+        assert_eq!(s.status, Status::Up);
     }
 
     #[test]

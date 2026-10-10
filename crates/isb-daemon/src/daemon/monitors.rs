@@ -220,7 +220,7 @@ pub(super) fn register(r: &mut Registry, m: Monitors) -> Result<()> {
         (
             "monitor_list",
             "List uptime monitors",
-            "The org's monitors with status (up, down, pending, paused; `never_up` when pending 30 min with only failures), last check, uptime over 24h/7d/30d, latency p50/p95 (24h), 24 hourly uptime bars and the last 30 latencies; `down` (how many are down), the org's recent incidents, and its settings (auto_monitors, exclude_apps, exclude_services).",
+            "The org's monitors with status (up, down, pending, paused, stopped: its app or stack service is scaled to 0 and not checked; `never_up` when pending 30 min with only failures), last check, uptime over 24h/7d/30d, latency p50/p95 (24h), 24 hourly uptime bars and the last 30 latencies; `down` (how many are down), the org's recent incidents, and its settings (auto_monitors, exclude_apps, exclude_services).",
         ),
         obj(json!({}), &[]),
         &ro,

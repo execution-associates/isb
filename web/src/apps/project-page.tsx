@@ -51,6 +51,7 @@ import { autoHostLabel, ingressOff } from "./domains";
 import { HEALTH_LABEL, HEALTH_TONE, stackHealth, useStackList } from "./health";
 import { NewAppDialog } from "./new-app-dialog";
 import { NewEnvironmentDialog } from "./project-dialogs";
+import { DoomedMonitors } from "@/uptime/doomed";
 import { imageName, shortSha } from "./util";
 
 export function ProjectPage() {
@@ -69,6 +70,7 @@ export function ProjectPage() {
   const [delEnv, setDelEnv] = useState(false);
   const [delProject, setDelProject] = useState(false);
   const [wipe, setWipe] = useState(false);
+  const [keepMonitors, setKeepMonitors] = useState(false);
 
   const p = projects.data?.find((x) => x.name === project);
   const environment = p?.environments.find((e) => e.name === env);
@@ -286,7 +288,10 @@ export function ProjectPage() {
         open={delEnv}
         onOpenChange={(v) => {
           setDelEnv(v);
-          if (!v) setWipe(false);
+          if (!v) {
+            setWipe(false);
+            setKeepMonitors(false);
+          }
         }}
         title={`Delete environment ${environment.name}?`}
         description={envServices.length ? "Its services are deleted with it." : `It has no services; this removes it from ${project}.`}
@@ -294,7 +299,7 @@ export function ProjectPage() {
         typed={envServices.length ? environment.name : undefined}
         onConfirm={async () => {
           const force = envServices.length > 0;
-          await callTool("environment_delete", { project, name: environment.name, force, volumes: force && wipe }, org);
+          await callTool("environment_delete", { project, name: environment.name, force, volumes: force && wipe, keep_monitors: keepMonitors }, org);
           await refresh();
           toast.success(`Environment ${environment.name} deleted`);
           navigate(`/orgs/${o}/projects/${project}`);
@@ -308,13 +313,18 @@ export function ProjectPage() {
           admin={admin}
           wipe={wipe}
           onWipe={setWipe}
+          keepMonitors={keepMonitors}
+          onKeepMonitors={setKeepMonitors}
         />
       </ConfirmDialog>
       <ConfirmDialog
         open={delProject}
         onOpenChange={(v) => {
           setDelProject(v);
-          if (!v) setWipe(false);
+          if (!v) {
+            setWipe(false);
+            setKeepMonitors(false);
+          }
         }}
         title={`Delete project ${project}?`}
         description={
@@ -326,13 +336,23 @@ export function ProjectPage() {
         typed={projectServices.length ? project : undefined}
         onConfirm={async () => {
           const force = projectServices.length > 0;
-          await callTool("project_delete", { name: project, force, volumes: force && wipe }, org);
+          await callTool("project_delete", { name: project, force, volumes: force && wipe, keep_monitors: keepMonitors }, org);
           await refresh();
           toast.success(`Project ${project} deleted`);
           navigate(`/orgs/${o}/projects`);
         }}
       >
-        <DoomedServices org={org} tool="project_delete" args={{ name: project }} services={projectServices} admin={admin} wipe={wipe} onWipe={setWipe} />
+        <DoomedServices
+          org={org}
+          tool="project_delete"
+          args={{ name: project }}
+          services={projectServices}
+          admin={admin}
+          wipe={wipe}
+          onWipe={setWipe}
+          keepMonitors={keepMonitors}
+          onKeepMonitors={setKeepMonitors}
+        />
       </ConfirmDialog>
     </>
   );
@@ -431,10 +451,11 @@ function EnvStopStart({
 
 type Doomed = { name: string; kind: "app" | "compose"; env: string };
 
-type DryRun = { volumes: string[]; volumes_kept: { name: string; reason: string }[] };
+type DryRun = { volumes: string[]; volumes_kept: { name: string; reason: string }[]; monitors?: string[] };
 
-/** What a delete takes with it, so the confirmation names it, and the
- * choice to delete the data in their volumes too (kept by default). */
+/** What a delete takes with it, so the confirmation names it, the choice
+ * to delete the data in their volumes too (kept by default), and to keep
+ * the monitors watching them (deleted by default). */
 function DoomedServices({
   org,
   tool,
@@ -443,6 +464,8 @@ function DoomedServices({
   admin,
   wipe,
   onWipe,
+  keepMonitors,
+  onKeepMonitors,
 }: {
   org: string;
   tool: "project_delete" | "environment_delete";
@@ -451,6 +474,8 @@ function DoomedServices({
   admin: boolean;
   wipe: boolean;
   onWipe: (v: boolean) => void;
+  keepMonitors: boolean;
+  onKeepMonitors: (v: boolean) => void;
 }) {
   // The server knows which volumes go: the ones these stacks made that no other stack uses.
   const plan = useQuery({
@@ -509,6 +534,7 @@ function DoomedServices({
       ) : (
         <p className="text-xs text-muted-foreground">They have no named volumes.</p>
       )}
+      <DoomedMonitors names={plan.data?.monitors ?? []} keep={keepMonitors} onKeep={onKeepMonitors} />
     </div>
   );
 }

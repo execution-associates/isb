@@ -34,8 +34,8 @@ pub enum Target {
 }
 
 impl Target {
-    /// Is `m` this target's own monitor?
-    fn owns(&self, m: &Monitor) -> bool {
+    /// Does `m` follow this target (its own monitor, or one made for it)?
+    pub(super) fn owns(&self, m: &Monitor) -> bool {
         match self {
             Target::App(a) => m.kind == Kind::App && m.app.as_deref() == Some(a),
             Target::Service { stack, service } => {
@@ -46,7 +46,7 @@ impl Target {
         }
     }
 
-    fn excluded(&self, s: &Settings) -> bool {
+    pub(super) fn excluded(&self, s: &Settings) -> bool {
         match self {
             Target::App(a) => s.exclude_apps.contains(a),
             Target::Service { stack, service } => {

@@ -92,7 +92,7 @@ And every monitor:
 | `timeout` | `10` | seconds a check may take (connect, TLS, answer), under the interval |
 | `failure_threshold` | `2` | failed checks in a row that make it down |
 | `recovery_threshold` | `2` | successful checks in a row that make it up again |
-| `paused` | `false` | a paused monitor is not checked; its history stays |
+| `paused` | `false` | a paused monitor is not checked; its history stays. A monitor whose app or service is stopped rests on its own (status `stopped`) |
 
 ```sh
 # Over REST (or MCP): any URL, with a keyword.
@@ -116,6 +116,11 @@ curl -H "Authorization: Bearer $ISB_TOKEN" -H 'Content-Type: application/json' \
   for the app's first live deployment" (or "the service's first replica in
   rotation") check instead. Once it has been up, a failed rollout that leaves
   the old revision serving does not page, and a real outage does.
+- An `app` or `service` monitor whose target is scaled to 0 (Stop, or
+  `stack_scale` to 0 replicas) is **stopped**: not checked and never paging.
+  Stopping closes an open incident without a notification; starting again
+  begins as a new monitor does, pending until its first success. Only a scale
+  to 0 counts: a target that crashed, or lost its last replica, still pages.
 - A monitor still pending with only failures after 30 minutes is flagged **never came
   up** (`never_up: true` in `monitor_list` and `monitor_get`; shown red as
   "Never came up"). It opens an incident dated from its first check and sends
@@ -210,6 +215,12 @@ Deleting an own monitor adds its target to the org's exclusions so it does
 not come back (`exclude_apps`, or `exclude_services` as `<stack>/<service>`);
 `monitor_settings` turns the whole thing off (`auto_monitors: false`) or edits
 the exclusions.
+
+Deleting the target itself (`app_delete`, `stack_remove`, `project_delete`,
+`environment_delete`) deletes the monitors that follow it, its own and any
+`app` or `service` monitor made for it, with their history, unless
+`keep_monitors` is set. Its exclusion goes too, so an app made again under the
+name gets its own monitor again. `http` and `tcp` monitors are left alone.
 
 ### Behind Cloudflare Access
 
