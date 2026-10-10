@@ -329,4 +329,40 @@ volumes:
         d.source = Some(text.into());
         assert_eq!(source_text(&d).unwrap(), text);
     }
+
+    /// A shell script in the file: compose interpolates every string, single
+    /// quoted or not, so the shell's own `$f`, `$((n+1))` and `"$@"` are
+    /// written `$$`. The resolved file has them as the shell sees them, and
+    /// the export writes them `$$` again.
+    #[test]
+    fn a_shell_script_entrypoint_needs_doubled_dollars_and_exports_with_them() {
+        const SCRIPT: &str = r#"n=0; for f in /a.yaml /b.yaml; do until [ -s "$f" ]; do n=$((n+1)); sleep 1; done; done; exec "$@""#;
+        let compose = |script: &str| {
+            format!(
+                "services:\n  dagu:\n    image: dev-base\n    entrypoint:\n      - /bin/sh\n      - -c\n      - '{script}'\n      - managed-files\n"
+            )
+        };
+        // Bare, the script's variables are the file's, and none is set.
+        let e = crate::compose::load_docs(
+            &[(PathBuf::from("compose.yaml"), compose(SCRIPT))],
+            Path::new("/srv/x"),
+            Some("shop"),
+            &|_| None,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            e.contains("variable f is not set") && e.contains("$$f"),
+            "{e}"
+        );
+        // Doubled, the shell gets the script as written.
+        let d = def(&compose(&SCRIPT.replace('$', "$$")));
+        let entrypoint = d.file.services["dagu"].entrypoint.clone().unwrap();
+        assert_eq!(entrypoint, ["/bin/sh", "-c", SCRIPT, "managed-files"]);
+        // The export doubles them again, so it deploys to the same file.
+        let yaml = export_yaml(&d).unwrap();
+        assert!(yaml.contains(r#""$$f""#), "{yaml}");
+        let again = load(&yaml, "shop");
+        assert_eq!(again.file.services["dagu"].entrypoint, Some(entrypoint));
+    }
 }

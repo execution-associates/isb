@@ -131,7 +131,7 @@ pub(in crate::daemon) fn load_compose(
             Err(Error::Parse {
                 path,
                 message: format!(
-                    "{message}; define it in the stack's environment (stack_env_set, the Environment tab)"
+                    "{message}; define it in the stack's environment (stack_env_set, the Environment tab). Text copied from stack_config's `file` is resolved, its `$$` already single: deploy stack_export's text instead"
                 ),
             })
         }
@@ -715,6 +715,7 @@ mod tests {
         .to_string();
         assert!(e.contains("variable TAG is not set"), "{e}");
         assert!(e.contains("stack_env_set"), "{e}");
+        assert!(e.contains("stack_export"), "{e}");
     }
 
     #[test]
