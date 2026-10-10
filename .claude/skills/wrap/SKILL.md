@@ -206,8 +206,9 @@ when a newer one lands first.
 
 ## 8. Upgrade titan's isb, rolling nothing
 
-titan runs `isb serve` as the user unit `isb.service` on `127.0.0.1:8192`,
-from `~/.local/bin/isb`.
+titan runs `isb serve` as the system unit `isb.service` (as stephan, outside
+the agents' user slice) on `127.0.0.1:8192`, from `~/.local/bin/isb`. Its
+unit lives in titan-iac (`host/systemd/isb.service`).
 
 **Announce first.** Tell any agent working on titan's orgs (step 0's list)
 that the daemon is about to restart, and wait for an OK from one that asked
@@ -246,9 +247,9 @@ roll with the user (which orgs, when, one at a time with health checks).
 
 ```bash
 ~/.local/bin/isb update "$VER"
-systemctl --user restart isb
+sudo systemctl restart isb
 ~/.local/bin/isb --version                       # isb $VER
-systemctl --user is-active isb
+systemctl is-active isb
 ```
 
 **Verify after ~30s:**
@@ -258,7 +259,7 @@ incus list --all-projects --format json </dev/null \
   | jq -r '.[] | select(.config["user.isb.rev"]) | [.project, .name, .status, .config["user.isb.rev"]] | @tsv' \
   | sort >"$B/after.tsv"
 diff "$B/before.tsv" "$B/after.tsv" && echo "nothing rolled"
-journalctl --user -u isb --since "-2min" | grep -iE "error|panic" | head
+sudo journalctl -u isb --since "-2min" | grep -iE "error|panic" | head
 ```
 
 Same instance names, same status, same revisions. Then spot-check a few
