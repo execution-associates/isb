@@ -19,6 +19,7 @@ throughout: stopping or restarting the daemon never stops an app.
 ```sh
 isb update                          # the latest signed release, in place
 systemctl --user restart isb        # the daemon runs the new binary
+                                    # (a --system install: sudo systemctl restart isb)
 isb --version
 ```
 

@@ -79,6 +79,45 @@ On macOS the daemon runs inside the `isb machine` VM, and `isb serve install`
 writes a LaunchAgent that starts the machine at login instead; see
 [isb on macOS](../getting-started/macos.md#the-daemon-lives-in-the-vm).
 
+### Outside your user slice: `--system`
+
+A user unit runs in your user's slice (`user-UID.slice`), next to everything
+else you run, and under that slice's limits. On a host where agents run as
+the same user, an agent that fills the slice stalls the daemon with it.
+`isb serve install --system` installs the daemon as a system unit that still
+runs as you, in `system.slice` with limits of its own:
+
+```sh
+isb serve install --system   # as yourself, not root; it uses sudo where it must
+systemctl status isb
+sudo journalctl -u isb -f
+sudo systemctl restart isb   # after `isb update`
+```
+
+It:
+
+- writes `/etc/systemd/system/isb.service` with `User=` you, your home as the
+  working directory, `XDG_RUNTIME_DIR=/run/user/UID` (so the socket is where
+  the CLI looks) and `~/.local/bin` ahead of the system `PATH`, ordered after
+  your user manager, which creates that runtime directory;
+- caps the daemon at `MemoryMax=8G` and `TasksMax=4096`, far above what it
+  uses, so only a leak in isb itself meets them. Change them with a drop-in
+  (`sudo systemctl edit isb`);
+- turns on lingering for you if it is off, so the runtime directory exists
+  from boot without a login;
+- keeps the same `serve.env`, state and listen address as a user install;
+- puts the secrets key in the system credential store
+  (`/etc/credstore.encrypted/isb-age-key`, encrypted with the host key; a
+  user credential decrypts only under your user manager), from the plaintext
+  key or else the user credential an earlier install made;
+- stops, disables and removes a user unit `~/.config/systemd/user/isb.service`
+  if there is one, then enables and restarts the system unit and waits for
+  `/healthz`, as a user install does.
+
+Run it again to update it. Once the system unit exists, plain
+`isb serve install` refuses and points here. Restarting the daemon never
+stops an app, so moving between the two is safe on a live host.
+
 ### The secrets key
 
 Where `systemd-creds` can make user credentials (systemd 256 or later), the

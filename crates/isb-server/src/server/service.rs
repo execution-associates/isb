@@ -1,4 +1,5 @@
-//! Installing `isb serve` as a systemd user service.
+//! Installing `isb serve` as a systemd user service (`isb serve install`);
+//! [`super::system_service`] installs it as a system unit instead.
 //!
 //! The unit runs the isb binary that installed it, by its canonical path. The
 //! installer's path (`~/.local/bin/isb`) stays put across `isb update`, so a
@@ -56,42 +57,18 @@ pub fn install_user_service(opts: &ServiceOptions) -> Result<ServiceInstall> {
             "installing the service needs Linux with systemd user services",
         ));
     }
+    if super::system_service::installed() {
+        return Err(Error::invalid(format!(
+            "isb serve runs from the system unit {}: update it with `isb serve install --system`",
+            super::system_service::UNIT_PATH
+        )));
+    }
     let config = config_dir()?;
     let env_path = config.join("isb/serve.env");
     let unit_path = config.join("systemd/user").join(UNIT_NAME);
     let exe = std::env::current_exe()?.canonicalize()?;
     let key = setup_key(&config)?;
-
-    let existing = match std::fs::read_to_string(&env_path) {
-        Ok(s) => Some(s),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(e.into()),
-    };
-    let listen = opts
-        .listen
-        .clone()
-        .or_else(|| existing.as_deref().and_then(|s| env_value(s, LISTEN_ENV)))
-        .unwrap_or_else(|| DEFAULT_LISTEN.to_string());
-    check_loopback(&listen)?;
-
-    let env_text = match &existing {
-        None => Some(render_env(&listen)),
-        Some(s) if opts.listen.is_some() && env_value(s, LISTEN_ENV).as_ref() != Some(&listen) => {
-            Some(set_env_value(s, LISTEN_ENV, &listen))
-        }
-        Some(_) => None,
-    };
-    if let Some(text) = env_text {
-        // The env file may come to hold credentials: keep it private.
-        if let Some(dir) = env_path.parent() {
-            use std::os::unix::fs::DirBuilderExt;
-            std::fs::DirBuilder::new()
-                .recursive(true)
-                .mode(0o700)
-                .create(dir)?;
-        }
-        write_atomic(&env_path, text.as_bytes(), 0o600)?;
-    }
+    let listen = prepare_env(opts, &env_path)?;
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let cred = key
         .credential
@@ -144,6 +121,42 @@ pub fn install_user_service(opts: &ServiceOptions) -> Result<ServiceInstall> {
         key_credential: key.credential,
         notes,
     })
+}
+
+/// The listen address, from `opts`, else the env file's, else the default;
+/// writes the env file when it is missing or `opts.listen` changes it.
+pub(crate) fn prepare_env(opts: &ServiceOptions, env_path: &Path) -> Result<String> {
+    let existing = match std::fs::read_to_string(env_path) {
+        Ok(s) => Some(s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e.into()),
+    };
+    let listen = opts
+        .listen
+        .clone()
+        .or_else(|| existing.as_deref().and_then(|s| env_value(s, LISTEN_ENV)))
+        .unwrap_or_else(|| DEFAULT_LISTEN.to_string());
+    check_loopback(&listen)?;
+
+    let env_text = match &existing {
+        None => Some(render_env(&listen)),
+        Some(s) if opts.listen.is_some() && env_value(s, LISTEN_ENV).as_ref() != Some(&listen) => {
+            Some(set_env_value(s, LISTEN_ENV, &listen))
+        }
+        Some(_) => None,
+    };
+    if let Some(text) = env_text {
+        // The env file may come to hold credentials: keep it private.
+        if let Some(dir) = env_path.parent() {
+            use std::os::unix::fs::DirBuilderExt;
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(dir)?;
+        }
+        write_atomic(env_path, text.as_bytes(), 0o600)?;
+    }
+    Ok(listen)
 }
 
 /// A unit running a mise install pins that version, and mise installs are
@@ -308,7 +321,7 @@ pub fn credential_path(path: &Path, home: Option<&Path>) -> String {
     }
 }
 
-fn config_dir() -> Result<PathBuf> {
+pub(crate) fn config_dir() -> Result<PathBuf> {
     if let Some(d) = std::env::var_os("XDG_CONFIG_HOME").filter(|s| !s.is_empty()) {
         return Ok(PathBuf::from(d));
     }
@@ -346,7 +359,7 @@ fn systemctl(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-fn wait_healthy(listen: &str, timeout: Duration) -> std::result::Result<(), String> {
+pub(crate) fn wait_healthy(listen: &str, timeout: Duration) -> std::result::Result<(), String> {
     let started = Instant::now();
     let mut last = "no answer".to_string();
     while started.elapsed() < timeout {
@@ -396,7 +409,7 @@ WantedBy=default.target
 /// The env file written on first install.
 pub fn render_env(listen: &str) -> String {
     format!(
-        "# isb serve settings, read by the {UNIT_NAME} user unit.
+        "# isb serve settings, read by the {UNIT_NAME} unit.
 
 # Loopback address for /mcp and /healthz; point cloudflared here.
 {LISTEN_ENV}={listen}
@@ -449,7 +462,7 @@ fn set_env_value(text: &str, key: &str, value: &str) -> String {
 }
 
 /// An ExecStart argument: quoted, with systemd's `%` and `$` expansion escaped.
-fn quote(s: &str) -> String {
+pub(crate) fn quote(s: &str) -> String {
     let s = s
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
@@ -458,7 +471,7 @@ fn quote(s: &str) -> String {
     format!("\"{s}\"")
 }
 
-fn escape_env_path(s: &str) -> String {
+pub(crate) fn escape_env_path(s: &str) -> String {
     s.replace('\\', "\\x5c")
         .replace(' ', "\\x20")
         .replace('\t', "\\x09")
