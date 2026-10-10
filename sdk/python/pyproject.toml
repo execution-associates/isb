@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "isb-sdk"
-version = "2.0.2"
+version = "2.1.0"
 description = "Python SDK for isb: declarative incus sandboxes (containers and VMs)"
 readme = "README.md"
 license = "MIT"

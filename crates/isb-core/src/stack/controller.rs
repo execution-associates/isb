@@ -1356,16 +1356,7 @@ impl Worker {
         let mut insts = list_instances(self.client(), &self.stack, Some(&self.service))?;
         self.rt.retain(|n, _| insts.iter().any(|i| i.name == *n));
 
-        // Scale down, highest slots first.
-        let extra: Vec<Inst> = insts
-            .iter()
-            .filter(|i| i.slot > replicas || i.slot == 0)
-            .cloned()
-            .collect();
-        for i in extra.iter().rev() {
-            self.log(&format!("scaling down: removing {}", i.name));
-            self.retire(&i.name)?;
-        }
+        self.scale_down(def, &insts, replicas)?;
         insts.retain(|i| i.slot >= 1 && i.slot <= replicas);
         self.insts = insts.clone();
 
@@ -2326,6 +2317,8 @@ pub fn unsettled(st: &StackStatus) -> BTreeSet<String> {
 
 #[path = "rotation.rs"]
 mod rotation;
+#[path = "scale_down.rs"]
+mod scale_down;
 
 #[cfg(test)]
 #[path = "controller_tests.rs"]

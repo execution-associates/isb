@@ -189,7 +189,12 @@ function AppHeader({ org, app, writer, viewing }: { org: string; app: App; write
         actions={
           writer && (
             <>
-              {loading ? null : state === "stopped" ? (
+              {loading ? null : state === "stopping" || state === "starting" ? (
+                <Button variant="outline" disabled>
+                  <Loader2 className="animate-spin" />
+                  {state === "stopping" ? "Stopping" : "Starting"}
+                </Button>
+              ) : state === "stopped" ? (
                 <Button variant="outline" onClick={start} disabled={starting}>
                   {starting ? <Loader2 className="animate-spin" /> : <Play />}
                   Start
@@ -226,7 +231,7 @@ function AppHeader({ org, app, writer, viewing }: { org: string; app: App; write
         onConfirm={async () => {
           await callTool("stack_scale", { name: app.stack, service: app.name, replicas: 0 }, org);
           await invalidateOrg(qc, org);
-          toast.success(`${app.name} stopped`);
+          toast.success(`${app.name} stopping`);
         }}
       />
     </>

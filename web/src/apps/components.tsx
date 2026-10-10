@@ -44,6 +44,8 @@ const APP_STATE: Record<AppState, [Tone, string]> = {
   degraded: ["warn", "Degraded"],
   updating: ["busy", "Updating"],
   failing: ["bad", "Failing"],
+  starting: ["busy", "Starting"],
+  stopping: ["busy", "Stopping"],
   stopped: ["idle", "Stopped"],
   failed: ["bad", "Deploy failed"],
 };

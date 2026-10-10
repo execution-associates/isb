@@ -2,30 +2,32 @@
 import { useQuery } from "@tanstack/react-query";
 import { callTool, type StackList, type StackStatus } from "@/api/tools";
 import { LIVE_POLL } from "@/lib/freshness";
-import { type EnvironmentInfo, keys, type Project, type StackDetail } from "./api";
+import { type EnvironmentInfo, isStarting, isStopping, keys, type Project, type StackDetail, transitionPoll } from "./api";
 
-export type Health = "healthy" | "degraded" | "failing" | "updating" | "idle";
+export type Health = "healthy" | "degraded" | "failing" | "starting" | "updating" | "stopping" | "idle";
 
 /** Every stack the caller sees (shared with the org overview's query). */
 export function useStackList() {
   return useQuery({
     queryKey: ["tool", "stack_list"],
     queryFn: () => callTool<StackList>("stack_list"),
-    refetchInterval: LIVE_POLL,
+    refetchInterval: (q) => transitionPoll(q.state.data?.stacks.flatMap((s) => s.services)),
   });
 }
 
 export function stackHealth(s: Pick<StackStatus, "services"> | undefined): Health {
   if (!s || s.services.length === 0) return "idle";
   const live = s.services.filter((x) => x.replicas > 0);
-  if (live.length === 0) return "idle";
-  if (live.some((x) => x.state === "failing" || x.healthy === 0)) return "failing";
-  if (live.some((x) => x.state === "updating" || x.state === "starting")) return "updating";
+  const stopping = s.services.some(isStopping);
+  if (live.length === 0) return stopping ? "stopping" : "idle";
+  if (live.some((x) => x.state === "failing" || (x.healthy === 0 && !isStarting(x)))) return "failing";
+  if (live.every(isStarting)) return "starting";
+  if (stopping || live.some((x) => x.state === "updating" || x.state === "starting")) return "updating";
   if (live.some((x) => x.healthy < x.replicas)) return "degraded";
   return "healthy";
 }
 
-const RANK: Health[] = ["failing", "degraded", "updating", "healthy", "idle"];
+const RANK: Health[] = ["failing", "degraded", "stopping", "starting", "updating", "healthy", "idle"];
 
 /** The worst of several. */
 export function worst(hs: Health[]): Health {
@@ -51,7 +53,9 @@ export const HEALTH_TONE = {
   healthy: "ok",
   degraded: "warn",
   failing: "bad",
+  starting: "busy",
   updating: "busy",
+  stopping: "busy",
   idle: "idle",
 } as const;
 
@@ -59,7 +63,9 @@ export const HEALTH_LABEL: Record<Health, string> = {
   healthy: "Healthy",
   degraded: "Degraded",
   failing: "Failing",
+  starting: "Starting",
   updating: "Updating",
+  stopping: "Stopping",
   idle: "Nothing running",
 };
 
