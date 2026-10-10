@@ -282,7 +282,8 @@ minime only runs binaries downloaded from our CI runs.
   `/tmp/isb-0/serve.sock`; the CLI over ssh (pam sets `/run/user/0`) looks
   in `/run/user/0/isb/`. Workaround on isb-test: `RuntimeDirectory=isb` +
   `ISB_SERVE_SOCKET=/run/isb/serve.sock`. Fix: one fallback order shared by
-  both, and `isb serve install` for system units.
+  both. (`isb serve install --system` runs the daemon as a user, with that
+  user's runtime dir, so it does not meet this.)
 - **The default org is always a real org (`isb-default`)**, created by
   `isb serve` at start when missing (`org::ensure_default`); incus' own
   `default` project is never an org and holds only plain `isb create` /

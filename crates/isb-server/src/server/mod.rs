@@ -35,6 +35,7 @@ pub mod openapi;
 pub mod service;
 pub mod ssh;
 pub mod ssh_config;
+pub mod system_service;
 pub mod tailnet;
 pub mod terminal;
 

@@ -209,6 +209,11 @@ pub(crate) enum ServeAction {
         /// Do not run `isb host setup` (it needs sudo).
         #[arg(long)]
         no_host_setup: bool,
+        /// Install a system unit that runs as you, outside your user slice
+        /// and its limits, with its own (/etc/systemd/system/isb.service;
+        /// uses sudo). For a host where agents run as the same user.
+        #[arg(long)]
+        system: bool,
     },
 }
 
@@ -220,7 +225,10 @@ pub(crate) fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
     use isb::daemon::{ServeConfig, policy::RemotePolicy};
     if cfg!(target_os = "macos") {
         let Some(ServeAction::Install {
-            listen, machine, ..
+            listen,
+            machine,
+            system,
+            ..
         }) = a.action
         else {
             return Err(Error::Invalid(
@@ -230,6 +238,12 @@ pub(crate) fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
                     .into(),
             ));
         };
+        if system {
+            return Err(Error::Invalid(
+                "--system: on macOS the daemon runs in the isb machine, started by a LaunchAgent"
+                    .into(),
+            ));
+        }
         if listen.is_some() {
             return Err(Error::Invalid(format!(
                 "--listen: on macOS the daemon in the machine listens on {}",
@@ -250,6 +264,7 @@ pub(crate) fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
     if let Some(ServeAction::Install {
         listen,
         no_host_setup,
+        system,
         ..
     }) = a.action
     {
@@ -258,11 +273,15 @@ pub(crate) fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
         } else if !no_host_setup {
             crate::host::host_setup_with_sudo()?;
         }
-        let r =
-            isb::server::service::install_user_service(&isb::server::service::ServiceOptions {
-                listen,
-                health_timeout: None,
-            })?;
+        let opts = isb::server::service::ServiceOptions {
+            listen,
+            health_timeout: None,
+        };
+        let r = if system {
+            isb::server::system_service::install_system_service(&opts)?
+        } else {
+            isb::server::service::install_user_service(&opts)?
+        };
         println!(
             "installed {} (runs {})",
             r.unit_path.display(),

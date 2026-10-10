@@ -207,8 +207,9 @@ when a newer one lands first.
 ## 8. Upgrade titan's isb, rolling nothing
 
 titan runs `isb serve` as the system unit `isb.service` (as stephan, outside
-the agents' user slice) on `127.0.0.1:8192`, from `~/.local/bin/isb`. Its
-unit lives in titan-iac (`host/systemd/isb.service`).
+the agents' user slice) on `127.0.0.1:8192`, from `~/.local/bin/isb`.
+`isb serve install --system` writes that unit; a restart is all an upgrade
+needs.
 
 **Announce first.** Tell any agent working on titan's orgs (step 0's list)
 that the daemon is about to restart, and wait for an OK from one that asked
