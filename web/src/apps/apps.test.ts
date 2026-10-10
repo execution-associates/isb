@@ -7,7 +7,7 @@ import { gitUrlProblem } from "./new-app-dialog";
 import { parseMemory } from "./app-monitoring";
 import { appState, type Project } from "./api";
 import { activeServiceTab, SERVICE_TABS, serviceTabs } from "./service-tabs";
-import { envHealth, projectHealth } from "./health";
+import { envHealth, projectHealth, stackHealth } from "./health";
 import { lastDeploy, projectCounts } from "./projects-page";
 import { composeStates } from "./dashboard";
 import { imageNote, imageProblem } from "./image-ref";
@@ -277,7 +277,19 @@ describe("small helpers", () => {
     expect(appState(svc({}), dep("done"))).toBe("running");
     expect(appState(svc({ healthy: 1 }), dep("done"))).toBe("degraded");
     expect(appState(svc({ healthy: 0 }), dep("done"))).toBe("failing");
-    expect(appState(svc({ replicas: 0, healthy: 0 }), dep("done"))).toBe("stopped");
+    expect(appState(svc({ replicas: 0, running: 0, healthy: 0 }), dep("done"))).toBe("stopped");
+    // Stop returns before the instances are gone; Start before any is healthy.
+    expect(appState(svc({ replicas: 0, running: 1, healthy: 0, state: "updating", instances: [{}] }), dep("done"))).toBe("stopping");
+    expect(appState(svc({ running: 0, healthy: 0, state: "updating" }), dep("done"))).toBe("starting");
+  });
+
+  it("shows a stack stopping or starting as such, not as idle or failing", () => {
+    const svc = (p: Record<string, unknown>) => ({ service: "web", image: "", rev: "", replicas: 2, running: 2, healthy: 2, state: "converged", instances: [], ports: [], checked_at: 0, ...p }) as never;
+    expect(stackHealth({ services: [svc({ replicas: 0, running: 2, healthy: 0, state: "updating", instances: [{}, {}] })] })).toBe("stopping");
+    expect(stackHealth({ services: [svc({ replicas: 0, running: 0, healthy: 0 })] })).toBe("idle");
+    expect(stackHealth({ services: [svc({ running: 0, healthy: 0, state: "updating" })] })).toBe("starting");
+    expect(stackHealth({ services: [svc({ running: 2, healthy: 0, state: "failing" })] })).toBe("failing");
+    expect(stackHealth({ services: [svc({}), svc({ service: "db", replicas: 0, running: 1, instances: [{}] })] })).toBe("updating");
   });
 });
 

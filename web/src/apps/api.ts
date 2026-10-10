@@ -218,11 +218,12 @@ export function useLatestDeployments(org: string, apps: string[]) {
 }
 
 /** A stack's status, or null when it is not deployed (no app has run yet). */
-export function useStack(org: string, stack: string | undefined, refetchInterval: number = LIVE_POLL) {
+export function useStack(org: string, stack: string | undefined, interval: number = LIVE_POLL) {
   return useQuery({
     queryKey: keys.stack(org, stack ?? ""),
     enabled: !!stack,
-    refetchInterval,
+    // Faster while it stops or starts, so the badge follows it.
+    refetchInterval: (q) => Math.min(interval, transitionPoll(q.state.data?.services)),
     queryFn: async () => {
       try {
         return await callTool<StackDetail>("stack_status", { name: stack ?? "" }, org);
@@ -259,6 +260,17 @@ export function useIngress(org: string) {
   });
 }
 
+type Transition = Pick<ServiceStatus, "replicas" | "running" | "healthy" | "state"> & { instances?: unknown[] };
+
+/** Scaled to 0 (Stop) while its instances are still shutting down: stack_scale returns before they do. */
+export const isStopping = (s: Transition) => s.replicas === 0 && (s.running > 0 || (s.instances?.length ?? 0) > 0);
+
+/** Asked for replicas, none healthy yet, while the controller brings them up (Start, or a first rollout). */
+export const isStarting = (s: Transition) => s.replicas > 0 && s.healthy === 0 && (s.state === "starting" || s.state === "updating");
+
+/** Poll a stack every 2 s while a service is stopping or starting, else at the usual pace. */
+export const transitionPoll = (services: Transition[] | undefined) => (services?.some((s) => isStopping(s) || isStarting(s)) ? 2000 : LIVE_POLL);
+
 /** What an app is doing now, from its service and its latest deployment. */
 export type AppState =
   | "not-deployed"
@@ -267,14 +279,17 @@ export type AppState =
   | "degraded"
   | "updating"
   | "failing"
+  | "starting"
+  | "stopping"
   | "stopped"
   | "failed";
 
 export function appState(svc: StackDetail["services"][number] | undefined, latest: Deployment | undefined): AppState {
   if (latest && !finished(latest.status)) return "deploying";
   if (!svc) return latest?.status === "failed" ? "failed" : "not-deployed";
-  if (svc.replicas === 0) return "stopped";
+  if (svc.replicas === 0) return isStopping(svc) ? "stopping" : "stopped";
   if (svc.state === "failing") return "failing";
+  if (isStarting(svc)) return "starting";
   if (svc.state === "updating" || svc.state === "starting") return "updating";
   if (svc.healthy < svc.replicas) return svc.healthy === 0 ? "failing" : "degraded";
   return "running";

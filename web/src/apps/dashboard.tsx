@@ -89,7 +89,9 @@ const HEALTH_STATE: Record<Health, AppState> = {
   healthy: "running",
   degraded: "degraded",
   failing: "failing",
+  starting: "starting",
   updating: "updating",
+  stopping: "stopping",
   idle: "stopped",
 };
 
@@ -103,7 +105,7 @@ export function composeStates(names: string[], stacks: StackDetail[], deps: Map<
   return m;
 }
 
-const UP: AppState[] = ["running", "degraded", "updating"];
+const UP: AppState[] = ["running", "degraded", "updating", "stopping"];
 const TROUBLE: AppState[] = ["failing", "failed", "degraded"];
 
 export function OrgDashboard({ org }: { org: string }) {

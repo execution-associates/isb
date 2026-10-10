@@ -1,7 +1,7 @@
 // /orgs/:org/projects/:project/:env: a project, its environments as tabs, and
 // the services (apps, databases and compose stacks) of the one selected, as cards.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Box, Boxes, ChevronDown, Database, GitBranch, Globe, Layers, LayoutTemplate, MoreHorizontal, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Box, Boxes, ChevronDown, Database, GitBranch, Globe, Layers, LayoutTemplate, Loader2, MoreHorizontal, Play, Plus, Square, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
@@ -23,6 +23,8 @@ import { engineLabel } from "@/data/api";
 import { NewDatabaseDialog } from "@/data/new-database";
 import { canWrite, maxGrant } from "@/lib/admin";
 import { relativeTime } from "@/lib/format";
+import { errorMessage } from "@/lib/messages";
+import { invalidateOrg } from "@/lib/freshness";
 import { useMe } from "@/lib/session";
 import type { Tone } from "@/lib/status";
 import { cn } from "@/lib/utils";
@@ -32,6 +34,8 @@ import {
   appState,
   type Deployment,
   isGit,
+  isStarting,
+  isStopping,
   keys,
   serviceOf,
   type StackDetail,
@@ -41,7 +45,7 @@ import {
   useProjects,
   useStack,
 } from "./api";
-import { composePath } from "@/stacks/api";
+import { composePath, type StackExport, sourceReplicas } from "@/stacks/api";
 import { AppStateBadge, ConfirmDialog, Crumbs, DeploymentBadge, EmptyState, QueryError, TabLinks, ToneBadge } from "./components";
 import { autoHostLabel, ingressOff } from "./domains";
 import { HEALTH_LABEL, HEALTH_TONE, stackHealth, useStackList } from "./health";
@@ -157,6 +161,7 @@ export function ProjectPage() {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+              <EnvStopStart org={org} env={environment.name} stack={environment.stack} apps={envApps} appStatus={stack.data} compose={compose} />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="icon" aria-label="Project actions">
@@ -333,6 +338,97 @@ export function ProjectPage() {
   );
 }
 
+/**
+ * Stop and Start for every service in the environment: its apps and
+ * databases (in its own stack) and its compose stacks. Stop scales each to 0
+ * replicas; Start scales apps back to the replicas they ask for and compose
+ * services to what their compose file says, as their own pages' Start does.
+ * stack_scale returns before the instances stop or start, so while any is
+ * still on its way the button says so and waits.
+ */
+function EnvStopStart({
+  org,
+  env,
+  stack,
+  apps,
+  appStatus,
+  compose,
+}: {
+  org: string;
+  env: string;
+  stack: string;
+  apps: App[];
+  appStatus: StackDetail | null | undefined;
+  compose: { name: string; services: string[]; status: StackStatus | undefined }[];
+}) {
+  const qc = useQueryClient();
+  const [stopOpen, setStopOpen] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const appSvcs = apps.map((a) => ({ app: a, svc: serviceOf(appStatus, a.name) })).filter((x) => x.svc);
+  const all = [...appSvcs.map((x) => x.svc!), ...compose.flatMap((c) => c.status?.services ?? [])];
+  if (all.length === 0) return null;
+  const refresh = () => Promise.all([invalidateOrg(qc, org), qc.invalidateQueries({ queryKey: ["tool", "stack_list"] }), qc.invalidateQueries({ queryKey: ["stacks", org] })]);
+  if (all.some(isStopping) || all.some(isStarting)) {
+    return (
+      <Button variant="outline" disabled>
+        <Loader2 className="animate-spin" />
+        {all.some(isStopping) ? "Stopping" : "Starting"}
+      </Button>
+    );
+  }
+  const running = all.some((s) => s.replicas > 0);
+  const start = async () => {
+    setStarting(true);
+    try {
+      for (const { app } of appSvcs) await callTool("stack_scale", { name: stack, service: app.name, replicas: Math.max(1, app.replicas) }, org);
+      for (const c of compose) {
+        if (!c.status?.services.length) continue;
+        const exp = await callTool<StackExport>("stack_export", { name: c.name }, org);
+        const want = sourceReplicas(exp.yaml, c.services.length ? c.services : c.status.services.map((s) => s.service));
+        for (const [service, replicas] of Object.entries(want)) await callTool("stack_scale", { name: c.name, service, replicas }, org);
+      }
+      await refresh();
+      toast.success(`${env} starting`);
+    } catch (err) {
+      toast.error(errorMessage(err));
+      await refresh();
+    } finally {
+      setStarting(false);
+    }
+  };
+  return (
+    <>
+      {running ? (
+        <Button variant="outline" onClick={() => setStopOpen(true)}>
+          <Square />
+          Stop
+        </Button>
+      ) : (
+        <Button variant="outline" onClick={start} disabled={starting}>
+          {starting ? <Loader2 className="animate-spin" /> : <Play />}
+          Start
+        </Button>
+      )}
+      <ConfirmDialog
+        open={stopOpen}
+        onOpenChange={setStopOpen}
+        title={`Stop everything in ${env}?`}
+        description={`Every app, database and compose stack in ${env} is scaled to 0 replicas, and their domains answer 503 until you start them or deploy again. Settings, compose files and volumes are kept.`}
+        confirmLabel={`Stop ${env}`}
+        onConfirm={async () => {
+          try {
+            for (const { app, svc } of appSvcs) if (svc!.replicas > 0) await callTool("stack_scale", { name: stack, service: app.name, replicas: 0 }, org);
+            for (const c of compose) for (const s of c.status?.services ?? []) if (s.replicas > 0) await callTool("stack_scale", { name: c.name, service: s.service, replicas: 0 }, org);
+          } finally {
+            await refresh();
+          }
+          toast.success(`${env} stopping`);
+        }}
+      />
+    </>
+  );
+}
+
 type Doomed = { name: string; kind: "app" | "compose"; env: string };
 
 type DryRun = { volumes: string[]; volumes_kept: { name: string; reason: string }[] };
@@ -438,6 +534,8 @@ const REPLICA_TONE: Record<AppState, Tone> = {
   deploying: "info",
   failing: "danger",
   failed: "danger",
+  starting: "info",
+  stopping: "info",
   stopped: "muted",
   "not-deployed": "muted",
 };
@@ -540,7 +638,7 @@ function ComposeCard({ to, name, services, status }: { to: string; name: string;
             <Link to={to} className="card-link truncate text-[15px] font-semibold tracking-tight after:absolute after:inset-0 after:rounded-xl focus-visible:outline-none">
               {name}
             </Link>
-            <ToneBadge tone={HEALTH_TONE[h]} pulse={h === "updating"}>
+            <ToneBadge tone={HEALTH_TONE[h]} pulse={HEALTH_TONE[h] === "busy"}>
               {HEALTH_LABEL[h]}
             </ToneBadge>
           </div>
@@ -576,7 +674,9 @@ const HEALTH_DOT: Record<keyof typeof HEALTH_TONE, Tone> = {
   healthy: "success",
   degraded: "warning",
   failing: "danger",
+  starting: "info",
   updating: "info",
+  stopping: "info",
   idle: "muted",
 };
 

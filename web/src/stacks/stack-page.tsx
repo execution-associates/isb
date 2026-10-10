@@ -23,7 +23,7 @@ import { errorMessage } from "@/lib/messages";
 import { useMe } from "@/lib/session";
 import { finished, isNotFound, useProjects, useStack } from "@/apps/api";
 import { ConfirmDialog, Crumbs, EmptyState, QueryError, ToneBadge } from "@/apps/components";
-import { HEALTH_LABEL, HEALTH_TONE, stackHealth } from "@/apps/health";
+import { type Health, HEALTH_LABEL, HEALTH_TONE, stackHealth } from "@/apps/health";
 import { DeploymentBanner, ServiceHeader, ServiceTabBar } from "@/apps/service-page";
 import { activeServiceTab, serviceTabs, stackTab } from "@/apps/service-tabs";
 import {
@@ -174,7 +174,7 @@ export function StackPage() {
           status.isLoading ? (
             <Skeleton className="h-5 w-20 rounded-full" />
           ) : (
-            <ToneBadge tone={HEALTH_TONE[health]} pulse={health === "updating"}>
+            <ToneBadge tone={HEALTH_TONE[health]} pulse={HEALTH_TONE[health] === "busy"}>
               {HEALTH_LABEL[health]}
             </ToneBadge>
           )
@@ -208,7 +208,7 @@ export function StackPage() {
           writer &&
           deploy && (
             <>
-              {!status.isLoading && <StopStart org={org} name={name} yaml={e.yaml} names={e.services} services={services} />}
+              {!status.isLoading && <StopStart org={org} name={name} yaml={e.yaml} names={e.services} services={services} health={health} />}
               <Button onClick={deploy.run} disabled={deploy.pending}>
                 {deploy.pending ? <Loader2 className="animate-spin" /> : <Rocket />}
                 {e.deployed_at ? "Redeploy" : "Deploy"}
@@ -292,8 +292,24 @@ function StackActiveDeployment({ org, name, path, viewing }: { org: string; name
  * Stop and Start for the whole stack, as an app has for its service. Stop
  * scales every service to 0 (stack_scale); Start, shown once every service
  * is at 0, scales each back to the replicas its compose file asks for.
+ * Both return before the instances have stopped or started, so while they
+ * do the button says so and waits.
  */
-function StopStart({ org, name, yaml, names, services }: { org: string; name: string; yaml: string; names: string[]; services: StackServices | undefined }) {
+function StopStart({
+  org,
+  name,
+  yaml,
+  names,
+  services,
+  health,
+}: {
+  org: string;
+  name: string;
+  yaml: string;
+  names: string[];
+  services: StackServices | undefined;
+  health: Health;
+}) {
   const qc = useQueryClient();
   const [stopOpen, setStopOpen] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -315,7 +331,12 @@ function StopStart({ org, name, yaml, names, services }: { org: string; name: st
   };
   return (
     <>
-      {stopped ? (
+      {health === "stopping" || health === "starting" ? (
+        <Button variant="outline" disabled>
+          <Loader2 className="animate-spin" />
+          {health === "stopping" ? "Stopping" : "Starting"}
+        </Button>
+      ) : stopped ? (
         <Button variant="outline" onClick={start} disabled={starting}>
           {starting ? <Loader2 className="animate-spin" /> : <Play />}
           Start
@@ -335,7 +356,7 @@ function StopStart({ org, name, yaml, names, services }: { org: string; name: st
         onConfirm={async () => {
           for (const s of services) if (s.replicas > 0) await callTool("stack_scale", { name, service: s.service, replicas: 0 }, org);
           await refresh();
-          toast.success(`${name} stopped`);
+          toast.success(`${name} stopping`);
         }}
       />
     </>
