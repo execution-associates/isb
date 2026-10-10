@@ -331,6 +331,24 @@ fn alive(pid: u32, start: u64) -> bool {
     matches!(stat(pid), Some((_, s)) if s == start)
 }
 
+/// This process as `host:pid:start`, for a resource to record so that a
+/// later process can tell whether its maker still runs ([`owner_alive`]).
+/// A pid alone may be reused; with its start time it names one process.
+pub fn owner_tag() -> Option<String> {
+    let pid = std::process::id();
+    let (_, start) = stat(pid)?;
+    Some(format!("{}:{pid}:{start}", crate::metrics::hostname()))
+}
+
+/// Whether the process an [`owner_tag`] names still runs: `None` when this
+/// host cannot tell (another host's tag, or not a tag).
+pub fn owner_alive(tag: &str) -> Option<bool> {
+    let mut f = tag.rsplitn(3, ':');
+    let start = f.next()?.parse().ok()?;
+    let pid = f.next()?.parse().ok()?;
+    (f.next()? == crate::metrics::hostname()).then(|| alive(pid, start))
+}
+
 /// (ppid, start time) from `/proc/<pid>/stat`; `None` for a missing or
 /// zombie process.
 #[cfg(target_os = "linux")]
@@ -401,6 +419,19 @@ mod tests {
         assert!(!a.is_empty());
         assert!(a.iter().all(|&(p, t)| alive(p, t)));
         assert!(!alive(a[0].0, a[0].1 + 1));
+    }
+
+    #[test]
+    fn owner_tags() {
+        let me = owner_tag().unwrap();
+        assert_eq!(owner_alive(&me), Some(true));
+        // The same pid with another start time is another process.
+        let (rest, start) = me.rsplit_once(':').unwrap();
+        let start: u64 = start.parse().unwrap();
+        assert_eq!(owner_alive(&format!("{rest}:{}", start + 1)), Some(false));
+        let pid = rest.rsplit_once(':').unwrap().1;
+        assert_eq!(owner_alive(&format!("not-this-host:{pid}:{start}")), None);
+        assert_eq!(owner_alive("garbage"), None);
     }
 
     #[test]

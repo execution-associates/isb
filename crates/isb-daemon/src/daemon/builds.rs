@@ -146,6 +146,14 @@ fn new_build_id() -> String {
     reason = "predates the lint ratchet; split it when next changed"
 )]
 pub fn register(r: &mut Registry, ctx: Ctx) -> Result<()> {
+    // Builds that were running when the last daemon stopped left their
+    // sandboxes behind, holding quota and build cache volumes.
+    let c = ctx.client.clone();
+    let _ = std::thread::Builder::new()
+        .name("isb-reap-builds".into())
+        .spawn(move || {
+            crate::build::reap_stale_everywhere(&c, &mut |l| eprintln!("isb serve: {l}"));
+        });
     let ctx = Arc::new(ctx);
     let jobs = Arc::new(Jobs::default());
     let ro = json!({"readOnlyHint": true, "openWorldHint": false});

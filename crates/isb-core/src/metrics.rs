@@ -18,6 +18,11 @@ use crate::error::Result;
 
 mod sys;
 
+/// This host's name.
+pub fn hostname() -> String {
+    sys::hostname()
+}
+
 /// Samples of history kept per series.
 pub const HISTORY: usize = 40;
 

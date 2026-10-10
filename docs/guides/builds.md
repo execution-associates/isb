@@ -112,6 +112,13 @@ when the build ends, however it ends (success, failure, timeout):
   allows VMs; the host needs KVM. A VM costs about 40 s more (boot). Apps
   built from git use a VM unless their `build.untrusted` is `false`.
 
+A build sandbox records the process that made it (`user.isb.build.owner`:
+host, pid and the process's start time). When that process dies before it
+can delete the sandbox, as a daemon restarted mid-build does, the next build
+in the org deletes it, and so does the daemon when it starts. Left in place,
+it would count against the org's quota and hold the app's build cache
+volume, which no later build's sandbox could mount.
+
 The source directory is copied in as a tar (symlinks stay links, never
 followed on the host; at most 2 GiB); the host directory is never mounted.
 The build writes the image as an OCI layout inside the sandbox; the daemon
