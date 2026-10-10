@@ -19,7 +19,7 @@ import { relativeTime } from "@/lib/format";
 import { errorMessage } from "@/lib/messages";
 import { useCanWrite } from "@/lib/use-role";
 import { cn } from "@/lib/utils";
-import { downtimeText, type Incident, type Monitor, type MonitorList, msText, STATUS_TONE, ukeys, uptimeText, uptimeTone, useMonitors } from "./api";
+import { downtimeText, type Incident, type Monitor, type MonitorList, msText, resting, STATUS_TONE, ukeys, uptimeText, uptimeTone, useMonitors } from "./api";
 import { MonitorBadge, Sparkline, Stat, UptimeBars } from "./components";
 import { MonitorDialog } from "./monitor-dialog";
 import { TONE_TEXT } from "@/lib/status";
@@ -97,7 +97,7 @@ export function UptimePage() {
 }
 
 function Summary({ list }: { list: MonitorList }) {
-  const ms = list.monitors.filter((m) => m.status !== "paused");
+  const ms = list.monitors.filter((m) => !resting(m));
   const up = ms.filter((m) => m.status === "up").length;
   const ups = ms.map((m) => m.uptime["24h"]).filter((u): u is number => u !== null);
   const avg = ups.length ? ups.reduce((a, b) => a + b, 0) / ups.length : null;
@@ -116,7 +116,7 @@ function MonitorRow({ org, m }: { org: string; m: Monitor }) {
   const to = `/orgs/${encodeURIComponent(org)}/uptime/${encodeURIComponent(m.name)}`;
   const u = m.uptime["24h"];
   return (
-    <li className={cn("relative grid grid-cols-[minmax(0,1fr)] items-center gap-x-5 gap-y-2 px-5 py-3.5 transition-colors hover:bg-muted/30 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1.2fr)_7rem_6rem]", m.status === "paused" && "opacity-60")}>
+    <li className={cn("relative grid grid-cols-[minmax(0,1fr)] items-center gap-x-5 gap-y-2 px-5 py-3.5 transition-colors hover:bg-muted/30 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1.2fr)_7rem_6rem]", resting(m) && "opacity-60")}>
       <div className="flex min-w-0 items-center gap-3">
         <StatusDot tone={STATUS_TONE[m.status]} pulse={m.status === "down"} className="size-2.5" />
         <div className="min-w-0">

@@ -163,6 +163,22 @@ pub(crate) fn is_live(apps: &Apps, org: &OrgId, m: &Monitor) -> bool {
         .is_some_and(|s| s.healthy > 0 && s.instances.iter().any(|i| i.in_rotation))
 }
 
+/// Is the app or stack service scaled to 0 (stopped)? Then its monitor
+/// is not checked.
+pub(crate) fn is_stopped(apps: &Apps, org: &OrgId, m: &Monitor) -> bool {
+    if !m.follows() {
+        return false;
+    }
+    let Ok(f) = followed(apps, org, m) else {
+        return false;
+    };
+    apps.controller()
+        .status(&f.stack)
+        .ok()
+        .and_then(|st| st.services.into_iter().find(|s| s.service == f.service))
+        .is_some_and(|s| s.replicas == 0)
+}
+
 /// The paths a check requests, from the monitor's `path`, the service's
 /// healthcheck and the picked domain's route (its prefix, whether it strips
 /// it, the port it routes to).

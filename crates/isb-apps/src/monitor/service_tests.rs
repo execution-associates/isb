@@ -119,6 +119,83 @@ fn down_once_up_once_with_details() {
 }
 
 #[test]
+fn a_stopped_target_rests_its_monitor_quietly() {
+    let dir = tempfile::tempdir().unwrap();
+    let (svc, ctl) = service(dir.path());
+    let org = OrgId::new("acme").unwrap();
+    let (port, status) = flappy();
+    let mut m = Monitor::new("shop", Kind::Http);
+    m.url = Some(format!("http://127.0.0.1:{port}/"));
+    svc.create(&org, m.clone()).unwrap();
+    let run = |n: usize| {
+        for _ in 0..n {
+            let o = svc.check(&org, &m);
+            svc.record(&org, &m, o).unwrap();
+        }
+    };
+    run(1);
+    status.store(503, Ordering::SeqCst);
+    run(5);
+    assert_eq!(kinds(&ctl).len(), 1, "down");
+    // Stopped: the incident closes and channels hear nothing.
+    svc.rest(&org, &m).unwrap();
+    svc.rest(&org, &m).unwrap();
+    assert_eq!(svc.summary(&org, &m).unwrap()["status"], "stopped");
+    let db = svc.db(&org).unwrap();
+    let inc = db.lock().unwrap().incidents(None, 10, now_ms()).unwrap();
+    assert!(inc.len() == 1 && inc[0].ended.is_some(), "{inc:?}");
+    // Started again, still failing: pending, not a second down.
+    run(5);
+    assert_eq!(svc.summary(&org, &m).unwrap()["status"], "pending");
+    status.store(200, Ordering::SeqCst);
+    run(1);
+    assert_eq!(svc.summary(&org, &m).unwrap()["status"], "up");
+    assert_eq!(kinds(&ctl).len(), 1, "{:?}", kinds(&ctl));
+}
+
+#[test]
+fn the_monitors_following_a_target_go_with_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let (svc, _) = service(dir.path());
+    let org = OrgId::new("acme").unwrap();
+    let mut own = Monitor::new("app-shop", Kind::App);
+    (own.app, own.auto) = (Some("shop".into()), true);
+    let mut made = Monitor::new("shop-check", Kind::App);
+    made.app = Some("shop".into());
+    let mut web = Monitor::new("wiki-web", Kind::Service);
+    (web.stack, web.service) = (Some("wiki".into()), Some("web".into()));
+    let mut other = Monitor::new("other", Kind::App);
+    other.app = Some("blog".into());
+    svc.save(&org, &[own, made, web, other]).unwrap();
+    let mut s = svc.settings(&org).unwrap();
+    s.exclude_apps = vec!["shop".into(), "blog".into()];
+    s.exclude_services = vec!["wiki/web".into()];
+    svc.set_settings(&org, &s).unwrap();
+    let targets = [
+        auto::Target::App("shop".into()),
+        auto::Target::Service {
+            stack: "wiki".into(),
+            service: "web".into(),
+        },
+    ];
+    let doomed = ["app-shop", "shop-check", "wiki-web"];
+    assert_eq!(svc.following(&org, &targets).unwrap(), doomed);
+    assert_eq!(svc.remove_following(&org, &targets).unwrap(), doomed);
+    let left: Vec<String> = svc
+        .list(&org)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.name)
+        .collect();
+    assert_eq!(left, ["other"]);
+    // Gone with their targets, not excluded: a new app of the name is
+    // monitored again.
+    let s = svc.settings(&org).unwrap();
+    assert_eq!(s.exclude_apps, ["blog"]);
+    assert!(s.exclude_services.is_empty());
+}
+
+#[test]
 fn edits_pause_and_delete() {
     let dir = tempfile::tempdir().unwrap();
     let (svc, _) = service(dir.path());

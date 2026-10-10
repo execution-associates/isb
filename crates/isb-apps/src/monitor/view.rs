@@ -31,8 +31,9 @@ fn uptimes(db: &Db, name: &str, now: u64) -> Result<Value> {
 
 impl Monitors {
     /// One monitor as listings show it: its definition, `status` (up, down,
-    /// pending, paused), `never_up` (pending for 30 minutes with only
-    /// failures), the last check, uptime over 24 h, 7 d and 30 d, latency
+    /// pending, paused, or stopped: its app or stack service is scaled to
+    /// 0), `never_up` (pending for 30 minutes with only failures), the last
+    /// check, uptime over 24 h, 7 d and 30 d, latency
     /// p50/p95 over 24 h, 24 hourly bars (`[start, uptime, pending checks]`)
     /// and the last 30 latencies.
     pub fn summary(&self, org: &OrgId, m: &Monitor) -> Result<Value> {
@@ -64,6 +65,8 @@ impl Monitors {
         let mut v = serde_json::to_value(m)?;
         let status = if m.paused {
             "paused"
+        } else if st.state.stopped {
+            "stopped"
         } else {
             st.state.status.as_str()
         };

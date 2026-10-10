@@ -347,6 +347,61 @@ impl Monitors {
         Ok(m)
     }
 
+    /// The monitors that follow any of `targets`: their own, and the app
+    /// and service monitors made for them.
+    pub fn following(&self, org: &OrgId, targets: &[auto::Target]) -> Result<Vec<String>> {
+        Ok(self
+            .list(org)?
+            .into_iter()
+            .filter(|m| targets.iter().any(|t| t.owns(m)))
+            .map(|m| m.name)
+            .collect())
+    }
+
+    /// Remove the monitors that follow `targets`, with their history, as
+    /// the targets themselves go. Unlike [`Monitors::delete`] the targets
+    /// leave the org's exclusions rather than join them, so an app made
+    /// again under the same name gets its own monitor again. Returns the
+    /// names removed.
+    pub fn remove_following(&self, org: &OrgId, targets: &[auto::Target]) -> Result<Vec<String>> {
+        let _g = self.inner.edit.lock().unwrap();
+        let mut all = self.list(org)?;
+        let mut gone = Vec::new();
+        all.retain(|m| {
+            let keep = !targets.iter().any(|t| t.owns(m));
+            if !keep {
+                gone.push(m.name.clone());
+            }
+            keep
+        });
+        if !gone.is_empty() {
+            self.save(org, &all)?;
+        }
+        let mut s = self.settings(org)?;
+        if targets.iter().any(|t| t.excluded(&s)) {
+            for t in targets {
+                match t {
+                    auto::Target::App(a) => s.exclude_apps.retain(|x| x != a),
+                    auto::Target::Service { stack, service } => {
+                        let x = auto::exclusion(stack, service);
+                        s.exclude_services.retain(|e| *e != x);
+                    }
+                }
+            }
+            write_json(&self.path(org, "settings.json"), &s)?;
+        }
+        drop(_g);
+        for n in &gone {
+            self.db(org)?.lock().unwrap().forget(n)?;
+            self.inner
+                .slots
+                .lock()
+                .unwrap()
+                .remove(&(org.clone(), n.clone()));
+        }
+        Ok(gone)
+    }
+
     pub fn set_paused(&self, org: &OrgId, name: &str, paused: bool) -> Result<Monitor> {
         let mut p = serde_json::Map::new();
         p.insert("paused".into(), json!(paused));
@@ -510,8 +565,13 @@ impl Monitors {
                 Err(_) => return,
             };
             let started = now_ms();
-            let o = self.check(&job.org, &job.monitor);
-            if let Err(e) = self.record(&job.org, &job.monitor, o) {
+            let done = if target::is_stopped(&self.inner.apps, &job.org, &job.monitor) {
+                self.rest(&job.org, &job.monitor)
+            } else {
+                let o = self.check(&job.org, &job.monitor);
+                self.record(&job.org, &job.monitor, o)
+            };
+            if let Err(e) = done {
                 eprintln!("isb serve: monitor: {}/{}: {e}", job.org, job.monitor.name);
             }
             let iv = job.monitor.interval * 1000;
@@ -554,6 +614,24 @@ impl Monitors {
             tls: self.inner.tls.clone(),
         };
         target::run(&ctx, org, m, now_ms())
+    }
+
+    /// Its app or stack service is stopped: no check. The first time, the
+    /// monitor turns stopped and an open incident closes, telling no one.
+    pub fn rest(&self, org: &OrgId, m: &Monitor) -> Result<()> {
+        match self.get(org, &m.name) {
+            Ok(cur) if !cur.paused => {}
+            _ => return Ok(()),
+        }
+        let db = self.db(org)?;
+        let db = db.lock().unwrap();
+        let mut s: Stored = db.load_state(&m.name)?.unwrap_or_default();
+        let now = now_ms();
+        if s.state.stop(now) {
+            db.close_incident(&m.name, now)?;
+            db.save_state(&m.name, &s)?;
+        }
+        Ok(())
     }
 
     /// Keep a check's result, step the state machine, raise events.

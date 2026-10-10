@@ -39,6 +39,9 @@ pub enum ProjectCmd {
         /// With --force: delete their named volumes too, data and all.
         #[arg(long, requires = "force")]
         volumes: bool,
+        /// Keep the monitors that follow what is deleted (deleted by default).
+        #[arg(long)]
+        keep_monitors: bool,
     },
     /// Add an environment to a project.
     EnvAdd { project: String, env: String },
@@ -52,6 +55,9 @@ pub enum ProjectCmd {
         /// With --force: delete their named volumes too, data and all.
         #[arg(long, requires = "force")]
         volumes: bool,
+        /// Keep the monitors that follow what is deleted (deleted by default).
+        #[arg(long)]
+        keep_monitors: bool,
     },
 }
 
@@ -174,7 +180,12 @@ pub enum AppCmd {
     },
     /// Delete an app (named volumes are kept).
     #[command(alias = "remove")]
-    Rm { name: String },
+    Rm {
+        name: String,
+        /// Keep the monitors that follow what is deleted (deleted by default).
+        #[arg(long)]
+        keep_monitors: bool,
+    },
     /// Deploy and follow the deployment's log (exit 0 when done).
     Deploy {
         name: String,
@@ -364,10 +375,11 @@ pub fn project(org: &Option<String>, cmd: ProjectCmd) -> Result<u8> {
             name,
             force,
             volumes,
+            keep_monitors,
         } => {
             call(
                 "project_delete",
-                json!({"name": name, "force": force, "volumes": volumes}),
+                json!({"name": name, "force": force, "volumes": volumes, "keep_monitors": keep_monitors}),
             )?;
         }
         ProjectCmd::EnvAdd { project, env } => {
@@ -381,10 +393,11 @@ pub fn project(org: &Option<String>, cmd: ProjectCmd) -> Result<u8> {
             env,
             force,
             volumes,
+            keep_monitors,
         } => {
             call(
                 "environment_delete",
-                json!({"project": project, "name": env, "force": force, "volumes": volumes}),
+                json!({"project": project, "name": env, "force": force, "volumes": volumes, "keep_monitors": keep_monitors}),
             )?;
         }
     }
@@ -687,8 +700,14 @@ pub fn app(org: &Option<String>, cmd: AppCmd) -> Result<u8> {
             }
             print_app(&r["app"]);
         }
-        AppCmd::Rm { name } => {
-            call("app_delete", json!({"name": name}))?;
+        AppCmd::Rm {
+            name,
+            keep_monitors,
+        } => {
+            call(
+                "app_delete",
+                json!({"name": name, "keep_monitors": keep_monitors}),
+            )?;
         }
         AppCmd::Deploy { name, detach } => {
             let d = call("app_deploy", json!({"name": name}))?;
