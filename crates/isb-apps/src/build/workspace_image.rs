@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-use super::{Remove, ready, remaining, stream_lines, uplink_network};
+use super::{Remove, owned, ready, reap_stale, remaining, stream_lines, uplink_network};
 use crate::client::{Client, encode_segment};
 use crate::error::{Error, Result};
 use crate::exec::ExecOptions;
@@ -484,6 +484,7 @@ fn run_recipe(
 ) -> Result<String> {
     let h = host(base);
     let name = container_name(&b.name);
+    reap_stale(s, false, log);
     let _guard = Remove {
         client: s.clone(),
         name: name.clone(),
@@ -503,7 +504,7 @@ fn run_recipe(
             "name": name,
             "type": "container",
             "source": src.to_api(None),
-            "config": {"limits.cpu": "4", "limits.memory": "4GiB", "user.isb.workspace-image-build": b.name},
+            "config": owned(json!({"limits.cpu": "4", "limits.memory": "4GiB", "user.isb.workspace-image-build": b.name})),
             "devices": {
                 "root": {"type": "disk", "path": "/", "pool": pool},
                 "eth0": {"type": "nic", "name": "eth0", "network": net},
@@ -524,6 +525,7 @@ fn run_recipe(
     let sb = Sandbox::get(s, &name)?;
     ready::exec(&sb, deadline)?;
     ready::network(s, &name, &net, deadline, log)?;
+    ready::resolver(&sb, deadline)?;
     s.push_file(&name, RECIPE_PATH, b.recipe.as_bytes(), 0, 0, 0o700)?;
     log(&format!(
         "running the recipe ({} bytes, sha256 {})",

@@ -5,7 +5,6 @@
 crates/isb-apps/src/app/deploy.rs 1744
 crates/isb-apps/src/app/preview.rs 1812
 crates/isb-apps/src/backup.rs 1675
-crates/isb-apps/src/build/mod.rs 1093
 crates/isb-apps/src/notify/mod.rs 1263
 crates/isb-apps/src/s3.rs 1263
 crates/isb-core/src/ingress/caddy.rs 1130
@@ -14,7 +13,7 @@ crates/isb-core/src/plan.rs 1517
 crates/isb-core/src/registry/oci.rs 1081
 crates/isb-core/src/sandbox.rs 1352
 crates/isb-core/src/spec.rs 1521
-crates/isb-core/src/stack/controller.rs 2332
+crates/isb-core/src/stack/controller.rs 2325
 crates/isb-daemon/src/daemon/mod.rs 1206
 crates/isb-daemon/src/daemon/workspaces.rs 1855
 crates/isb-server/src/audit.rs 1154

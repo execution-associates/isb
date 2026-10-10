@@ -103,3 +103,37 @@ systemctl --user stop "isb-preview-$USER-owner" 2>/dev/null || true
 tailscale serve --https="$PREVIEW_PORT" off || true
 isb down
 '''
+
+[tasks."readme:shots"]
+description = "Retake the README's feature screenshots (docs/assets/readme) in the preview VM"
+run = '''
+#!/usr/bin/env bash
+# Turns a fresh preview (`mise run preview`) into the README's demo org and
+# screenshots it: scripts/readme-shots/. Everything runs inside the VM; the
+# images land in docs/assets/readme. READMESHOTS_SOAK (seconds, default 600)
+# is how long the uptime monitors check before the uptime page is shot.
+set -euo pipefail
+name="isb-preview-$USER"
+if ! incus info "$name" </dev/null >/dev/null 2>&1; then
+  echo "no preview VM: run \`mise run preview\` first" >&2
+  exit 1
+fi
+as_root() { incus exec "$name" -- "$@" </dev/null; }
+as_ubuntu() { incus exec "$name" -- sudo -iu ubuntu "$@" </dev/null; }
+as_root bash /src/scripts/readme-shots/provision.sh
+as_ubuntu bash /src/scripts/readme-shots/seed.sh
+as_ubuntu bash /src/scripts/readme-shots/terminals.sh
+seeded=$(as_ubuntu cat readme-shots/seeded)
+left=$(( seeded + ${READMESHOTS_SOAK:-600} - $(date +%s) ))
+if [ "$left" -gt 0 ]; then
+  echo "letting the monitors check for ${left}s more"
+  sleep "$left"
+fi
+as_ubuntu mise exec -- uvx --from playwright==1.55.0 playwright install chromium >/dev/null
+as_ubuntu mise exec -- uv run -q /src/scripts/readme-shots/shoot.py readme-shots/out
+mkdir -p docs/assets/readme
+for f in sandbox agents workspace deploy templates previews secrets domains ssh databases uptime tui; do
+  incus file pull "$name/home/ubuntu/readme-shots/out/$f.webp" docs/assets/readme/ </dev/null
+done
+ls -l docs/assets/readme
+'''

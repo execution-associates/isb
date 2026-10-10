@@ -37,6 +37,35 @@ pub(super) fn exec(sb: &Sandbox, deadline: Instant) -> Result<()> {
     )))
 }
 
+/// How long a started instance may take to have a DNS resolver.
+const RESOLVER_WAIT: Duration = Duration::from_secs(60);
+
+/// Wait until `/etc/resolv.conf` names a nameserver. On an Ubuntu image it
+/// links to a file systemd-resolved writes once it starts, about a second
+/// after boot; a build that resolves its first image before then fails, as
+/// Go programs (BuildKit) fall back to `[::1]:53` with no resolv.conf.
+pub(super) fn resolver(sb: &Sandbox, deadline: Instant) -> Result<()> {
+    let until = Instant::now() + RESOLVER_WAIT;
+    while Instant::now() < until.min(deadline) {
+        let ok = sb
+            .exec_stream(
+                ["/bin/grep", "-qs", "^nameserver", "/etc/resolv.conf"],
+                ExecOptions::default().timeout(Duration::from_secs(20)),
+            )
+            .and_then(|s| s.collect_output())
+            .is_ok_and(|o| o.success());
+        if ok {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    Err(Error::invalid(format!(
+        "build sandbox {} has no DNS resolver after {}s: /etc/resolv.conf names no nameserver",
+        sb.name(),
+        RESOLVER_WAIT.as_secs()
+    )))
+}
+
 /// How long a prepared instance on the host's bridge may take to get an
 /// IPv4 address before the build gives up.
 const NETWORK_WAIT: Duration = Duration::from_secs(90);
