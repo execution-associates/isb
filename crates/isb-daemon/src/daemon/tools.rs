@@ -529,9 +529,9 @@ pub(super) fn stack_remove_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) ->
         d,
         "stack_remove",
         "Remove a stack",
-        "Delete a stack's instances and published ports. Named volumes are kept unless volumes=true.",
+        "Delete a stack's instances and published ports, and the monitors that follow its services unless keep_monitors=true. Named volumes are kept unless volumes=true.",
         obj(
-            json!({"name": {"type": "string"}, "volumes": {"type": "boolean"}}),
+            json!({"name": {"type": "string"}, "volumes": {"type": "boolean"}, "keep_monitors": {"type": "boolean", "description": super::apps::KEEP_MONITORS}}),
             &["name"]
         ),
         ann.destructive,
@@ -543,11 +543,20 @@ pub(super) fn stack_remove_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) ->
                 org: Option<String>,
                 #[serde(default)]
                 volumes: bool,
+                #[serde(default)]
+                keep_monitors: bool,
             }
             let a: A = args(a)?;
             let q = qname(&a.org, &a.name)?;
+            let org = d.ctl.definition(&q)?.org;
+            let targets = super::apps::stack_targets(d, &q);
             let removed = remove_stack(d, &q, a.volumes)?;
-            Ok(json!({"ok": true, "secrets_removed": removed}))
+            let gone = if a.keep_monitors {
+                Vec::new()
+            } else {
+                d.monitors.remove_following(&org, &targets)?
+            };
+            Ok(json!({"ok": true, "secrets_removed": removed, "monitors_deleted": gone}))
         }
     );
     Ok(())

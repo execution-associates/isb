@@ -209,7 +209,7 @@ isb stack deployments NAME [--json]
 isb stack env NAME                  the stack's environment (.env text the daemon resolves ${VAR} with)
 isb stack env-set NAME [FILE] [--deploy]   replace it from FILE or stdin
 isb stack config NAME
-isb stack rm NAME [--volumes]
+isb stack rm NAME [--volumes] [--keep-monitors]   its services' monitors go unless --keep-monitors
 ```
 
 `deploy` reads the file as `isb up` would (`.env`, `--env-file`, `${VAR}`),
@@ -311,9 +311,10 @@ See [Secrets](../guides/secrets.md).
 ```text
 isb project create NAME [--env E]... [--description D]    environments default to production
 isb project ls [--json]                                   alias list
-isb project rm NAME [-f [--volumes]]                      -f deletes its apps and compose stacks too; --volumes their data
+isb project rm NAME [-f [--volumes]] [--keep-monitors]    -f deletes its apps and compose stacks too; --volumes their data;
+                                                          their monitors go unless --keep-monitors
 isb project env-add PROJECT ENV
-isb project env-rm PROJECT ENV [-f [--volumes]]           the same, for one environment
+isb project env-rm PROJECT ENV [-f [--volumes]] [--keep-monitors]   the same, for one environment
 
 isb app create NAME --project P [--environment E]
                (--image REF | --git URL [--ref main] [--subdir D]
@@ -327,7 +328,7 @@ isb app ls [--project P] [--json]
 isb app show NAME [--json]              alias get; --json prints app_get's answer
 isb app update NAME [-f PATCH|-] [--image REF] [--ref R] [--replicas N] [--port N]
                [--cpus N] [--memory M] [--deploy]
-isb app rm NAME                         named volumes are kept
+isb app rm NAME [--keep-monitors]       named volumes are kept; its monitors go unless --keep-monitors
 isb app deploy NAME [-d]                follows the deployment's log; exit 0 when done
 isb app rollback NAME [ID] [-d]         a previous deployment's image and settings, no build
 isb app deployments NAME [--json]

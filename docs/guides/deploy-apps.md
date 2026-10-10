@@ -383,13 +383,13 @@ See [Reach isb serve remotely](remote-access.md).
 
 | Tool | Does |
 |---|---|
-| `project_create`, `project_list`, `project_delete` | Projects; `project_list` shows each environment's stack, apps, compose stacks and name `conflicts`. A project with apps or compose stacks is refused unless `force` is set, which deletes them first; their named volumes are kept unless `volumes` is set too, and `dry_run` lists what would go. |
-| `environment_create`, `environment_list`, `environment_delete` | A project's environments (stored with the project). One with apps or compose stacks is refused unless `force` is set, which deletes them first. |
+| `project_create`, `project_list`, `project_delete` | Projects; `project_list` shows each environment's stack, apps, compose stacks and name `conflicts`. A project with apps or compose stacks is refused unless `force` is set, which deletes them first; their named volumes are kept unless `volumes` is set too, and `dry_run` lists what would go. The monitors that follow them go too unless `keep_monitors` is set. |
+| `environment_create`, `environment_list`, `environment_delete` | A project's environments (stored with the project). One with apps or compose stacks is refused unless `force` is set, which deletes them first, with the monitors that follow them unless `keep_monitors` is set. |
 | `app_create` | Create an app (`deploy: true` deploys it too). Returns the app and its webhook secret. |
 | `app_get`, `app_list` | Settings, stack, service name, current deployment, webhook path, `domains_served`; env as a map with `{secret: NAME}` references. |
 | `app_update` | A merge patch of settings (`deploy: true` deploys after). |
 | `app_export`, `app_apply` | The app as a YAML document, and declarative create-or-update from one (`dry_run`, `deploy`); see [An app as YAML](#an-app-as-yaml). |
-| `app_delete` | Its service leaves the stack (the stack goes with its last app); its records, checkout, webhook secret and deploy key go. Named volumes are kept. |
+| `app_delete` | Its service leaves the stack (the stack goes with its last app); its records, checkout, webhook secret, deploy key and the monitors that follow it go (`keep_monitors` keeps those). Named volumes are kept. |
 | `app_deploy`, `app_rollback` | Queue a deployment; `wait: true` returns when it finishes. |
 | `app_deployments`, `app_deployment_log` | History, and one deployment's log from an offset. |
 | `app_env_get`, `app_env_set` | The environment as `.env` text. |

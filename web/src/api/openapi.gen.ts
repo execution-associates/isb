@@ -1003,7 +1003,7 @@ export interface paths {
         put?: never;
         /**
          * Delete an app
-         * @description Delete an app: its service leaves the stack (the stack is removed with its last app), its deployments, checkout, webhook secret and deploy key go. Named volumes are kept.
+         * @description Delete an app: its service leaves the stack (the stack is removed with its last app), its deployments, checkout, webhook secret and deploy key go, and the monitors that follow it (its own and any app monitor made for it) unless keep_monitors=true. Named volumes are kept. Returns the monitors deleted.
          */
         post: operations["app_delete"];
         delete?: never;
@@ -1803,7 +1803,7 @@ export interface paths {
         put?: never;
         /**
          * Delete an environment
-         * @description Remove an environment from a project. Refused while it has apps or compose stacks, unless force=true: then its apps are deleted (as app_delete) and its compose stacks removed (as stack_remove) first. Their named volumes are kept unless volumes=true. Returns the project and what was deleted; dry_run=true only says what would be.
+         * @description Remove an environment from a project. Refused while it has apps or compose stacks, unless force=true: then its apps are deleted (as app_delete) and its compose stacks removed (as stack_remove) first. Their named volumes are kept unless volumes=true. The monitors that follow its apps and compose stack services go too, unless keep_monitors=true. Returns the project and what was deleted; dry_run=true only says what would be.
          */
         post: operations["environment_delete"];
         delete?: never;
@@ -2483,7 +2483,7 @@ export interface paths {
         put?: never;
         /**
          * List uptime monitors
-         * @description The org's monitors with status (up, down, pending, paused; `never_up` when pending 30 min with only failures), last check, uptime over 24h/7d/30d, latency p50/p95 (24h), 24 hourly uptime bars and the last 30 latencies; `down` (how many are down), the org's recent incidents, and its settings (auto_monitors, exclude_apps, exclude_services).
+         * @description The org's monitors with status (up, down, pending, paused, stopped: its app or stack service is scaled to 0 and not checked; `never_up` when pending 30 min with only failures), last check, uptime over 24h/7d/30d, latency p50/p95 (24h), 24 hourly uptime bars and the last 30 latencies; `down` (how many are down), the org's recent incidents, and its settings (auto_monitors, exclude_apps, exclude_services).
          */
         post: operations["monitor_list"];
         delete?: never;
@@ -3003,7 +3003,7 @@ export interface paths {
         put?: never;
         /**
          * Delete a project
-         * @description Delete a project. Refused while it has apps or compose stacks, unless force=true: then every app in it is deleted (as app_delete) and every compose stack removed (as stack_remove), in every environment, before the project goes. Their named volumes are kept unless volumes=true. Returns what was deleted; dry_run=true only says what would be.
+         * @description Delete a project. Refused while it has apps or compose stacks, unless force=true: then every app in it is deleted (as app_delete) and every compose stack removed (as stack_remove), in every environment, before the project goes. Their named volumes are kept unless volumes=true. The monitors that follow its apps and compose stack services go too, unless keep_monitors=true. Returns what was deleted; dry_run=true only says what would be.
          */
         post: operations["project_delete"];
         delete?: never;
@@ -3923,7 +3923,7 @@ export interface paths {
         put?: never;
         /**
          * Remove a stack
-         * @description Delete a stack's instances and published ports. Named volumes are kept unless volumes=true.
+         * @description Delete a stack's instances and published ports, and the monitors that follow its services unless keep_monitors=true. Named volumes are kept unless volumes=true.
          */
         post: operations["stack_remove"];
         delete?: never;
@@ -7476,6 +7476,8 @@ export interface operations {
                     name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
+                    /** @description Keep the monitors that follow what is deleted (default false: they are deleted with their history). Kept, they fail until removed. */
+                    keep_monitors?: boolean;
                 };
             };
         };
@@ -9271,6 +9273,8 @@ export interface operations {
                     project: string;
                     /** @description With force: delete their named volumes too, the data in them for good (default false: kept). A volume another stack still uses is kept. Org admins and owners. */
                     volumes?: boolean;
+                    /** @description Keep the monitors that follow what is deleted (default false: they are deleted with their history). Kept, they fail until removed. */
+                    keep_monitors?: boolean;
                 };
             };
         };
@@ -11960,6 +11964,8 @@ export interface operations {
                     org?: string;
                     /** @description With force: delete their named volumes too, the data in them for good (default false: kept). A volume another stack still uses is kept. Org admins and owners. */
                     volumes?: boolean;
+                    /** @description Keep the monitors that follow what is deleted (default false: they are deleted with their history). Kept, they fail until removed. */
+                    keep_monitors?: boolean;
                 };
             };
         };
@@ -13889,6 +13895,8 @@ export interface operations {
                     /** @description The org to act in (default: default). */
                     org?: string;
                     volumes?: boolean;
+                    /** @description Keep the monitors that follow what is deleted (default false: they are deleted with their history). Kept, they fail until removed. */
+                    keep_monitors?: boolean;
                 };
             };
         };

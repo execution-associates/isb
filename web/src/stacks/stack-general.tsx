@@ -22,6 +22,8 @@ import { DeleteServiceSection } from "@/apps/service-page";
 import { type StackExport, stackKeys } from "./api";
 import type { StackServices } from "./stack-tabs";
 import { invalidateOrg } from "@/lib/freshness";
+import { monitorsOfStack, useMonitors } from "@/uptime/api";
+import { DoomedMonitors } from "@/uptime/doomed";
 
 type Service = StackServices[number];
 
@@ -125,18 +127,23 @@ export function StackGeneralTab({
   );
 }
 
-/** stack_remove behind a plain confirm, its named volumes kept unless asked. */
+/** stack_remove behind a plain confirm, its named volumes kept unless asked, the monitors watching its services deleted unless asked. */
 function DeleteStackSection({ org, name, onRemoved }: { org: string; name: string; onRemoved: () => void }) {
   const [volumes, setVolumes] = useState(false);
+  const [keep, setKeep] = useState(false);
+  const monitors = monitorsOfStack(useMonitors(org).data?.monitors, name).map((m) => m.name);
   const refresh = useRefresh(org);
   return (
     <DeleteServiceSection
       noun="stack"
       name={name}
       what={volumes ? "Its instances, published ports and named volumes are deleted." : "Its instances and published ports are deleted. Named volumes are kept."}
-      onClose={() => setVolumes(false)}
+      onClose={() => {
+        setVolumes(false);
+        setKeep(false);
+      }}
       onConfirm={async () => {
-        await callTool("stack_remove", { name, ...(volumes ? { volumes: true } : {}) }, org);
+        await callTool("stack_remove", { name, ...(volumes ? { volumes: true } : {}), ...(keep ? { keep_monitors: true } : {}) }, org);
         await refresh();
         toast.success(`${name} deleted`);
         onRemoved();
@@ -149,6 +156,7 @@ function DeleteStackSection({ org, name, onRemoved }: { org: string; name: strin
           <span className="block text-xs text-muted-foreground">Their data is gone for good.</span>
         </span>
       </label>
+      <DoomedMonitors names={monitors} keep={keep} onKeep={setKeep} />
     </DeleteServiceSection>
   );
 }

@@ -6,7 +6,7 @@ use std::time::Duration;
 mod delete;
 pub(crate) mod manifest;
 
-pub(super) use delete::{delete_tools, empty_org};
+pub(super) use delete::{KEEP_MONITORS, delete_tools, empty_org, stack_targets};
 
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -204,7 +204,6 @@ fn rb_props() -> Value {
 /// The MCP annotations the tools below share.
 struct Ann {
     ro: Value,
-    destructive: Value,
     write: Value,
 }
 
@@ -259,7 +258,6 @@ fn finish(ap: &Apps, org: &OrgId, a: &DeployArgs, id: u64) -> Result<Value> {
 pub fn register(r: &mut Registry, apps: Apps, ingress: bool) -> Result<()> {
     let ann = Ann {
         ro: json!({"readOnlyHint": true, "openWorldHint": false}),
-        destructive: json!({"destructiveHint": true, "openWorldHint": false}),
         write: json!({"destructiveHint": false, "openWorldHint": false}),
     };
 
@@ -273,7 +271,6 @@ pub fn register(r: &mut Registry, apps: Apps, ingress: bool) -> Result<()> {
     app_get_tool(r, &apps, &ann, ingress)?;
     app_list_tool(r, &apps, &ann, ingress)?;
     app_update_tool(r, &apps, &ann, ingress)?;
-    app_delete_tool(r, &apps, &ann)?;
 
     app_deploy_tool(r, &apps, &ann)?;
     app_rollback_tool(r, &apps, &ann)?;
@@ -563,25 +560,6 @@ fn app_update_tool(r: &mut Registry, apps: &Apps, ann: &Ann, ingress: bool) -> R
                 out["deployment"] = d.summary();
             }
             Ok(out)
-        }
-    );
-    Ok(())
-}
-
-fn app_delete_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
-    tool!(
-        r,
-        apps,
-        "app_delete",
-        "Delete an app",
-        "Delete an app: its service leaves the stack (the stack is removed with its last app), its deployments, checkout, webhook secret and deploy key go. Named volumes are kept.",
-        obj(json!({"name": {"type": "string"}}), &["name"]),
-        ann.destructive,
-        |ap: &Apps, a: Value, _c: &Caller| -> Result<Value> {
-            let org = org_of(&a)?;
-            let a: Named = args(a)?;
-            ap.delete(&org, &a.name)?;
-            Ok(json!({"ok": true}))
         }
     );
     Ok(())

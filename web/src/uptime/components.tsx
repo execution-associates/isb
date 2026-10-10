@@ -4,15 +4,15 @@ import { StatusBadge } from "@/components/status";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TONE_DOT } from "@/lib/status";
 import { cn } from "@/lib/utils";
-import { type Bar, type Monitor, msText, NEVER_UP_HINT, PENDING_HINT, statusText, statusTone, uptimeText, uptimeTone } from "./api";
+import { type Bar, type Monitor, msText, NEVER_UP_HINT, PENDING_HINT, resting, STOPPED_HINT, statusText, statusTone, uptimeText, uptimeTone } from "./api";
 
 export function MonitorBadge({ m, className }: { m: Pick<Monitor, "status" | "flapping" | "never_up">; className?: string }) {
-  const hint = m.status === "pending" ? (m.never_up ? NEVER_UP_HINT : PENDING_HINT) : undefined;
+  const hint = m.status === "pending" ? (m.never_up ? NEVER_UP_HINT : PENDING_HINT) : m.status === "stopped" ? STOPPED_HINT : undefined;
   return (
     <span title={hint} className="inline-flex">
       <StatusBadge tone={statusTone(m)} pulse={m.status === "down"} className={className}>
         {statusText(m)}
-        {m.flapping && m.status !== "paused" ? " · flapping" : ""}
+        {m.flapping && !resting(m) ? " · flapping" : ""}
       </StatusBadge>
     </span>
   );
