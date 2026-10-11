@@ -1,7 +1,7 @@
 // The Execution Associates texture, drawn by WebGL: a fixed canvas behind the
 // page with a still film grain printed onto the page (it scrolls with the
 // content on whole pixels, so it reads as paper and never shimmers) and the
-// evening's light spilling into the ink as an ordered dither in 2px cells.
+// evening's light spilling into the ink as a soft ordered dither.
 // Ported from executionassociates.com's own texture.js (same grain, same
 // Bayer threshold, same quantised light), with its scene lights replaced by
 // two app-sized ones: a glow at the top of the page (peach falling to violet)
@@ -9,7 +9,7 @@
 //
 // It is cheap by construction: it draws once, then again only when the page
 // scrolls or resizes, never on a timer, and not at all while the tab is hidden.
-import { LEVEL } from "@/lib/texture";
+import { DITHER, LEVEL } from "@/lib/texture";
 
 const VS = "attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}";
 
@@ -20,7 +20,7 @@ precision highp float;
 precision mediump float;
 #endif
 uniform vec2 uRes;
-uniform float uScroll, uGrain, uGlow, uStep, uSide;
+uniform float uScroll, uGrain, uGlow, uStep, uSide, uK, uCell;
 #define B2(a) fract(dot(floor(a),vec2(.5,floor(a).y*.75)))
 float b4(vec2 a){return B2(.5*a)*.25+B2(a);}
 float b8(vec2 a){return b4(.5*a)*.25+B2(a);}
@@ -44,8 +44,10 @@ void main(){
   col+=light(.85)*s2; amt+=s2;
   vec3 lc=amt>0.?col/amt:vec3(.47,.3,.65);
   float a=amt*uGlow;
-  // ordered dither in 2px cells: quantised light, the retro look of the brand
-  float qa=clamp(floor(a/uStep+b8(pp/2.))*uStep,0.,uGlow);
+  // ordered dither: quantised light, the retro look of the brand, mixed back
+  // toward the smooth glow by uK so the pattern stays a texture
+  float qa=clamp(floor(a/uStep+b8(pp/uCell))*uStep,0.,uGlow);
+  qa=mix(min(a,uGlow),qa,uK);
   vec3 rgb=lc*qa; float al=qa;
   // still film grain, one speck per CSS pixel
   float g=(hash(pp)-.5)*uGrain;
@@ -101,7 +103,7 @@ export function startGl(canvas: HTMLCanvasElement, onLost: () => void): Gl | nul
   const loc = gl.getAttribLocation(prog, "p");
   gl.enableVertexAttribArray(loc);
   gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-  const U = Object.fromEntries(["uRes", "uScroll", "uGrain", "uGlow", "uStep", "uSide"].map((n) => [n, gl.getUniformLocation(prog, n)]));
+  const U = Object.fromEntries(["uRes", "uScroll", "uGrain", "uGlow", "uStep", "uSide", "uK", "uCell"].map((n) => [n, gl.getUniformLocation(prog, n)]));
   const { grain, glow } = LEVEL;
 
   let W = 0;
@@ -117,7 +119,9 @@ export function startGl(canvas: HTMLCanvasElement, onLost: () => void): Gl | nul
     gl.uniform1f(U.uScroll, Math.round(window.scrollY) % 4096);
     gl.uniform1f(U.uGrain, grain);
     gl.uniform1f(U.uGlow, glow);
-    gl.uniform1f(U.uStep, Math.max(glow / 5, 0.01));
+    gl.uniform1f(U.uStep, Math.max(glow / DITHER.levels, 0.01));
+    gl.uniform1f(U.uK, DITHER.strength);
+    gl.uniform1f(U.uCell, DITHER.cell);
     gl.uniform1f(U.uSide, W >= 768 ? 1 : 0);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);

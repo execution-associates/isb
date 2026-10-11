@@ -9,7 +9,7 @@
  *     sidebar and on the page, and every opaque surface (cards, tables,
  *     dialogs, menus, the terminal and logs) is a clean plate. Nothing
  *     dense ever has grain under it.
- *   - Dithered fades in 2px cells, from ea-ramps.css, where a gradient would
+ *   - Dithered fades, from ea-ramps.css, where a gradient would
  *     be smooth: meter tails, the deployment strip, dialogs' top edge, the
  *     sign-in panel's edge, empty states' floor, initials badges.
  *   - Peach selection, a line of light under page titles, a neon bar on the
@@ -138,7 +138,7 @@ html.ea [data-slot="dialog-content"]::before {
   border-radius: inherit;
   background: rgb(240 153 191 / 0.08);
   mask-image: var(--ea-ramp-y-s);
-  mask-size: 16px 48px;
+  mask-size: var(--ea-ramp-tile) 48px;
   mask-repeat: repeat-x;
   pointer-events: none;
 }
@@ -146,7 +146,7 @@ html.ea [data-slot="dialog-content"]::before {
   height: 128px;
   background: linear-gradient(90deg, rgb(254 190 117 / 0.1), rgb(240 153 191 / 0.1) 50%, rgb(119 76 167 / 0.12));
   mask-image: var(--ea-ramp-y-l);
-  mask-size: 16px 128px;
+  mask-size: var(--ea-ramp-tile) 128px;
 }
 
 /* ---- meters: the fill trails off past its end in dither, like light falling off ---- */
@@ -164,7 +164,7 @@ html.ea [role="meter"] > *::after {
   width: 128px;
   background-color: inherit;
   mask-image: var(--ea-ramp-x-l);
-  mask-size: 128px 16px;
+  mask-size: 128px var(--ea-ramp-tile);
   mask-repeat: repeat-y;
   pointer-events: none;
 }
@@ -176,7 +176,7 @@ html.ea ol[aria-label="Progress"] > li > .bg-success\/50 {
   border-radius: 0;
   background: linear-gradient(90deg, var(--success), var(--ea-glow));
   mask-image: linear-gradient(#000, #000), var(--ea-ramp-x-s);
-  mask-size: calc(100% - 48px) 100%, 48px 16px;
+  mask-size: calc(100% - 48px) 100%, 48px var(--ea-ramp-tile);
   mask-position: left top, right top;
   mask-repeat: no-repeat, repeat-y;
 }
@@ -201,7 +201,7 @@ html.ea [data-slot="empty-state"]::before {
   z-index: -1;
   background: radial-gradient(ellipse 55% 100% at 50% 100%, rgb(240 153 191 / 0.2), rgb(119 76 167 / 0.12) 60%, transparent 85%);
   mask-image: var(--ea-ramp-y-l);
-  mask-size: 16px 128px;
+  mask-size: var(--ea-ramp-tile) 128px;
   mask-repeat: repeat-x;
   /* the ramp is opaque at its top; the floor is lit at its bottom */
   transform: scaleY(-1);
@@ -217,7 +217,7 @@ html.ea .auth-panel::after {
   width: 128px;
   background: var(--background);
   mask-image: var(--ea-ramp-x-l);
-  mask-size: 128px 16px;
+  mask-size: 128px var(--ea-ramp-tile);
   mask-repeat: repeat-y;
   transform: scaleX(-1);
   pointer-events: none;
@@ -240,7 +240,7 @@ html.ea [data-slot="avatar-fallback"]::after {
   background: linear-gradient(135deg, transparent 20%, rgb(18 7 31 / 0.55));
   mask-image: var(--ea-ramp-x-l);
   /* the middle of the ramp: a halftone from half-lit to a third */
-  mask-size: 128px 16px;
+  mask-size: 128px var(--ea-ramp-tile);
   mask-position: -48px 0;
   mask-repeat: repeat-y;
   pointer-events: none;
