@@ -1,7 +1,7 @@
 //! Calling `isb serve` tools from the CLI over its unix socket.
 //!
-//! One `tools/call` per connection with no `initialize`: the server is
-//! stateless, and a handshake would only double the round trips.
+//! One `tools/call` per connection, in MCP 2026-07-28: no `initialize`,
+//! and the version and capabilities ride in each request's `_meta`.
 
 use std::io::{ErrorKind, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
@@ -13,9 +13,14 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 
-/// The MCP protocol versions `isb serve` speaks, newest first; an unknown
-/// client version is answered with the first.
-pub const PROTOCOL_VERSIONS: [&str; 3] = ["2025-11-25", "2025-06-18", "2025-03-26"];
+/// The MCP protocol versions `isb serve` speaks, newest first.
+pub const PROTOCOL_VERSIONS: [&str; 4] = ["2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26"];
+/// The stateless revisions: version and capabilities in every request's
+/// `_meta`, no `initialize`.
+pub const MODERN_VERSIONS: [&str; 1] = ["2026-07-28"];
+/// The revisions that open with `initialize`; an unknown version asked
+/// there is answered with the first.
+pub const LEGACY_VERSIONS: [&str; 3] = ["2025-11-25", "2025-06-18", "2025-03-26"];
 
 const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 
@@ -79,10 +84,20 @@ pub fn list_tools(socket: &Path, timeout: Duration) -> Result<Vec<Value>> {
     }
 }
 
-fn rpc(socket: &Path, method: &str, params: Value, timeout: Duration) -> Result<Value> {
+fn rpc(socket: &Path, method: &str, mut params: Value, timeout: Duration) -> Result<Value> {
+    let version = MODERN_VERSIONS[0];
+    params["_meta"] = json!({
+        "io.modelcontextprotocol/protocolVersion": version,
+        "io.modelcontextprotocol/clientCapabilities": {},
+        "io.modelcontextprotocol/clientInfo": {"name": "isb", "version": env!("CARGO_PKG_VERSION")},
+    });
     let body = serde_json::to_vec(
         &json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}),
     )?;
+    // Mcp-Name repeats the tool's name; tool names are plain ASCII.
+    let name = params.get("name").and_then(Value::as_str);
+    let mut headers = vec![("MCP-Protocol-Version", version), ("Mcp-Method", method)];
+    headers.extend(name.map(|n| ("Mcp-Name", n)));
     let stream = UnixStream::connect(socket).map_err(|e| {
         std::io::Error::new(
             e.kind(),
@@ -90,7 +105,15 @@ fn rpc(socket: &Path, method: &str, params: Value, timeout: Duration) -> Result<
         )
     })?;
     let what = format!("{method} on {}", socket.display());
-    let (status, bytes) = exchange(Stream::Unix(stream), "POST", "/mcp", &body, timeout, &what)?;
+    let (status, bytes) = exchange_with(
+        Stream::Unix(stream),
+        "POST",
+        "/mcp",
+        &body,
+        timeout,
+        &what,
+        &headers,
+    )?;
     let v: Value = serde_json::from_slice(&bytes).map_err(|e| {
         Error::Protocol(format!(
             "{what}: HTTP {status}, undecodable body ({e}): {}",
@@ -211,9 +234,8 @@ fn exchange_with(
     let head = format!(
         "{method} {path} HTTP/1.1\r\nHost: localhost\r\nUser-Agent: isb/{}\r\n\
          Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\n\
-         MCP-Protocol-Version: {}\r\nContent-Length: {}\r\n{more}Connection: close\r\n\r\n",
+         Content-Length: {}\r\n{more}Connection: close\r\n\r\n",
         env!("CARGO_PKG_VERSION"),
-        PROTOCOL_VERSIONS[0],
         body.len()
     );
     s.io().write_all(head.as_bytes()).map_err(to_err)?;

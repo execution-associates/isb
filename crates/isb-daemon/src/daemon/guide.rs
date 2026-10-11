@@ -4,7 +4,8 @@
 //! MCP clients cut instructions short (Claude Code at 2 KiB), so they hold
 //! the rules and the way in, and `guide` holds the manual. Together they
 //! cover what the repository's SKILL.md teaches, so an agent with this
-//! server connected needs no skill.
+//! server connected needs no skill. Clients that speak MCP's Skills
+//! extension get that SKILL.md too, at `skill://isb/SKILL.md`.
 
 use std::sync::Arc;
 

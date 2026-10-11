@@ -47,7 +47,7 @@ use serde_json::Value;
 
 pub use access::{AccessValidator, Identity};
 pub use http::Shutdown;
-pub use mcp::{Authenticated, Caller, Hooks, Registry, Tool, ToolHandler, ToolPolicy};
+pub use mcp::{Authenticated, Caller, Hooks, Registry, Skill, Tool, ToolHandler, ToolPolicy};
 
 use crate::error::{Error, Result};
 use http::{Handler, HttpListener, HttpServer, Limits};

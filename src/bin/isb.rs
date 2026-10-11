@@ -43,6 +43,8 @@ mod registry;
 mod secret;
 #[path = "isb/serve.rs"]
 mod serve;
+#[path = "isb/skill.rs"]
+mod skill;
 #[path = "isb/ssh.rs"]
 mod ssh;
 #[path = "isb/stack.rs"]
@@ -356,6 +358,9 @@ enum Cmd {
     /// Replace this isb with the latest release (or VERSION), checked
     /// against the release's SHA256SUMS.
     Update(update::UpdateArgs),
+    /// Print isb's agent skill (SKILL.md) or one of its files: the skill
+    /// `isb serve` serves over MCP at skill://isb/.
+    Skill(skill::SkillArgs),
     /// Users of `isb serve` (its identity store, `<state>/isb.db`).
     #[command(subcommand)]
     User(UserCmd),
@@ -588,6 +593,7 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
             Ok(0)
         }
         Cmd::Update(a) => update::update(ctx, a),
+        Cmd::Skill(a) => skill::print(a),
         Cmd::User(c) => user_cmd(c),
         Cmd::Invite {
             org,

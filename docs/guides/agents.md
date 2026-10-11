@@ -20,6 +20,16 @@ manual a topic at a time (`start`, `safety`, `sandboxes`, `apps`, `inspect`,
 `data`, `workspace`, `admin`, `cli`). An agent connected to isb needs no
 skill.
 
+Both endpoints also serve isb's agent skill, the repository's `SKILL.md`,
+through MCP's [Skills
+extension](https://modelcontextprotocol.io/extensions/skills/overview)
+(`io.modelcontextprotocol/skills`). A client that speaks it finds the skill
+with `skills/list` and reads `skill://isb/SKILL.md`, and the docs pages it
+links to beside it, with `resources/read`. The skill is built into the
+`isb` binary, so it is the one for the version the server runs, and
+`isb skill` prints the same skill (`isb skill --list` lists its files).
+Clients without the extension see only the tools.
+
 ## Two endpoints
 
 | Endpoint | For | Every tool's `org` |
@@ -37,8 +47,11 @@ the remote-spec policy applies. A superadmin can therefore add `/mcp` and
 error with the reason, so the agent can explain it.
 
 The transport is MCP's Streamable HTTP with plain JSON responses (no SSE
-stream; `GET /mcp` is 405), stateless: `tools/call` works without a prior
-`initialize`, and there is no session id. The same tools answer as REST at
+stream; `GET /mcp` is 405), stateless, with no session id. It speaks MCP
+`2026-07-28`, where each request carries its own protocol version and
+there is no handshake, and the earlier versions that open with
+`initialize`, so clients of either era connect unchanged
+([HTTP API](../reference/http-api.md#mcp)). The same tools answer as REST at
 `POST /orgs/ORG/api/v1/tools/<tool>` ([HTTP API](../reference/http-api.md)),
 and [MCP tools](../reference/mcp-tools.md) lists them all.
 

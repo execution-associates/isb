@@ -361,6 +361,7 @@ pub(crate) fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
             None | Some("") => None,
             Some(d) => Some(isb::daemon::workspaces::PreviewBase::parse(d)?),
         },
+        skills: vec![skill::skill()?],
         workspace_home_root: match a.workspace_home_root {
             Some(r) if r.as_os_str().is_empty() => None,
             Some(r) if !r.is_absolute() => {

@@ -598,6 +598,19 @@ release signature); `--force` replaces it anyway, and also
 reinstalls the same version. A running `isb serve` keeps the old binary
 until it restarts ([Upgrading isb](../operations/upgrades.md)).
 
+## The agent skill
+
+```text
+isb skill [PATH] [--list]
+```
+
+Prints isb's agent skill, the `SKILL.md` that teaches an agent the CLI and
+the MCP tools, as built into this binary, so it matches this version.
+`PATH` prints one of the skill's other files instead (the docs pages
+`SKILL.md` links to), and `--list` lists them. `isb serve` serves the same
+files over MCP at `skill://isb/` ([Agents and MCP](../guides/agents.md)).
+To install it for an agent: `mkdir -p ~/.agents/skills/isb && isb skill > ~/.agents/skills/isb/SKILL.md`.
+
 ## macOS: the isb machine
 
 ```text
