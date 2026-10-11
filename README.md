@@ -27,70 +27,70 @@ domains with certificates, a web UI, and an MCP server for AI agents.
 <table>
   <tr>
     <td width="33%" align="center" valign="top">
-      <a href="docs/getting-started/first-sandbox.md"><img src="docs/assets/readme/sandbox.webp" alt="isb up creating a sandbox from isb.yaml and streaming its server's log"></a><br>
+      <a href="docs/assets/readme/sandbox.webp"><img src="docs/assets/readme/sandbox.webp" alt="isb up creating a sandbox from isb.yaml and streaming its server's log"></a><br>
       <b>Sandboxes from a file</b><br>
       <a href="docs/getting-started/first-sandbox.md">Your first sandbox →</a>
     </td>
     <td width="33%" align="center" valign="top">
-      <a href="docs/guides/agents.md"><img src="docs/assets/readme/agents.webp" alt="The MCP page: the claude mcp add command for an org's endpoint"></a><br>
+      <a href="docs/assets/readme/agents.webp"><img src="docs/assets/readme/agents.webp" alt="The MCP page: the claude mcp add command for an org's endpoint"></a><br>
       <b>Agents and MCP</b><br>
       <a href="docs/guides/agents.md">Agents and MCP →</a>
     </td>
     <td width="33%" align="center" valign="top">
-      <a href="docs/concepts/workspaces.md"><img src="docs/assets/readme/workspace.webp" alt="An org's workspace with its web terminal attached to a herdr session"></a><br>
+      <a href="docs/assets/readme/workspace.webp"><img src="docs/assets/readme/workspace.webp" alt="An org's workspace with its web terminal attached to a herdr session"></a><br>
       <b>Workspaces for agents</b><br>
       <a href="docs/concepts/workspaces.md">Workspaces →</a>
     </td>
   </tr>
   <tr>
     <td width="33%" align="center" valign="top">
-      <a href="docs/guides/deploy-apps.md"><img src="docs/assets/readme/deploy.webp" alt="A deployment triggered by a GitHub push: its stages, live URLs and build log"></a><br>
+      <a href="docs/assets/readme/deploy.webp"><img src="docs/assets/readme/deploy.webp" alt="A deployment triggered by a GitHub push: its stages, live URLs and build log"></a><br>
       <b>Deploy from an image or git</b><br>
       <a href="docs/guides/deploy-apps.md">Deploy apps →</a>
     </td>
     <td width="33%" align="center" valign="top">
-      <a href="docs/guides/templates.md"><img src="docs/assets/readme/templates.webp" alt="The template catalog searched for n8n, with isb's, Dokploy's and Coolify's templates side by side"></a><br>
+      <a href="docs/assets/readme/templates.webp"><img src="docs/assets/readme/templates.webp" alt="The template catalog searched for n8n, with isb's, Dokploy's and Coolify's templates side by side"></a><br>
       <b>Templates, with Dokploy's and Coolify's catalogs</b><br>
       <a href="docs/guides/templates.md">Templates →</a> ·
       <a href="docs/guides/from-dokploy.md">from Dokploy</a> ·
       <a href="docs/guides/from-coolify.md">from Coolify</a>
     </td>
     <td width="33%" align="center" valign="top">
-      <a href="docs/guides/previews.md"><img src="docs/assets/readme/previews.webp" alt="Two pull requests, each built and served on its own URL"></a><br>
+      <a href="docs/assets/readme/previews.webp"><img src="docs/assets/readme/previews.webp" alt="Two pull requests, each built and served on its own URL"></a><br>
       <b>Preview deployments</b><br>
       <a href="docs/guides/previews.md">Previews →</a>
     </td>
   </tr>
   <tr>
     <td width="33%" align="center" valign="top">
-      <a href="docs/guides/secrets.md"><img src="docs/assets/readme/secrets.webp" alt="An org's secrets with their labels and the stacks using them, and 1Password below"></a><br>
+      <a href="docs/assets/readme/secrets.webp"><img src="docs/assets/readme/secrets.webp" alt="An org's secrets with their labels and the stacks using them, and 1Password below"></a><br>
       <b>Secrets, local or from 1Password</b><br>
       <a href="docs/guides/secrets.md">Secrets →</a>
     </td>
     <td width="33%" align="center" valign="top">
-      <a href="docs/guides/domains.md"><img src="docs/assets/readme/domains.webp" alt="An app's domains, each serving with its certificate issued"></a><br>
+      <a href="docs/assets/readme/domains.webp"><img src="docs/assets/readme/domains.webp" alt="An app's domains, each serving with its certificate issued"></a><br>
       <b>Domains with HTTPS</b><br>
       <a href="docs/guides/domains.md">Domains and ingress →</a>
     </td>
     <td width="33%" align="center" valign="top">
-      <a href="docs/guides/ssh.md"><img src="docs/assets/readme/ssh.webp" alt="herdr attached to an org's workspace over isb's SSH"></a><br>
+      <a href="docs/assets/readme/ssh.webp"><img src="docs/assets/readme/ssh.webp" alt="herdr attached to an org's workspace over isb's SSH"></a><br>
       <b>SSH and herdr</b><br>
       <a href="docs/guides/ssh.md">SSH and herdr →</a>
     </td>
   </tr>
   <tr>
     <td width="33%" align="center" valign="top">
-      <a href="docs/guides/databases.md"><img src="docs/assets/readme/databases.webp" alt="Backups: an S3 destination, a nightly Postgres schedule and a restore"></a><br>
+      <a href="docs/assets/readme/databases.webp"><img src="docs/assets/readme/databases.webp" alt="Backups: an S3 destination, a nightly Postgres schedule and a restore"></a><br>
       <b>Databases and backups</b><br>
       <a href="docs/guides/databases.md">Databases →</a>
     </td>
     <td width="33%" align="center" valign="top">
-      <a href="docs/guides/uptime.md"><img src="docs/assets/readme/uptime.webp" alt="Uptime monitors with their latency and uptime"></a><br>
+      <a href="docs/assets/readme/uptime.webp"><img src="docs/assets/readme/uptime.webp" alt="Uptime monitors with their latency and uptime"></a><br>
       <b>Uptime monitoring</b><br>
       <a href="docs/guides/uptime.md">Uptime →</a>
     </td>
     <td width="33%" align="center" valign="top">
-      <a href="docs/reference/tui.md"><img src="docs/assets/readme/tui.webp" alt="isb tui following a rolling update slot by slot"></a><br>
+      <a href="docs/assets/readme/tui.webp"><img src="docs/assets/readme/tui.webp" alt="isb tui following a rolling update slot by slot"></a><br>
       <b>The terminal dashboard</b><br>
       <a href="docs/reference/tui.md">isb tui →</a>
     </td>
