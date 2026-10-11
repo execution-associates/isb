@@ -18,13 +18,14 @@ use crate::error::{Error, Result};
 
 mod ambient;
 mod downscope;
+mod modern;
 mod origin;
 mod skills;
 pub use ambient::ambient_ok;
 pub use origin::origin;
 pub use skills::Skill;
 
-pub use isb_core::serve_client::PROTOCOL_VERSIONS;
+pub use isb_core::serve_client::{LEGACY_VERSIONS, PROTOCOL_VERSIONS};
 
 const PARSE_ERROR: i64 = -32700;
 const INVALID_REQUEST: i64 = -32600;
@@ -1042,6 +1043,10 @@ impl Endpoint {
             }
         };
         let answer = match v {
+            Value::Array(items) if items.iter().any(|m| modern::is_modern(req, m)) => {
+                Some(modern::batch_refused())
+            }
+            m if modern::is_modern(req, &m) => return self.modern(req, m, caller, scope, origin),
             Value::Array(items) if items.is_empty() => {
                 Some(rpc_error(Value::Null, INVALID_REQUEST, "empty batch"))
             }
@@ -1122,23 +1127,9 @@ impl Endpoint {
             return bad("params must be an object");
         }
         match method {
-            "initialize" => {
-                let asked = params.get("protocolVersion").and_then(Value::as_str);
-                let version = asked
-                    .filter(|v| PROTOCOL_VERSIONS.contains(v))
-                    .unwrap_or(PROTOCOL_VERSIONS[0]);
-                let mut r = json!({
-                    "protocolVersion": version,
-                    "capabilities": {"tools": {"listChanged": false}},
-                    "serverInfo": {"name": "isb", "version": env!("CARGO_PKG_VERSION")},
-                });
-                skills::declare(&self.registry.skills, &mut r["capabilities"]);
-                if let Some(i) = &self.registry.instructions {
-                    r["instructions"] = json!(i);
-                }
-                Ok(r)
-            }
+            "initialize" => Ok(self.initialize(&params)),
             "ping" => Ok(json!({})),
+            "server/discover" => Ok(self.discover()),
             "tools/list" => {
                 // We never paginate, so any cursor just means "everything".
                 if params.get("cursor").is_some_and(|c| !c.is_string()) {

@@ -79,14 +79,34 @@ what](mcp-tools.md#who-may-call-what) and
 ## MCP
 
 The daemon speaks MCP's Streamable HTTP transport with plain JSON
-responses, statelessly:
+responses, statelessly, in protocol version `2026-07-28` and in the
+earlier versions that open with `initialize`, on the same endpoint:
 
 - `POST` only: `GET /mcp` (no SSE stream) and other methods are 405.
-- No session id; `tools/call` works without a prior `initialize`.
-- Methods: `initialize` (protocol versions `2025-11-25`, `2025-06-18`,
-  `2025-03-26`; an unknown one is answered with the newest), `ping`,
-  `tools/list` (never paginated), `tools/call`. Notifications are accepted
-  and answered with 202. JSON-RPC batches (arrays) work.
+- No session id.
+- **2026-07-28**: a request is this version when its `params._meta` carries
+  `io.modelcontextprotocol/protocolVersion` or its `MCP-Protocol-Version`
+  header says `2026-07-28`. Every request then carries
+  `io.modelcontextprotocol/protocolVersion` and
+  `io.modelcontextprotocol/clientCapabilities` in `_meta`, and the
+  `MCP-Protocol-Version` and `Mcp-Method` headers (plus `Mcp-Name` for
+  `tools/call` and `resources/read`) must match the body: a missing field
+  is 400 with `-32602`, a header that disagrees 400 with `-32020`, an
+  unsupported version 400 with `-32022` listing the supported ones. One
+  message per POST, no batches. `server/discover` returns the versions,
+  capabilities and instructions; `initialize` and `ping` are not part of
+  this version and, like any unknown method, are 404 with `-32601`. Every
+  result carries `resultType` and `io.modelcontextprotocol/serverInfo` in
+  its `_meta`.
+- **2025-11-25, 2025-06-18, 2025-03-26**: `initialize` (an unknown version
+  is answered with `2025-11-25`), `ping`, and every method below; even
+  `tools/call` works without a prior `initialize`. Notifications are
+  accepted and answered with 202. JSON-RPC batches (arrays) work.
+- Methods in both: `server/discover`, `tools/list` (never paginated),
+  `tools/call`, and the skill methods ([Agents and
+  MCP](../guides/agents.md)): `skills/list`, `skills/get`,
+  `resources/list`, `resources/read`, `resources/templates/list` and
+  `resources/directory/read`.
 - A refused or failed tool call is a tool result with `isError: true` and
   `structuredContent: {code, message, data}`.
 
