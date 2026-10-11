@@ -361,6 +361,7 @@ pub(crate) fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
             None | Some("") => None,
             Some(d) => Some(isb::daemon::workspaces::PreviewBase::parse(d)?),
         },
+        skills: vec![skill()?],
         workspace_home_root: match a.workspace_home_root {
             Some(r) if r.as_os_str().is_empty() => None,
             Some(r) if !r.is_absolute() => {
@@ -556,9 +557,56 @@ pub(crate) fn ingress_status(json: bool) -> Result<u8> {
     Ok(0)
 }
 
+/// The files of isb's skill: `SKILL.md` and the docs it links to, at the
+/// same paths, so its relative links resolve under `skill://isb/`.
+const SKILL_FILES: &[(&str, &str)] = &[
+    ("SKILL.md", include_str!("../../../SKILL.md")),
+    ("docs/index.md", include_str!("../../../docs/index.md")),
+    (
+        "docs/guides/agents.md",
+        include_str!("../../../docs/guides/agents.md"),
+    ),
+    (
+        "docs/guides/egress.md",
+        include_str!("../../../docs/guides/egress.md"),
+    ),
+    (
+        "docs/reference/compose.md",
+        include_str!("../../../docs/reference/compose.md"),
+    ),
+    (
+        "docs/reference/mcp-tools.md",
+        include_str!("../../../docs/reference/mcp-tools.md"),
+    ),
+];
+
+/// isb's own skill, served over MCP to clients that speak the Skills
+/// extension.
+fn skill() -> Result<isb::server::Skill> {
+    isb::server::Skill::new(SKILL_FILES.iter().copied())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skill_serves_every_file_it_links_to() {
+        let s = skill().unwrap();
+        assert_eq!(s.name(), "isb");
+        let md = SKILL_FILES[0].1;
+        let served: Vec<&str> = SKILL_FILES.iter().map(|(p, _)| *p).collect();
+        for link in md.split("](").skip(1).filter_map(|l| l.split(')').next()) {
+            if link.contains("://") || link.starts_with('#') {
+                continue;
+            }
+            let path = link.split('#').next().unwrap();
+            assert!(
+                served.contains(&path),
+                "SKILL.md links {path}, which the skill does not serve"
+            );
+        }
+    }
 
     #[derive(Parser)]
     struct Wrap {

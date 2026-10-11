@@ -33,6 +33,11 @@ Three counts differ for that reason, and none is a fault:
   (false for those), and the web UI's MCP page counts the tools an org
   endpoint lists from it.
 
+Beside the tools, both MCP endpoints serve isb's agent skill at
+`skill://isb/SKILL.md` through the Skills extension (`skills/list`,
+`skills/get`, `resources/read`, `resources/directory/read`); see [Agents and
+MCP](../guides/agents.md). It is not a tool, and REST does not serve it.
+
 The canonical argument names are the ones in each schema: an app is `name`
 and a command is `argv`. The `app_*` tools also accept `app` for `name`, and
 the exec tools accept `command` (an array, or a string that runs as

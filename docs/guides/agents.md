@@ -20,6 +20,15 @@ manual a topic at a time (`start`, `safety`, `sandboxes`, `apps`, `inspect`,
 `data`, `workspace`, `admin`, `cli`). An agent connected to isb needs no
 skill.
 
+Both endpoints also serve isb's agent skill, the repository's `SKILL.md`,
+through MCP's [Skills
+extension](https://modelcontextprotocol.io/extensions/skills/overview)
+(`io.modelcontextprotocol/skills`). A client that speaks it finds the skill
+with `skills/list` and reads `skill://isb/SKILL.md`, and the docs pages it
+links to beside it, with `resources/read`. The skill is built into the
+`isb` binary, so it is the one for the version the server runs. Clients
+without the extension see only the tools.
+
 ## Two endpoints
 
 | Endpoint | For | Every tool's `org` |

@@ -19,8 +19,10 @@ use crate::error::{Error, Result};
 mod ambient;
 mod downscope;
 mod origin;
+mod skills;
 pub use ambient::ambient_ok;
 pub use origin::origin;
+pub use skills::Skill;
 
 pub use isb_core::serve_client::PROTOCOL_VERSIONS;
 
@@ -191,6 +193,7 @@ impl Tool {
 pub struct Registry {
     tools: Vec<Tool>,
     instructions: Option<String>,
+    skills: Vec<Skill>,
 }
 
 impl Registry {
@@ -1129,6 +1132,7 @@ impl Endpoint {
                     "capabilities": {"tools": {"listChanged": false}},
                     "serverInfo": {"name": "isb", "version": env!("CARGO_PKG_VERSION")},
                 });
+                skills::declare(&self.registry.skills, &mut r["capabilities"]);
                 if let Some(i) = &self.registry.instructions {
                     r["instructions"] = json!(i);
                 }
@@ -1157,7 +1161,8 @@ impl Endpoint {
                     None => Err((INVALID_PARAMS, format!("unknown tool: {name}"))),
                 }
             }
-            _ => Err((METHOD_NOT_FOUND, format!("method not found: {method}"))),
+            _ => skills::dispatch(&self.registry.skills, method, &params)
+                .unwrap_or_else(|| Err((METHOD_NOT_FOUND, format!("method not found: {method}")))),
         }
     }
 }
@@ -1344,11 +1349,15 @@ mod agent_tests;
 mod anonymous_tests;
 
 #[cfg(test)]
+#[path = "mcp_rpc_tests.rs"]
+mod rpc_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::server::access::tests as at;
 
-    fn registry() -> Registry {
+    pub(super) fn registry() -> Registry {
         let mut r = Registry::new().instructions("use isb");
         r.register(
             Tool::new(
@@ -1374,7 +1383,7 @@ mod tests {
         r
     }
 
-    fn endpoint(policy: ToolPolicy, access: Option<AccessValidator>) -> Endpoint {
+    pub(super) fn endpoint(policy: ToolPolicy, access: Option<AccessValidator>) -> Endpoint {
         Endpoint {
             registry: Arc::new(registry()),
             policy,
@@ -1406,11 +1415,11 @@ mod tests {
         }
     }
 
-    fn local() -> Peer {
+    pub(super) fn local() -> Peer {
         Peer::Unix { uid: Some(1000) }
     }
 
-    fn post(ep: &Endpoint, body: Value) -> (u16, Value) {
+    pub(super) fn post(ep: &Endpoint, body: Value) -> (u16, Value) {
         let r = ep.handle(&req(
             "POST",
             "/mcp",
@@ -1428,96 +1437,6 @@ mod tests {
 
     pub(super) fn rpc(method: &str, params: Value) -> Value {
         json!({"jsonrpc": "2.0", "id": 7, "method": method, "params": params})
-    }
-
-    #[test]
-    fn initialize_negotiates_version() {
-        let ep = endpoint(ToolPolicy::default(), None);
-        for (asked, got) in [
-            ("2025-06-18", "2025-06-18"),
-            ("2025-03-26", "2025-03-26"),
-            ("2024-11-05", PROTOCOL_VERSIONS[0]),
-        ] {
-            let (s, v) = post(&ep, rpc("initialize", json!({"protocolVersion": asked})));
-            assert_eq!(s, 200);
-            assert_eq!(v["id"], 7);
-            assert_eq!(v["result"]["protocolVersion"], got);
-        }
-        let (_, v) = post(&ep, rpc("initialize", json!({})));
-        let r = &v["result"];
-        assert_eq!(r["capabilities"], json!({"tools": {"listChanged": false}}));
-        assert_eq!(r["serverInfo"]["name"], "isb");
-        assert_eq!(r["instructions"], "use isb");
-    }
-
-    #[test]
-    fn notifications_and_responses_are_accepted() {
-        let ep = endpoint(ToolPolicy::default(), None);
-        let n = json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
-        assert_eq!(post(&ep, n.clone()).0, 202);
-        let resp = json!({"jsonrpc": "2.0", "id": 1, "result": {}});
-        assert_eq!(post(&ep, resp).0, 202);
-        // A batch of only notifications has nothing to answer either.
-        assert_eq!(post(&ep, json!([n.clone(), n])).0, 202);
-    }
-
-    #[test]
-    fn batch_answers_requests_only() {
-        let ep = endpoint(ToolPolicy::default(), None);
-        let (s, v) = post(
-            &ep,
-            json!([
-                {"jsonrpc": "2.0", "id": "a", "method": "ping"},
-                {"jsonrpc": "2.0", "method": "notifications/initialized"},
-                {"jsonrpc": "2.0", "id": "b", "method": "nope"},
-            ]),
-        );
-        assert_eq!(s, 200);
-        let a = v.as_array().unwrap();
-        assert_eq!(a.len(), 2);
-        assert_eq!(a[0]["id"], "a");
-        assert_eq!(a[0]["result"], json!({}));
-        assert_eq!(a[1]["error"]["code"], METHOD_NOT_FOUND);
-        assert_eq!(post(&ep, json!([])).1["error"]["code"], INVALID_REQUEST);
-    }
-
-    #[test]
-    fn protocol_errors() {
-        let ep = endpoint(ToolPolicy::default(), None);
-        let (s, v) = post(&ep, rpc("resources/list", json!({})));
-        assert_eq!(
-            (s, v["error"]["code"].as_i64()),
-            (200, Some(METHOD_NOT_FOUND))
-        );
-        let r = ep.handle(&req("POST", "/mcp", &[], b"{not json", local()));
-        assert_eq!(r.status, 400);
-        let v: Value = serde_json::from_slice(&r.body).unwrap();
-        assert_eq!(v["error"]["code"], PARSE_ERROR);
-        assert_eq!(post(&ep, json!(42)).1["error"]["code"], INVALID_REQUEST);
-        assert_eq!(
-            post(&ep, json!({"jsonrpc": "1.0", "id": 1, "method": "ping"})).1["error"]["code"],
-            INVALID_REQUEST
-        );
-        assert_eq!(
-            post(&ep, rpc("tools/call", json!({"arguments": {}}))).1["error"]["code"],
-            INVALID_PARAMS
-        );
-        assert_eq!(
-            post(
-                &ep,
-                rpc("tools/call", json!({"name": "echo", "arguments": [1]}))
-            )
-            .1["error"]["code"],
-            INVALID_PARAMS
-        );
-        assert_eq!(
-            post(&ep, rpc("tools/call", json!({"name": "missing"}))).1["error"]["code"],
-            INVALID_PARAMS
-        );
-        assert_eq!(
-            post(&ep, rpc("ping", json!([1]))).1["error"]["code"],
-            INVALID_PARAMS
-        );
     }
 
     #[test]
