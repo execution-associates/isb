@@ -389,8 +389,13 @@ enum Cmd {
     /// ssh's ProxyCommand (`isb ssh-config` writes it). Nothing listens in
     /// the instance and no port opens anywhere.
     SshProxy {
-        /// ORG/INSTANCE, or INSTANCE in --org.
+        /// ORG/INSTANCE, ORG/STACK/SERVICE (the service's current replica),
+        /// or INSTANCE in --org.
         target: String,
+        /// Print the target's host keys as known_hosts lines instead (ssh's
+        /// `KnownHostsCommand`).
+        #[arg(long)]
+        known_hosts: bool,
         /// Whose isb SSH keys to let in, for the local socket (which has no
         /// account of its own).
         #[arg(long = "as")]
@@ -606,9 +611,10 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         Cmd::Key(c) => ssh::key(c),
         Cmd::SshProxy {
             target,
+            known_hosts,
             keys_of,
             remote,
-        } => ssh::proxy(&ctx.global.org, &target, keys_of, &remote),
+        } => ssh::proxy(&ctx.global.org, &target, keys_of, &remote, known_hosts),
         Cmd::SshConfig(a) => ssh::config(&ctx.global.org, a),
         Cmd::Audit(c) => audit_cmd(c),
         Cmd::History(a) => history_cmd(a),

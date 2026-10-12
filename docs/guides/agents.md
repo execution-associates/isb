@@ -264,10 +264,11 @@ services:
   ([Scopes](../concepts/access.md#scopes)). Rotate it with a new token and
   `isb secret set isb-token --org acme`: `on_change: none` writes the new
   file into the running box without replacing it.
-- **Reaching it.** `isb ssh-config acme/INSTANCE` writes an SSH block for
-  the replica (its name is in `isb stack ps agents-box --org acme`); run it
-  again after a redeploy, which makes a new instance with a new name and
-  host keys. herdr adds it like any SSH machine ([SSH and herdr](ssh.md)).
+- **Reaching it.** `isb ssh-config acme/agents-box/box` writes an SSH block
+  for the service, `box.agents-box.acme.isb`, that reaches whichever replica
+  runs now and asks isb for its host keys at each connection, so a redeploy
+  (a new instance, with a new name and new host keys) needs no new block.
+  herdr adds it like any SSH machine ([SSH and herdr](ssh.md)).
 
 So inside the box:
 

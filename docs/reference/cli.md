@@ -533,9 +533,9 @@ Passwords never come from argv.
 isb key add FILE|- [--name N] [--user EMAIL] [--url URL] [--token-file FILE]
 isb key ls [--user EMAIL] [--json] [--url URL] [--token-file FILE]
 isb key rm ID... [--user EMAIL] [--url URL] [--token-file FILE]
-isb ssh-config [ORG/INSTANCE...] [--user U] [--as EMAIL] [--known-hosts FILE] [--identity FILE]
-               [--isb PATH] [-o FILE] [--url URL] [--token-file FILE]
-isb ssh-proxy ORG/INSTANCE [--as EMAIL] [--url URL] [--token-file FILE]
+isb ssh-config [ORG/INSTANCE | ORG/STACK/SERVICE ...] [--user U] [--as EMAIL] [--known-hosts FILE]
+               [--identity FILE] [--isb PATH] [-o FILE] [--url URL] [--token-file FILE]
+isb ssh-proxy ORG/INSTANCE|ORG/STACK/SERVICE [--known-hosts] [--as EMAIL] [--url URL] [--token-file FILE]
 ```
 
 With `--url` (or `ISB_URL`) and a token (`ISB_TOKEN`, or `--token-file`),
@@ -543,9 +543,12 @@ With `--url` (or `ISB_URL`) and a token (`ISB_TOKEN`, or `--token-file`),
 daemon. Without, `key` edits the identity store on the host for `--user`
 (default: the only platform admin), and `ssh-proxy` uses the local
 daemon's socket with the keys of `--as`. `ssh-config` prints a `Host` block
-per instance (every running instance in `--org` when none is named), pins
+per instance (every running sandbox in `--org` when none is named), pins
 host keys in `~/.config/isb/known_hosts`, and prints a `herdr machine add`
-line per instance on stderr. See [SSH and herdr](../guides/ssh.md).
+line per instance on stderr. A stack service (`ORG/STACK/SERVICE`) reaches
+its current replica, and its block asks isb for that replica's keys at each
+connection (`KnownHostsCommand isb ssh-proxy --known-hosts`) instead of
+pinning them. See [SSH and herdr](../guides/ssh.md).
 
 ## Audit and history
 
