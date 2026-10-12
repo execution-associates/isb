@@ -50,15 +50,12 @@ every flag and field is in the [Reference](../reference/index.md).
 - [Reach isb serve remotely](remote-access.md): Cloudflare Tunnel and Access
   in front of the daemon, or a tailnet.
 - [Agents and MCP](agents.md): connect an agent with a token that reaches one
-  org; agents in a workspace and the sandboxes they make; one agent over
-  several hosts.
+  org; a long-lived box for agents and the sandboxes they make; one agent
+  over several hosts.
 - [isb for kubectl users](kubectl.md): list and describe instances, exec, logs,
   copy files, scale, restart, events and top, as CLI commands and MCP tools.
 - [SSH and herdr](ssh.md): plain `ssh`, `scp` and herdr into any instance of
   an org, with the keys on your isb account.
-- [Workspace images and recipes](workspace-images.md): build the images
-  workspaces start from, isb's default one (Claude Code, Codex, herdr,
-  mise), and first-boot scripts.
 
 ## Develop with sandboxes
 

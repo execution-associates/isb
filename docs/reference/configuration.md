@@ -107,16 +107,13 @@ Client secrets are never flags (argv shows in `ps`): they come from
 
 See [Domains and ingress](../guides/domains.md).
 
-### Workspaces
+### The org API listener
 
 | Flag | Environment | Default | |
 |---|---|---|---|
-| `--workspace-mcp-port` | `ISB_WORKSPACE_MCP_PORT` | `8481` | where each org's workspace reaches the org-bound MCP, on its bridge address; must differ from the tunnel port |
-| `--workspace-pool` | `ISB_WORKSPACE_POOL` | the org's default pool | the storage pool new workspace home volumes go in (an org's `home_pool` wins) |
-| `--workspace-home-root` | `ISB_WORKSPACE_HOME_ROOT` | off | make workspace homes host folders, `<DIR>/<org>/home`, instead of volumes |
-| `--preview-domain` | `ISB_PREVIEW_DOMAIN` | off (`.localhost` when isb is reached on loopback) | `[http(s)://]DOMAIN[:PORT]` whose subdomains reach the listener: workspace port previews get `<port>-<workspace>-<org>.DOMAIN` |
+| `--org-api-port` | `ISB_ORG_API_PORT` | `8481` | where every org's instances reach the org-bound MCP and REST surface, on the org bridge's gateway address; must differ from the tunnel port |
 
-See [Workspaces](../concepts/workspaces.md).
+See [The org API listener](http-api.md#the-org-api-listener).
 
 ### Sandbox egress
 
@@ -160,7 +157,7 @@ Everything else isb reads from its environment.
 | `ISB_ORG` | every command | the org (the `--org` flag) |
 | `ISB_SERVE_SOCKET` | the CLI and the daemon | the daemon's unix socket |
 | `ISB_SERVE_STATE_DIR` | the daemon, and `isb user`, `invite`, `token`, `key`, `audit`, `history`, `registry setup`, `org` | the daemon's state directory |
-| `ISB_URL`, `ISB_TOKEN` | the CLI | a daemon's URL and an API token: `isb ssh-config`, `ssh-proxy` and `key` with a remote daemon, and every platform command where there is no local daemon socket (inside a workspace) |
+| `ISB_URL`, `ISB_TOKEN` | the CLI | a daemon's URL and an API token: `isb ssh-config`, `ssh-proxy` and `key` with a remote daemon, and every platform command where there is no local daemon socket (inside an org's instance, through [the org API listener](http-api.md#the-org-api-listener)) |
 | `ISB_PUBLIC_URL` | `isb invite` | prints the invitation as a link |
 | `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR`, `HOME` | everything | the default state directory, `~/.config/isb`, the daemon socket and `isb up`'s locks |
 | `ISB_DNS_DIR` | `isb org`, `isb host setup`, the daemon | the service-name hosts directory (default `/var/lib/isb/dns`) |
@@ -228,7 +225,6 @@ What isb puts in a guest's environment, for scripts to read:
 
 | Variable | Where |
 |---|---|
-| `ISB_URL`, `ISB_ORG`, `ISB_TOKEN`, `ISB_WORKSPACE` | login shells in a workspace ([Workspaces](../concepts/workspaces.md#the-workspace-is-an-org-actor)) |
 | `ISB_VOLUME`, `ISB_REASON`, `ISB_SNAPSHOT` | the `/etc/isb/pre-snapshot` hook ([Volumes](../guides/volumes.md)) |
 | `ISB_TPL_<VAR>` | a template's command line or health check that uses a secret variable ([Templates](../guides/templates.md)) |
 | `HOME`, `USER`, `LOGNAME` | `isb exec` and a service's `command`, from the user's passwd entry, unless given |

@@ -324,21 +324,10 @@ fn instance_exec(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
             "instance_exec runs in the instance `name`; app_exec takes replica",
         ));
     }
-    let mut run = Run::new(a.argv, a.cwd, a.user, a.env, a.stdin, a.timeout.as_deref())?;
+    let run = Run::new(a.argv, a.cwd, a.user, a.env, a.stdin, a.timeout.as_deref())?;
     let oc = d.oc(&Some(org.to_string()))?;
-    let info = running_info(d, c, &oc, &a.name)?;
-    d.workspaces.mark_active(&org.incus_project(), &a.name);
-    // A workspace's commands run as its user, in its home, as its terminal does.
-    if let Some(w) = info
-        .config
-        .get(crate::workspace::KEY_WORKSPACE)
-        .and_then(|w| d.workspaces_def(&org, w).ok())
-    {
-        if run.user.is_none() {
-            run.user = Some(w.user.clone());
-            run.cwd.get_or_insert_with(|| w.home_dir());
-        }
-    }
+    running_info(d, c, &oc, &a.name)?;
+    d.sandboxes.mark_active(&org.incus_project(), &a.name);
     run_capped(&oc, &a.name, run, EXEC_OUTPUT_CAP)
 }
 
@@ -389,7 +378,7 @@ pub(super) fn register(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<(
         d,
         "instance_exec",
         "Run a command in an instance",
-        "Run argv in any running instance of the org (a replica, a database, the workspace, a sandbox) and return its exit code and output: as sandbox_exec, with a 60s default timeout (at most 15m) and each stream capped at 1 MiB. A workspace's commands run as its user, in its home. Members and up.",
+        "Run argv in any running instance of the org (a replica, a database, a sandbox) and return its exit code and output: as sandbox_exec, with a 60s default timeout (at most 15m) and each stream capped at 1 MiB. Members and up.",
         obj(
             exec_props("The instance's name, from instance_list."),
             &["name", "argv"]

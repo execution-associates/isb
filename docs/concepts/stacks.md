@@ -311,7 +311,8 @@ outlives a restart of the daemon.
 service's replicas, as `isb app exec` does for an app: a running replica,
 healthy and in rotation first, or the one `--replica N` names. It prints the
 output and exits with the command's status; it is not interactive (`-i` feeds
-stdin), and it works over the socket and, from a workspace, over `$ISB_URL`.
+stdin), and it works over the socket and, against a remote daemon, over
+`$ISB_URL`.
 Members and up.
 
 ## Editing in the web UI

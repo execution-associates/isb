@@ -80,14 +80,14 @@ fn annotations(tool: &str, ann: &Ann) -> Value {
 }
 
 /// What an instance is to isb: `app`, `database`, `stack` (a compose
-/// service's replica), `tunnel`, `workspace`, `build` or `sandbox`.
+/// service's replica), `tunnel`, `build` or `sandbox`.
 /// `app_db` is `Some(is_database)` when an app owns it.
 pub(super) fn kind(
     labels: &BTreeMap<String, String>,
     tunnel: bool,
     app_db: Option<bool>,
 ) -> &'static str {
-    match crate::workspace::kind_of(labels) {
+    match crate::sandbox_life::kind_of(labels) {
         "replica" if tunnel => "tunnel",
         "replica" => match app_db {
             Some(true) => "database",

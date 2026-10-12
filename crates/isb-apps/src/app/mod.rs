@@ -54,7 +54,7 @@ use crate::spec::{NamedVolumeSpec, SandboxSpec, SecretDef};
 
 pub use compose::ComposeOwner;
 pub use database::{DatabaseSource, Engine};
-pub use deploy::{Apps, BuildFn, ImageProbe, SecretHook};
+pub use deploy::{Apps, BuildFn, ImageProbe};
 pub use env::{EnvFile, EnvValue};
 pub use git::{GitAuth, GitSource};
 pub use preview::{Preview, PreviewSettings};

@@ -1,8 +1,8 @@
 # The isb CLI
 
 The `isb` CLI does what these tools do. On a host it talks to incus over its
-socket and to `isb serve` over the daemon's unix socket; inside a workspace
-its daemon commands use `$ISB_URL` and `$ISB_TOKEN`. `isb --help` and
+socket and to `isb serve` over the daemon's unix socket; elsewhere its daemon
+commands use `$ISB_URL` and `$ISB_TOKEN`. `isb --help` and
 `isb <command> --help` list everything. Install:
 `curl -fsSL https://github.com/execution-associates/isb/releases/latest/download/install.sh | sh`
 (signature checked; `isb update` keeps it current). Do not install it with

@@ -14,6 +14,9 @@ Linux machine, starts in seconds) or a VM.
   stream.
 - `sandbox_list`, `sandbox_extend` (push out the expiry before it passes, or
   the sandbox is deleted), `sandbox_remove`.
+- `sandbox_settings`: the org's defaults for new sandboxes (`sandbox_expiry`,
+  e.g. `24h`, at most `30d`; `sandbox_idle`, e.g. `2h`, or `none`). Without
+  changes it reads; org admins and above change them.
 - `sandbox_start`, `sandbox_stop`, `instance_restart`: a stopped sandbox keeps
   its state.
 - `sandbox_logs`: output of a long-running `restart: always` service, or an

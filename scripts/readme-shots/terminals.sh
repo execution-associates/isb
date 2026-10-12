@@ -2,8 +2,8 @@
 # Run as ubuntu inside the preview VM, after seed.sh. Drives three terminal
 # scenes in tmux and keeps each screen with its colors, rendered to a page
 # shoot.py screenshots: `isb up` serving a directory, herdr attached to the
-# workspace over isb's SSH, and `isb tui` in the middle of a rolling update
-# (last, so its restart shows in no other scene).
+# org's dev box over isb's SSH, and `isb tui` in the middle of a rolling
+# update (last, so its restart shows in no other scene).
 set -euo pipefail
 
 isb=$HOME/.local/bin/isb
@@ -44,11 +44,11 @@ tmux capture-pane -t up -e -p >"$term/sandbox.ansi"
 tmux send-keys -t up C-c
 render sandbox "~/demo — isb up"
 
-# herdr on this machine, attached to the workspace's herdr through
-# `ssh workspace.acme.isb` (isb ssh-proxy over the daemon's websocket).
+# herdr on this machine, attached to the dev box's herdr through
+# `ssh devbox.acme.isb` (isb ssh-proxy over the daemon's websocket).
 tmux new-session -d -s hd -x 146 -y 22 "bash --norc -i"
 keys hd 'eval "$(mise activate bash)"; clear'
-keys hd 'herdr --remote workspace.acme.isb' 12
+keys hd 'herdr --remote devbox.acme.isb' 12
 # A first attach shows herdr's welcome and its integrations panel.
 tmux send-keys -t hd Enter; sleep 2
 tmux send-keys -t hd Escape; sleep 1
@@ -57,13 +57,13 @@ tmux send-keys -t hd C-l; sleep 1
 keys hd 'isb app top api' 4
 keys hd 'isb db ls' 3
 tmux capture-pane -t hd -e -p >"$term/ssh.ansi"
-render ssh "herdr --remote workspace.acme.isb"
+render ssh "herdr --remote devbox.acme.isb"
 
 # isb tui: shop-production while api rolls out, slot 1 replaced and slot 2
 # being created.
 tmux new-session -d -s tui -x 118 -y 32 "$isb tui"
 sleep 6
-tmux send-keys -t tui Down   # stacks are sorted: analytics-production, then shop-production
+tmux send-keys -t tui Down Down   # stacks are sorted: analytics-production, devbox, then shop-production
 sleep 25                     # a few CPU samples for the header's sparkline
 ISB_ORG=acme $isb app restart api -q &
 restart=$!

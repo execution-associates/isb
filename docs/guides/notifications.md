@@ -121,7 +121,7 @@ shortest globs (`*`, `deploy.*`, `*.failed`).
 | `backup.succeeded`, `backup.failed`, `job.succeeded`, `job.failed` | [Database and volume backups](databases.md#backups) and [scheduled jobs](jobs.md). |
 | `monitor.down`, `monitor.up` | An [uptime monitor](uptime.md) went down (its failure threshold reached), or came back (with the downtime). Once per incident; a flapping monitor is held until it settles. The body's `details` carry the URL, status, latency, error and a link. |
 | `monitor.cert_expiring` | An HTTPS certificate a monitor sees expires within its `cert_expiry_days`; once per certificate. |
-| `secret.rotated` | A new secret version reached a stack service (or an app): the message says the versions and what its `on_change` does (rolling, restarting in place, or not cycled, at `warn`). A workspace using it is reported under stack `<org>/@workspaces`. See [When a secret changes](secrets.md#when-a-secret-changes). |
+| `secret.rotated` | A new secret version reached a stack service (or an app): the message says the versions and what its `on_change` does (rolling, restarting in place, or not cycled, at `warn`). See [When a secret changes](secrets.md#when-a-secret-changes). |
 
 The list is the `kind` field on the event feed (the `events` tool, the SSE
 stream); a producer adding a kind adds it there, and a `*` rule hears it.

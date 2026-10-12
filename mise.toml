@@ -132,7 +132,7 @@ fi
 as_ubuntu mise exec -- uvx --from playwright==1.55.0 playwright install chromium >/dev/null
 as_ubuntu mise exec -- uv run -q /src/scripts/readme-shots/shoot.py readme-shots/out
 mkdir -p docs/assets/readme
-for f in sandbox agents workspace deploy templates previews secrets domains ssh databases uptime tui; do
+for f in sandbox agents deploy templates previews secrets domains ssh databases uptime tui; do
   incus file pull "$name/home/ubuntu/readme-shots/out/$f.webp" docs/assets/readme/ </dev/null
 done
 ls -l docs/assets/readme

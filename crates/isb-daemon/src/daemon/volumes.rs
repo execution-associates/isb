@@ -77,7 +77,7 @@ fn register_reads(r: &mut Registry, v: &VolumeBackups) -> Result<()> {
         (
             "volume_list",
             "List volumes",
-            "The org's named volumes (an app's <app>_<NAME>, a database's data, a workspace's home): instances using each, its snapshot schedule, and which are staged restores.",
+            "The org's named volumes (an app's <app>_<NAME>, a database's data): instances using each, its snapshot schedule, and which are staged restores.",
         ),
         obj(json!({}), &[]),
         ro.clone(),

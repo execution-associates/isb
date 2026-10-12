@@ -590,11 +590,11 @@ pub(super) fn sandbox_list_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) ->
         d,
         "sandbox_list",
         "List sandboxes",
-        "List instances (for remote callers: only the ones isb serve manages), optionally filtered by labels (`key` or `key=value`) and kind (`sandbox`, `workspace`, `replica`, `build`). Each with who created it (owner), when, its expiry and idle timeout, its last activity, and its CPU and memory.",
+        "List instances (for remote callers: only the ones isb serve manages), optionally filtered by labels (`key` or `key=value`) and kind (`sandbox`, `replica`, `build`). Each with who created it (owner), when, its expiry and idle timeout, its last activity, and its CPU and memory.",
         obj(
             json!({
                 "labels": {"type": "array", "items": {"type": "string"}},
-                "kind": {"type": "string", "enum": ["sandbox", "workspace", "replica", "build"], "description": "Only this kind of instance."}
+                "kind": {"type": "string", "enum": ["sandbox", "replica", "build"], "description": "Only this kind of instance."}
             }),
             &[]
         ),
@@ -631,7 +631,7 @@ pub(super) fn sandbox_list_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) ->
                             k.strip_prefix("user.").map(|k| (k.to_string(), v.clone()))
                         })
                         .collect();
-                    let kind = crate::workspace::kind_of(&isb);
+                    let kind = crate::sandbox_life::kind_of(&isb);
                     if a.kind.as_deref().is_some_and(|k| k != kind) {
                         return None;
                     }
@@ -643,15 +643,14 @@ pub(super) fn sandbox_list_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) ->
                         "kind": kind,
                         "labels": i.labels,
                         "stack": i.config.get("user.isb.stack"),
-                        "workspace": i.config.get(crate::workspace::KEY_WORKSPACE),
                         "owner": i.config.get("user.isb.owner"),
                         // Created by this caller (who may extend it).
                         "mine": i.config.get("user.isb.owner").is_some_and(|o| *o == owner_label(c)),
                         "created_at": created,
                         "age_secs": created.map(|c| now.saturating_sub(c as u64)),
-                        "expires_at": num(crate::workspace::KEY_EXPIRES_AT),
-                        "idle_timeout": num(crate::workspace::KEY_IDLE_TIMEOUT),
-                        "last_active": d.workspaces.last_seen(&project, &i.name),
+                        "expires_at": num(crate::sandbox_life::KEY_EXPIRES_AT),
+                        "idle_timeout": num(crate::sandbox_life::KEY_IDLE_TIMEOUT),
+                        "last_active": d.sandboxes.last_seen(&project, &i.name),
                         "cpus": i.config.get("limits.cpu"),
                         "memory": i.config.get("limits.memory"),
                         "cpu_pct": s.and_then(|s| s.cpu_pct),
@@ -724,12 +723,6 @@ pub(super) fn sandbox_remove_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) 
                 return Err(Error::invalid(format!(
                     "{} belongs to stack {}; scale or remove the stack instead",
                     a.name, info.config["user.isb.stack"]
-                )));
-            }
-            if info.config.contains_key(crate::workspace::KEY_WORKSPACE) {
-                return Err(Error::invalid(format!(
-                    "{} is the org's workspace; workspace_delete removes it",
-                    a.name
                 )));
             }
             Sandbox::remove(&oc, &a.name, true)?;

@@ -275,7 +275,6 @@ type Rotation = {
   rolled: string[];
   applied?: { stack: string; service: string; instance: string }[];
   services?: { stack: string; service: string; action: "roll" | "restart" | "none" }[];
-  skipped?: { kind: string; name: string; reason: string }[];
 };
 
 /** A database app's password (`db.<app>.password` or `.root-password`): what setting it does. */
@@ -285,7 +284,7 @@ function dbPasswordNote(name: string): string {
   return ` This is database ${m[1]}'s password: isb changes it inside the running database first (and its URL secret with it); if that fails, for instance because the database is not running, nothing is stored.`;
 }
 
-/** One line on what a new version did: per `on_change`, and what was skipped. */
+/** One line on what a new version did: per `on_change`. */
 function rotationSummary(r: Rotation): string {
   const by = (a: string) =>
     (r.services ?? []).filter((c) => c.action === a).map((c) => `${c.stack}/${c.service}`);
@@ -298,8 +297,6 @@ function rotationSummary(r: Rotation): string {
   if (restart.length) parts.push(`restarting in place ${[...new Set(restart)].join(", ")}`);
   const none = by("none");
   if (none.length) parts.push(`stale until restarted ${[...new Set(none)].join(", ")}`);
-  const ws = (r.skipped ?? []).filter((s) => s.kind === "workspace").map((s) => s.name);
-  if (ws.length) parts.push(`file updated in workspace ${ws.join(", ")} (not restarted)`);
   return parts.join("; ");
 }
 

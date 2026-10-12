@@ -50,9 +50,9 @@ secret reads, the rest are ordinary reads.
 | `id` | position in the log, from 1, never reused |
 | `time` | unix milliseconds |
 | `org` | the org the call acted in; `null` for platform-level entries (sign-ins, accounts, users, org-spanning tools) |
-| `actor` | the user's email; `local(uid N)` for the unix socket and the host CLI; `access:EMAIL` for a Cloudflare Access identity; `webhook:PROVIDER` (`github`, `gitlab`, `gitea`, `token`); `workspace` for an org's workspace token; an agent identity's source (`tailnet:<login or node>`, `access:<email or client id>`); a superadmin's source (`token:<name>`, `tailnet:<login>`, `access:<name>`) |
-| `actor_kind` | `person` (a session, or Access mapped to a user), `agent` (an API token or a workspace token), `local`, `webhook`, `anonymous` (a failed sign-in, an Access identity without an account), `superadmin` |
-| `user_id`, `user_email`, `token_id`, `token_name` | who, when known; a workspace's `token_name` is `workspace:<name>` |
+| `actor` | the user's email; `local(uid N)` for the unix socket and the host CLI; `access:EMAIL` for a Cloudflare Access identity; `webhook:PROVIDER` (`github`, `gitlab`, `gitea`, `token`); an agent identity's source (`tailnet:<login or node>`, `access:<email or client id>`); a superadmin's source (`token:<name>`, `tailnet:<login>`, `access:<name>`) |
+| `actor_kind` | `person` (a session, or Access mapped to a user), `agent` (an API token or an agent identity), `local`, `webhook`, `anonymous` (a failed sign-in, an Access identity without an account), `superadmin` |
+| `user_id`, `user_email`, `token_id`, `token_name` | who, when known |
 | `surface` | `mcp`, `rest`, `web` (a browser session), `cli` (the unix socket or the host CLI), `webhook` |
 | `action` | as above |
 | `target` | what it acted on: the first of the arguments `name`, `app`, `stack`, `project`, `service`, `environment`, `id`, `user_id`, `email`; for the `org_*` tools, the org |

@@ -16,7 +16,6 @@ import { errorMessage } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 import { useOrgPage } from "@/pages/org-common";
 import { AgentIdentitiesPanel } from "@/pages/org-agent-identities";
-import { NestingPanel } from "@/pages/org-nesting";
 
 export function SettingsPage() {
   const { org, me, redirect } = useOrgPage();
@@ -58,7 +57,6 @@ export function SettingsPage() {
           <NetworkPanel o={o} />
           <EgressPanel org={org} o={o} editable={platform} />
           <AgentIdentitiesPanel org={org} />
-          {o.network && <NestingPanel org={org} o={o} superadmin={!!me.superadmin} />}
           {platform && !isDefault && <DangerPanel org={org} o={o} />}
         </div>
       ) : null}
@@ -542,7 +540,7 @@ export function DeleteOrgDialog({
         for (const n of r?.notes ?? []) toast.info(n);
         // Leave the org's pages before they learn it is gone.
         onDeleted();
-        for (const k of [["apps", org], ["stacks", org], ["workspace", org], ["workspace-sandboxes", org]]) qc.removeQueries({ queryKey: k });
+        for (const k of [["apps", org], ["stacks", org], ["sandboxes", org], ["sandbox-settings", org]]) qc.removeQueries({ queryKey: k });
         await qc.invalidateQueries({ queryKey: ["me"] });
         await qc.invalidateQueries({ queryKey: ["tool"] });
       }}

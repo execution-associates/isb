@@ -484,7 +484,7 @@ fn sign_in_schemas() -> Value {
             "platform_admin": {"type": "boolean"},
             "memberships": {"type": "array", "items": r("Membership")},
             "orgs": {"type": "array", "items": {"type": "string"}, "description": "Every org this caller can open."},
-            "auth": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["session", "api_token", "access", "superadmin", "workspace", "agent"]}}, "required": ["kind"], "additionalProperties": true, "description": "How the caller signed in: {kind: session, id}, {kind: api_token, id, org, name, scopes?}, {kind: access}, {kind: superadmin, source}, {kind: workspace, org, name}, {kind: agent, label}."},
+            "auth": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["session", "api_token", "access", "superadmin", "agent"]}}, "required": ["kind"], "additionalProperties": true, "description": "How the caller signed in: {kind: session, id}, {kind: api_token, id, org, name, scopes?}, {kind: access}, {kind: superadmin, source}, {kind: agent, label}."},
             "superadmin": {"oneOf": [{"type": "null"}, obj(json!({"source": {"type": "string"}, "via": superadmin_via, "account": {"type": "boolean"}}), &["source", "via", "account"])]},
         }), &["user", "platform_admin", "memberships", "orgs", "auth", "superadmin"]),
     })

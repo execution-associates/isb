@@ -15,10 +15,8 @@
 pub mod caddy;
 pub mod cloudflare;
 pub mod domain;
-mod extra;
 mod status;
 mod tunnels;
-pub use extra::{ExtraRoute, port_service, workspace_route, workspace_stack};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, SocketAddr};
@@ -172,8 +170,6 @@ type Rotation = BTreeMap<(String, String), Vec<IpAddr>>;
 struct State {
     defs: Vec<Arc<StackDef>>,
     rotation: Rotation,
-    /// Routes outside any stack: workspace ports ([`extra`]).
-    extras: Vec<ExtraRoute>,
     /// Bumped by every change; the applier works up to it.
     generation: u64,
     claims: Vec<Claim>,
@@ -495,15 +491,10 @@ impl Manager {
         reason = "predates the lint ratchet; split it when next changed"
     )]
     fn apply_once(&self, last_cfg: &mut Option<Value>) -> Result<()> {
-        let (defs, mut rotation, claims, extras) = {
+        let (defs, rotation, claims) = {
             let st = self.state.lock().unwrap();
             let s = &st;
-            (
-                s.defs.clone(),
-                s.rotation.clone(),
-                s.claims.clone(),
-                s.extras.clone(),
-            )
+            (s.defs.clone(), s.rotation.clone(), s.claims.clone())
         };
         let mut orgs: BTreeMap<OrgId, OrgIngress> = BTreeMap::new();
         let mut org_errors: BTreeMap<OrgId, String> = BTreeMap::new();
@@ -514,7 +505,6 @@ impl Manager {
             .collect();
         // Tunnel orgs we serve now, whose settings may have changed.
         want.extend(self.state.lock().unwrap().tunnels.keys().cloned());
-        want.extend(extras.iter().map(|e| e.route.org.clone()));
         for o in want {
             match self.org_settings(&o, false) {
                 Ok(oi) => {
@@ -562,8 +552,6 @@ impl Manager {
                 }
             }
         }
-        let out = (&mut routes, &mut rotation, &mut refused);
-        Self::merge_extras(&extras, &orgs, &org_errors, out);
         let res = domain::resolve(&routes, &claims, crate::stack::now_secs());
 
         // Tunnel listeners, one per tunnel org with an address.

@@ -99,5 +99,5 @@ org's ([Users, roles and superadmins](../concepts/access.md)).
 ## In the web UI
 
 An app's **Monitoring** tab charts this history over 1 hour, 24 hours, 7 days
-or 30 days ([The web UI](../getting-started/web-ui.md)); the workspace's
-Resources tab and the org overview show live CPU and memory with a sparkline.
+or 30 days ([The web UI](../getting-started/web-ui.md)); the org overview
+shows live CPU and memory with a sparkline.

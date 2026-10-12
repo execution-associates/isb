@@ -1,7 +1,7 @@
 //! A database app's credentials as org secrets: its passwords, generated
 //! once, and the URL secrets that carry the password, kept in step with it.
 
-use super::{Apps, DeployLog, SecretHook};
+use super::{Apps, DeployLog};
 use crate::app::{AppSpec, Source, git};
 use crate::error::{Error, Result};
 use crate::org::OrgId;
@@ -68,8 +68,7 @@ impl Apps {
     }
 
     /// The URL secret `name` got a new value at deploy: the stacks using it
-    /// cycle per their `on_change` (as after `secret_set`), and the hook
-    /// delivers it to the workspaces.
+    /// cycle per their `on_change` (as after `secret_set`).
     pub(super) fn url_secret_moved(&self, org: &OrgId, name: &str, log: &mut DeployLog) {
         for c in self.inner.ctl.secret_changed(org, name) {
             let what = match &c.error {
@@ -78,15 +77,6 @@ impl Apps {
             };
             log.line(&format!("secret {name}: {}/{} {what}", c.stack, c.service));
         }
-        if let Some(f) = self.inner.secret_hook.get() {
-            f(org, name);
-        }
-    }
-
-    /// Tell `f` about each secret that gets a new value outside `secret_set`
-    /// (once; later calls are ignored).
-    pub fn on_secret_changed(&self, f: SecretHook) {
-        let _ = self.inner.secret_hook.set(f);
     }
 
     /// The secret `name` got a new value: when it is a database app's
@@ -177,11 +167,6 @@ mod tests {
         )
         .unwrap();
         let ap = Apps::new(dir.path(), client, ctl, secrets.clone());
-        let told = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-        let t = told.clone();
-        ap.on_secret_changed(Arc::new(move |_: &OrgId, n: &str| {
-            t.lock().unwrap().push(n.to_string());
-        }));
         let spec: AppSpec = serde_json::from_value(serde_json::json!({
             "name": "main-db", "project": "shop",
             "source": {"database": {"engine": "postgres", "urls": {
@@ -258,6 +243,5 @@ mod tests {
         let now = secrets.version(&org, "dsn.main-db.jobs").unwrap();
         assert!(now > before);
         assert_eq!(bound(), now, "the stack using it moved to the new value");
-        assert_eq!(*told.lock().unwrap(), ["dsn.main-db.jobs"]);
     }
 }

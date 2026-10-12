@@ -15,7 +15,7 @@ superadmin. This page explains those levels; signing in is in
 | Level | Reaches | Typical holder |
 |---|---|---|
 | org viewer | reads one org | a stakeholder, a dashboard |
-| org member, admin, owner | administers one org | the org's people, its workspace, its agents |
+| org member, admin, owner | administers one org | the org's people, its agents |
 | org agent identity | one org, at a role the org gave it (never owner) | a tailnet node or Cloudflare Access service token an org maps ([Agent identities](#agent-identities)) |
 | platform admin | every org, plus creating and deleting orgs | the platform's operators |
 | superadmin | everything the daemon's unix socket can do, the host included | the host's own operator, break-glass automation |
@@ -50,8 +50,8 @@ new tools are covered by their annotation.
 
 Some org tools need more than membership: volume snapshots, schedules and
 restores are for the org's admins and owners
-([Volumes](../guides/volumes.md)), and so are creating, changing and deleting
-the workspace ([Workspaces](workspaces.md#who-may-do-what)). The audit log
+([Volumes](../guides/volumes.md)), and so is changing the org's sandbox
+defaults ([Sandboxes are short-lived](sandboxes.md#sandboxes-are-short-lived)). The audit log
 is for owners and admins ([The audit log](../operations/audit.md)).
 
 ## Agent identities
@@ -104,7 +104,6 @@ org's owners and admins map identities to a role in **that org**
   names (the tailnet listen addresses, the node's MagicDNS names, the public
   URL's host). Refusals are audited (`agent.refused`). The tailnet identity
   comes from the TCP peer only, never a forwarded header.
-- Workspace tokens are unchanged: they stay the org's own actor.
 
 ## Platform admins
 
@@ -261,7 +260,7 @@ removing are in the audit log (`auth.superadmin_add`,
 
 A superadmin's reach is the unbound `/mcp` and `/api/v1/tools/<tool>`. On an
 org-bound endpoint (`/orgs/<org>/mcp`, `/orgs/<org>/api/v1/tools/<tool>`, the
-terminal, SSH and workspace resources under `/orgs/<org>/`) a superadmin over
+terminal and SSH resources under `/orgs/<org>/`) a superadmin over
 HTTP, and a platform admin, acts as an **admin of that org only**, so an org
 connector in an MCP client behaves as an org connector whoever adds it:
 
@@ -274,8 +273,8 @@ connector in an MCP client behaves as an org connector whoever adds it:
   an owner; everyone else keeps their own role.
 - The audit row names who it really was (a superadmin's source, or the user)
   and records `scope: org <org>` in its details; reads are recorded too.
-- The unix socket is always full, on any path. Workspace tokens, org tokens
-  and agent identities are unchanged.
+- The unix socket is always full, on any path. Org tokens and agent
+  identities are unchanged.
 
 ## How callers sign in
 
@@ -283,7 +282,6 @@ connector in an MCP client behaves as an org connector whoever adds it:
 |---|---|---|
 | Session cookie `isb_session` | the web UI | from password, passkey or provider sign-in; cookie-authenticated writes carry `X-Isb-Csrf: 1` |
 | API token, `Authorization: Bearer isb_tok_...` | agents, scripts, the CLI against a remote daemon | from `isb token create` or the web UI |
-| Workspace token `isb_ws_...` | the agents in an org's workspace | delivered inside the workspace, never shown ([Workspaces](workspaces.md#the-workspace-is-an-org-actor)) |
 | Cloudflare Access | anyone, when Access is in front | an Access identity whose email belongs to an isb user acts as that user; one that does not gets "ask an org admin to invite you" |
 | Tailnet or Access agent identity | agents an org maps | [Agent identities](#agent-identities) |
 | Superadmin sources | operators | above |
@@ -315,7 +313,7 @@ admins list and revoke any token in it.
 
 **A token cannot mint tokens.** New tokens come from a signed-in browser
 session, an Access or tailnet identity, or `isb token create` on the host;
-an API token, a workspace token and a superadmin token are all refused
+an API token and a superadmin token are both refused
 (`POST tokens` and the `token_create` tool alike). A token that could mint
 another would survive its own revocation through the copy, and bounding the
 copy's scopes or expiry would not change that: revoking a leaked token must

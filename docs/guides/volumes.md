@@ -6,15 +6,15 @@ nav_title: Volumes
 ---
 
 Data that matters lives on named volumes: an app's data, a database's
-files, a workspace's home. isb protects them three ways: cheap snapshots on
+files, a long-lived box's home. isb protects them three ways: cheap snapshots on
 the volume's own pool, now or on a schedule; backups to the org's S3
 destinations; and restores that land **beside** the live volume, never over
 it, so you compare and copy back only what you need.
 
 An org's **named volumes** are the custom incus volumes in its project: an
 app's volumes (`<project>-<env>_<app>_<NAME>`, [Deploy apps](deploy-apps.md#an-apps-settings)),
-a database's data ([Databases](databases.md)), a workspace's home
-([Workspaces](../concepts/workspaces.md#the-home-a-volume-or-a-host-folder)).
+a database's data ([Databases](databases.md)), a stack's named volumes
+([Stacks](../concepts/stacks.md)).
 
 ```console
 $ isb --org acme volume snapshot schedule web_data --schedule '0 * * * *' --keep 24
@@ -34,16 +34,14 @@ $ isb --org acme volume discard web_data 20261003T201304Z
 ```
 
 In the web UI, the **Volumes** page (linked from Backups) lists the org's
-volumes, and a volume's page (the Volume panel, also on a workspace's Home
-tab) shows its snapshots, schedule and hook, backups and staged restores
+volumes, and a volume's page (the Volume panel) shows its snapshots, schedule and hook, backups and staged restores
 ([The web UI](../getting-started/web-ui.md)).
 
 ## Snapshots
 
 incus snapshots of the volume, on its own pool (cheap, and lost with the
 pool: back up for that). On a `dir` pool every snapshot is a full copy of
-the volume, as large and as slow as the volume itself; see
-[Workspaces](../concepts/workspaces.md#the-home-a-volume-or-a-host-folder).
+the volume, as large and as slow as the volume itself.
 
 - **Scheduled** (`volume_snapshot_schedule`): a cron schedule
   ([Scheduled jobs](jobs.md#schedules)), `timezone`, `keep` (default 7; 1 to

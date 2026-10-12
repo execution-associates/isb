@@ -63,27 +63,6 @@ def open_first_deployment(page: Page) -> None:
     page.wait_for_timeout(2500)
 
 
-def workspace_terminal(page: Page) -> None:
-    # Attach the web terminal (a herdr session in the workspace) and look
-    # around the org with the workspace's own token.
-    # A session attached before reattaches by itself; exact, or "Connect"
-    # also matches Disconnect.
-    connect = page.get_by_role("button", name="Connect", exact=True)
-    if connect.count():
-        connect.click()
-    page.locator(".xterm").first.wait_for()
-    page.wait_for_timeout(3000)
-    page.locator(".xterm").first.click()
-    # The session outlives runs: a fresh login shell has the PATH seed.sh set and the token.
-    for cmd in ["exec bash -l", "clear", "isb app ls", "isb app previews ls web"]:
-        page.keyboard.type(cmd)
-        page.keyboard.press("Enter")
-        # A login shell takes a few seconds to come up.
-        page.wait_for_timeout(7000 if cmd.startswith("exec") else 2500)
-    page.evaluate("""() => document.querySelectorAll('*').forEach(e => { if (e.scrollTop) e.scrollTop = 0; })""")
-    page.wait_for_timeout(500)
-
-
 def search_templates(page: Page) -> None:
     # One app from each catalog side by side: isb's own, Dokploy's, Coolify's.
     # The Dokploy and Coolify catalogs are fetched on demand: wait for cards.
@@ -97,7 +76,6 @@ def search_templates(page: Page) -> None:
 SHOTS = {
     "sandbox": (f"file://{TERM}/sandbox.html", None),
     "agents": (f"{PUBLIC}/orgs/acme/agents", scroll_to("Install it", 140)),
-    "workspace": (f"{UI}/orgs/acme/workspace", workspace_terminal),
     "deploy": (f"{UI}/orgs/acme/apps/web/deployments", open_first_deployment),
     "templates": (f"{UI}/orgs/acme/templates", search_templates),
     "previews": (f"{UI}/orgs/acme/apps/web/previews", None),

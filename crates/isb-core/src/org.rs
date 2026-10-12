@@ -106,7 +106,6 @@ use std::collections::BTreeMap;
 
 pub mod disk;
 mod ensure;
-mod homes;
 mod names;
 pub use ensure::{Names, ensure_service_names};
 pub use names::{ensure_all_service_names, ensure_default, names, of_project};
@@ -117,7 +116,6 @@ mod udp;
 pub use udp::{allowed_udp, check_proxies, check_udp_port};
 
 pub use ensure::ensure;
-pub use homes::allow_home;
 
 /// Config keys isb keeps on the org's project.
 const KEY_ORG: &str = "user.isb.org";
@@ -224,8 +222,6 @@ pub struct OrgInfo {
     pub dns_dir: Option<String>,
     /// Instances in the org right now.
     pub instances: usize,
-    /// Its workspace may run Docker (`security.nesting`): [`nesting`].
-    pub allow_nesting: bool,
 }
 
 /// The bridge for an org: `isbbr` + 8 hex digits of the name's hash, inside
@@ -650,7 +646,6 @@ fn info(base: &Client, org: OrgId, p: &Value) -> Result<OrgInfo> {
         cloudflare_zone: cfg.get(KEY_CF_ZONE).filter(|s| !s.is_empty()).cloned(),
         dns_dir,
         instances,
-        allow_nesting: nesting::allowed(&p["config"]),
     })
 }
 

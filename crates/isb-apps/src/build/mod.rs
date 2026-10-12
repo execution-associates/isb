@@ -39,7 +39,6 @@ use crate::org::OrgId;
 use crate::sandbox::Sandbox;
 mod ready;
 mod reap;
-pub mod workspace_image;
 use reap::owned;
 pub use reap::{reap_stale, reap_stale_everywhere};
 /// How a source tree becomes an image.

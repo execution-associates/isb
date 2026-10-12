@@ -20,28 +20,17 @@ type Handler = Box<dyn Fn(&Secrets, Value, &Caller) -> Result<Value> + Send + Sy
 pub type InUse = Arc<dyn Fn(&OrgId, &str) -> Vec<String> + Send + Sync>;
 
 /// What a new secret version did: per stack service, its `on_change`
-/// action, and what was not cycled (workspaces) and why.
+/// action.
 #[derive(Debug, Clone, Default)]
 pub struct Outcome {
     pub cycles: Vec<Cycle>,
-    pub skipped: Vec<Skipped>,
-}
-
-/// Something using a secret that a new version does not restart.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct Skipped {
-    /// `workspace`.
-    pub kind: String,
-    pub name: String,
-    pub reason: String,
 }
 
 impl Outcome {
-    /// `rolled`, `services` and `skipped`, as the tools answer them.
+    /// `rolled` and `services`, as the tools answer them.
     fn fill(&self, v: &mut Value) {
         v["rolled"] = json!(crate::stack::secrets::cycled_stacks(&self.cycles));
         v["services"] = json!(self.cycles);
-        v["skipped"] = json!(self.skipped);
     }
 }
 
@@ -255,7 +244,7 @@ pub fn register(r: &mut Registry, secrets: Arc<Secrets>, hooks: Hooks) -> Result
     add(
         "secret_set",
         "Set a secret",
-        "Give a secret a new value (base64), bumping its version; creates it in the local store if missing. Each stack service using it acts per its `on_change`: `roll` (default; a rolling update), `restart` (in place) or `none` (files updated, replicas stale until they next start). `services` lists what each service did, `rolled` the stacks that roll or restart, `skipped` what was not cycled and why (workspaces get the file, never a restart). A stack secret with a `rotate` command (a database app's password) is first changed where the old value is kept, in a running replica (`applied`); if that fails, nothing is stored. A database app's URL secret follows its password.",
+        "Give a secret a new value (base64), bumping its version; creates it in the local store if missing. Each stack service using it acts per its `on_change`: `roll` (default; a rolling update), `restart` (in place) or `none` (files updated, replicas stale until they next start). `services` lists what each service did, `rolled` the stacks that roll or restart. A stack secret with a `rotate` command (a database app's password) is first changed where the old value is kept, in a running replica (`applied`); if that fails, nothing is stored. A database app's URL secret follows its password.",
         obj(
             props(json!({"name": name_prop()["name"], "value": value_prop["value"]})),
             &["name", "value"],
@@ -345,7 +334,7 @@ pub fn register(r: &mut Registry, secrets: Arc<Secrets>, hooks: Hooks) -> Result
     add(
         "secret_refresh",
         "Refresh a secret",
-        "Re-read an externally stored secret from its source now; if its version moved, each stack service using it acts per its `on_change` (`services`, `rolled`, `skipped` as for secret_set). `name` is a store name, or a stack's driver reference. A no-op for the local store.",
+        "Re-read an externally stored secret from its source now; if its version moved, each stack service using it acts per its `on_change` (`services`, `rolled` as for secret_set). `name` is a store name, or a stack's driver reference. A no-op for the local store.",
         obj(
             props(
                 json!({"name": {"type": "string", "description": "A store name, or a driver reference a stack uses."}}),
@@ -498,11 +487,6 @@ mod tests {
                         cycle("app", "api", crate::spec::OnChange::Roll),
                         cycle("other", "cron", crate::spec::OnChange::None),
                     ],
-                    skipped: vec![Skipped {
-                        kind: "workspace".into(),
-                        name: "main".into(),
-                        reason: "delivered".into(),
-                    }],
                 }
             } else {
                 Outcome::default()
@@ -514,7 +498,6 @@ mod tests {
                     vec![("vault".to_string(), 4)],
                     Outcome {
                         cycles: vec![cycle("app", "web", crate::spec::OnChange::Roll)],
-                        skipped: vec![],
                     },
                 ))
             } else {
@@ -596,7 +579,6 @@ mod tests {
         );
         assert_eq!(m["services"][0]["from"], 1);
         assert_eq!(m["services"][0]["to"], 2);
-        assert_eq!(m["skipped"][0]["kind"], "workspace");
         // A driver reference is no store name; the stacks answer for it.
         let m = call(&r, "secret_refresh", json!({"name": "op://v/item"})).unwrap();
         assert_eq!(

@@ -206,10 +206,6 @@ conflict, no replica) keeps it.
   preview's) are covered by the apps' own monitors, and the org's tunnel
   stack (`isb-tunnel`) serves nothing of its own: neither gets `service`
   monitors. Services without a domain (a database, a cache) get none.
-- A workspace's published ports get no monitor of their own: they are
-  development servers that stop with the workspace or the session that
-  started them, so a monitor would page every time one stops. Give one an
-  `http` monitor on its host when it should be watched.
 
 Deleting an own monitor adds its target to the org's exclusions so it does
 not come back (`exclude_apps`, or `exclude_services` as `<stack>/<service>`);

@@ -4,7 +4,6 @@
 //! identity endpoints under `/api/v1/auth/` ([`crate::auth::ops`]), so MCP
 //! and REST callers get the web UI's account pages with the same rules:
 //!
-//! - A workspace token reaches none of them but `whoami`.
 //! - A token scoped short of `admin` only reads them.
 //! - A token never mints tokens (`token_create` needs a browser session, an
 //!   Access or tailnet identity; the host CLI mints too).
@@ -75,13 +74,9 @@ pub fn names_another_user(tool: &str, a: &Value) -> bool {
 }
 
 /// The authorizer's part for a signed-in user calling an account tool,
-/// after its scopes: a workspace only asks `whoami`, and a token scoped
-/// short of `admin` only reads. The rest is judged per call, by
-/// [`crate::auth::ops`].
-pub fn authorize(p: &Principal, tool: &str, cls: audit::Class) -> Result<()> {
-    if tool != "whoami" {
-        ops::account_holder(p).map_err(err)?;
-    }
+/// after its scopes: a token scoped short of `admin` only reads. The rest
+/// is judged per call, by [`crate::auth::ops`].
+pub fn authorize(p: &Principal, cls: audit::Class) -> Result<()> {
     if !cls.read_only {
         ops::may_change_accounts(p).map_err(err)?;
     }
@@ -221,7 +216,7 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
         d,
         "whoami",
         "Who am I",
-        "The caller: its user, platform admin flag, orgs and roles, how it signed in (session, API token with its org and scopes, workspace, superadmin), and the orgs it can open. Every caller may ask, a workspace included.",
+        "The caller: its user, platform admin flag, orgs and roles, how it signed in (session, API token with its org and scopes, agent identity, superadmin), and the orgs it can open. Every caller may ask.",
         schema(json!({}), &[], NO_ORG),
         ann.ro,
         |d: &Daemon, p: &Principal, _a: Value, c: &Caller| -> Result<Value> {
@@ -554,7 +549,7 @@ fn register_keys(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> {
         d,
         "ssh_key_list",
         "List your SSH keys",
-        "The SSH public keys on your account: what `isb ssh-proxy` lets in to your orgs' workspaces and sandboxes (id, name, algorithm, fingerprint, last use). A platform admin may list another user's (`user`).",
+        "The SSH public keys on your account: what `isb ssh-proxy` lets in to your orgs' instances (id, name, algorithm, fingerprint, last use). A platform admin may list another user's (`user`).",
         schema(
             json!({"user": {"type": "string", "description": USER}}),
             &[],

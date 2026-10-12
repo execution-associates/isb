@@ -1,6 +1,6 @@
 ---
 title: Agents and MCP
-description: Connect an AI agent to isb over MCP, with a token that reaches one org, and let agents in an org's workspace make their own sandboxes.
+description: Connect an AI agent to isb over MCP, with a token that reaches one org, and give an org's agents a long-lived box that makes its own sandboxes.
 order: 14
 ---
 
@@ -17,7 +17,7 @@ or compromised agent off the host.
 The server teaches an agent to use it: its MCP `instructions` hold the
 safety rules and the way in, and the `guide` tool returns the rest of the
 manual a topic at a time (`start`, `safety`, `sandboxes`, `apps`, `inspect`,
-`data`, `workspace`, `admin`, `cli`). An agent connected to isb needs no
+`data`, `admin`, `cli`). An agent connected to isb needs no
 skill.
 
 Both endpoints also serve isb's agent skill, the repository's `SKILL.md`,
@@ -220,46 +220,73 @@ Every call that changes something, and every refusal, is in the [audit
 log](../operations/audit.md) with the token's name; a sandbox a remote caller
 creates is labelled `isb.owner=mcp:<identity>`.
 
-## Agents in an org's workspace
+## A long-lived box for agents
 
-An org's [workspace](../concepts/workspaces.md) is its long-lived machine,
-where its people and agents work. It comes with its own credential, so an
-agent started inside needs no setup:
-
-- `/run/isb/token` (0400, owned by the workspace user) holds the workspace's
-  token, `isb_ws_...`, with a role in the org (`--token-role`, admin by
-  default). It is never shown by any tool, never logged, and rotated with
-  `isb workspace rotate-token`.
-- Login shells get it as `$ISB_TOKEN`, with `$ISB_URL` (where isb answers),
-  `$ISB_ORG` and `$ISB_WORKSPACE`, from `/etc/profile.d/isb.sh`.
-- `$ISB_URL` is the org bridge's gateway on port 8481
-  (`--workspace-mcp-port`), the **bridge listener**: it answers only the
-  org's own subnet, serves only `/orgs/<org>/...` and `/healthz`, and takes
-  only bearer tokens (the workspace's or an org API token; no cookies, Access
-  assertions or superadmin tokens). See [Reaching isb from
-  inside](../concepts/workspaces.md#reaching-isb-from-inside-the-bridge-listener).
-
-So inside the workspace:
+A machine where an org's agents live and work is an ordinary one-replica
+stack the org deploys: an image with the tools, and a volume for the home so
+it outlives every redeploy. isb gives it no credential of its own; it gets
+an org API token like any other caller, delivered as a secret file:
 
 ```sh
+isb token create agents-box --org acme --expires 90d   # shown once
+isb secret create isb-token --org acme                 # paste it on stdin
+```
+
+```yaml
+# isb stack deploy agents-box -f agents-box.yaml --org acme
+volumes:
+  home: {}
+secrets:
+  isb-token: {external: true}
+services:
+  box:
+    image: dev-base
+    cpus: 4
+    mem_limit: 8g
+    volumes:
+      - {source: home, target: /home/dev}
+    secrets:
+      - {source: isb-token, uid: 1000, mode: "0400", on_change: none}
+    environment:
+      ISB_URL: http://10.122.37.1:8481     # the org bridge's gateway (the box's default route)
+      ISB_ORG: acme
+```
+
+- **Where isb answers.** Every org has the org API listener on its bridge's
+  gateway, port 8481: it answers only the org's own subnet, serves only
+  `/orgs/<org>/...` and `/healthz`, and takes only bearer tokens (an org API
+  token; no cookies, Access assertions or superadmin tokens). See [The org
+  API listener](../reference/http-api.md#the-org-api-listener). The gateway
+  is the box's default route (`ip route show default`).
+- **The token** is the file `/run/secrets/isb-token`, readable by the
+  `dev` user alone. With no scopes it has its member's role, which making
+  and running sandboxes needs; narrow it with `--scope` for less
+  ([Scopes](../concepts/access.md#scopes)). Rotate it with a new token and
+  `isb secret set isb-token --org acme`: `on_change: none` writes the new
+  file into the running box without replacing it.
+- **Reaching it.** `isb ssh-config acme/INSTANCE` writes an SSH block for
+  the replica (its name is in `isb stack ps agents-box --org acme`); run it
+  again after a redeploy, which makes a new instance with a new name and
+  host keys. herdr adds it like any SSH machine ([SSH and herdr](ssh.md)).
+
+So inside the box:
+
+```sh
+export ISB_TOKEN="$(cat /run/secrets/isb-token)"
 claude mcp add --transport http --scope user isb "$ISB_URL/orgs/$ISB_ORG/mcp" \
   --header "Authorization: Bearer $ISB_TOKEN"
 isb app ls                     # the isb CLI uses $ISB_URL and $ISB_TOKEN when there is no daemon socket
 ```
 
-The workspace's Connect tab shows the same snippets, the token's role and last
-use, and Rotate for admins (never the token itself). In the audit log and the
-history the workspace acts as **`workspace`**.
-
-The token is confined to its org: it acts as no user, reaches no other org,
-no platform or host tool, and cannot use the identity endpoints (no members,
-invitations, tokens or keys).
+In the audit log and the history the box acts as the token's user, under the
+token's name.
 
 ### Sandboxes for heavy or risky work
 
-The workspace is shared and long-lived, so builds, test runs and anything
+The box is shared and long-lived, so builds, test runs and anything
 untrusted belong in sandboxes the agent makes through the same MCP, never in
-nested incus. `sandbox_create` takes one compose service as the spec:
+nested incus (an org instance may not nest; [Nesting](../concepts/security.md#nesting)).
+`sandbox_create` takes one compose service as the spec:
 
 ```json
 {"name": "sandbox_create", "arguments": {
@@ -271,7 +298,7 @@ nested incus. `sandbox_create` takes one compose service as the spec:
 then `sandbox_exec` runs argv in it (exit code, stdout and stderr each capped
 at 256 KiB keeping the end, optional stdin text, a timeout of 10 minutes by
 default), and `sandbox_remove` deletes it. A sandbox made this way is
-labelled `isb.owner=workspace` and is short-lived by rule:
+labelled `isb.owner=mcp:<identity>` and is short-lived by rule:
 
 - it **expires** after the org's `sandbox_expiry` (default 24 h, at most 30
   days), or the call's `expires`;
@@ -283,8 +310,8 @@ labelled `isb.owner=workspace` and is short-lived by rule:
 timeout; the sandbox's creator or the org's admins may. `sandbox_list` shows
 each sandbox's creator, age, expiry and use, and whether the caller made it
 (`mine`). The daemon's reaper deletes expired and idle sandboxes every minute
-and records `sandbox.reaped` in the history. The workspace itself can never
-be reached as a sandbox.
+and records `sandbox.reaped` in the history. A stack replica, the box
+included, is never reaped and can never be reached as a sandbox.
 
 ## Superadmin MCP
 

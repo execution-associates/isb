@@ -529,8 +529,7 @@ impl Gate {
     }
 }
 
-/// Tools for superadmins only (not platform admins): the host itself, and
-/// what reaches further into its kernel (nesting for an org's workspace).
+/// Tools for superadmins only (not platform admins): the host itself.
 pub const TOOLS: &[&str] = &[
     "host_inventory",
     "host_monitor",
@@ -538,7 +537,6 @@ pub const TOOLS: &[&str] = &[
     "superadmin_token_list",
     "superadmin_token_revoke",
     "superadmin_list",
-    "org_nesting",
 ];
 
 /// A `--listen` address on the tailnet (it then binds without a tunnel).

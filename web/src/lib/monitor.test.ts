@@ -93,9 +93,8 @@ describe("monitor instances", () => {
     expect(instanceOrgs(list)).toEqual(["acme", "beta"]);
   });
 
-  it("links a stack's replicas and an org's workspace, nothing else", () => {
+  it("links a stack's replicas, nothing else", () => {
     expect(instanceLink(inst("web", { stack: "shop-production" }))).toBe("/orgs/acme/stacks/shop-production");
-    expect(instanceLink(inst("workspace"))).toBe("/orgs/acme/workspace");
     expect(instanceLink(inst("sandbox-1"))).toBeNull();
     expect(instanceLink(inst("web", { org: null, stack: "x" }))).toBeNull();
   });

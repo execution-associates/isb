@@ -186,8 +186,8 @@ pub struct Event {
     /// `backup.succeeded`, `backup.failed`, `restore.succeeded`,
     /// `restore.failed`, `job.succeeded`, `job.failed`, `cert.issued`,
     /// `cert.failed`, `secret.rotated` (a new secret version reached a
-    /// service, saying what its `on_change` does; a workspace under stack
-    /// `<org>/@workspaces`), `preview.created`, `preview.removed` (a preview's
+    /// service, saying what its `on_change` does), `preview.created`,
+    /// `preview.removed` (a preview's
     /// deploys are `deploy.*` under its own stack). Most events have none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,

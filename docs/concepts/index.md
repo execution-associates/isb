@@ -24,10 +24,10 @@ which command to type.
   Dokploy presents it: you say what to run (an image, a git repository, a
   database) and isb keeps the deployments, logs and webhooks. See
   [Projects, environments and apps](apps.md).
-- A **workspace** is an org's long-lived machine where its people and agents
-  work, and it is itself an actor in the org. **Sandboxes** made through the
-  daemon are its short-lived companions. See
-  [Workspaces and sandboxes](workspaces.md).
+- **Sandboxes** made through the daemon (`sandbox_create`) are an org's
+  short-lived machines: they expire and are reaped when idle. A long-lived
+  machine is an ordinary one-replica stack with a volume for its home. See
+  [Sandboxes are short-lived](sandboxes.md#sandboxes-are-short-lived).
 - One isb manages **one host**, and every org on it shares the host's
   kernel. Several hosts are several isbs, each connected to the same agent
   over MCP. See [Several hosts](../guides/agents.md#several-hosts).
@@ -39,7 +39,6 @@ which command to type.
 ```text
 host
 └── org              incus project + bridge + network ACL + quotas
-    ├── workspace    the org's machine, with a home and an org token
     ├── sandboxes    short-lived instances, made by people or agents
     └── project
         └── environment   one stack, <project>-<env>
@@ -52,6 +51,5 @@ host
 - [Orgs](orgs.md)
 - [Projects, environments and apps](apps.md)
 - [Stacks](stacks.md)
-- [Workspaces and sandboxes](workspaces.md)
 - [Security model](security.md)
 - [Users, roles and superadmins](access.md)

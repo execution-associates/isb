@@ -57,19 +57,19 @@ pub(crate) fn host_rules(
             "ufw allow in on isbbr+ to any port {} proto tcp comment",
             isb::ingress::DEFAULT_TUNNEL_PORT
         )),
-        // An org's workspace reaches the org-bound MCP on its own bridge
-        // address; the daemon answers only that org's subnet, and other
-        // orgs' ACLs keep them off it.
+        // An org's instances reach the org-bound API and MCP on their own
+        // bridge address; the daemon answers only that org's subnet, and
+        // other orgs' ACLs keep them off it.
         v(&format!(
             "ufw allow in on isbbr+ to any port {} proto tcp comment",
-            isb::daemon::workspaces::DEFAULT_PORT
+            isb::daemon::org_api::DEFAULT_PORT
         )),
     ];
     let mut comments = vec![
         "isb org bridges: DNS",
         "isb org bridges: egress",
         "isb org bridges: tunnel ingress",
-        "isb org bridges: workspace MCP",
+        "isb org bridges: org API",
     ];
     // incus' default bridge: DNS from its instances, and their way out.
     // Without these the instances isb builds images in get no address.

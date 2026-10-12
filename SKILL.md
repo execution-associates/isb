@@ -7,8 +7,8 @@ description: >
   MCP tools (org MCP at /orgs/ORG/mcp, or the superadmin /mcp). Use when you need
   an isolated Linux machine to run untrusted code, a sandbox for a task, a dev
   server per branch or worktree, to deploy or inspect apps, stacks, databases,
-  secrets or domains in an isb org, when you are inside an org's workspace
-  (/run/isb/token, $ISB_URL, $ISB_ORG, $ISB_TOKEN), when a project has an
+  secrets or domains in an isb org, when you hold an org API token with
+  $ISB_URL, $ISB_ORG and $ISB_TOKEN set, when a project has an
   isb.yaml, or when the user mentions isb, incus sandboxes, `isb up`, `isb exec`,
   `isb stack`, `isb app`, `isb serve`, or isb-sdk.
 ---
@@ -23,7 +23,7 @@ and serves all of it as MCP tools.
 
 **If the isb MCP server is connected, you do not need this skill.** Its
 instructions carry the rules, and its `guide` tool (topics `start`, `safety`,
-`sandboxes`, `apps`, `inspect`, `data`, `workspace`, `admin`, `cli`) is this
+`sandboxes`, `apps`, `inspect`, `data`, `admin`, `cli`) is this
 manual. Call `guide` with `topic: start` first. Keep reading here when you
 have only the CLI on a host.
 
@@ -34,8 +34,7 @@ Pick the way in that matches what you hold. Never go around it.
 | You have | You are | Use |
 |---|---|---|
 | the incus socket on a Linux host (`incus info` works) | the host's operator | the `isb` CLI and `isb.yaml`; daemon commands go over its unix socket |
-| `/run/isb/token` and `$ISB_URL` (inside an org's workspace) | that org's workspace actor | the org MCP at `$ISB_URL/orgs/$ISB_ORG/mcp`, or the `isb` CLI's daemon commands (they use `$ISB_URL` and `$ISB_TOKEN` when there is no local socket) |
-| an MCP connector or an `isb_tok_` API token | a user (or an agent acting for one) in some orgs | the org MCP, `https://HOST/orgs/ORG/mcp`, or REST `POST /orgs/ORG/api/v1/tools/TOOL` |
+| an MCP connector or an `isb_tok_` API token | a user (or an agent acting for one) in some orgs | the org MCP, `https://HOST/orgs/ORG/mcp`, or REST `POST /orgs/ORG/api/v1/tools/TOOL`; with `$ISB_URL`, `$ISB_ORG` and `$ISB_TOKEN` set, the `isb` CLI's daemon commands too (they use them when there is no local socket) |
 | a superadmin token, tailnet or Access identity | the host's operator, remotely | the unbound `https://HOST/mcp`: every tool, every org, the host tools. It is root on the host; act as narrowly as an org token would |
 
 ```sh
@@ -79,9 +78,6 @@ isb manages: `isb machine status`, `isb machine init`, `isb machine start`.
   would change on a sandbox someone else uses (a replaced mount is a remount
   under their running processes). `isb prune` only lists what it would delete
   until you add `-y`.
-- **Disruptive workspace tools refuse without `confirm: true`** and say which
-  live sessions they would end. Read that answer before confirming: those
-  sessions may be people, or you.
 - **Clean up and label.** Name what you create, label it
   (`labels: {owner: my-task}`, then `isb ls --label owner=my-task`), and
   delete it when done (`isb down`, `isb rm -f`, `sandbox_remove`).
@@ -193,8 +189,8 @@ cannot exec or read secrets.
   capped at 256 KiB per stream), `sandbox_list`, `sandbox_extend`,
   `sandbox_remove`. Remote callers' specs are refused privileged mode, raw
   config, host bind mounts outside the bind roots and non-loopback ports.
-  From a workspace, put heavy or risky work in a sandbox, not in the
-  workspace itself.
+  `sandbox_settings` reads the org's defaults (`sandbox_expiry`,
+  `sandbox_idle`); org admins change them.
 - **Apps:** `project_create`, `app_create` (an image, or a git repository and
   a builder), `app_env_set` (`.env` text; `KEY=${{secret.NAME}}` for
   secrets), `app_deploy` (`wait: true`), `app_deployment_log`,
@@ -226,8 +222,6 @@ cannot exec or read secrets.
   `job_*`. **Secrets:** `secret_create`, `secret_set` (values base64; a new
   version rolls the stacks using it), `secret_list` (no values).
 - **Templates:** `template_list`, `template_deploy` (`dry_run: true` first).
-- **The workspace:** `workspace_get`, `workspace_start`, `workspace_restart`
-  (`confirm`), `workspace_settings`.
 - **What happened:** `events`, `history_query`, `audit_list` (owners and
   admins), `metrics_query`, `overview`.
 
@@ -240,15 +234,15 @@ curl -fsS -H "Authorization: Bearer $ISB_TOKEN" -H 'Content-Type: application/js
   "$ISB_URL/orgs/$ISB_ORG/api/v1/tools/sandbox_create"
 ```
 
-## Inside a workspace
+## A long-lived box in an org
 
-An org's workspace is its long-lived machine. Its credential is an org
-token (role `admin` by default) at `/run/isb/token`, also `$ISB_TOKEN` in
-login shells, with `$ISB_URL` (the org bridge's listener), `$ISB_ORG` and
-`$ISB_WORKSPACE`. It reaches that org and nothing else: no other org, no
-host tools, no accounts or tokens. There is no incus socket inside: make
-sandboxes with `sandbox_create`, not `isb create`. The token is never shown
-by any tool; do not print or copy it.
+A persistent dev box is a one-replica stack the org deploys (an image and a
+volume at the home directory), reached with `isb ssh-config ORG/INSTANCE`.
+Inside an org instance, isb answers at `http://<org bridge gateway>:8481`
+(`/orgs/ORG/mcp` and `/orgs/ORG/api/v1/...`) with an org API token as
+Bearer; whoever deploys the box sets `$ISB_URL`, `$ISB_ORG` and
+`$ISB_TOKEN` (the token as a secret file). There is no incus socket inside:
+make sandboxes with `sandbox_create`, not `isb create`.
 
 ## Stacks on a host
 

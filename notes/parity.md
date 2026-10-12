@@ -15,9 +15,9 @@ endpoint has neither a tool nor a documented reason in the
 
 | Category | Count |
 |---|---|
-| Tools in the web UI and MCP | 152 |
+| Tools in the web UI and MCP | 131 |
 | Account tools, the web UI through the identity endpoints | 20 |
-| Tools for MCP and the CLI only | 36 |
+| Tools for MCP and the CLI only | 35 |
 | Identity endpoints with a tool | 21 |
 | Identity endpoints for the browser only | 23 |
 | Other routes with no tool | 4 |
@@ -45,12 +45,12 @@ a person on the web does not need it.
 | Redeploy one service, roll a stack back | A stack's page: General and Advanced (Redeploy), Deployments (Roll back to any kept deployment) | `stack_redeploy`, `stack_rollback` |
 | The effective stored definition (managed domains merged in) | A stack's page, YAML: Deployed (read-only, beside Source) | `stack_config` |
 | A stack's environment, domains and deployments | A stack's page: Environment (the `${VAR}` values), Domains (managed per service; the file's own shown read-only), Deployments (history, and each deployment on the page an app deployment has: stages, log from its events, the file it deployed) | `stack_env_get`, `stack_env_set`, `stack_domains_get`, `stack_domains_set`, `stack_deployments`, `stack_deployment_get` |
-| List sandboxes | Workspace, Sandboxes | `sandbox_list` |
-| Extend or remove a sandbox | Workspace, Sandboxes: Extend by, Delete | `sandbox_extend`, `sandbox_remove` |
-| Create a sandbox, run a command in it | *MCP/CLI only*: sandboxes are agents' scratch machines; a person opens a shell in one from Workspace, Sandboxes, Shell (the terminal websocket) | `sandbox_create`, `sandbox_exec` |
-| Start or stop a sandbox, read its logs | *MCP/CLI only*: what `isb start`, `isb stop` and `isb logs` do, for an agent's own sandboxes; a person deletes one from Workspace, Sandboxes | `sandbox_start`, `sandbox_stop`, `sandbox_logs` |
-| A sandbox's ports and devices | *MCP/CLI only*: `isb port` and `isb device rm` for an agent's sandbox; a person publishes the workspace's ports (Workspace, Ports) | `sandbox_port_list`, `sandbox_port_add`, `sandbox_port_remove`, `sandbox_device_remove` |
-| Sandbox defaults (lifetime, idle limit) | Workspace, Sandboxes: Defaults (admins) | `workspace_settings` |
+| List sandboxes | Sandboxes | `sandbox_list` |
+| Extend or remove a sandbox | Sandboxes: Extend by, Delete | `sandbox_extend`, `sandbox_remove` |
+| Create a sandbox, run a command in it | *MCP/CLI only*: sandboxes are agents' scratch machines; a person opens a shell in one from Sandboxes, Shell (the terminal websocket) | `sandbox_create`, `sandbox_exec` |
+| Start or stop a sandbox, read its logs | *MCP/CLI only*: what `isb start`, `isb stop` and `isb logs` do, for an agent's own sandboxes; a person deletes one from Sandboxes | `sandbox_start`, `sandbox_stop`, `sandbox_logs` |
+| A sandbox's ports and devices | *MCP/CLI only*: `isb port` and `isb device rm` for an agent's sandbox | `sandbox_port_list`, `sandbox_port_add`, `sandbox_port_remove`, `sandbox_device_remove` |
+| Sandbox defaults (lifetime, idle limit) | Sandboxes: Defaults (admins) | `sandbox_settings` |
 
 ### Instances: look inside and act on what runs
 
@@ -68,26 +68,7 @@ cluster's pods. A person has the app page.
 | Scale an app by its name | *MCP/CLI only*: the Scale control saves the setting and calls `stack_scale` | `app_scale` |
 | Replace one replica | App, General: Scale, a replica's Restart | `instance_restart` |
 | Copy a small file into or out of an instance | *MCP/CLI only*: the terminal and `isb cp` serve the same need | `instance_file_read`, `instance_file_write` |
-
-### Workspaces
-
-| Capability | Web UI | MCP |
-|---|---|---|
-| The workspace: status, resources, home, sessions, connect details | Workspace (every tab) | `workspace_get` |
-| Build a workspace image from a recipe (the default image or your own) | Workspace create form: Build the default image (platform admins) | `workspace_image_build` |
-| Follow an image build's log | Workspace create form, the build log | `workspace_image_logs` |
-| List the workspace images isb built | Workspace create form, the image picker | `workspace_image_list` |
-| Remove a workspace image isb built | Workspace create form (platform admins) | `workspace_image_remove` |
-| Run the workspace's first-boot setup script again | Workspace page | `workspace_setup_run` |
-| The workspace's terminal sessions (herdr or plain shells) | Workspace, Terminal | `workspace_terminals` |
-| Rename or end a terminal session | Workspace, Terminal: rename a tab, close it (Detach or End) | `workspace_terminal_update` |
-| Create, change, delete it | Workspace: Create; Resources, Home, Environment tabs; Delete | `workspace_create`, `workspace_update`, `workspace_delete` |
-| Start, stop, restart, rebuild | Workspace header actions | `workspace_start`, `workspace_stop`, `workspace_restart`, `workspace_rebuild` |
-| Rotate its token | Workspace, Connect: Rotate token | `workspace_token_rotate` |
-| Publish, list and remove ports; open a port's preview | Workspace, Ports: Publish, the bin, Open | `workspace_port_add`, `workspace_port_list`, `workspace_port_remove`, `workspace_port_open` |
-| Docker in the workspace (superadmins) | Org settings, Docker in the workspace; the Nesting allowed badge | `org_nesting` |
-| List an org's workspaces | *MCP/CLI only*: an org has one workspace unless a platform admin raised `max_workspaces`, and the page shows it | `workspace_list` |
-| SSH host keys for `known_hosts` | *MCP/CLI only*: `isb ssh config` pins them for the SSH client; a browser has no use for them | `ssh_host_keys` |
+| SSH host keys for `known_hosts` | *MCP/CLI only*: `isb ssh-config` pins them for the SSH client; a browser has no use for them | `ssh_host_keys` |
 
 ### Secrets
 
@@ -214,12 +195,10 @@ And these rules hold on both sides:
   --superadmin`), never over HTTP or MCP, so a stolen HTTP credential, a
   superadmin's included, cannot mint a durable one.
 - **A token cannot mint tokens.** `token_create` and `POST tokens` refuse
-  API, workspace and superadmin tokens; new tokens come from a browser
+  API and superadmin tokens; new tokens come from a browser
   session, an Access or tailnet identity, or the host CLI. A token that
   could mint another would survive its own revocation through the copy, and
   narrowing the copy's scopes or expiry would not change that.
-- **A workspace token** reaches no account endpoint and no account tool but
-  `whoami`.
 - **A token scoped short of `admin`** reads accounts but changes nothing.
 
 ## The rest of the HTTP surface
@@ -230,9 +209,8 @@ And these rules hold on both sides:
 | `GET /api/v1/events` | Live updates on app pages | `events` (polled) |
 | `GET /api/v1/audit/stream` | History: Live | `audit_list` with `after` |
 | `GET /api/v1/history/stream` | History: Live | `history_query` |
-| `/orgs/{org}/api/v1/workspace[/ACTION]` | The Workspace page calls the tools directly | The `workspace_*` tools |
-| `GET /orgs/{org}/api/v1/ssh` | Workspace, Connect explains `isb ssh-proxy` | `isb ssh-proxy`, the CLI's SSH transport |
-| `GET /orgs/{org}/api/v1/terminal` | App, Terminal; Workspace, Terminal | *Browser only*: an interactive terminal for a person; agents run commands with `sandbox_exec`, or SSH |
+| `GET /orgs/{org}/api/v1/ssh` | Account, SSH keys explains `isb ssh-config` | `isb ssh-proxy`, the CLI's SSH transport |
+| `GET /orgs/{org}/api/v1/terminal` | App, Terminal; Sandboxes, Shell | *Browser only*: an interactive terminal for a person; agents run commands with `sandbox_exec`, or SSH |
 | `POST /api/v1/webhooks/{org}/{app}` | App, General shows the URL | *Neither*: called by a git host; `app_deploy` and `preview_redeploy` do the same by hand |
 | `GET /api/v1/templates/{catalog}/{id}/logo` | Template gallery | *Browser only*: an image; `template_get` names it |
 | `GET /healthz` | None | *Neither*: for load balancers and monitors; `overview` is the signed-in view |

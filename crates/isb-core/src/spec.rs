@@ -380,9 +380,6 @@ pub struct SandboxSpec {
     )]
     #[schemars(with = "BTreeMap<String, BTreeMap<String, flex::Scalar>>")]
     pub raw_devices: BTreeMap<String, BTreeMap<String, String>>,
-    /// Nesting keys allowed: only the daemon sets it, for a workspace ([`crate::org::nesting`]).
-    #[serde(skip)]
-    pub workspace_nesting: bool,
     /// UDP proxy devices allowed: only the stack controller sets it, for a
     /// replica's published UDP ports ([`crate::org::check_proxies`]).
     #[serde(skip)]

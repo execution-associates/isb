@@ -17,7 +17,7 @@ export function VolumesPage() {
   const list = (vols.data ?? []).filter((v) => !v.restore_of);
   return (
     <>
-      <PageHeader title="Volumes" description="Named volumes in the org: apps' data, databases', the workspace's home. Snapshot them, back them up, restore beside them." />
+      <PageHeader title="Volumes" description="Named volumes in the org: apps' data, databases', a dev box's home. Snapshot them, back them up, restore beside them." />
       <Section title="Volumes" description="Open one for its snapshots, backups and staged restores.">
         {vols.isLoading ? (
           <div className="-mx-5 -mb-5 grid gap-3 border-t p-5">
@@ -28,7 +28,7 @@ export function VolumesPage() {
           <QueryError error={vols.error} />
         ) : !list.length ? (
           <EmptyState compact icon={HardDrive} title="No volumes">
-            An app's named volumes, a database's data and the workspace's home appear here once created.
+            An app's named volumes and a database's data appear here once created.
           </EmptyState>
         ) : (
           <ul className="-mx-5 -mb-5 divide-y border-t">

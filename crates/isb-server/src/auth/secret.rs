@@ -3,7 +3,7 @@
 //!
 //! A token is 32 bytes from the OS (ring's `SystemRandom`, i.e. getrandom),
 //! base64url-encoded behind a prefix that says what it is (`isb_sess_`,
-//! `isb_tok_`, `isb_sa_`, `isb_ws_`, `isb_inv_`, `isb_rst_`, `isb_setup_`). It is shown once; the
+//! `isb_tok_`, `isb_sa_`, `isb_inv_`, `isb_rst_`, `isb_setup_`). It is shown once; the
 //! store keeps only its SHA-256. Looking a row up by that hash through an
 //! index leaks nothing useful (the input is 256 bits of randomness, so timing
 //! on the hash says nothing about any other token), and the row found is still
@@ -25,8 +25,6 @@ pub enum TokenKind {
     Api,
     /// A superadmin token: the unix socket's reach over HTTP.
     Superadmin,
-    /// An org's workspace token (docs/concepts/workspaces.md).
-    Workspace,
     Invitation,
     PasswordReset,
     Setup,
@@ -38,7 +36,6 @@ impl TokenKind {
             TokenKind::Session => "isb_sess_",
             TokenKind::Api => "isb_tok_",
             TokenKind::Superadmin => "isb_sa_",
-            TokenKind::Workspace => "isb_ws_",
             TokenKind::Invitation => "isb_inv_",
             TokenKind::PasswordReset => "isb_rst_",
             TokenKind::Setup => "isb_setup_",

@@ -1,4 +1,4 @@
-// The org's defaults for new sandboxes (the workspace_settings tool): how long
+// The org's defaults for new sandboxes (the sandbox_settings tool): how long
 // one lives, and how long it may sit idle. Org admins change them; sandboxes
 // that exist keep the deadlines they were made with.
 import { useQueryClient } from "@tanstack/react-query";
@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { errorMessage } from "@/lib/messages";
-import { type WorkspaceSettings, wsCall, wsKeys } from "./api";
+import { type SandboxSettings, sbCall, sbKeys } from "./api";
 
 export function SandboxDefaultsDialog({
   org,
@@ -18,7 +18,7 @@ export function SandboxDefaultsDialog({
   onOpenChange,
 }: {
   org: string;
-  settings: WorkspaceSettings;
+  settings: SandboxSettings;
   open: boolean;
   onOpenChange: (o: boolean) => void;
 }) {
@@ -42,8 +42,8 @@ export function SandboxDefaultsDialog({
     setPending(true);
     setError(null);
     try {
-      await wsCall("workspace_settings", { sandbox_expiry: expiry.trim(), sandbox_idle: idle.trim() }, org);
-      await qc.invalidateQueries({ queryKey: wsKeys.workspace(org) });
+      await sbCall("sandbox_settings", { sandbox_expiry: expiry.trim(), sandbox_idle: idle.trim() }, org);
+      await qc.invalidateQueries({ queryKey: sbKeys.settings(org) });
       toast.success("Sandbox defaults saved");
       onOpenChange(false);
     } catch (err) {

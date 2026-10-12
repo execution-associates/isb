@@ -5,7 +5,7 @@ use super::super::tests::{token, user};
 use super::*;
 use std::collections::BTreeSet;
 
-use crate::auth::{Principal, Role};
+use crate::auth::Role;
 use crate::stack::controller::InstanceStatus;
 
 fn ok(c: &Caller, tool: &str, org: &str) -> bool {
@@ -98,18 +98,16 @@ fn viewers_read_members_act_and_nobody_crosses_orgs() {
 }
 
 #[test]
-fn a_workspace_token_acts_in_its_org_only() {
+fn an_org_api_token_acts_in_its_org_only() {
     let acme = OrgId::new("acme").unwrap();
-    let ws = Caller::User {
-        principal: Arc::new(Principal::workspace(&acme, "workspace", Role::Admin)),
-    };
+    let admin = token(&[("acme", Role::Admin)], &["admin"]);
     for t in all() {
-        assert!(ok(&ws, t, "acme"), "{t}");
-        assert!(!ok(&ws, t, "beta"), "{t}: another org");
+        assert!(ok(&admin, t, "acme"), "{t}");
+        assert!(!ok(&admin, t, "beta"), "{t}: another org");
     }
-    // An org-bound endpoint pins the org.
+    // An org-bound endpoint (the org API listener) pins the org.
     let e = authorize_class(
-        &ws,
+        &admin,
         "app_exec",
         audit::Class::default(),
         json!({"org": "beta"}),
@@ -118,7 +116,7 @@ fn a_workspace_token_acts_in_its_org_only() {
     );
     assert!(e.is_err());
     let pinned = authorize_class(
-        &ws,
+        &admin,
         "app_exec",
         audit::Class::default(),
         json!({}),
@@ -127,12 +125,6 @@ fn a_workspace_token_acts_in_its_org_only() {
     )
     .unwrap();
     assert_eq!(pinned["org"], "acme");
-    // A viewer workspace only reads.
-    let viewer = Caller::User {
-        principal: Arc::new(Principal::workspace(&acme, "workspace", Role::Viewer)),
-    };
-    assert!(ok(&viewer, "instance_list", "acme"));
-    assert!(!ok(&viewer, "instance_exec", "acme"));
 }
 
 #[test]
@@ -302,16 +294,15 @@ fn file_paths_are_clean_and_isbs_own_files_are_off_limits() {
     for bad in ["etc/passwd", "/etc/../root/x", "/", "//", "/a\0b"] {
         assert!(clean_path(bad).is_err(), "{bad}");
     }
-    // The token and isb's directories are never written; the token is never read.
+    // isb's directories are never written.
     for p in [
-        "/run/isb/token",
+        "/run/isb/file",
         "/run/secrets/db",
         "/etc/isb/web.env",
         "/etc/isb",
     ] {
         assert!(refuse_path(p, true, &[]).is_some(), "{p}");
     }
-    assert!(refuse_path("/run/isb/token", false, &[]).is_some());
     assert!(
         refuse_path("/run/secrets/db", false, &[]).is_none(),
         "readable (and audited)"
@@ -395,7 +386,6 @@ fn an_instance_is_an_app_a_database_a_tunnel_or_the_rest() {
     assert_eq!(kind(&l("isb.stack"), false, Some(true)), "database");
     assert_eq!(kind(&l("isb.stack"), false, None), "stack");
     assert_eq!(kind(&l("isb.stack"), true, None), "tunnel");
-    assert_eq!(kind(&l("isb.workspace"), false, None), "workspace");
     assert_eq!(kind(&l("isb.build"), false, None), "build");
     assert_eq!(kind(&BTreeMap::new(), false, None), "sandbox");
 }

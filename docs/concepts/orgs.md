@@ -26,7 +26,6 @@ isb org update NAME [--cpus N|none] [--memory SIZE|none] [--disk SIZE|none] [--i
 isb org ls [--json]
 isb org show NAME [--json]
 isb org rm NAME [--force]
-isb org nesting NAME [on|off]
 sudo isb host setup [--uplink IFACE] [--user USER] [--dry-run] [--public-ingress]
 ```
 
@@ -59,7 +58,6 @@ and the web UI's org Settings and Platform pages use them:
 | `org_create` | platform admins | `isb org create` without `--bind-root` |
 | `org_update` | platform admins | `isb org update`: limits (`"none"` or `null` lifts one), per-instance defaults, egress exceptions, UDP ports, the domain allowlist (`domains`) and ingress provider (`ingress`, `cloudflare_account`, `cloudflare_zone`) |
 | `org_delete` | platform admins | `isb org rm`, refused while stacks are deployed in the org, and while it has sandboxes unless `force` |
-| `org_nesting` | superadmins | whether the org's workspace may run Docker (`isb org nesting ORG on\|off`); `org_get` shows it as `allow_nesting` |
 
 Limits, egress exceptions and the domain allowlist are what keep one org from
 the others and from the host's networks, so changing them is for platform admins, not the org's
@@ -91,9 +89,9 @@ metrics history.
 
 The `default` org is an org like any other: the incus project
 `isb-default`, with its own bridge, ACL and service names, settings, limits,
-egress rules, workspaces and, if you set one, a Cloudflare Tunnel
-([Domains](../guides/domains.md)). Multi-app templates and workspaces work in
-it as in any org. `isb serve` makes sure it exists on every start, so
+egress rules and, if you set one, a Cloudflare Tunnel
+([Domains](../guides/domains.md)). Multi-app templates work in it as in any
+org. `isb serve` makes sure it exists on every start, so
 `isb serve install`, which starts the daemon, leaves a host with one, and it
 cannot be removed. `isb org ls` shows it as `default -> isb-default`.
 
@@ -113,8 +111,8 @@ host:
 
 - unprivileged containers only; no nesting, no `raw.lxc`, no `raw.idmap` of
   root, no proxy devices (a platform admin can allow a stack's UDP ports,
-  [UDP ports](#udp-ports); a superadmin can allow nesting for the org's
-  workspace alone: [The Docker exception](security.md#the-docker-exception));
+  [UDP ports](#udp-ports)); Docker inside an org needs a VM
+  ([Nesting](security.md#nesting));
 - disks are managed volumes only, or bind mounts from the org's
   `--bind-root` directories;
 - the org's own bridge is the only network;
@@ -174,7 +172,7 @@ no `size`. isb gives every instance it creates in such an org a size of its
 own, in the create request: the service's `raw_devices.root.size`
 (`raw_devices: {root: {size: 20GiB}}`, allowed for remote callers without
 `--allow-raw`, since it is only a quota), else 10GiB. That covers stack
-replicas, job runs, builds and sandboxes; workspaces get 20GiB. The size is
+replicas, job runs, builds and sandboxes. The size is
 not part of a stack service's revision, so setting or lifting a limit never
 rolls a service, and an existing instance is never resized. isb puts no size
 on the org's default profile: incus applies a profile's size to every
@@ -198,9 +196,7 @@ isb-ORG`) and run the update again, or remove it by hand with
 `incus profile device unset default root size --project isb-ORG` once no
 limit is set. Any other size on the profile is an operator's and stays.
 
-The project's bind paths are the `--bind-root` directories plus the host
-folders of the org's workspace homes, which are recorded on the project, so
-rewriting the bind roots never takes a home away.
+The project's bind paths are the org's `--bind-root` directories.
 
 ## The network
 
@@ -276,8 +272,7 @@ stack deploy that publishes UDP anywhere else is refused, whoever deploys it.
 Taking a port off the list does not touch a stack already publishing it; its
 next deploy is refused.
 
-Two layers keep proxy devices to those ports, as for [the Docker
-exception](security.md#the-docker-exception):
+Two layers keep proxy devices to those ports:
 
 - **The project.** With a UDP port listed, the org's project allows proxy
   devices (`restricted.devices.proxy=allow`); with none, it blocks them

@@ -11,7 +11,7 @@ const web = fileURLToPath(new URL("../..", import.meta.url));
 // crates/isb-daemon/src/daemon/authorize.rs PLATFORM_TOOLS and superadmin.rs TOOLS.
 const UNBOUND = [
   "server_status", "org_list", "org_create", "org_update", "org_delete", "registry_gc", "notification_settings",
-  "template_catalog_add", "template_catalog_remove", "audit_verify", "user_list", "user_update", "host_inventory", "host_policy", "superadmin_token_list", "superadmin_token_revoke", "superadmin_list", "org_nesting",
+  "template_catalog_add", "template_catalog_remove", "audit_verify", "user_list", "user_update", "host_inventory", "host_policy", "superadmin_token_list", "superadmin_token_revoke", "superadmin_list",
   "host_monitor",
 ];
 

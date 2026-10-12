@@ -67,10 +67,10 @@ use registry::*;
 use secret::*;
 use serve::*;
 use stack::*;
+#[path = "isb/sandboxes.rs"]
+mod sandboxes;
 #[path = "isb/volumes.rs"]
 mod volumes;
-#[path = "isb/workspaces.rs"]
-mod workspaces;
 
 /// Declarative incus sandboxes.
 ///
@@ -347,11 +347,11 @@ enum Cmd {
     /// Slack, Discord, Telegram, email (docs/guides/notifications.md).
     #[command(subcommand)]
     Notify(notify::NotifyCmd),
-    /// The org's workspace on the `isb serve` daemon: its long-lived
-    /// machine with a home and an org token, and the sandboxes beside it
-    /// (docs/concepts/workspaces.md).
+    /// An org's sandboxes on the `isb serve` daemon: list them, push one's
+    /// expiry out, and the org's defaults for new ones
+    /// (docs/concepts/sandboxes.md).
     #[command(subcommand)]
-    Workspace(workspaces::WorkspaceCmd),
+    Sandbox(sandboxes::SandboxCmd),
     /// A live dashboard of stacks and sandboxes (`isb serve`'s view; with no
     /// daemon, sandboxes only).
     Tui,
@@ -587,7 +587,7 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         Cmd::Build(a) => build_cmd(ctx, a),
         Cmd::Registry(r) => registry_cmd(ctx, r),
         Cmd::Notify(n) => notify::notify(&ctx.global.org, n),
-        Cmd::Workspace(w) => workspaces::workspace(&ctx.global.org, w),
+        Cmd::Sandbox(s) => sandboxes::sandbox(&ctx.global.org, s),
         Cmd::Tui => {
             isb::tui::run(ctx.client(None), isb::server::default_socket_path())?;
             Ok(0)
@@ -812,9 +812,10 @@ fn volume_local(ctx: &Ctx, v: VolumeCmd) -> Result<u8> {
 /// Call a tool on the local daemon.
 fn call(tool: &str, args: serde_json::Value, timeout: Duration) -> Result<serde_json::Value> {
     let socket = isb::server::default_socket_path();
-    // Inside an org's workspace there is no daemon socket: isb serve's URL
-    // (the org bridge's, `$ISB_URL`) with the workspace's token
-    // (`$ISB_TOKEN`), as `isb ssh-config` and `isb key` use it.
+    // Where there is no daemon socket (an org's instance, another
+    // machine): isb serve's URL (`$ISB_URL`, such as the org API listener on
+    // the org's bridge) with an API token (`$ISB_TOKEN`), as `isb
+    // ssh-config` and `isb key` use them.
     if !socket.exists() {
         let remote = ssh::RemoteArgs::default().or_env();
         if remote.url.is_some() {

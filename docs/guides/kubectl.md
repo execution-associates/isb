@@ -12,9 +12,8 @@ equal to the other, and you look inside with `get`, `describe`, `logs` and
 same few verbs, one set of tools, in one org, with the same authorizer and the
 [audit log](../operations/audit.md) behind every call.
 
-An org's token (or the workspace token inside an org's
-[workspace](../concepts/workspaces.md)) reaches that org and nothing else, as a
-kubeconfig context does one cluster. The `isb` CLI works the same: on the
+An org's token reaches that org and nothing else, as a kubeconfig context
+does one cluster. The `isb` CLI works the same: on the
 daemon's host it talks to the unix socket, anywhere else through
 `ISB_URL`, `ISB_TOKEN` and `ISB_ORG`. Add `--org NAME` to act in another org.
 
@@ -42,7 +41,7 @@ daemon's host it talks to the unix socket, anywhere else through
 | `delete deploy NAME` | `isb app rm NAME`, `isb stack rm NAME` | `app_delete`, `stack_remove` |
 | `top pods` | `isb app top NAME` | `app_top`, `metrics_query` |
 | `get events`, `get events --for` | `isb app events NAME` | `app_events`, `events`, `history_query` |
-| `port-forward` | not offered; see below | `app_exec` with `curl`, or a service name from the workspace |
+| `port-forward` | not offered; see below | `app_exec` with `curl`, or a service name from an instance in the org |
 | `get secret`, `create secret` | `isb secret get`, `isb secret set` | `secret_get`, `secret_set` |
 | `get ns`, `config use-context` | `isb org ls`, `--org NAME` | `org_list`, the endpoint `/orgs/NAME/mcp` |
 
@@ -62,7 +61,7 @@ scratch1                      sandbox   -      -     Running  none     -        
 
 `kind` says what the instance is to isb: `app` (a replica of an app; a
 preview's replicas too), `database`, `stack` (a replica of a compose
-service), `tunnel` (an org's cloudflared), `workspace`, `sandbox` and `build`.
+service), `tunnel` (an org's cloudflared), `sandbox` and `build`.
 Filter with `app`, `stack`, `service`, `kind` and `status`. **Rotation** is
 whether the load balancer sends it traffic; a replica that is running but
 unhealthy is out of rotation. **Health** is `none` for an app without a health
@@ -119,13 +118,13 @@ The CLI's old `isb app logs` (a deployment's build and rollout log) is now
 isb app exec web -- cat /etc/os-release
 isb app exec web --replica 2 -w /app -e DEBUG=1 -- sh -c 'ls | head'
 echo 'select 1' | isb app exec db -i -- psql -U app
-isb instance exec workspace -- git -C ~/src status
+isb instance exec scratch1 -- df -h /
 ```
 
 `app_exec` runs argv in one replica of an app: by default a running one,
 preferring replicas that are healthy and in rotation; `replica` (the slot) or
 `instance` choose one. `instance_exec` runs in any running instance of the org:
-a replica, a database, a sandbox, the workspace (as its user, in its home). It
+a replica, a database, a sandbox. It
 is not interactive and not a shell: argv is a list, so use `["sh", "-c",
 "..."]` for pipes. What it takes and gives:
 
@@ -144,8 +143,7 @@ scratch` (traefik/whoami, say) has no shell or tools: run its own binary
 **Who may:** members, admins and owners of the org; a viewer is refused, as
 are tokens scoped `read` or `deploy`, and everything is gone when the operator
 runs `--deny-tools app_exec,instance_exec` (the web terminal is admitted as
-`sandbox_exec`, which has its own switch). A workspace token is an org admin,
-so an agent in the workspace may. Every call, refused ones too, is in the
+`sandbox_exec`, which has its own switch). Every call, refused ones too, is in the
 audit log with the **argv** (up to 64 arguments), the names of the `env`
 variables and the size of `stdin`, never their values. Treat argv as logged:
 pass a password in `env` or on `stdin`, not in the command line.
@@ -166,8 +164,7 @@ files, run `tar`, `head`, `tail` or `split` with `instance_exec`, or use `scp`
 ([SSH and herdr](ssh.md)).
 
 What they refuse: paths that are not absolute or contain `..`; the kernel's
-`/proc`, `/sys` and `/dev`; a workspace's token (`/run/isb/token`), for reading
-and writing; and, for writing, everything isb itself delivers: `/run/isb`,
+`/proc`, `/sys` and `/dev`; and, for writing, everything isb itself delivers: `/run/isb`,
 `/run/secrets`, `/etc/isb`, and the files of an app's `files` or a stack's
 secrets, which come from org secrets and are changed there. A file can hold
 secrets, so reading one is a *secret read*: members and up only, always in the
@@ -189,18 +186,16 @@ fresh instances of the same settings, in the order the app's `update_config`
 says (stop-first by default; `order: start-first` keeps it serving); it also
 picks up a moved image tag. `instance_restart` is `delete pod`: a replica is
 deleted and the controller makes its replacement for the slot (`wait` blocks
-until it runs); a sandbox is restarted in place. The workspace has
-`workspace_restart`. All three need a member, emit an event
+until it runs); a sandbox is restarted in place. All three need a member, emit an event
 ([`app_events`](#look-list-and-describe)) and are in the audit log; a token
 scoped `deploy` may scale and restart.
 
 ## What isb does differently
 
 - **No port-forward.** An agent that needs to reach an app runs `curl` (or the
-  client it needs) inside an instance with `app_exec`, or, from the org's
-  workspace, uses the instance's address from `instance_list`. A person opens
-  the app's domain, or a workspace port's
-  [preview](../concepts/workspaces.md).
+  client it needs) inside an instance with `app_exec`, or, from another
+  instance in the org, uses its address from `instance_list`. A person opens
+  the app's domain.
 - **Desired state is a compose file or an app, not a manifest per object.**
   `app_update` takes a JSON merge patch (`null` clears a setting) where
   `kubectl patch` does; there is no `edit`, so read with `app_get`, change,

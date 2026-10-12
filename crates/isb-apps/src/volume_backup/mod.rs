@@ -1,5 +1,5 @@
 //! Snapshots, backups and staged restores of an org's named volumes: an
-//! app's `<app>_<NAME>`, a database's data, a workspace's home. Generic
+//! app's `<app>_<NAME>`, a database's data. Generic
 //! over "a custom volume in the org's incus project"; [`crate::volume`] is
 //! the raw incus helper underneath.
 //!

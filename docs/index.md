@@ -67,8 +67,8 @@ $ isb down      # delete it; the host is untouched
   privileged containers, host paths or raw incus config; secrets never sit in
   instance config or stack definitions.
 - **Built for agents.** Every operation is an MCP tool, scoped to one org by
-  its token. An org's long-lived workspace holds its own credential, so the
-  agents inside administer that org and nothing else.
+  its token, so an agent holding an org's token administers that org and
+  nothing else.
 - **One static binary.** CLI, daemon, web UI, TUI and the SDKs' engine are the
   same program, on Linux or (through a managed VM) macOS.
 

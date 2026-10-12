@@ -9,8 +9,7 @@ pub(super) const FILE_READ_CAP: usize = 4 * 1024 * 1024;
 /// must fit the HTTP body limit (4 MiB).
 pub(super) const FILE_WRITE_CAP: usize = 2 * 1024 * 1024;
 
-/// Where isb keeps what it delivers into instances: the workspace token,
-/// stack and app secrets, the supervised service's environment and the
+/// Where isb keeps what it delivers into instances: stack and app secrets, the supervised service's environment and the
 /// egress CA. Writes there are refused.
 const MANAGED_DIRS: &[&str] = &["/run/isb", "/run/secrets", "/etc/isb"];
 /// Kernel and device trees: neither read nor written through the file tools.
@@ -48,11 +47,6 @@ pub(super) fn refuse_path(path: &str, write: bool, managed: &[String]) -> Option
     if VIRTUAL_DIRS.iter().any(|d| under(path, d)) {
         return Some(format!(
             "{path} is a kernel or device file, not a regular one"
-        ));
-    }
-    if path == crate::workspace::TOKEN_PATH {
-        return Some(format!(
-            "{path} is the workspace's token: isb delivers and rotates it (workspace_token_rotate)"
         ));
     }
     if write {
@@ -140,7 +134,7 @@ fn instance_file_read(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     if !["auto", "utf8", "base64"].contains(&want) {
         return Err(Error::invalid("encoding is auto, utf8 or base64"));
     }
-    d.workspaces.mark_active(&org.incus_project(), &a.name);
+    d.sandboxes.mark_active(&org.incus_project(), &a.name);
     let body = oc
         .read_file(&a.name, &path)?
         .ok_or_else(|| Error::NotFound(format!("{path} in {}", a.name)))?;
@@ -199,7 +193,7 @@ fn instance_file_write(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         None => 0o644,
     };
     let (uid, gid) = (a.uid.unwrap_or(0), a.gid.unwrap_or(0));
-    d.workspaces.mark_active(&org.incus_project(), &a.name);
+    d.sandboxes.mark_active(&org.incus_project(), &a.name);
     if a.parents {
         make_parents(&oc, &a.name, &path, uid, gid)?;
     }
@@ -240,7 +234,7 @@ pub(super) fn register(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<(
         d,
         "instance_file_read",
         "Read a file in an instance",
-        "Read one file of an instance, running or stopped (kubectl cp from it, for small files): at most 4 MiB. Text comes back as `utf8`, anything else as `base64` (or ask with `encoding`). It can hold secrets, so it is for members and up, and recorded in the audit log. Not the kernel's /proc, /sys, /dev, nor a workspace's token. For larger files run `head`, `tail` or `split` with instance_exec.",
+        "Read one file of an instance, running or stopped (kubectl cp from it, for small files): at most 4 MiB. Text comes back as `utf8`, anything else as `base64` (or ask with `encoding`). It can hold secrets, so it is for members and up, and recorded in the audit log. Not the kernel's /proc, /sys, /dev. For larger files run `head`, `tail` or `split` with instance_exec.",
         obj(
             json!({
                 "name": {"type": "string", "description": "The instance's name."},

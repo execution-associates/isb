@@ -40,11 +40,6 @@ What is **not** in the state directory, and how it is covered:
 - **The local registry's images** are on the volume `registry-data` in the
   incus project `isb-system`. Apps built from git can be rebuilt from their
   repositories; the registry's CA and keys are in `<state>/registry/`.
-- **Workspace homes on host folders** (`--workspace-home-root`) are the
-  host's to back up; isb takes no snapshots of them
-  ([Workspaces](../concepts/workspaces.md#the-home-a-volume-or-a-host-folder)).
-  Those backups hold the org's data: keep them with the same care as the
-  daemon's state.
 
 ## The secrets key
 
@@ -65,9 +60,6 @@ the state directory and the key decrypts everything in it, so:
   `isb secret reencrypt --all` so existing values are encrypted to it too
   ([Break-glass recipients](../guides/secrets.md#break-glass-recipients)). The
   daemon warns at start-up while there is none.
-
-Workspace tokens (`<org root>/workspaces/<name>.token.age`) are encrypted to
-the same key.
 
 ## Several hosts
 

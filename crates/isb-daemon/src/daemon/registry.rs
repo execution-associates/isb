@@ -8,7 +8,7 @@ use serde_json::json;
 use super::tools::{self, Ann};
 use super::{
     Daemon, accounts, apps, audit, builds, data, guide, host_monitor, monitors, notify, orgs,
-    previews, secret_hooks, ssh, superadmin, templates, volumes, workspaces,
+    previews, sandboxes, secret_hooks, ssh, superadmin, templates, volumes,
 };
 use crate::error::Result;
 use crate::server::{Registry, Skill};
@@ -48,6 +48,7 @@ pub(super) fn registry(d: Arc<Daemon>, skills: &[Skill]) -> Result<Registry> {
         },
     )?;
     tools::sandbox_tools(&mut r, &d, &ann)?;
+    sandboxes::register(&mut r, d.clone())?;
     apps::register(&mut r, d.apps.clone(), d.ingress.is_some())?;
     apps::delete_tools(&mut r, &d)?;
     previews::register(&mut r, d.apps.clone())?;
@@ -73,7 +74,6 @@ pub(super) fn registry(d: Arc<Daemon>, skills: &[Skill]) -> Result<Registry> {
     audit::register(&mut r, d.audit.clone())?;
     audit::register_history(&mut r, d.audit.clone())?;
     ssh::register(&mut r, d.clone())?;
-    workspaces::register(&mut r, d.clone())?;
     accounts::register(&mut r, d.clone())?;
     Ok(r)
 }

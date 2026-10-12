@@ -127,8 +127,6 @@ export interface OrgView {
   members: number;
   stacks: number;
   notes?: string[];
-  /** Its workspace may run Docker (security.nesting): set by superadmins (org_nesting). */
-  allow_nesting?: boolean;
 }
 
 // This host (server_status).

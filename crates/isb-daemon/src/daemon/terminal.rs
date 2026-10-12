@@ -1,7 +1,7 @@
 //! The web terminal's other end: a login shell in one of an app's replicas,
 //! for [`crate::server::terminal`]; or a login shell in any instance of the
-//! org the caller may exec into (a workspace, a sandbox). Nothing outside
-//! the org is reachable this way.
+//! org the caller may exec into (a sandbox, a replica). Nothing outside the
+//! org is reachable this way.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,9 +24,9 @@ struct ExecPty {
     ctl: ExecController,
     done: bool,
     instance: String,
-    /// Counts the session (a workspace's live sessions, a sandbox's
-    /// activity) until it closes.
-    guard: Option<super::workspaces::SessionGuard>,
+    /// Counts the session (a sandbox's activity: the reaper leaves it
+    /// alone) until it closes.
+    guard: Option<super::sandboxes::SessionGuard>,
 }
 
 impl Pty for ExecPty {
@@ -76,8 +76,8 @@ pub(super) fn terminal(d: Arc<Daemon>) -> Terminal {
     Arc::new(
         move |c: &Caller, org: &OrgId, t: &TermRequest| -> Result<Box<dyn Pty>> {
             let oc = crate::org::client(&d.client, org);
-            // Any instance of the org the caller may exec into (a
-            // workspace, a sandbox): the org is the boundary.
+            // Any instance of the org the caller may exec into: the org is
+            // the boundary.
             if let Some(name) = &t.instance {
                 let info = d.reach(c, &oc, name)?;
                 if info.status != "Running" {
@@ -86,26 +86,8 @@ pub(super) fn terminal(d: Arc<Daemon>) -> Terminal {
                         info.status.to_lowercase()
                     )));
                 }
-                // The workspace opens as its user, in its home.
-                let def = info
-                    .config
-                    .get(crate::workspace::KEY_WORKSPACE)
-                    .and_then(|w| d.workspaces_def(org, w).ok());
-                let user = def.as_ref().map(|w| (w.user.clone(), w.home_dir()));
-                // A named session is a herdr tab that outlives this socket.
-                let argv = match (&t.session, &def) {
-                    (Some(s), Some(w)) => {
-                        let h = super::workspaces::Herdr::new(&oc, w)?;
-                        let term = h.ensure_session(s)?;
-                        super::workspaces::attach_argv(&term)
-                    }
-                    (Some(_), None) => {
-                        return Err(Error::invalid("named terminal sessions are for workspaces"));
-                    }
-                    (None, _) => vec!["/bin/sh".into(), "-c".into(), SHELL.into()],
-                };
-                let mut pty = shell(&oc, name, t, user, argv)?;
-                pty.guard = Some(d.workspaces.session(&org.incus_project(), name));
+                let mut pty = shell(&oc, name, t)?;
+                pty.guard = Some(d.sandboxes.session(&org.incus_project(), name));
                 return Ok(pty);
             }
             let app = d.apps.get(org, &t.app)?;
@@ -139,8 +121,7 @@ pub(super) fn terminal(d: Arc<Daemon>) -> Terminal {
                     inst.status.to_lowercase()
                 )));
             }
-            let argv = vec!["/bin/sh".into(), "-c".into(), SHELL.into()];
-            let pty = shell(&oc, &inst.name, t, None, argv)?;
+            let pty = shell(&oc, &inst.name, t)?;
             d.ctl.service_event(
                 "info",
                 &stack,
@@ -152,32 +133,17 @@ pub(super) fn terminal(d: Arc<Daemon>) -> Terminal {
     )
 }
 
-/// `argv` (a login shell, or herdr's attach) in `instance`, on a
-/// pseudo-terminal of the asked size.
-fn shell(
-    oc: &crate::client::Client,
-    instance: &str,
-    t: &TermRequest,
-    user: Option<(String, String)>,
-    argv: Vec<String>,
-) -> Result<Box<ExecPty>> {
+/// A login shell in `instance`, on a pseudo-terminal of the asked size.
+fn shell(oc: &crate::client::Client, instance: &str, t: &TermRequest) -> Result<Box<ExecPty>> {
     let sb = Sandbox::get(oc, instance)?;
     let mut opts = ExecOptions::default()
         .tty(true)
         .stdin(Stdin::Piped)
         .env("TERM", "xterm-256color");
-    if let Some((u, h)) = user {
-        opts = opts
-            .user(u.clone())
-            .cwd(h.clone())
-            .env("HOME", h)
-            .env("USER", u.clone())
-            .env("LOGNAME", u);
-    }
     opts.width = Some(t.cols);
     opts.height = Some(t.rows);
     let stream = sb
-        .exec_stream(argv, opts)
+        .exec_stream(["/bin/sh", "-c", SHELL], opts)
         .map_err(|e| Error::invalid(format!("cannot start a shell in {instance}: {e}")))?;
     Ok(Box::new(ExecPty {
         ctl: stream.controller(),

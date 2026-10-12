@@ -102,7 +102,7 @@ pub(super) fn authorize_class(
             if accounts::TOOLS.contains(&tool) {
                 // Judged per call by the account rules (crate::auth::ops),
                 // as the identity endpoints are: not by a role in `org`.
-                accounts::authorize(p, tool, cls)?;
+                accounts::authorize(p, cls)?;
                 if PLATFORM_TOOLS.contains(&tool) && !p.platform_admin {
                     return Err(Error::Forbidden(format!("{tool} is for platform admins")));
                 }

@@ -161,7 +161,7 @@ export const keys = {
   yaml: (org: string, app: string) => ["apps", org, "yaml", app] as const,
   /** Secret names (useSecretNames). */
   secrets: (org: string) => ["apps", org, "secrets"] as const,
-  /** secret_list's whole answer: the Secrets page and the workspace's environment. */
+  /** secret_list's whole answer: the Secrets page. */
   secretList: (org: string) => ["apps", org, "secret-list"] as const,
   ingress: (org: string) => ["apps", org, "ingress"] as const,
 };

@@ -6,8 +6,9 @@ order: 15
 
 `isb serve` carries SSH over its own authenticated websocket, so plain
 `ssh`, `scp`, `rsync`, editors' remote modes and `herdr machine add` reach
-any instance of an org you may exec into: its workspace, a sandbox, a
-replica. Nothing listens in the instance and no port is opened on the host or
+any instance of an org you may exec into: a sandbox, a replica, a
+long-lived box the org deploys for its agents ([A long-lived box for
+agents](agents.md#a-long-lived-box-for-agents)). Nothing listens in the instance and no port is opened on the host or
 anywhere else. The keys that get in are the SSH public keys on your isb
 account, so removing a key from your account locks it out everywhere at once.
 
@@ -18,10 +19,6 @@ ssh box.acme.isb
 scp build.tar box.acme.isb:/tmp/
 herdr machine add box.acme.isb --label acme/box
 ```
-
-For an org's workspace, `isb workspace ssh-config` writes the block for it
-(it is `isb ssh-config` for the workspace's instance), and the web UI's
-workspace **Connect** tab shows the same lines.
 
 ## How it works
 
@@ -158,8 +155,7 @@ prints why on stderr and exits 1, and ssh reports the connection closed.
 herdr, the terminal multiplexer for coding agents, reads `~/.ssh/config`, so
 once the `Include` is there, `herdr machine add box.acme.isb` works like any
 SSH machine: its panes and agents run in the instance. `isb ssh-config`
-prints the herdr line for each instance on stderr, and the workspace's
-Connect tab shows it for the workspace.
+prints the herdr line for each instance on stderr.
 
 ## Limits
 
@@ -167,8 +163,6 @@ Connect tab shows it for the workspace.
   credentials, so it cannot pass a daemon behind Access. Reach the daemon on a
   tailnet or loopback `--listen` address instead ([Reach isb serve
   remotely](remote-access.md)).
-- The web terminal's shells outlive their tab only in a workspace with herdr
-  installed, where each tab is a herdr session ([The web
-  terminal](../concepts/workspaces.md#the-web-terminal)); elsewhere, closing a
-  page or a tab ends its shell. Use SSH (and herdr) for sessions on other
-  instances.
+- Closing a web terminal's page or tab ends its shell ([The web
+  terminal](../reference/http-api.md#the-web-terminal)). Use SSH (and herdr)
+  for sessions that outlive a browser tab.

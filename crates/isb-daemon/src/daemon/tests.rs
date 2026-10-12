@@ -127,33 +127,26 @@ fn host_tools_are_superadmin_only_and_superadmins_reach_everything() {
 }
 
 #[test]
-fn a_workspace_token_administers_its_org_and_nothing_else() {
+fn an_org_api_token_administers_its_org_and_nothing_else() {
     let acme = OrgId::new("acme").unwrap();
-    let ws = |r| Caller::User {
-        principal: Arc::new(Principal::workspace(&acme, "workspace", r)),
-    };
-    let admin = ws(Role::Admin);
+    let admin = token(&[("acme", Role::Admin)], &[]);
     let a = |org: &str| json!({"org": org, "name": "web"});
     for t in [
         "app_deploy",
         "secret_get",
         "sandbox_create",
-        "workspace_get",
+        "sandbox_settings",
     ] {
         assert!(ok(&admin, t, a("acme")), "{t}");
         assert!(!ok(&admin, t, a("beta")), "{t}: another org");
     }
-    assert!(
-        !ok(&admin, "secret_get", json!({"name": "x"})),
-        "default org"
-    );
-    for t in ["org_update", "org_delete", "org_list", "user_list"] {
+    for t in ["org_update", "org_delete", "user_list"] {
         assert!(!ok(&admin, t, a("acme")), "{t}");
     }
     for t in superadmin::TOOLS {
         assert!(!ok(&admin, t, json!({})), "{t}");
     }
-    // An org-bound endpoint pins it to its org.
+    // The org API listener pins it to its org.
     assert!(
         authorize(
             &admin,
@@ -164,18 +157,6 @@ fn a_workspace_token_administers_its_org_and_nothing_else() {
         )
         .is_err()
     );
-    // Narrowed at create: a viewer workspace only reads.
-    let viewer = ws(Role::Viewer);
-    assert!(ok(&viewer, "stack_status", a("acme")));
-    assert!(!ok(&viewer, "secret_get", a("acme")));
-    assert!(!ok(&viewer, "sandbox_exec", a("acme")));
-    // Audit rows and owner labels name it `workspace`.
-    let act = audit::actor(&admin);
-    assert_eq!(act.name, "workspace");
-    assert_eq!(act.user_id, None);
-    assert_eq!(act.token_name.as_deref(), Some("workspace:workspace"));
-    assert_eq!(owner_label(&admin), "workspace");
-    assert_eq!(admin.to_string(), "workspace");
 }
 
 #[test]

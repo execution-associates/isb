@@ -38,7 +38,7 @@ pub use isb_core::{
     sandbox, secrets, self_update, sftp, shorthand, spec, stack, supervise, volume,
 };
 #[doc(inline)]
-pub use isb_daemon::{daemon, workspace};
+pub use isb_daemon::{daemon, sandbox_life};
 #[doc(inline)]
 pub use isb_egress as egress_proxy;
 #[doc(inline)]

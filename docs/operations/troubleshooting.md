@@ -83,7 +83,7 @@ More in [isb on macOS](../getting-started/macos.md).
 | Published ports pause during a daemon restart | The load balancer and ingress live in the daemon; apps do not. | Expected; they return within seconds. |
 | Apps cannot reach each other by name | Service names need an org with its own network: the `default` org on a host whose incus `default` project held workloads first has none. On a fresh org, the host may lack the service-name directory. | Use an org of its own; run `sudo isb host setup`, after which a running `isb serve` turns names on within a minute (`isb org create ORG` again does it without the daemon) ([Setting up a host](host-setup.md#service-names)). |
 | A new org's instances get no address or no internet | A default-deny firewall drops DHCP, DNS and forwarding on new bridges. | `sudo isb host setup` ([Host firewall](host-setup.md#host-firewall)). |
-| A workspace image or builder image build stops with `got no IPv4 address on incusbr0` | The same firewall drops DHCP and forwarding on incus' own bridge, where those builds run. | `sudo isb host setup`, then build again. |
+| A builder image build stops with `got no IPv4 address on incusbr0` | The same firewall drops DHCP and forwarding on incus' own bridge, where those builds run. | `sudo isb host setup`, then build again. |
 | `isb serve` or `isb host setup` warns that incus is too old for OCI images | The incus package is older than 6.3 (Ubuntu 24.04's is 6.0), so `docker:` images cannot run. | Install incus from the Zabbly stable repository ([Install isb](../getting-started/install.md#1-incus)). |
 | Instances of one org cannot reach each other on a Docker or Kubernetes host | With `br_netfilter` loaded, bridged frames go through ufw's FORWARD chain. | `sudo isb host setup` adds the same-bridge rule. |
 | A deploy fails with `domain conflict: ... is already served by another org` | The first org to claim a name keeps it. | Use another name, or have the other org stop serving it. |
@@ -97,7 +97,7 @@ More in [isb on macOS](../getting-started/macos.md).
 | A build is slow the first time | The builder image and the build cache are prepared on first use. | Rebuilds reuse both ([Builds](../guides/builds.md#build-cache)). |
 | A MongoDB 8.0 or 8.2 database will not start | MongoDB 8.0 and 8.2 refuse to start on Linux 6.19 and newer (SERVER-121912). | Use another version, or a host with an older kernel. |
 | A Postgres database will not start after a version change | A new major version over old data is the engine's business; Postgres refuses. | Restore a backup into a new database with the new version. |
-| A sandbox disappeared | Sandboxes made through `isb serve` expire (24 h) and are deleted when idle (2 h); the history records `sandbox.reaped` with the reason. | Extend it (`sandbox_extend`, `isb workspace extend`) or set longer org defaults ([Workspaces](../concepts/workspaces.md#sandboxes-are-short-lived)). |
+| A sandbox disappeared | Sandboxes made through `isb serve` expire (24 h) and are deleted when idle (2 h); the history records `sandbox.reaped` with the reason. | Extend it (`sandbox_extend`, `isb sandbox extend`) or set longer org defaults (`sandbox_settings`, `isb sandbox settings`; [Sandboxes are short-lived](../concepts/sandboxes.md#sandboxes-are-short-lived)). |
 
 ## Notifications
 
