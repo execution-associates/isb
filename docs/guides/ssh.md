@@ -6,8 +6,9 @@ order: 15
 
 `isb serve` carries SSH over its own authenticated websocket, so plain
 `ssh`, `scp`, `rsync`, editors' remote modes and `herdr machine add` reach
-any instance of an org you may exec into: its workspace, a sandbox, a
-replica. Nothing listens in the instance and no port is opened on the host or
+any instance of an org you may exec into: a sandbox, a replica, a
+long-lived box the org deploys for its agents ([A long-lived box for
+agents](agents.md#a-long-lived-box-for-agents)). Nothing listens in the instance and no port is opened on the host or
 anywhere else. The keys that get in are the SSH public keys on your isb
 account, so removing a key from your account locks it out everywhere at once.
 
@@ -18,10 +19,6 @@ ssh box.acme.isb
 scp build.tar box.acme.isb:/tmp/
 herdr machine add box.acme.isb --label acme/box
 ```
-
-For an org's workspace, `isb workspace ssh-config` writes the block for it
-(it is `isb ssh-config` for the workspace's instance), and the web UI's
-workspace **Connect** tab shows the same lines.
 
 ## How it works
 
@@ -111,12 +108,12 @@ An API token scoped short of `admin` cannot change keys.
 ## `isb ssh-config`
 
 ```sh
-isb ssh-config [ORG/INSTANCE ...] [--user U] [--identity FILE] [--known-hosts FILE]
-               [--as EMAIL] [--isb PATH] [-o FILE] [--url URL] [--token-file FILE]
+isb ssh-config [ORG/INSTANCE | ORG/STACK/SERVICE ...] [--user U] [--identity FILE]
+               [--known-hosts FILE] [--as EMAIL] [--isb PATH] [-o FILE] [--url URL] [--token-file FILE]
 ```
 
-Prints a `Host` block per instance (none named: every running instance in
-`--org`):
+Prints a `Host` block per instance or stack service (none named: every
+running sandbox in `--org`):
 
 ```
 Host box.acme.isb
@@ -148,8 +145,32 @@ Host box.acme.isb
 - `-o FILE` writes the blocks to a file; add `Include FILE` near the top
   of `~/.ssh/config`.
 
-`isb ssh-proxy ORG/INSTANCE [--as EMAIL] [--url URL] [--token-file FILE]`
+### A stack service
+
+A stack replica is replaced by every deploy, with a new name and new host
+keys, so a long-lived box deployed as a stack (a dev box, an agent's
+machine) is named by its service instead: `isb ssh-config acme/dev/box`
+writes `Host box.dev.acme.isb`, whose `ProxyCommand` is `isb ssh-proxy
+acme/dev/box`. That reaches the service's running replica (one in rotation
+first, then the lowest slot), and the block's host keys are never pinned:
+
+```
+  KnownHostsCommand /usr/local/bin/isb ssh-proxy --known-hosts acme/dev/box
+  StrictHostKeyChecking yes
+```
+
+At each connection ssh asks isb for the keys of the replica it reached
+(`ssh_host_keys` through incus), and isb starts that replica's `sshd`
+(generating keys if it has none) before ssh checks them. A redeploy needs no
+new block and no edit to `known_hosts`. `KnownHostsCommand` needs OpenSSH
+8.5 or later.
+
+### `isb ssh-proxy`
+
+`isb ssh-proxy ORG/INSTANCE|ORG/STACK/SERVICE [--known-hosts] [--as EMAIL] [--url URL] [--token-file FILE]`
 is the `ProxyCommand` itself: stdin and stdout are the SSH connection.
+`--known-hosts` prints the target's host keys as known_hosts lines instead,
+for `KnownHostsCommand`.
 When the daemon refuses (not allowed, no keys, no sshd in the instance), it
 prints why on stderr and exits 1, and ssh reports the connection closed.
 
@@ -158,8 +179,7 @@ prints why on stderr and exits 1, and ssh reports the connection closed.
 herdr, the terminal multiplexer for coding agents, reads `~/.ssh/config`, so
 once the `Include` is there, `herdr machine add box.acme.isb` works like any
 SSH machine: its panes and agents run in the instance. `isb ssh-config`
-prints the herdr line for each instance on stderr, and the workspace's
-Connect tab shows it for the workspace.
+prints the herdr line for each instance on stderr.
 
 ## Limits
 
@@ -167,8 +187,6 @@ Connect tab shows it for the workspace.
   credentials, so it cannot pass a daemon behind Access. Reach the daemon on a
   tailnet or loopback `--listen` address instead ([Reach isb serve
   remotely](remote-access.md)).
-- The web terminal's shells outlive their tab only in a workspace with herdr
-  installed, where each tab is a herdr session ([The web
-  terminal](../concepts/workspaces.md#the-web-terminal)); elsewhere, closing a
-  page or a tab ends its shell. Use SSH (and herdr) for sessions on other
-  instances.
+- Closing a web terminal's page or tab ends its shell ([The web
+  terminal](../reference/http-api.md#the-web-terminal)). Use SSH (and herdr)
+  for sessions that outlive a browser tab.

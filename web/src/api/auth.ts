@@ -53,7 +53,6 @@ export type Me = Omit<S["Me"], "auth" | "superadmin"> & {
     | { kind: "api_token"; id: number; org: string | null; name: string; scopes?: string[] }
     | { kind: "access" }
     | { kind: "superadmin"; source: SuperadminVia }
-    | { kind: "workspace"; org: string; name: string }
     | { kind: "agent"; label: string };
   /** The unix socket's reach over HTTP (docs/concepts/access.md#superadmins), or null. */
   superadmin?: Superadmin | null;

@@ -20,9 +20,6 @@
 - **Look before you change what is not yours.** `stack_deploy`, `app_apply`
   and `template_deploy` take `dry_run: true`; `stack_validate` checks a file.
   Read `instance_list` before restarting or scaling.
-- **Disruptive workspace tools refuse without `confirm: true`** and say which
-  live sessions they would end. Read that answer first: those sessions may be
-  people, or you.
 - **Label and clean up.** Name what you create, label it
   (`labels: {owner: my-task}`), remove it when done (`sandbox_remove`).
   Sandboxes expire (24h by default) and are deleted after 2h idle.

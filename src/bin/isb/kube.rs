@@ -54,8 +54,8 @@ pub struct ExecArgs {
 
 #[derive(Subcommand)]
 pub enum InstanceCmd {
-    /// Every instance isb manages in the org: replicas, databases, the
-    /// workspace, sandboxes (kubectl get pods).
+    /// Every instance isb manages in the org: replicas, databases,
+    /// sandboxes (kubectl get pods).
     #[command(alias = "list", alias = "ps")]
     Ls {
         #[arg(long)]
@@ -64,7 +64,7 @@ pub enum InstanceCmd {
         stack: Option<String>,
         #[arg(long)]
         service: Option<String>,
-        /// app, database, stack, tunnel, workspace, build or sandbox.
+        /// app, database, stack, tunnel, build or sandbox.
         #[arg(long)]
         kind: Option<String>,
         #[arg(long)]

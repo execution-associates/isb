@@ -37,17 +37,12 @@ domains with certificates, a web UI, and an MCP server for AI agents.
       <a href="docs/guides/agents.md">Agents and MCP →</a>
     </td>
     <td width="33%" align="center" valign="top">
-      <a href="docs/assets/readme/workspace.webp"><img src="docs/assets/readme/workspace.webp" alt="An org's workspace with its web terminal attached to a herdr session"></a><br>
-      <b>Workspaces for agents</b><br>
-      <a href="docs/concepts/workspaces.md">Workspaces →</a>
-    </td>
-  </tr>
-  <tr>
-    <td width="33%" align="center" valign="top">
       <a href="docs/assets/readme/deploy.webp"><img src="docs/assets/readme/deploy.webp" alt="A deployment triggered by a GitHub push: its stages, live URLs and build log"></a><br>
       <b>Deploy from an image or git</b><br>
       <a href="docs/guides/deploy-apps.md">Deploy apps →</a>
     </td>
+  </tr>
+  <tr>
     <td width="33%" align="center" valign="top">
       <a href="docs/assets/readme/templates.webp"><img src="docs/assets/readme/templates.webp" alt="The template catalog searched for n8n, with isb's, Dokploy's and Coolify's templates side by side"></a><br>
       <b>Templates, with Dokploy's and Coolify's catalogs</b><br>
@@ -60,30 +55,30 @@ domains with certificates, a web UI, and an MCP server for AI agents.
       <b>Preview deployments</b><br>
       <a href="docs/guides/previews.md">Previews →</a>
     </td>
-  </tr>
-  <tr>
     <td width="33%" align="center" valign="top">
       <a href="docs/assets/readme/secrets.webp"><img src="docs/assets/readme/secrets.webp" alt="An org's secrets with their labels and the stacks using them, and 1Password below"></a><br>
       <b>Secrets, local or from 1Password</b><br>
       <a href="docs/guides/secrets.md">Secrets →</a>
     </td>
+  </tr>
+  <tr>
     <td width="33%" align="center" valign="top">
       <a href="docs/assets/readme/domains.webp"><img src="docs/assets/readme/domains.webp" alt="An app's domains, each serving with its certificate issued"></a><br>
       <b>Domains with HTTPS</b><br>
       <a href="docs/guides/domains.md">Domains and ingress →</a>
     </td>
     <td width="33%" align="center" valign="top">
-      <a href="docs/assets/readme/ssh.webp"><img src="docs/assets/readme/ssh.webp" alt="herdr attached to an org's workspace over isb's SSH"></a><br>
+      <a href="docs/assets/readme/ssh.webp"><img src="docs/assets/readme/ssh.webp" alt="herdr attached to an org's stack replica over isb's SSH"></a><br>
       <b>SSH and herdr</b><br>
       <a href="docs/guides/ssh.md">SSH and herdr →</a>
     </td>
-  </tr>
-  <tr>
     <td width="33%" align="center" valign="top">
       <a href="docs/assets/readme/databases.webp"><img src="docs/assets/readme/databases.webp" alt="Backups: an S3 destination, a nightly Postgres schedule and a restore"></a><br>
       <b>Databases and backups</b><br>
       <a href="docs/guides/databases.md">Databases →</a>
     </td>
+  </tr>
+  <tr>
     <td width="33%" align="center" valign="top">
       <a href="docs/assets/readme/uptime.webp"><img src="docs/assets/readme/uptime.webp" alt="Uptime monitors with their latency and uptime"></a><br>
       <b>Uptime monitoring</b><br>
@@ -152,8 +147,8 @@ $ isb app create web --project shop --image docker:traefik/whoami -p 127.0.0.1:8
 - [Overview](docs/index.md): what isb is, who it is for, and why
 - [Getting started](docs/getting-started/index.md): install, your first
   sandbox, your first org and app, the web UI
-- [Concepts](docs/concepts/index.md): sandboxes, orgs, apps, stacks,
-  workspaces, the security model, users and roles
+- [Concepts](docs/concepts/index.md): sandboxes, orgs, apps, stacks, the
+  security model, users and roles
 - [Guides](docs/guides/index.md): deploying apps, builds, databases and
   backups, domains, secrets, agents and MCP, SSH, dev environments
 - [Reference](docs/reference/index.md): the CLI, `isb.yaml`, MCP tools, the

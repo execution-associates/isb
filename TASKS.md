@@ -310,6 +310,7 @@ minime only runs binaries downloaded from our CI runs.
   with a cert from an isb-generated CA, and `isb host setup` installs that
   CA file. Pulls keep OCI semantics (`oci.entrypoint`, uid/gid). Verified
   on titan with `registry:2` and a pushed busybox.
+- **No built-in workspace.** A long-lived dev box is a one-replica stack the org deploys (image + home volume), reached with `isb ssh-config`; every org gets the org API listener on its bridge (:8481, org API tokens). Kept isb out of shells, terminals, homes and Docker nesting.
 
 ## Phase 0: platform support
 
@@ -487,140 +488,11 @@ minime only runs binaries downloaded from our CI runs.
   **Verify:** an org in its own VM on titan runs an app, its server shows
   healthy, and deleting the org deletes the VM.
 
-## Workspaces (docs/design/workspaces.md)
-
-- [x] (workspaces-ssh) W3 Doors, generic over an org's instances: SSH over
-  the daemon's websocket (`sshd -i` through incus exec, the caller's isb
-  SSH keys per connection, live sessions re-checked every 15 s), `isb key`,
-  the Account page's SSH keys, `isb ssh-proxy`, `isb ssh-config` (pinned
-  host keys, herdr line), `ssh_host_keys`, `?instance=` on the web
-  terminal, audit `ssh.open/close` and `auth.ssh_key_*` (docs/guides/ssh.md).
-  **Verified** on titan: ssh, scp (20 MB both ways), a removed key refused
-  and its live session ended in 8 s, viewer and `read` tokens refused,
-  an instance's own authorized_keys ignored, `herdr machine add` saved and
-  reached the host (isolated HOME).
-- [x] (workspaces-home) W4 the home, generic over an org's named volumes:
-  snapshots now and on a schedule (`auto-*` pruned to keep, manual kept),
-  volume backups as `backup_*` with a `volume` (snapshot, temporary copy,
-  incus export compressed and streamed to S3, retention, run logs, beside
-  database backups), the `/etc/isb/pre-snapshot` hook (timeout, output in
-  the run log, `hook_required`), staged restores into a new volume mounted
-  at `/restore/<stamp>` (detached when the instance is stopped) and their
-  discard, `volume_*` tools, `isb volume snapshot|restore|restores|discard`,
-  the Volume panel and Volumes pages, admins-and-owners writes, org
-  projects allowing snapshots and exports (docs/guides/volumes.md).
-  **Verified** on titan (scratch daemon, org `volh`, a dev-base instance
-  with a volume, RustFS as the S3 store): hook ran and its output logged; a
-  per-minute schedule pruned to keep 2 with the manual snapshot kept; a
-  5 s hook timeout reported and the snapshot taken, then refused with
-  `hook_required`; write, snapshot, change, staged restore, `diff -r`
-  showed the old file at `/restore/<stamp>` with ownership kept and the
-  live volume untouched; backup to RustFS, retention to 2, restore from the
-  bucket staged and diffed; restore while stopped left detached; discard
-  refused a volume that was not a staged restore; the UI restored a backup
-  file staged.
-- [ ] W4 follow-ups: a restore's byte count in its run record.
-- [x] (workspaces-core) W1 the workspace and its sandboxes, W2 the
-  workspace as an org actor, W7 the web UI (docs/concepts/workspaces.md): one
-  workspace per org (`max_workspaces`), a container with a home volume
-  that survives rebuild, `workspace_*` tools, the `workspace` REST resource
-  and `isb workspace`, confirmations that name live sessions; its `isb_ws_`
-  token (role admin by default) delivered as /run/isb/token and $ISB_TOKEN
-  with $ISB_URL and $ISB_ORG, rotated and revoked, actor `workspace`; the
-  org-bound MCP on each org's bridge (port 8481, the org's subnet and bearer
-  tokens only); sandbox expiry and idle timeout, `sandbox_extend`, the
-  reaper; `isb workspace ssh`/`ssh-config`; the Workspace page, org
-  overview card and create form. **Verified** on titan (scratch daemon,
-  bridge port 8480 since titan's ufw has no 8481 rule): workspace from
-  dev-base, token and env inside, tools/list and the isb CLI over the
-  bridge, another org's path 404, no token 401, another org's instance
-  cannot connect, a rotated token refused at once, rebuild keeps the home
-  and drops the root, a sibling sandbox through the MCP labelled
-  `isb.owner=workspace`, reaped on expiry (2m) and on idle (1m) with
-  `sandbox.reaped` in the history, the audit actor `workspace`, the web
-  terminal as `dev` counted as a live session, UI light/dark,
-  desktop/phone. Homes: a volume's pool per host (`--workspace-pool`) and
-  org (`home_pool`), hourly snapshots only on copy-on-write pools (titan's
-  `dir` gets none, with the Home tab's warning), the Volume panel on the
-  Home tab; host-folder homes (`--workspace-home-root`, `home_kind`,
-  `home_bind` for superadmins), the folder allowed in the org's project and
-  mapped 1:1. **Verified**: a host-folder home under the scratchpad (a file
-  made inside is uid 1000 on the host, the path added to
-  `restricted.devices.disk.paths`), and an org opting back to a volume on
-  `dir` with no schedule.
-- [x] (ws-fixes) Workspace rough edges: `workspace_*`/`sandbox_*` refuse an
-  unknown org up front; incus project-limit refusals become "org X is at its
-  CPU quota (limits.cpu 2, 2 in use)" with how to raise it, and a failed
-  create removes what it made; host-folder homes are recorded on the project
-  so `isb org create`/`org_update` keep them bindable; the image defaults to
-  `dev-base` where it exists, else `images:ubuntu/24.04`, and the create
-  form picks from the host's images and shows quota headroom. **Verified**
-  on titan with a scratch `isb serve`, before and after.
-- [x] (ws-images) W5 workspace images and terminal reattach:
-  `workspace_image_build`/`_logs`/`_list`/`_remove` and `isb workspace image
-  build|ls|logs|rm` (platform admins): a recipe script run as root in a
-  throwaway container in `isb-system`, published as a local image labelled
-  `isb.workspace-image=1` (only those can be replaced or removed), idempotent
-  per recipe and base, nothing left behind on failure; isb's default recipe
-  (`isb-workspace`: Ubuntu 24.04, dev uid 1000 with sudo, openssh-server,
-  mise with node/bun/uv system-wide, Claude Code, Codex, herdr, all under
-  /usr/local) is the default image where it exists, and the create form
-  offers to build it; a first-boot `setup` script per workspace (run once as
-  root after create/rebuild, state on the workspace, `workspace.setup` in
-  the history, `workspace_setup_run`); web terminal tabs as herdr sessions
-  when the workspace has herdr (`&session=NAME`, `workspace_terminals`,
-  `workspace_terminal_update`; detach or end on close; plain shells
-  otherwise). **Verified** on titan with a scratch `isb serve`: the default
-  image built in 83 s (632 MiB), rebuilt as up to date, `rm dev-base`
-  refused, a failing recipe left no container or image; a workspace from it
-  with a setup script (succeeded, marker and package present, history row
-  with output), claude 2.1.288, codex 0.160.0, herdr 0.9.3, mise, node, bun,
-  uv as `dev`; the web terminal in herdr mode survived a reload (same shell,
-  variable and scrollback), detach then reattach, end through the tool;
-  rebuild to dev-base re-ran the setup and switched the tab to plain shells;
-  the create form's Build button built the image with its log.
-- [x] (ws-docker-ports) W6 Docker in the workspace and W3's ports
-  (docs/concepts/workspaces.md#ports, docs/concepts/security.md#the-docker-exception):
-  `org_nesting` / `isb org nesting` (superadmins only, audited) opens the
-  org's project to nesting and interception and gives only its workspace
-  `security.nesting` + `mknod`/`setxattr` interception; isb refuses those
-  keys for every other instance of an org project (a daemon-only mark on
-  the workspace's spec); off is refused while the workspace runs with
-  nesting. `workspace_port_add/list/remove/open` and `isb workspace port`:
-  hostnames through the org's ingress (allowlist, claims, Caddy or the
-  tunnel; `default`, `auto`), and previews through isb on an origin of
-  their own per port (`--preview-domain`, else `*.localhost`), a one-time
-  link then a Strict host-only cookie, isb's credentials stripped both ways,
-  websockets piped. The Ports tab, the Nesting allowed badge and the org
-  settings panel. Instance addresses prefer `eth0` (Docker's `docker0`
-  sorted first). **Verified** on titan with a scratch `isb serve`
-  (loopback listener, Caddy on loopback with its internal CA): `docker run
-  hello-world`, an alpine image and a build in the workspace with nesting
-  on, `permission denied` with it off (before and after); a platform admin's
-  token refused `org_nesting`; a sandbox and a stack asking for nesting (or
-  mknod interception) in that org refused even over the socket; off refused
-  while running, accepted stopped; a port on `3000-workspace.wsports.test`
-  through Caddy, one outside the allowlist refused; previews of
-  `python3 -m http.server` and a Vite 6 dev server in Chrome through
-  `*.localhost`, HMR over the proxied websocket after an edit, `isb_session`,
-  bearer, Access and forged forwarding headers absent upstream, a used link
-  403, another preview host 401, an unpublished port 404. Not tested live:
-  the Cloudflare Tunnel provider for a port (same code path as apps,
-  unit-tested), `--preview-domain` through a real wildcard name, the
-  nesting switch in the browser (superadmin sessions over HTTP need a
-  superadmin identity; the CLI and API were used).
-- [ ] Workspace follow-ups: `isb host setup` on titan for port 8481 (not
-  run: the rule is in the code); titan's `--workspace-home-root
-  /srv/workspaces` and migrating clem with `home_bind`; a Setup panel on the
-  workspace page (re-run, edit; today the CLI and tools); Access credentials
-  in `isb ssh-proxy`.
-
 ## Release 1.0
 
 Finishing this workstream is isb **1.0.0** (Stephan, 2026-10-03), not another 0.x.
 
 - [ ] Land the in-flight branches on `platform` (default org always `isb-default`, the EA theme and wordmark) and the docs pass that follows.
-- [ ] Workspaces: an explicit decision to ship 1.0 without anything left over. W5 (recipe images, the default image, first-boot scripts), herdr-backed terminal reattach and W6 (the per-org Docker exception) and ports are built.
 - [x] (remote-gaps) Remote-server gaps: SSH to orgs on a server (the
   control plane bridges the SSH websocket to the agent with the caller's
   keys in `X-Isb-Ssh-Keys`, re-checks the grant every 15 s and ends the
@@ -632,29 +504,29 @@ Finishing this workstream is isb **1.0.0** (Stephan, 2026-10-03), not another 0.
   control plane's confirmation in 120 s); agent protocol 2 with `build`,
   `arch` and the helper in the heartbeat, calls to an incompatible agent
   refused with the reason; version skew and an Upgrade button on the Servers
-  page; `ssh_host_keys` answers a workspace's own user. **Verified** on
+  page; `ssh_host_keys` answers an org instance's own user. **Verified** on
   titan (scratch control plane, a dedicated-VM org `rgvm` and a throwaway VM
   added with `isb server add` as `rgssh`/org `rgsrv`): SSH to the old agent
   refused naming protocol 1; VM upgraded from the origin/platform build
   through incus in 6 s, helper installed on the way; SSH server upgraded
   A→B over mTLS in 12 s; a binary that never answers rolled back by the box
   in 2.4 min and reported; `upgrade --all` both in 19 s; the UI's Upgrade
-  button; on both servers: workspace created, token and `$ISB_URL` inside,
-  bridge MCP/REST through the box's firewall (401 without token, 404 for
+  button; on both servers: the org API listener's
+  MCP/REST through the box's firewall (401 without token, 404 for
   another org), a sibling sandbox reaped by the agent, ssh and scp (20 MB
   both ways, hashes equal), a removed key ended a live session in 1 s and
   a demotion to viewer in 3 s, `ssh.open/close` with fingerprint on the
   control plane and the agent; RustFS in the org as the S3 store: hook ran,
   snapshot, volume backup uploaded and verified, staged restores from the
   snapshot and from the bucket at `/restore/<stamp>` (ownership kept, live
-  untouched), discard; the web terminal on the VM's workspace.
+  untouched), discard; the web terminal on the VM's instances.
   Left: an SSH session's own processes outlive a revoked bridge (sshd
   ends; a non-tty command it started is orphaned, as for local instances);
   servers added by an isb without the helper are upgraded by hand once.
 - [ ] Full CI green on `platform`, integration tests on titan, a fresh-host install test on a new hcloud box (README quick start as written).
 - [ ] PR `platform` → `main` with release notes (the user-visible changes since 0.7, and breaking changes: the default org, the crate split).
 - [ ] Bump to 1.0.0 everywhere the release process lists, for all six crates together; tag; publish (crates.io `cargo publish --workspace`, PyPI, npm) per the release process.
-- [ ] Upgrade titan's `isb.service` from 0.7.0; `isb host setup`; `--workspace-home-root /srv/workspaces`.
+- [ ] Upgrade titan's `isb.service` from 0.7.0; `isb host setup`.
 - [x] (branch `sandbox-egress`) lasso plugin sandboxing: per-sandbox egress allowlist (`egress: [host[:port]]` / `none`, domains and `*.` suffixes; a bridge, ACL and filtering dnsmasq per sandbox plus a host-side proxy in `isb serve`; containers and VMs) and secrets that never enter the guest (placeholder env var, swapped on the wire only towards approved hosts, per-sandbox CA, verified upstream TLS); surfaces: compose, `isb create --egress/--secret`, rpc and both SDKs, `sandbox_create`; docs/guides/egress.md. **Verify:** integration tests `tests/egress.rs` (container and VM: DNS, direct public and private IPs, `none`, secret substitution to a local HTTPS server with its own CA, placeholder unchanged to a non-approved host, teardown) and a scratch `isb serve` on titan (default org too, daemon restart, live list edit, orphan sweep); `isb exec -T` into a VM: p50 0.9-1.4 ms, p95 2.4-4.7 ms per line over 300 lines (container p50 0.3-0.5 ms). Left: `egress` on an existing open sandbox needs a recreate; request bodies are not rewritten and h2 is not offered to intercepted hosts. On release run `lasso notify "isb <version>: per-sandbox egress allowlist + on-the-wire secrets ready for lasso plugins"`.
 - [x] (branch `isb-vm-mounts-no-root-owned-or-setuid-files-on-the-host`) VM host bind mounts are translated by virtiofsd: isb sets `raw.idmap` on every VM with a host bind mount (incus 7.5+ runs virtiofsd with `--translate-uid/gid` map + forbid-guest), so exactly one guest uid/gid (the service user; root when `user:` is unset) reads and writes as the invoking user and every other guest id is refused; refuses incus < 7.5 or unreadable; `idmap: none` opts out with a warning. Found by lasso's plugin work: before, guest root made root-owned setuid files and device nodes on titan. Setuid bits on the mapped id's own files remain (invoker-owned); `nosuid` host mount or `:ro` closes that. **Verify:** `tests/integration.rs` `virtual_machine` (chown/mknod/other-uid refused, files owned by the invoker) on titan incus 7.5.1. Not released.
 - [ ] Marketing site pulls isb docs from `main` (or the v1.0.0 tag) instead of `platform`.

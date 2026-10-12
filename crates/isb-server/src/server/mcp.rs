@@ -115,9 +115,6 @@ impl std::fmt::Display for Caller {
                 crate::auth::PrincipalKind::ApiToken { .. } => {
                     write!(f, "{} (token)", principal.user.email)
                 }
-                crate::auth::PrincipalKind::Workspace { .. } => {
-                    f.write_str(crate::auth::WORKSPACE_ACTOR)
-                }
                 _ => f.write_str(&principal.user.email),
             },
         }
@@ -485,10 +482,6 @@ fn rpc_error(id: Value, code: i64, message: impl Into<String>) -> Value {
 type RpcResult = std::result::Result<Value, (i64, String)>;
 
 impl Endpoint {
-    #[expect(
-        clippy::excessive_nesting,
-        reason = "predates the lint ratchet; split it when next changed"
-    )]
     pub fn handle(&self, req: &Request) -> Response {
         match req.path.as_str() {
             "/healthz" => match req.method.as_str() {
@@ -526,11 +519,6 @@ impl Endpoint {
                         }
                         if tail == "api/v1/ssh" {
                             return self.ssh(req, &org);
-                        }
-                        if let Some(rest) = tail.strip_prefix("api/v1/workspace") {
-                            if rest.is_empty() || rest.starts_with('/') {
-                                return self.workspace_rest(req, rest, &org);
-                            }
                         }
                     }
                 }
@@ -608,35 +596,6 @@ impl Endpoint {
             return Response::text(405, "method not allowed").header("Allow", "POST");
         }
         self.rest_run(req, name, scope)
-    }
-
-    /// `/orgs/<org>/api/v1/workspace[/ACTION]`: the org's workspace as a
-    /// resource, over the `workspace_*` tools (docs/concepts/workspaces.md). GET
-    /// reads it (`?name=`), POST creates it, PATCH changes it, DELETE
-    /// deletes it (`{"confirm": true}`); POST `/start`, `/stop`,
-    /// `/restart`, `/rebuild`, `/token/rotate`; GET or PATCH `/settings`.
-    fn workspace_rest(&self, req: &Request, rest: &str, org: &crate::org::OrgId) -> Response {
-        let tool = match super::openapi::workspace_tool(rest, &req.method) {
-            Ok(t) => t,
-            Err(allowed) if allowed.is_empty() => {
-                return rest_error(404, "not_found", "no such workspace action");
-            }
-            Err(allowed) => {
-                return Response::text(405, "method not allowed")
-                    .header("Allow", allowed.join(", "));
-            }
-        };
-        if req.method == "GET" {
-            // Arguments from the query string.
-            let mut r = req.clone();
-            let mut args = serde_json::Map::new();
-            if let Some(n) = query_param(req, "name") {
-                args.insert("name".into(), json!(n));
-            }
-            r.body = serde_json::to_vec(&Value::Object(args)).unwrap_or_default();
-            return self.rest_run(&r, tool, Some(org));
-        }
-        self.rest_run(req, tool, Some(org))
     }
 
     fn rest_run(&self, req: &Request, name: &str, scope: Option<&crate::org::OrgId>) -> Response {

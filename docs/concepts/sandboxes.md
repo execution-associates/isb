@@ -182,4 +182,33 @@ load balancer and rolling updates, deploy the same file as a
   dry run unless given `-y`.
 - Sandboxes made by `isb create` and `isb up` on the host have no expiry.
   Sandboxes made through the daemon do: see
-  [Workspaces and sandboxes](workspaces.md#sandboxes-are-short-lived).
+  [Sandboxes are short-lived](#sandboxes-are-short-lived).
+
+## Sandboxes are short-lived
+
+Every sandbox made through `isb serve` (`sandbox_create`) gets deadlines,
+kept on the instance as `user.isb.expires_at` and `user.isb.idle_timeout`:
+
+- **an expiry**: the org's `sandbox_expiry` (default 24 h; at most 30 days),
+  or the call's `expires`;
+- **an idle timeout**: the org's `sandbox_idle` (default 2 h), or the call's
+  `idle_timeout`, or `none`. Idle means no exec or terminal through isb and
+  under 2 % of a core of CPU since the daemon last saw it used (a daemon that
+  just started counts from its start). Org admins change both defaults with
+  `sandbox_settings` (`isb sandbox settings --expiry 24h --idle 2h`), or
+  **Defaults** on the org's Sandboxes page.
+
+`sandbox_extend` (`isb sandbox extend NAME --by 24h`) pushes the expiry out
+(`by`, default 24 h, from the later of now and the current expiry, never past
+30 days from now) or changes the idle timeout; its creator (the `isb.owner`
+the caller would get) or the org's admins may. `sandbox_list`
+(`isb sandbox ls`) shows each instance's kind (`sandbox`, `replica`,
+`build`), creator, age, expiry, idle timeout, last activity, limits and use,
+and whether the caller made it (`mine`).
+
+**The reaper** in the daemon checks every minute and deletes a sandbox past
+either deadline, recording `sandbox.reaped` in the history with the reason.
+It only takes instances that carry isb's deadlines and are neither a stack
+replica nor a build, re-reads each before deleting it, and skips one with a
+terminal open. Sandboxes made by `isb create` and `isb up` on the host have
+no deadlines and are never reaped.

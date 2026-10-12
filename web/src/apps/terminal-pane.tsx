@@ -1,7 +1,7 @@
 // A web terminal: xterm.js over the daemon's terminal websocket
 // (GET /orgs/<org>/api/v1/terminal?app=|instance=, docs/reference/http-api.md#the-web-terminal).
-// The app page's Terminal tab and the workspace's terminals use it; what to
-// open is the caller's `url`.
+// The app page's Terminal tab, a stack's Terminal tab and a sandbox's shell
+// use it; what to open is the caller's `url`.
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
@@ -23,7 +23,6 @@ export function TerminalPane({
   idleText,
   autoConnect,
   liveText,
-  reattach,
   className,
 }: {
   /** The websocket URL for a terminal of this size. */
@@ -39,22 +38,18 @@ export function TerminalPane({
   autoConnect?: boolean;
   /** The line while connected (default: the shell ends on disconnect). */
   liveText?: ReactNode;
-  /** The session outlives the socket: reconnect by itself when the connection drops. */
-  reattach?: boolean;
   className?: string;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const session = useRef<{ ws: WebSocket; term: Terminal; ro: ResizeObserver } | null>(null);
   const [state, setState] = useState<State>({ kind: "idle" });
-  // The latest url, for a reconnect scheduled by an earlier render.
+  // The latest url, for a Reconnect after a later render.
   const urlRef = useRef(url);
   useEffect(() => {
     urlRef.current = url;
   });
-  const retry = useRef<{ n: number; timer?: ReturnType<typeof setTimeout> }>({ n: 0 });
 
   const disconnect = () => {
-    clearTimeout(retry.current.timer);
     const s = session.current;
     session.current = null;
     if (!s) return;
@@ -89,7 +84,6 @@ export function TerminalPane({
     setState({ kind: "connecting" });
     ws.onopen = () => {
       opened = true;
-      retry.current.n = 0;
       setState({ kind: "open" });
       term.focus();
     };
@@ -115,13 +109,6 @@ export function TerminalPane({
     };
     ws.onclose = () => {
       if (ended) return;
-      // A dropped connection to a session that lives on: reattach, a few times, backing off.
-      if (reattach && opened && session.current?.ws === ws && retry.current.n < 5) {
-        retry.current.n += 1;
-        setState({ kind: "connecting" });
-        retry.current.timer = setTimeout(connect, 1000 * retry.current.n);
-        return;
-      }
       setState({
         kind: "closed",
         message: opened ? "The connection closed." : "Could not open a terminal: you may be signed out, not allowed to, or the server refused it.",

@@ -43,7 +43,6 @@ use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 
 use crate::org::OrgId;
-pub use actors::WORKSPACE_ACTOR;
 use limit::{Rate, RateLimiter};
 pub use scope::Scope;
 use secret::{PasswordCost, TokenKind};
@@ -284,14 +283,6 @@ pub enum PrincipalKind {
     Superadmin {
         source: SuperadminSource,
     },
-    /// An org's workspace (docs/concepts/workspaces.md): its token (`isb_ws_...`),
-    /// held by the agents that live in it. Nobody's account: a synthetic
-    /// principal confined to `org` with the role the workspace was given.
-    Workspace {
-        org: OrgId,
-        /// The workspace's name in its org.
-        name: String,
-    },
     /// A tailnet or Cloudflare Access caller an org mapped to a role
     /// ([`agent_identities`]): `label` is `tailnet:<login or node>` or
     /// `access:<name>`. Nobody's account, confined to the orgs that mapped it.
@@ -360,8 +351,7 @@ impl Principal {
             PrincipalKind::ApiToken { .. }
             | PrincipalKind::Access
             | PrincipalKind::Superadmin { .. }
-            | PrincipalKind::Agent { .. }
-            | PrincipalKind::Workspace { .. } => None,
+            | PrincipalKind::Agent { .. } => None,
         }
     }
 }

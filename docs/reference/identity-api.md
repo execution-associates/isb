@@ -138,7 +138,7 @@ Signing in sets the cookie `isb_session`:
 ## Secrets at rest
 
 Every bearer secret (session `isb_sess_`, API token `isb_tok_`, superadmin
-token `isb_sa_`, workspace token `isb_ws_`, invitation `isb_inv_`, password
+token `isb_sa_`, invitation `isb_inv_`, password
 reset `isb_rst_`, setup token `isb_setup_`) is 32 random bytes from the OS,
 base64url behind its prefix, shown exactly once. The database keeps only the
 SHA-256 of each; the row found by that hash is compared again in constant
@@ -227,8 +227,7 @@ JSON in and out; every response is `Cache-Control: no-store`. Errors are
 (403), `forbidden` (403), `not_found` (404), `conflict` (409), `rate_limited`
 (429), `passkey_rejected` (401), `internal` (500), and the sign-in codes
 above (403) for a refused provider sign-in. "Signed in" means a session
-cookie or a bearer token. A token scoped short of `admin` (and a workspace
-token) cannot change accounts, tokens, keys, invitations or members.
+cookie or a bearer token. A token scoped short of `admin` cannot change accounts, tokens, keys, invitations or members.
 
 The same operations are [account tools](mcp-tools.md#accounts) for agents
 (`whoami`, `member_*`, `invitation_*`, `token_*`, `ssh_key_*`, `session_*`,
@@ -251,7 +250,7 @@ router's own route table.
 | `POST invitations/inspect` | anyone with the token | `{token}` | `{org, email, role, expires_at, account_exists}` |
 | `POST invitations/accept` | anyone with the token | `{token, name?, password?}` | `{user, membership, created}`, cookie set unless already signed in |
 | `GET tokens` | signed in | | `{tokens: [{id, name, user_id, org, created_at, last_used, expires_at, scopes}]}` |
-| `POST tokens` | signed in with a session, or an Access or tailnet identity, with an account; never with a token | `{name, org?, expires?, scopes?}` | `201 {token, info}`; `"superadmin": true` is always `403`; an API, workspace or superadmin token is `403` ([why](../concepts/access.md#api-tokens)) |
+| `POST tokens` | signed in with a session, or an Access or tailnet identity, with an account; never with a token | `{name, org?, expires?, scopes?}` | `201 {token, info}`; `"superadmin": true` is always `403`; an API or superadmin token is `403` ([why](../concepts/access.md#api-tokens)) |
 | `DELETE tokens/ID` | its user, or the org's owners/admins | | `204` |
 | `GET ssh-keys` | signed in | | `{ssh_keys: [...]}`: id, name, type, fingerprint, last use |
 | `POST ssh-keys` | signed in, with an account | `{public_key, name?}` | `201 {ssh_key}` |

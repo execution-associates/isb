@@ -83,7 +83,6 @@ const SAFE_KEYS: &[&str] = &[
     "stamp",
     "port",
     "device",
-    "allow_nesting",
 ];
 
 /// The target, in order of preference.

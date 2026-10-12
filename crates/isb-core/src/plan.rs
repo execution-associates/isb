@@ -697,7 +697,7 @@ pub fn resolve(
     for (k, v) in &spec.raw_config {
         config.insert(k.clone(), v.clone());
     }
-    crate::org::nesting::check_config(&name, host.org.as_ref(), &config, spec.workspace_nesting)?;
+    crate::org::nesting::check_config(&name, host.org.as_ref(), &config)?;
 
     let mut devices: BTreeMap<String, DesiredDevice> = BTreeMap::new();
     let mut add_dev = |dname: String, dev: DesiredDevice| -> Result<()> {

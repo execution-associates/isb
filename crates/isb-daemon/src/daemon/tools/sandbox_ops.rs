@@ -5,8 +5,8 @@
 //!
 //! They reach what `sandbox_exec` reaches ([`Daemon::reach`]). The ones that
 //! change an instance take sandboxes only: a replica belongs to its stack's
-//! controller (which would undo the change), the workspace has its own
-//! `workspace_*` tools, and a build's machine goes when the build ends.
+//! controller (which would undo the change), and a build's machine goes
+//! when the build ends.
 
 use std::path::Path;
 
@@ -14,11 +14,11 @@ use super::Ann;
 use super::*;
 use crate::spec::PortSpec;
 
-/// The instance `name`, if `c` reaches it and it is a sandbox `what` may
-/// change.
-fn sandbox(d: &Daemon, c: &Caller, oc: &Client, name: &str, what: &str) -> Result<SandboxInfo> {
+/// The instance `name`, if `c` reaches it and it is a sandbox (which these
+/// tools may change).
+fn sandbox(d: &Daemon, c: &Caller, oc: &Client, name: &str) -> Result<SandboxInfo> {
     let info = d.reach(c, oc, name)?;
-    only_sandboxes(name, &labels(&info), what)?;
+    only_sandboxes(name, &labels(&info))?;
     Ok(info)
 }
 
@@ -29,12 +29,9 @@ fn labels(info: &SandboxInfo) -> BTreeMap<String, String> {
         .collect()
 }
 
-fn only_sandboxes(name: &str, labels: &BTreeMap<String, String>, what: &str) -> Result<()> {
-    match crate::workspace::kind_of(labels) {
+fn only_sandboxes(name: &str, labels: &BTreeMap<String, String>) -> Result<()> {
+    match crate::sandbox_life::kind_of(labels) {
         "sandbox" => Ok(()),
-        "workspace" => Err(Error::invalid(format!(
-            "{name} is the org's workspace; the workspace_* tools {what} it"
-        ))),
         "replica" => Err(Error::invalid(format!(
             "{name} belongs to stack {}; its controller would undo this (scale, redeploy or change the stack instead)",
             labels.get("isb.stack").map(String::as_str).unwrap_or("?")
@@ -57,9 +54,9 @@ fn sandbox_start(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     let org = arg_org(&a)?;
     let a: Named = args(a)?;
     let oc = d.oc(&a.org)?;
-    sandbox(d, c, &oc, &a.name, "start")?;
+    sandbox(d, c, &oc, &a.name)?;
     // Started is used: the idle reaper counts from now, not from before it stopped.
-    d.workspaces.mark_active(&org.incus_project(), &a.name);
+    d.sandboxes.mark_active(&org.incus_project(), &a.name);
     Sandbox::get(&oc, &a.name)?.start()?;
     Ok(json!({"started": a.name}))
 }
@@ -84,7 +81,7 @@ fn sandbox_stop(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         return Err(Error::invalid("timeout is at most 10m"));
     }
     let oc = d.oc(&a.org)?;
-    sandbox(d, c, &oc, &a.name, "stop")?;
+    sandbox(d, c, &oc, &a.name)?;
     Sandbox::get(&oc, &a.name)?.stop(a.force, timeout)?;
     Ok(json!({"stopped": a.name}))
 }
@@ -202,7 +199,7 @@ fn sandbox_port_add(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     let a: A = args(a)?;
     let ps = port_spec(&d.policy, c.is_trusted(), &a.spec, a.device, a.search)?;
     let oc = d.oc(&a.org)?;
-    sandbox(d, c, &oc, &a.name, "publish ports of")?;
+    sandbox(d, c, &oc, &a.name)?;
     let listen = Sandbox::get(&oc, &a.name)?.add_port(&ps)?;
     Ok(json!({"name": a.name, "listen": listen}))
 }
@@ -218,7 +215,7 @@ fn sandbox_port_remove(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     }
     let a: A = args(a)?;
     let oc = d.oc(&a.org)?;
-    let info = sandbox(d, c, &oc, &a.name, "unpublish ports of")?;
+    let info = sandbox(d, c, &oc, &a.name)?;
     // Only a proxy: this is not how a disk or the network goes.
     if !proxies(&info).contains_key(&a.device) {
         return Err(Error::NotFound(format!(
@@ -259,7 +256,7 @@ fn sandbox_device_remove(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     }
     let a: A = args(a)?;
     let oc = d.oc(&a.org)?;
-    let info = sandbox(d, c, &oc, &a.name, "remove devices of")?;
+    let info = sandbox(d, c, &oc, &a.name)?;
     // Profile devices are not the instance's to remove: incus would say
     // nothing, and the device would stay.
     let Some(dev) = info.devices.get(&a.device) else {
@@ -289,7 +286,7 @@ pub(super) fn register(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<(
         d,
         "sandbox_start",
         "Start a sandbox",
-        "Start a stopped sandbox and wait until it runs. Not a stack replica (scale its stack) nor the workspace (workspace_start). Members and up.",
+        "Start a stopped sandbox and wait until it runs. Not a stack replica (scale its stack). Members and up.",
         obj(json!({"name": name()}), &["name"]),
         ann.write,
         sandbox_start
@@ -299,7 +296,7 @@ pub(super) fn register(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<(
         d,
         "sandbox_stop",
         "Stop a sandbox",
-        "Stop a sandbox, keeping it and its disk (sandbox_start starts it again): a clean shutdown of at most `timeout` (default 30s, at most 10m), or `force` to kill it. Not a stack replica (scale its stack to 0) nor the workspace (workspace_stop). Members and up.",
+        "Stop a sandbox, keeping it and its disk (sandbox_start starts it again): a clean shutdown of at most `timeout` (default 30s, at most 10m), or `force` to kill it. Not a stack replica (scale its stack to 0). Members and up.",
         obj(
             json!({
                 "name": name(),
@@ -349,7 +346,7 @@ fn register_devices(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> 
         d,
         "sandbox_port_add",
         "Publish a sandbox port",
-        "Add a proxy device to a running sandbox (one already as asked is left alone) and answer its listen address. `spec` is `[IP:]HOST:GUEST[/udp]` (IP defaults to 127.0.0.1) or `listen=..,connect=..[,bind=guest][,search=N]`. Remote callers are held to the remote-spec policy, as sandbox_create's ports are: loopback only unless the operator lists the address, no unix sockets, no guest-bound ports. Not a stack replica nor the workspace (workspace_port_add). Members and up.",
+        "Add a proxy device to a running sandbox (one already as asked is left alone) and answer its listen address. `spec` is `[IP:]HOST:GUEST[/udp]` (IP defaults to 127.0.0.1) or `listen=..,connect=..[,bind=guest][,search=N]`. Remote callers are held to the remote-spec policy, as sandbox_create's ports are: loopback only unless the operator lists the address, no unix sockets, no guest-bound ports. Not a stack replica. Members and up.",
         obj(
             json!({
                 "name": name(),
@@ -380,7 +377,7 @@ fn register_devices(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<()> 
         d,
         "sandbox_device_remove",
         "Remove a sandbox device",
-        "Remove one of a sandbox's own devices (instance_get lists them): a disk, a port, a GPU. Not the root disk, nor a profile's device; and not its network card for a remote caller, nor for anyone when an egress policy confines it. Not a stack replica nor the workspace. Members and up.",
+        "Remove one of a sandbox's own devices (instance_get lists them): a disk, a port, a GPU. Not the root disk, nor a profile's device; and not its network card for a remote caller, nor for anyone when an egress policy confines it. Not a stack replica. Members and up.",
         obj(
             json!({"name": name(), "device": {"type": "string"}}),
             &["name", "device"]
@@ -398,13 +395,11 @@ mod tests {
     #[test]
     fn only_sandboxes_change_here() {
         let l = |k: &str, v: &str| BTreeMap::from([(k.to_string(), v.to_string())]);
-        assert!(only_sandboxes("t", &BTreeMap::new(), "stop").is_ok());
-        assert!(only_sandboxes("t", &l("isb.owner", "mcp:x"), "stop").is_ok());
-        let e = only_sandboxes("w", &l("isb.workspace", "workspace"), "stop").unwrap_err();
-        assert!(e.to_string().contains("workspace_*"), "{e}");
-        let e = only_sandboxes("web-1", &l("isb.stack", "shop"), "stop").unwrap_err();
+        assert!(only_sandboxes("t", &BTreeMap::new()).is_ok());
+        assert!(only_sandboxes("t", &l("isb.owner", "mcp:x")).is_ok());
+        let e = only_sandboxes("web-1", &l("isb.stack", "shop")).unwrap_err();
         assert!(e.to_string().contains("stack shop"), "{e}");
-        assert!(only_sandboxes("b", &l("isb.build", "1"), "stop").is_err());
+        assert!(only_sandboxes("b", &l("isb.build", "1")).is_err());
     }
 
     #[test]

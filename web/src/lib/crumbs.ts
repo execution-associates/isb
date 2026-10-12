@@ -29,7 +29,7 @@ export function useCrumbs(): Crumb[] | null {
 }
 
 const SECTION: Record<string, string> = {
-  workspace: "Workspace",
+  sandboxes: "Sandboxes",
   projects: "Projects",
   templates: "Templates",
   backups: "Backups",

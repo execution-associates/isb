@@ -58,7 +58,7 @@ describe("API parity", () => {
   });
 
   it("calls only tools that exist", () => {
-    const called = new Set(src.flatMap(({ text }) => [...text.matchAll(/\b(?:callTool|wsCall)(?:<[^>]*>)?\(\s*"([a-z_]+)"/g)].map((m) => m[1])));
+    const called = new Set(src.flatMap(({ text }) => [...text.matchAll(/\b(?:callTool|sbCall)(?:<[^>]*>)?\(\s*"([a-z_]+)"/g)].map((m) => m[1])));
     expect(called.size).toBeGreaterThan(50);
     const unknown = [...called].filter((t) => !tools.has(t));
     expect(unknown, "the web UI calls tools the daemon does not offer").toEqual([]);

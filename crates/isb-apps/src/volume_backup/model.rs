@@ -329,7 +329,7 @@ mod tests {
     fn names_and_settings_are_checked() {
         for ok in [
             "web_data",
-            "acme_workspace_home",
+            "acme_devbox_home",
             "shop-production_pg_data",
             "v.1",
         ] {

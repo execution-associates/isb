@@ -1,7 +1,6 @@
 // The Volume panel: a named volume's snapshots (now and on a schedule, with
 // the pre-snapshot hook), its backups to the org's buckets and its staged
-// restores. Self-contained so the workspace's Home tab and the Volumes page
-// embed the same thing. Members and viewers read; admins and owners act.
+// restores, self-contained. Members and viewers read; admins and owners act.
 import { useQueryClient } from "@tanstack/react-query";
 import { ArchiveRestore, Camera, CalendarClock, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";

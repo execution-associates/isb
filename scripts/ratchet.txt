@@ -2,7 +2,7 @@
 # its line LIMIT (`path max-lines`), and how many times each ratcheted clippy
 # lint may be named in an exemption (`lint:<name> max-count`). Numbers only go
 # down: run `scripts/ratchet.sh --update` after shrinking something.
-crates/isb-apps/src/app/deploy.rs 1744
+crates/isb-apps/src/app/deploy.rs 1736
 crates/isb-apps/src/app/preview.rs 1812
 crates/isb-apps/src/backup.rs 1675
 crates/isb-apps/src/notify/mod.rs 1263
@@ -12,20 +12,19 @@ crates/isb-core/src/machine.rs 1097
 crates/isb-core/src/plan.rs 1517
 crates/isb-core/src/registry/oci.rs 1081
 crates/isb-core/src/sandbox.rs 1352
-crates/isb-core/src/spec.rs 1521
+crates/isb-core/src/spec.rs 1518
 crates/isb-core/src/stack/controller.rs 2325
-crates/isb-daemon/src/daemon/mod.rs 1146
-crates/isb-daemon/src/daemon/workspaces.rs 1855
-crates/isb-server/src/audit.rs 1154
+crates/isb-daemon/src/daemon/mod.rs 1089
+crates/isb-server/src/audit.rs 1153
 crates/isb-server/src/auth/http.rs 1040
-crates/isb-server/src/auth/mod.rs 1668
+crates/isb-server/src/auth/mod.rs 1658
 crates/isb-server/src/history.rs 1581
 crates/isb-server/src/server/http.rs 1085
-crates/isb-server/src/server/mcp.rs 2161
+crates/isb-server/src/server/mcp.rs 2120
 crates/isb-tui/src/tui/ui.rs 1564
 lint:cognitive_complexity 14
-lint:excessive_nesting 9
+lint:excessive_nesting 8
 lint:too_many_arguments 12
-lint:too_many_lines 77
+lint:too_many_lines 72
 lint:type_complexity 0
 tests/integration.rs 2092

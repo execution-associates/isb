@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -187,16 +187,9 @@ pub(super) struct Inner {
     pub(super) queues: Mutex<BTreeMap<(OrgId, String), Queue>>,
     /// Recent webhook delivery ids, to ignore a replayed delivery.
     deliveries: Mutex<VecDeque<String>>,
-    /// Told when a secret gets a new value outside `secret_set` (a
-    /// database's URL secrets, written at deploy), for what stacks don't
-    /// cover: the workspaces.
-    pub(super) secret_hook: OnceLock<SecretHook>,
     /// Compose stack owners per org, read from the project records.
     pub(super) owners: Mutex<BTreeMap<OrgId, Arc<super::compose::Owners>>>,
 }
-
-/// Called with an org and a secret's name after it got a new value.
-pub type SecretHook = Arc<dyn Fn(&OrgId, &str) + Send + Sync>;
 
 /// Projects, environments, apps and their deployments, for every org.
 #[derive(Clone)]
@@ -223,7 +216,6 @@ impl Apps {
                 stacks: Mutex::new(()),
                 queues: Mutex::new(BTreeMap::new()),
                 deliveries: Mutex::new(VecDeque::new()),
-                secret_hook: OnceLock::new(),
                 owners: Mutex::new(BTreeMap::new()),
             }),
         };

@@ -3,8 +3,6 @@
 //!
 //! - the REST tools, from the tool registry (one POST per tool the
 //!   listener offers);
-//! - the workspace resource, from [`WORKSPACE_ROUTES`] (the table its
-//!   router dispatches by) with each tool's schema as the body;
 //! - the identity endpoints, from [`crate::auth::http::spec::ROUTES`] (held
 //!   to their router by a test);
 //! - the streams, websockets, webhooks, logos, MCP and health, from
@@ -17,38 +15,6 @@
 use serde_json::{Map, Value, json};
 
 use super::Tool;
-
-/// The workspace resource (`/orgs/<org>/api/v1/workspace[ACTION]`):
-/// `(action, method, tool)`. The router dispatches by this table.
-pub const WORKSPACE_ROUTES: &[(&str, &str, &str)] = &[
-    ("", "GET", "workspace_get"),
-    ("", "POST", "workspace_create"),
-    ("", "PATCH", "workspace_update"),
-    ("", "DELETE", "workspace_delete"),
-    ("/start", "POST", "workspace_start"),
-    ("/stop", "POST", "workspace_stop"),
-    ("/restart", "POST", "workspace_restart"),
-    ("/rebuild", "POST", "workspace_rebuild"),
-    ("/token/rotate", "POST", "workspace_token_rotate"),
-    ("/settings", "GET", "workspace_settings"),
-    ("/settings", "PATCH", "workspace_settings"),
-];
-
-/// The workspace tool for `action` and `method`: `Ok(tool)`, or
-/// `Err(allowed methods)` (empty: no such action).
-pub fn workspace_tool(action: &str, method: &str) -> Result<&'static str, Vec<&'static str>> {
-    let action = if action == "/" { "" } else { action };
-    let mut allowed = Vec::new();
-    for (a, m, t) in WORKSPACE_ROUTES {
-        if *a == action {
-            if *m == method {
-                return Ok(t);
-            }
-            allowed.push(*m);
-        }
-    }
-    Err(allowed)
-}
 
 /// One route outside the tools and the identity endpoints.
 pub struct Surface {
@@ -175,7 +141,7 @@ pub const SURFACE: &[Surface] = &[
             (
                 "instance",
                 "string",
-                "Or an instance of the org (a workspace, a sandbox).",
+                "Or an instance of the org (a sandbox, a replica).",
             ),
             ("cols", "integer", "Initial columns."),
             ("rows", "integer", "Initial rows."),
@@ -312,34 +278,6 @@ fn op_id(method: &str, path: &str) -> String {
     format!("{method}_{p}")
 }
 
-/// The workspace resource's path items, for the workspace tools offered.
-fn workspace_paths(tools: &[&Tool], out: &mut Map<String, Value>) {
-    for (action, method, name) in WORKSPACE_ROUTES {
-        let Some(t) = tools.iter().find(|t| t.name == *name) else {
-            continue;
-        };
-        let path = format!("/orgs/{{org}}/api/v1/workspace{action}");
-        let m = method.to_ascii_lowercase();
-        let mut params = path_params(&path);
-        let mut op = json!({
-            "operationId": format!("workspace_resource_{m}{}", action.replace('/', "_")),
-            "tags": ["workspace"],
-            "summary": t.title.clone().unwrap_or_else(|| t.name.clone()),
-            "description": format!("The `{}` tool as a resource. {}", t.name, t.description),
-            "x-isb-tool": t.name,
-            "responses": {"200": tool_ok(), "default": tool_error()},
-        });
-        if m == "get" {
-            params.push(json!({"name": "name", "in": "query", "required": false, "schema": {"type": "string"}}));
-        } else {
-            op["requestBody"] = json!({"required": false, "content": {"application/json": {"schema": t.input_schema}}});
-        }
-        op["parameters"] = json!(params);
-        let item = out.entry(path).or_insert_with(|| json!({}));
-        item[m] = op;
-    }
-}
-
 /// The document, for the tools a listener offers.
 pub fn document(tools: &[&Tool]) -> Value {
     let mut paths = Map::new();
@@ -357,7 +295,6 @@ pub fn document(tools: &[&Tool]) -> Value {
             }}),
         );
     }
-    workspace_paths(tools, &mut paths);
     paths.extend(crate::auth::http::spec::paths());
     for s in SURFACE {
         let item = paths.entry(s.path.to_string()).or_insert_with(|| json!({}));
@@ -374,17 +311,16 @@ pub fn document(tools: &[&Tool]) -> Value {
         "info": {
             "title": "isb",
             "version": env!("CARGO_PKG_VERSION"),
-            "description": "isb serve's HTTP surface: the tools (also MCP), the workspace resource, the identity endpoints, streams, websockets and webhooks. docs/reference/http-api.md.",
+            "description": "isb serve's HTTP surface: the tools (also MCP), the identity endpoints, streams, websockets and webhooks. docs/reference/http-api.md.",
         },
         "tags": [
             {"name": "tools", "description": "One POST per tool; the same tools as MCP."},
-            {"name": "workspace", "description": "An org's workspace as a REST resource over the workspace_* tools."},
             {"name": "identity", "description": "Sign-in, sessions, invitations, tokens, keys, members and users (docs/reference/identity-api.md)."},
             {"name": "surface", "description": "MCP, streams, websockets, webhooks, logos and health."},
         ],
         "components": {
             "securitySchemes": {
-                "token": {"type": "http", "scheme": "bearer", "description": "An API token (isb_tok_), a workspace token (isb_ws_) or a superadmin token (isb_sa_)."},
+                "token": {"type": "http", "scheme": "bearer", "description": "An API token (isb_tok_) or a superadmin token (isb_sa_)."},
                 "session": {"type": "apiKey", "in": "cookie", "name": "isb_session", "description": "The web UI's session; writes need X-Isb-Csrf: 1."},
             },
             "schemas": schemas,
@@ -436,34 +372,13 @@ mod tests {
     }
 
     #[test]
-    fn workspace_routes_dispatch() {
-        assert_eq!(workspace_tool("", "GET"), Ok("workspace_get"));
-        assert_eq!(workspace_tool("/", "DELETE"), Ok("workspace_delete"));
-        assert_eq!(
-            workspace_tool("/settings", "PATCH"),
-            Ok("workspace_settings")
-        );
-        assert_eq!(workspace_tool("/start", "GET"), Err(vec!["POST"]));
-        assert_eq!(workspace_tool("/nope", "POST"), Err(vec![]));
-    }
-
-    #[test]
     fn the_document_covers_every_surface() {
-        let t = Tool::new(
-            "workspace_get",
-            "Show it",
-            json!({"type": "object"}),
-            |_, _| Ok(json!({})),
-        );
+        let t = Tool::new("app_get", "Show it", json!({"type": "object"}), |_, _| {
+            Ok(json!({}))
+        });
         let doc = document(&[&t]);
         let p = &doc["paths"];
-        assert!(p["/api/v1/tools/workspace_get"]["post"].is_object());
-        assert_eq!(
-            p["/orgs/{org}/api/v1/workspace"]["get"]["x-isb-tool"],
-            "workspace_get"
-        );
-        // Workspace actions whose tool is not offered are left out.
-        assert!(p["/orgs/{org}/api/v1/workspace/start"].is_null());
+        assert!(p["/api/v1/tools/app_get"]["post"].is_object());
         assert!(p["/api/v1/auth/me"]["get"].is_object());
         assert!(
             p["/api/v1/events"]["get"]["responses"]["200"]["content"]["text/event-stream"]

@@ -123,11 +123,7 @@ fn instance_restart(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         Some(t) => crate::flex::parse_duration(t).map_err(Error::invalid)?,
         None => Duration::from_secs(120),
     };
-    match crate::workspace::kind_of(&labels) {
-        "workspace" => Err(Error::invalid(format!(
-            "{} is the org's workspace; workspace_restart restarts it",
-            a.name
-        ))),
+    match crate::sandbox_life::kind_of(&labels) {
         "build" => Err(Error::invalid(format!(
             "{} is a build's machine; it goes when the build ends",
             a.name
@@ -189,7 +185,7 @@ fn instance_restart(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
             Ok(out)
         }
         _ => {
-            d.workspaces.mark_active(&org.incus_project(), &a.name);
+            d.sandboxes.mark_active(&org.incus_project(), &a.name);
             Sandbox::get(&oc, &a.name)?.restart()?;
             Ok(json!({"restarted": a.name}))
         }
@@ -233,7 +229,7 @@ pub(super) fn register(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<(
         d,
         "instance_restart",
         "Restart an instance",
-        "Replace one instance (kubectl delete pod): a stack or app replica is deleted and the controller creates its replacement for the slot (wait=true blocks until that one runs, at most `timeout`, default 2m); a sandbox is restarted in place. The workspace has workspace_restart. Members and up.",
+        "Replace one instance (kubectl delete pod): a stack or app replica is deleted and the controller creates its replacement for the slot (wait=true blocks until that one runs, at most `timeout`, default 2m); a sandbox is restarted in place. Members and up.",
         obj(
             json!({
                 "name": {"type": "string", "description": "The instance's name, from instance_list."},

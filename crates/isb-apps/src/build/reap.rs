@@ -38,9 +38,7 @@ pub fn reap_stale(client: &Client, untagged: bool, log: &mut dyn FnMut(&str)) ->
             continue;
         };
         let config = &i["config"];
-        let build = config.get("user.isb.build").is_some()
-            || config.get("user.isb.workspace-image-build").is_some()
-            || name.starts_with("builder-prep-");
+        let build = config.get("user.isb.build").is_some() || name.starts_with("builder-prep-");
         let stale = match config[OWNER].as_str() {
             Some(t) => crate::foreground::owner_alive(t) == Some(false),
             None => untagged,

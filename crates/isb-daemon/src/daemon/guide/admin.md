@@ -1,7 +1,8 @@
 # Admin: orgs, people, tokens, audit
 
-- Orgs: `org_list`, `org_get`, `org_create`, `org_update`, `org_delete`,
-  `org_nesting`. An org's domain allowlist and ingress are set by a platform
+- Orgs: `org_list`, `org_get`, `org_create`, `org_update`, `org_delete`. No
+  org instance may set nesting keys: Docker inside an org needs `type: vm`.
+  An org's domain allowlist and ingress are set by a platform
   admin or superadmin.
 - Members: `member_list`, `member_update` (role: owner, admin, member,
   viewer), `member_remove`; `invitation_create`, `invitation_list`,

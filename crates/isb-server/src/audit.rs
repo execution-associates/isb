@@ -158,7 +158,6 @@ impl Actor {
                 a.token_id = Some(*id);
                 a.token_name = Some(name.clone());
             }
-            crate::auth::PrincipalKind::Workspace { name, .. } => a.as_workspace(name),
             crate::auth::PrincipalKind::Agent { label } => a.as_agent(label),
             crate::auth::PrincipalKind::Superadmin { source } => {
                 a.name = source.label();

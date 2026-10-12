@@ -27,7 +27,7 @@ Three counts differ for that reason, and none is a fault:
 - `/mcp` lists the same tools to a signed-in caller (a call is still judged
   by role and scopes).
 - An org's `/orgs/<org>/mcp` lists fewer: the host, superadmin and platform
-  tools (`host_*`, `superadmin_*`, `org_nesting`, `org_list`, `org_create`,
+  tools (`host_*`, `superadmin_*`, `org_list`, `org_create`,
   `server_status`, `user_list` and the like) are on `/mcp` only, for anyone but
   the unix socket. `GET /api/v1/tools` marks each tool with `org_endpoint`
   (false for those), and the web UI's MCP page counts the tools an org
@@ -77,8 +77,7 @@ fills it in and refuses any other value. Then, in order:
   own). `audit_list` and `history_query` filter themselves the same way, and
   `guide` holds nothing of any org's.
 - **Superadmin tools** (`host_inventory`, `host_monitor`, `host_policy`,
-  `superadmin_token_list`, `superadmin_token_revoke`, `superadmin_list`,
-  `org_nesting`) are
+  `superadmin_token_list`, `superadmin_token_revoke`, `superadmin_list`) are
   refused to everyone else, platform admins included.
 - **API token scopes** narrow a token below its role: `read` (read-only
   tools), `deploy` (`read` plus `stack_deploy`, `stack_redeploy`,
@@ -86,8 +85,7 @@ fills it in and refuses any other value. Then, in order:
   `instance_restart`, `sandbox_start`, `sandbox_stop`, `app_deploy`, `app_rollback`, `build_run`), `admin` (the whole role) and `tool:GLOB`. See
   [Scopes](../concepts/access.md#scopes).
 - **Account tools** ([below](#accounts)) are judged by the identity
-  endpoints' own rules rather than a role in `org`: a workspace token reaches
-  none of them but `whoami`, a token scoped short of `admin` only reads them,
+  endpoints' own rules rather than a role in `org`: a token scoped short of `admin` only reads them,
   and a token never mints a token, nor creates a user, sets a password or
   adds a key for someone else.
 - Some tools check more themselves; the **Who** column says so.
@@ -122,65 +120,45 @@ means every member of the org, *member* means members, admins and owners.
 
 ## Instances
 
-[isb for kubectl users](../guides/kubectl.md): look inside what runs and act on it, by app or by instance. An instance is anything isb manages in the org: an app's replica, a database, a compose service's replica, the workspace, a sandbox, a build, an org's tunnel.
+[isb for kubectl users](../guides/kubectl.md): look inside what runs and act on it, by app or by instance. An instance is anything isb manages in the org: an app's replica, a database, a compose service's replica, a sandbox, a build, an org's tunnel.
 
 | Tool | Who | Does |
 |---|---|---|
-| `instance_list` | viewer | Every instance of the org, one row each: `kind` (`app`, `database`, `stack`, `tunnel`, `workspace`, `sandbox`, `build`), owning `app` or `stack` and `service`, `slot`, `revision`, `status`, `health`, `in_rotation`, `ip`, `restarts`, `created_at`, `age_s`, `cpu_pct`, `mem_bytes`. Filters: `app`, `stack`, `service`, `kind`, `status`. |
+| `instance_list` | viewer | Every instance of the org, one row each: `kind` (`app`, `database`, `stack`, `tunnel`, `sandbox`, `build`), owning `app` or `stack` and `service`, `slot`, `revision`, `status`, `health`, `in_rotation`, `ip`, `restarts`, `created_at`, `age_s`, `cpu_pct`, `mem_bytes`. Filters: `app`, `stack`, `service`, `kind`, `status`. |
 | `instance_get` | viewer | One instance in full: the row plus image, limits, environment variable **names** (never values), volumes, devices, ports, the domains its service serves and whether traffic reaches it, the last health probe, the files isb delivers into it, labels, and its recent `history` (`history` sets how many rows). |
 | `app_exec` | member | Run argv in one of an app's replicas (default: a running one, healthy and in rotation first; `replica` is the slot, or `instance` its name): exit code, stdout, stderr. `stdin` (at most 1 MiB), `cwd`, `user`, `env`, `timeout` (default 60s, at most 15m; `timed_out` and the output so far when it runs out). Each stream keeps its last 1 MiB (`truncated`). The audit row keeps the argv, the names of `env` and the size of `stdin`. |
-| `instance_exec` | member | The same in any running instance of the org by `name` (a workspace runs as its user, in its home). |
+| `instance_exec` | member | The same in any running instance of the org by `name`. |
 | `app_logs` | viewer | An app's replicas' recent output by app name (`replica`, `tail` default 200, `since` such as `10m`); `stack_logs` underneath. While the app is not converged, `last_failed_attempt` carries the output of the last replica that failed to come up (instance, reason, output) after it was deleted. |
 | `app_top` | viewer | Per replica CPU, memory, disk and network counters now, and the totals next to the app's limits (`history: true` adds CPU samples). |
 | `app_events` | viewer | Events about one app, newest last (`since`, `limit`, `stack_wide: true` adds the stack's own). |
 | `app_restart` | member | A rolling replace of the app's replicas with fresh instances of the same settings, in `update_config`'s order (`wait`, `timeout`). |
 | `app_scale` | member | The replica count (0 stops it); also saved as the app's `replicas` setting. |
-| `instance_restart` | member | Replace one instance: a replica is deleted and the controller makes its replacement (`wait`); a sandbox restarts; the workspace has `workspace_restart`. |
-| `instance_file_read` | member | One file of an instance, at most 4 MiB: `utf8` or `base64` (`encoding`). A secret read: always audited (path, never content). Not `/proc`, `/sys`, `/dev` or a workspace's token. |
+| `instance_restart` | member | Replace one instance: a replica is deleted and the controller makes its replacement (`wait`); a sandbox restarts. |
+| `instance_file_read` | member | One file of an instance, at most 4 MiB: `utf8` or `base64` (`encoding`). A secret read: always audited (path, never content). Not `/proc`, `/sys` or `/dev`. |
 | `instance_file_write` | member | Replace one file (`content`, `encoding`, `mode`, `uid`, `gid`, `parents`), at most 2 MiB. Refused: `/run/isb`, `/run/secrets`, `/etc/isb`, files isb delivers from org secrets, `/proc`, `/sys`, `/dev`. Audited with path and size. |
 
-There is no `port-forward` tool: run `curl` with `app_exec`, or reach an instance's address from the workspace.
+There is no `port-forward` tool: run `curl` with `app_exec`, or reach an instance's address from another instance in the org.
 
-## Sandboxes and workspaces
+## Sandboxes
 
-[Workspaces and sandboxes](../concepts/workspaces.md).
+[Sandboxes](../concepts/sandboxes.md); [Sandboxes are short-lived](../concepts/sandboxes.md#sandboxes-are-short-lived).
 
 | Tool | Who | Does |
 |---|---|---|
 | `sandbox_create` | member | Create or reconcile one sandbox from a service spec (an object or YAML, `container_name` set), with `expires` and `idle_timeout` (the org's defaults otherwise: 24h and 2h) and `wait_ready`. Remote callers' specs are held to the [remote-spec policy](../concepts/security.md#the-remote-spec-policy), and their sandboxes labelled `isb.owner=<identity>`. `spec.egress` confines the sandbox's network to a list of hosts (or none) and gives it [secrets that never enter the guest](../guides/egress.md); a secret the org does not hold is refused. |
-| `sandbox_list` | viewer | Instances, filtered by labels and `kind` (`sandbox`, `workspace`, `replica`, `build`): creator, age, expiry, idle timeout, last activity, limits and use, and `mine`. Remote callers see only instances isb manages. |
+| `sandbox_list` | viewer | Instances, filtered by labels and `kind` (`sandbox`, `replica`, `build`): creator, age, expiry, idle timeout, last activity, limits and use, and `mine`. Remote callers see only instances isb manages. |
 | `sandbox_exec` | member | Run argv in a sandbox: exit code, stdout, stderr (each capped at 256 KiB, keeping the end), optional `stdin` text, `user`, `cwd`, `env`, `timeout` (default 10m). |
 | `sandbox_extend` | the sandbox's creator, or admin | Push the expiry out (`by`, default 24h, at most 30 days from now) or change `idle_timeout`. |
-| `sandbox_remove` | member | Delete a sandbox (not a stack replica, nor the workspace). |
-| `sandbox_start` | member | Start a stopped sandbox and wait until it runs. Not a stack replica, nor the workspace. |
-| `sandbox_stop` | member | Stop a sandbox and keep it: a clean shutdown within `timeout` (default 30s, at most 10m), or `force`. Not a stack replica, nor the workspace. |
+| `sandbox_settings` | member reads, admin changes | The org's defaults for new sandboxes: `sandbox_expiry` (e.g. `24h`, `7d`; at most `30d`) and `sandbox_idle` (e.g. `2h`, or `none`). Without changes it reads; returns `{org, settings: {sandbox_expiry, sandbox_idle}}`. Sandboxes that exist keep their deadlines. |
+| `sandbox_remove` | member | Delete a sandbox (not a stack replica). |
+| `sandbox_start` | member | Start a stopped sandbox and wait until it runs. Not a stack replica. |
+| `sandbox_stop` | member | Stop a sandbox and keep it: a clean shutdown within `timeout` (default 30s, at most 10m), or `force`. Not a stack replica. |
 | `sandbox_logs` | viewer | The journal of the command a sandbox supervises (`restart:`; `service` picks one of several), or an OCI image's console: `tail` (default 200, at most 5000), `since`. |
 | `sandbox_port_list` | viewer | A sandbox's proxy devices by name, with `listen`, `connect`, `bind` and the rest. |
 | `sandbox_port_add` | member | Add a proxy device to a sandbox and answer its listen address: `spec` as `isb port add` takes it (`[IP:]HOST:GUEST[/udp]` or `listen=..,connect=..`), `device`, `search`. Remote callers are held to the [remote-spec policy](../concepts/security.md#the-remote-spec-policy)'s port rules. |
 | `sandbox_port_remove` | member | Remove one proxy device (`device`). |
 | `sandbox_device_remove` | member | Remove one of a sandbox's own devices (`device`; `instance_get` lists them). Not the root disk; not its NIC for a remote caller, nor for anyone when `egress` confines it. |
 | `ssh_host_keys` | viewer | An instance's SSH host public keys, for pinning, and the user `isb ssh-config` logs in as by default. |
-| `workspace_get` | viewer | The workspace (or `null`) and the org's settings: definition, status, resources, home, live sessions, last activity, token metadata, `connect` (`url`, `mcp_url`), sandbox count. |
-| `workspace_list` | viewer | Every workspace in the org. |
-| `workspace_create` | admin | `image` (default `isb-workspace`, then `dev-base`, where the host has it, else `images:ubuntu/24.04`), `name`, `user`, `cpus`, `memory`, `root_size`, `home_size`, `env`, `secrets`, `labels`, `token_role`, `setup` (a first-boot script); `home_bind` (a host folder as the home) is for superadmins. |
-| `workspace_update` | admin | Any of those but `name`, `user`, `home_bind`; resizing needs `confirm: true`. |
-| `workspace_start` | member | Start it and deliver its credentials. |
-| `workspace_stop`, `workspace_restart` | member | Without `confirm: true`, only report the live sessions it would end. |
-| `workspace_rebuild` | admin | A fresh machine from its image (or `image`), same home and token; `confirm`. |
-| `workspace_delete` | admin | The machine and its token, and the home unless `keep_home`; `confirm`. |
-| `workspace_token_rotate` | admin | A new token, delivered inside; the old one stops at once. |
-| `workspace_settings` | member reads, admin changes | `sandbox_expiry`, `sandbox_idle`, `secret_refresh` (how often workspaces' driver references are checked); `max_workspaces`, `home_kind`, `home_pool` are for platform admins. |
-| `workspace_setup_run` | admin | Run the first-boot script again, as root: now when running, else on the next start; outcome and output in the history (`workspace.setup`). |
-| `workspace_terminals` | member | The web terminal's mode (`herdr` or `shell`) and its herdr sessions. |
-| `workspace_terminal_update` | member | A herdr session: `rename`, or `end: true`. |
-| `workspace_image_build` | platform admin | Build a workspace image from a recipe (default: isb's, as `isb-workspace`) in a throwaway container in `isb-system`; returns an `id`. [Workspace images](../guides/workspace-images.md). |
-| `workspace_image_logs` | platform admin | A build's state and log lines (`since`, `wait`). |
-| `workspace_image_list` | platform admin | The images isb built, recent builds, and whether the default image is current. |
-| `workspace_image_remove` | platform admin | Remove an image isb built (never another). |
-| `workspace_port_list` | member | The published ports: each with its preview host, and its ingress hostname, URL and state. |
-| `workspace_port_add` | member | Publish `port`; with `host` (a hostname, `default` or `auto`) also through the org's ingress. |
-| `workspace_port_remove` | member | Stop publishing `port`. |
-| `workspace_port_open` | member | A one-time link (60 s) to the port's preview; `origin` when the daemon has no `--preview-domain`. |
 
 ## Secrets
 
@@ -189,7 +167,7 @@ There is no `port-forward` tool: run `curl` with `app_exec`, or reach an instanc
 | Tool | Who | Does |
 |---|---|---|
 | `secret_create` | member | Create (`name`, `value`, optional `driver`, `labels`); fails if it exists. |
-| `secret_set` | member | A new value and version (creates it in the local store if missing). A stack secret's `rotate` command (a database app's password) runs first, in a running replica (`applied`); if it fails nothing is stored. Each stack service using it acts per its `on_change`: `services` lists what each did (`roll`, `restart`, `none`), `rolled` the stacks that roll or restart, `skipped` what was not cycled and why (workspaces get the file, never a restart). |
+| `secret_set` | member | A new value and version (creates it in the local store if missing). A stack secret's `rotate` command (a database app's password) runs first, in a running replica (`applied`); if it fails nothing is stored. Each stack service using it acts per its `on_change`: `services` lists what each did (`roll`, `restart`, `none`), `rolled` the stacks that roll or restart, `skipped` what was not cycled and why. |
 | `secret_get` | member | `{meta, value}`. A secret read: always audited. |
 | `secret_list` | viewer | Metadata, never values; `used_by` per secret, and `references`: the driver references stacks use. |
 | `secret_inspect` | viewer | One secret's metadata. |
@@ -343,7 +321,7 @@ and owners.
 | `ingress_status` | anyone signed in | Listeners, CA, the Caddy process, every routed domain (URL, certificate state, upstreams), conflicts and refusals, each tunnel org's cloudflared. The caller's orgs only. |
 | `overview` | anyone signed in | Everything a dashboard shows in one call: host CPU and memory with history, every stack in detail, sandboxes with CPU and memory, the latest event number. |
 | `events` | anyone signed in | The event feed after a `since` cursor (`limit`), waiting up to 30 s (`wait`) for one. Numbering restarts with the daemon: a `since` past the newest `seq` starts over from the kept events. |
-| `guide` | anyone signed in | The manual for agents, one Markdown topic at a time (`topic`: `start`, `safety`, `sandboxes`, `apps`, `inspect`, `data`, `workspace`, `admin`, `cli`; default `start`). The server's MCP `instructions` point here, so an agent connected to isb needs no skill. |
+| `guide` | anyone signed in | The manual for agents, one Markdown topic at a time (`topic`: `start`, `safety`, `sandboxes`, `apps`, `inspect`, `data`, `admin`, `cli`; default `start`). The server's MCP `instructions` point here, so an agent connected to isb needs no skill. |
 | `server_status` | platform admin | isb's and incus' versions, and the balancer's routes with live counters. |
 
 ## Audit and history
@@ -360,14 +338,13 @@ and owners.
 
 [Users, roles and superadmins](../concepts/access.md). The identity
 endpoints' account pages as tools, with the same rules
-([Identity API](identity-api.md#endpoints)): a workspace token reaches none
-of them but `whoami`; a token scoped short of `admin` only reads them;
+([Identity API](identity-api.md#endpoints)): a token scoped short of `admin` only reads them;
 nobody outside an org learns about it (`not_found`); only an owner (or a
 platform admin) touches an owner or makes one.
 
 | Tool | Who | Does |
 |---|---|---|
-| `whoami` | anyone signed in, a workspace included | The caller: user, platform admin flag, orgs and roles, how it signed in (`auth`), the orgs it can open (every org that exists for a platform admin; its memberships among them for anyone else), and `superadmin`. |
+| `whoami` | anyone signed in | The caller: user, platform admin flag, orgs and roles, how it signed in (`auth`), the orgs it can open (every org that exists for a platform admin; its memberships among them for anyone else), and `superadmin`. |
 | `member_list` | viewer | Each member's user (id, email, name), role and last activity. |
 | `member_update` | admin | `user_id` or `email`, `role`. |
 | `member_remove` | admin; anyone for themselves | `user_id` or `email`. Their account stays. |
@@ -378,7 +355,7 @@ platform admin) touches an owner or makes one.
 | `agent_identity_set` | admin | `kind` (`tailnet`, `access`), `subject` (a tailnet login or `tag:name`; an Access service token client id or the email of someone who is not an isb user), `role` (`viewer`, `member`, `admin`: never owner, at most your own), `note`. An existing subject changes role. |
 | `agent_identity_remove` | admin | `id`. |
 | `token_list` | anyone signed in | Your tokens' metadata (only `org`'s when given; an org token sees its org's). `all: true`: every token in `org`, with its holder (admins). `all_orgs: true`: every token on the platform, with its holder (platform admins; superadmin tokens are `superadmin_token_list`'s). |
-| `token_create` | a session, or an Access or tailnet identity | `name`, `expires` (`90d`; none: never), `scopes`; confined to `org`. Returns `{token, info}`, the token shown once. **A token cannot mint tokens** (an API, workspace or superadmin token is refused), so revoking a leaked token always ends it. Minting for another user is `isb token create --user` on the host only. |
+| `token_create` | a session, or an Access or tailnet identity | `name`, `expires` (`90d`; none: never), `scopes`; confined to `org`. Returns `{token, info}`, the token shown once. **A token cannot mint tokens** (an API or superadmin token is refused), so revoking a leaked token always ends it. Minting for another user is `isb token create --user` on the host only. |
 | `token_revoke` | its holder; the org's admins | `id`. |
 | `ssh_key_list`, `ssh_key_add`, `ssh_key_remove` | anyone with an account | The caller's SSH keys for [isb ssh-proxy](../guides/ssh.md): `public_key` and `name`; `id`. A platform admin may list or remove another user's (`user`: their email), as `isb key ls/rm --user` does; adding one to someone else's account is on the host only. |
 | `session_list`, `session_revoke` | anyone with an account | The caller's browser sessions; end one by `id`. |
@@ -408,4 +385,3 @@ and superadmin tokens and superadmin identities are made on the host only.
 | `superadmin_token_list` | Superadmin tokens' metadata, never the token. |
 | `superadmin_token_revoke` | Revoke one by `id`. Minting is `isb token create NAME --superadmin`, on the host only. |
 | `superadmin_list` | Every tailnet and Access superadmin identity: `kind` (`tailnet`, `access`), `value`, `source` (`flag`: `--superadmin-tailnet` / `--superadmin-access`; `state`: `isb.db`, with `id`, `added_at`, `added_by`), `effective`, and a `note` when this daemon cannot match it. Read only: adding and removing is `isb superadmin add` / `rm`, on the host only. |
-| `org_nesting` | Read (`org`) or set (`allow_nesting`) whether the org's workspace may run Docker with `security.nesting` ([The Docker exception](../concepts/security.md#the-docker-exception)). Turning it off is refused while the workspace runs with nesting. |

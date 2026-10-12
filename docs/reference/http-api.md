@@ -1,6 +1,6 @@
 ---
 title: HTTP API
-description: The isb serve daemon's HTTP surfaces: MCP, REST tools, the event stream, the terminal and SSH websockets, the workspace resource and webhooks.
+description: The isb serve daemon's HTTP surfaces: MCP, REST tools, the event stream, the terminal and SSH websockets, the org API listener and webhooks.
 order: 4
 ---
 
@@ -16,8 +16,8 @@ calling REST, something following the event stream.
 - **HTTP listeners** (`--listen`): loopback addresses, reached through a
   tunnel or reverse proxy, and tailnet addresses
   ([Reach isb serve remotely](../guides/remote-access.md)).
-  Each org with a workspace also gets an org-bound listener on its own
-  bridge ([below](#the-org-bridge-listener)).
+  Every org also gets an org-bound listener on its own bridge
+  ([below](#the-org-api-listener)).
 
 ## Routes
 
@@ -33,12 +33,10 @@ calling REST, something following the event stream.
 | `GET /api/v1/history/stream` | server-sent events: new history items the caller may read |
 | `GET /orgs/<org>/api/v1/terminal?app=NAME` (or `?instance=NAME`) | a websocket to a shell ([below](#the-web-terminal)) |
 | `GET /orgs/<org>/api/v1/ssh?instance=NAME` | a websocket carrying SSH, for `isb ssh-proxy` ([below](#the-ssh-websocket)) |
-| `/orgs/<org>/api/v1/workspace[/ACTION]` | the org's workspace as a REST resource ([below](#the-workspace-resource)) |
 | `POST /api/v1/webhooks/<org>/<app>` | an app's push and pull request webhooks ([Deploy apps](../guides/deploy-apps.md#webhooks)) |
 | `GET /api/v1/templates/<catalog>/<id>/logo` | a template's logo, from isb's cached copy ([Templates](../guides/templates.md#logos)) |
 | `/api/v1/auth/*` | identity: sign-in, sessions, invitations, tokens, keys ([Identity API](identity-api.md)) |
 | `GET /healthz` | `{"ok": true, "isb": VERSION, "stacks": [{name, converged}]}`, without authentication |
-| any request for `<port>-<workspace>-<org>.<preview domain>` | a published workspace port's preview, proxied to the workspace; taken by `Host` ahead of everything above ([Previews through isb](../concepts/workspaces.md#previews-through-isb)) |
 | every other `GET` | the [web UI](../getting-started/web-ui.md), embedded in the binary; it never answers an API path |
 
 ## Signing in
@@ -46,8 +44,7 @@ calling REST, something following the event stream.
 Every HTTP caller is an isb user, or a superadmin:
 
 - **API tokens**: `Authorization: Bearer isb_tok_...` (from `isb token
-  create` or the web UI). How agents and scripts sign in. A workspace's
-  token (`isb_ws_...`) is a bearer token too.
+  create` or the web UI). How agents and scripts sign in.
 - **Sessions**: the `isb_session` cookie from the sign-in endpoints. How the
   web UI signs in. Cookie-authenticated writes must carry `X-Isb-Csrf: 1`.
 - **Superadmin sources**: a superadmin token (`isb_sa_...`), a tailnet
@@ -148,8 +145,6 @@ surface, generated from what serves it rather than written by hand:
 - one `POST /api/v1/tools/<tool>` per tool the listener offers, from the
   tool registry (so `--allow-tools`/`--deny-tools` shape it), tagged
   `tools`;
-- the [workspace resource](#the-workspace-resource), from the table its
-  router dispatches by, each body the tool's schema (`workspace`);
 - the [identity endpoints](identity-api.md#endpoints), from the identity
   router's route table, with request and answer schemas (`identity`);
 - MCP, the event, audit and history streams (`text/event-stream`), the
@@ -186,11 +181,8 @@ every 15 s. See [The audit log](../operations/audit.md) and
 upgrades to a websocket bridged to a login shell (bash, else sh) in one of
 the app's running replicas (`slot`, or one in rotation), with a
 pseudo-terminal. With `?instance=NAME` instead of `app`, the shell is in
-that instance of the org (a workspace, as its user; a sandbox, as root).
-`&session=NAME` (percent-encoded, up to 40 characters) on the workspace
-attaches to that herdr session instead, made if new, which outlives the
-socket ([The web terminal](../concepts/workspaces.md#the-web-terminal)).
-The web UI's Terminal tabs use it.
+that instance of the org (a sandbox, a replica), as root. The web UI's
+terminals use it.
 
 - **Who**: the caller signs in as for any tool and is admitted as if calling
   `sandbox_exec` in the org: its members, admins and owners (not viewers,
@@ -225,36 +217,26 @@ their own; anyone else may only name themselves. 64 sessions per daemon,
 closed after 2 hours idle and 24 hours in all. `isb ssh-proxy` is its
 client; see [SSH and herdr](../guides/ssh.md).
 
-## The workspace resource
+## The org API listener
 
-The org's workspace as REST, over the `workspace_*` tools
-([Workspaces](../concepts/workspaces.md)):
-
-| Method and path (`/orgs/<org>/api/v1/...`) | Tool |
-|---|---|
-| `GET workspace[?name=]` | `workspace_get` |
-| `POST workspace` | `workspace_create` |
-| `PATCH workspace` | `workspace_update` |
-| `DELETE workspace` (body `{"confirm": true}`) | `workspace_delete` |
-| `POST workspace/start`, `/stop`, `/restart`, `/rebuild`, `/token/rotate` | the action |
-| `GET`, `PATCH workspace/settings` | `workspace_settings` |
-
-Bodies and answers are as for the REST tools.
-
-## The org-bridge listener
-
-For each org with a workspace, the daemon serves the org-bound surface on
-the org bridge's gateway address, `http://<gateway>:8481`
-(`--workspace-mcp-port`). That is `$ISB_URL` inside the workspace.
+Every org gets the org-bound surface on its own bridge: the daemon serves it
+on the org bridge's gateway address, `http://<gateway>:8481`
+(`--org-api-port`, `ISB_ORG_API_PORT`), so an instance in the org reaches
+isb at `http://<gateway>:8481/orgs/<org>/mcp` and
+`http://<gateway>:8481/orgs/<org>/api/v1/...` without leaving its bridge.
+The gateway is the instance's default route.
 
 - It answers only peers in the org's own subnet (others get 403).
-- It serves only `/orgs/<org>/...` (MCP, the REST tools, the workspace
-  resource, the terminal and SSH websockets) and `/healthz`; every call is
-  pinned to the org.
-- It takes bearer tokens only (the workspace's, or an org API token): no
-  session cookies, no Access assertions, no superadmin tokens.
-
-See [Reaching isb from inside](../concepts/workspaces.md#reaching-isb-from-inside-the-bridge-listener).
+- It serves only `/orgs/<org>/...` (MCP, the REST tools, the terminal and
+  SSH websockets) and `/healthz`; every call is pinned to the org.
+- It takes bearer tokens only, an org API token (`isb_tok_...`, from `isb
+  token create NAME --org ORG`): no session cookies, no Access assertions,
+  no superadmin tokens.
+- isb puts no URL or token into instances. Whoever deploys a machine that
+  should call isb sets `ISB_URL`, `ISB_ORG` and `ISB_TOKEN` there, the
+  token as a secret file ([A long-lived box for
+  agents](../guides/agents.md#a-long-lived-box-for-agents)).
+- `isb host setup`'s firewall rule allows the port from the org bridges.
 
 ## Audit
 

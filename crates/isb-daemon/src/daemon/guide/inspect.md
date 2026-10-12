@@ -1,7 +1,7 @@
 # Look inside and act on what runs
 
 The org's `kubectl`. An instance is any running container or VM: an app or
-stack replica, a database, a sandbox, the workspace.
+stack replica, a database, a sandbox, a build.
 
 - `instance_list`: kind, app, slot, health, in rotation, IP, restarts, CPU,
   memory. Filter by `app`, `kind`.

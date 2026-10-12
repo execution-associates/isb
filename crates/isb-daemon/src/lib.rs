@@ -13,4 +13,4 @@ use isb_core::*;
 use isb_server::{audit, auth, history, server, web};
 
 pub mod daemon;
-pub mod workspace;
+pub mod sandbox_life;

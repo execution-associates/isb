@@ -13,8 +13,8 @@
 //! resized, and refuses with text such as `Reached maximum aggregate value
 //! "2" for "limits.cpu" in project "isb-lab"`. The client turns any such
 //! answer into [`Error::Invalid`] with [`explain`]'s message, so every path
-//! that creates instances in an org (sandboxes, workspaces, apps, databases,
-//! builds, stacks) says the same thing.
+//! that creates instances in an org (sandboxes, apps, databases, builds,
+//! stacks) says the same thing.
 
 use std::collections::BTreeMap;
 

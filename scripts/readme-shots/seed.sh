@@ -3,9 +3,9 @@
 # into the README's demo: an `acme` org with apps built from an image and
 # from git, previews of two pull requests, Postgres with backups to S3 and a
 # restore, secrets, domains, templates from isb's, Dokploy's and Coolify's
-# catalogs, uptime monitors, a workspace reached over SSH, and an agent's
-# token that has done some work. Everything is real: builds run, backups
-# upload, monitors check.
+# catalogs, uptime monitors, a dev box (a one-replica stack) reached over
+# SSH, and an agent's token that has done some work. Everything is real:
+# builds run, backups upload, monitors check.
 #
 # Run it on a fresh preview: it skips what exists, but a second run on top of
 # a first adds deployments and runs to the history the screenshots show.
@@ -52,10 +52,6 @@ tool() {
   curl -sf -H "Authorization: Bearer $(cat "$state/token")" -H 'Content-Type: application/json' \
     -d "$2" "http://127.0.0.1:8092/orgs/acme/api/v1/tools/$1"
 }
-
-# The default workspace image takes minutes: build it while the rest runs.
-$isb workspace image ls | found '^isb-workspace ' || $isb workspace image build >"$state/workspace-image.log" 2>&1 &
-image_build=$!
 
 step "secrets"
 secret() { $isb secret ls | awk -v n="$1" '$1 == n { f = 1 } END { exit !f }' || printf %s "$2" | $isb secret create "$1" - -l "$3"; }
@@ -199,19 +195,60 @@ if ! $isb ls 2>/dev/null | found -w agent-tests; then
   tool app_deployments '{"name":"web"}' >/dev/null
 fi
 
-step "the workspace, with the isb CLI, reached over SSH"
-wait "$image_build" || { cat "$state/workspace-image.log"; exit 1; }
-$isb workspace ls 2>/dev/null | found '^workspace ' || $isb workspace create
-# One line: sudo -i runs it through a login shell, which joins lines. The
-# loop waits for a just-made workspace's DNS.
-incus exec --project isb-acme workspace -- sudo -iu dev bash -c 'for i in $(seq 30); do [ -x ~/.local/bin/isb ] && break; curl -fsSL https://github.com/execution-associates/isb/releases/latest/download/install.sh | sh || sleep 5; done; [ -x ~/.local/bin/isb ] && { grep -q local/bin ~/.bashrc || echo "export PATH=\$HOME/.local/bin:\$PATH" >>~/.bashrc; }' </dev/null
+step "a dev box: a one-replica stack with a home volume and the isb CLI, reached over SSH"
+if [ ! -s "$state/devbox-token" ]; then
+  $isb token create devbox --org acme --user dev@dev.com | tail -1 >"$state/devbox-token"
+  chmod 600 "$state/devbox-token"
+fi
+secret devbox-token "$(cat "$state/devbox-token")" app=devbox
+if ! $isb stack ls | found -w devbox; then
+  cat >"$state/devbox.yaml" <<'EOF'
+services:
+  box:
+    image: images:ubuntu/24.04
+    command: ["sleep", "infinity"]
+    volumes: ["home:/home/ubuntu"]
+    secrets: [{source: devbox-token, uid: 1000, mode: "0400"}]
+volumes:
+  home: {}
+secrets:
+  devbox-token: {external: true}
+EOF
+  $isb stack deploy devbox -q --file "$state/devbox.yaml"
+fi
+box=$(incus list --project isb-acme user.isb.stack=devbox -c n -f csv | head -1)
+[ -n "$box" ] || { echo "the devbox stack has no replica" >&2; exit 1; }
+# OpenSSH's server (installed, not running: isb starts `sshd -i` per
+# connection) and herdr; the home volume starts empty and root's. The loop
+# waits for a just-made box's DNS.
+incus exec --project isb-acme "$box" -- bash -c '
+  for i in $(seq 30); do getent hosts archive.ubuntu.com >/dev/null && break; sleep 2; done
+  command -v sshd >/dev/null || { apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -yq openssh-server; } >/dev/null
+  command -v herdr >/dev/null || curl -fsSL https://herdr.dev/install.sh | HERDR_INSTALL_DIR=/usr/local/bin sh >/dev/null
+  chown ubuntu: /home/ubuntu
+  [ -f /home/ubuntu/.bashrc ] || sudo -u ubuntu cp -rn /etc/skel/. /home/ubuntu/' </dev/null
+# The isb CLI, pointed at the org API listener on the bridge with the box's
+# token.
+incus exec --project isb-acme "$box" -- sudo -u ubuntu -H bash -c '
+  for i in $(seq 30); do
+    [ -x ~/.local/bin/isb ] && break
+    curl -fsSL https://github.com/execution-associates/isb/releases/latest/download/install.sh | sh || sleep 5
+  done
+  [ -x ~/.local/bin/isb ] || exit 1
+  grep -q ISB_URL ~/.bashrc || cat >>~/.bashrc <<"RC"
+export PATH=$HOME/.local/bin:$PATH
+export ISB_URL=http://$(ip -4 route show default | cut -d" " -f3):8481 ISB_ORG=acme
+export ISB_TOKEN=$(cat /run/secrets/devbox-token)
+RC' </dev/null
 [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/id_ed25519 -C dev@acme
 $isb key ls --user dev@dev.com 2>/dev/null | found -w laptop ||
   $isb key add ~/.ssh/id_ed25519.pub --user dev@dev.com --name laptop
-$isb ssh-config acme/workspace --user dev --as dev@dev.com -o ~/.config/isb/ssh_config -q
+$isb ssh-config "acme/$box" --user ubuntu --as dev@dev.com -o ~/.config/isb/ssh_config -q
+# A short name for the box: its replica's name changes with every rollout.
+sed -i "s/^Host $box\.acme\.isb\$/& devbox.acme.isb/" ~/.config/isb/ssh_config
 touch ~/.ssh/config && chmod 600 ~/.ssh/config
 grep -q 'Include ~/.config/isb/ssh_config' ~/.ssh/config || echo 'Include ~/.config/isb/ssh_config' >>~/.ssh/config
-ssh -o BatchMode=yes workspace.acme.isb true
+ssh -o BatchMode=yes devbox.acme.isb true
 
 # When the monitors started: the uptime page's soak counts from the first run.
 [ -s "$state/seeded" ] || date +%s >"$state/seeded"

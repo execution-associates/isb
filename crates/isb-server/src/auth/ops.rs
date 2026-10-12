@@ -8,10 +8,8 @@
 //! - Nobody outside an org learns about it: its `members`, `invitations`
 //!   and `tokens` answer `404` to non-members (platform admins excepted).
 //! - Only an owner (or platform admin) touches an owner or makes one.
-//! - A workspace (its `isb_ws_` token) is nobody's account: it reaches
-//!   none of this.
-//! - **A token cannot mint tokens** ([`may_mint_tokens`]): API tokens,
-//!   workspace tokens and superadmin tokens are refused, so revoking a
+//! - **A token cannot mint tokens** ([`may_mint_tokens`]): API tokens and
+//!   superadmin tokens are refused, so revoking a
 //!   leaked token always ends what it could do. New tokens come from a
 //!   browser session, an Access or tailnet identity, or the host CLI.
 
@@ -28,21 +26,9 @@ use crate::org::OrgId;
 
 type R<T> = Result<T, AuthError>;
 
-/// Refuse a workspace: account operations are for people and their tokens.
-pub fn account_holder(p: &Principal) -> R<()> {
-    if p.is_workspace() {
-        return Err(AuthError::Forbidden(
-            "a workspace token has no reach into accounts, members, invitations, tokens or keys"
-                .into(),
-        ));
-    }
-    Ok(())
-}
-
-/// Refuse a token scoped short of `admin` (and a workspace) a change to
-/// accounts, tokens, keys, invitations or members.
+/// Refuse a token scoped short of `admin` a change to accounts, tokens,
+/// keys, invitations or members.
 pub fn may_change_accounts(p: &Principal) -> R<()> {
-    account_holder(p)?;
     if p.restricted() {
         return Err(AuthError::Forbidden(
             "this token's scopes do not cover changing accounts, tokens or members (it needs admin)"
@@ -64,7 +50,7 @@ pub fn may_mint_tokens(p: &Principal) -> R<()> {
         ));
     }
     let by_token = match &p.kind {
-        PrincipalKind::ApiToken { .. } | PrincipalKind::Workspace { .. } => true,
+        PrincipalKind::ApiToken { .. } => true,
         PrincipalKind::Superadmin { source } => matches!(source, SuperadminSource::Token { .. }),
         PrincipalKind::Session { .. } | PrincipalKind::Access | PrincipalKind::Agent { .. } => {
             false
@@ -145,7 +131,6 @@ pub fn me(store: &AuthStore, p: &Principal, existing: Option<&OrgsFn>) -> R<Valu
 // ---- sessions ----
 
 pub fn sessions(store: &AuthStore, p: &Principal) -> R<Value> {
-    account_holder(p)?;
     let current = p.session_id();
     let list: Vec<Value> = store
         .list_sessions(p.user.id)?
@@ -231,7 +216,6 @@ pub struct NewToken {
 /// The caller's own tokens (an org token sees only its org's), or only
 /// `org`'s when given.
 pub fn tokens(store: &AuthStore, p: &Principal, org: Option<&OrgId>) -> R<Value> {
-    account_holder(p)?;
     let list = store.list_api_tokens(p.user.id)?;
     let pinned = match &p.kind {
         PrincipalKind::ApiToken { org: Some(o), .. } => Some(o),
@@ -314,7 +298,6 @@ pub fn revoke_token(store: &AuthStore, p: &Principal, id: i64) -> R<()> {
 // ---- SSH keys ----
 
 pub fn ssh_keys(store: &AuthStore, p: &Principal) -> R<Value> {
-    account_holder(p)?;
     let list = if p.user.id > 0 {
         store.list_ssh_keys(p.user.id)?
     } else {
@@ -346,7 +329,6 @@ pub fn delete_ssh_key(store: &AuthStore, p: &Principal, id: i64) -> R<()> {
 
 /// Members see who else is in their org; nobody else learns it exists.
 pub fn visible_org(p: &Principal, org: &OrgId) -> R<()> {
-    account_holder(p)?;
     if p.role_in(org).is_none() && !p.platform_admin {
         return Err(AuthError::NotFound(format!("org {org}")));
     }
@@ -566,7 +548,6 @@ fn check_role_change(
 // ---- platform administration ----
 
 fn platform_admin(p: &Principal) -> R<()> {
-    account_holder(p)?;
     if p.platform_admin {
         Ok(())
     } else {

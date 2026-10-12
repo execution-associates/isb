@@ -1,6 +1,6 @@
 ---
 title: The web UI
-description: A tour of the browser UI that isb serve ships in its binary: orgs, workspaces, apps, deployments, databases, backups, members, MCP and the platform pages.
+description: A tour of the browser UI that isb serve ships in its binary: orgs, sandboxes, apps, deployments, databases, backups, members, MCP and the platform pages.
 order: 5
 nav_title: Web UI
 ---
@@ -54,7 +54,7 @@ next request would sign it in again). See [superadmins](../concepts/access.md#su
   home, an org switcher (the orgs you can open: your
   memberships, or every org for a platform admin; switching keeps the
   section you are in), a search button, the selected org's sections (**Org**:
-  Overview, Projects, Workspace, Templates, Backups, Notifications;
+  Overview, Projects, Sandboxes, Templates, Backups, Notifications;
   **Manage**: Members, MCP, Secrets, Settings, History), **Platform** for
   platform admins (and **Host** for superadmins), and your account menu
   (account, theme, sign out). The page sits in a panel with a top bar that
@@ -68,7 +68,7 @@ next request would sign it in again). See [superadmins](../concepts/access.md#su
   live. In the web terminal, Ctrl+K belongs to the shell; ⌘K still opens the
   palette.
 - **Go to**: `G` then a letter jumps to a section from anywhere outside a
-  text field: `G W` Workspace, `G O` Overview, `G P` Projects, `G T`
+  text field: `G O` Overview, `G P` Projects, `G X` Sandboxes, `G T`
   Templates, `G B` Backups, `G N` Notifications, `G M` Members, `G A` MCP,
   `G S` Secrets, `G ,` Settings, `G H` History.
 - **Account** (`/account`) changes your password, links and unlinks
@@ -83,15 +83,13 @@ what an event in its org touches.
 
 ## An org's sections
 
-- **Workspace** (`/orgs/ORG/workspace`): the org's machine and its
-  sandboxes ([below](#the-workspace)).
-- **Overview** (`/orgs/ORG`): the workspace first (status, live sessions,
-  CPU and memory with a sparkline, last activity, sandbox count; or a
-  "Create the workspace" button for admins), then its projects with their
+- **Overview** (`/orgs/ORG`): the org's projects with their
   health, the latest deployments of every app, its stacks and a live
   activity feed.
 - **Projects** (`/orgs/ORG/projects`): projects, their environments and the
   apps in each, with every app's pages ([below](#projects-and-apps)).
+- **Sandboxes** (`/orgs/ORG/sandboxes`): the org's short-lived machines
+  ([below](#sandboxes)).
 - **Templates** (`/orgs/ORG/templates`): the template catalog, what the org
   deployed from it, and for platform admins the catalogs
   ([below](#templates)).
@@ -152,8 +150,6 @@ what an event in its org touches.
   network (bridge, subnet, service-name domain, bind roots) and egress
   exceptions. Platform admins edit the quota and egress exceptions and
   delete the org (typing its name); everyone else sees them read-only.
-  **Docker in the workspace** shows whether the org's workspace may nest,
-  with the warning badge when it may; superadmins get the switch.
 - **History** (`/orgs/ORG/history`, every member): what happened in the org
   ([history](../operations/history.md)): the controller's events, incus
   changes made through isb or not (with who requested them), and, for owners
@@ -163,43 +159,24 @@ what an event in its org touches.
   of an incus change) on a click, and **Export JSONL** of everything
   matching. `/orgs/ORG/audit` opens it on the audit log.
 
-## The workspace
+## Sandboxes
 
-`/orgs/ORG/workspace[/TAB]`, over the `workspace_*` tools
-([workspaces](../concepts/workspaces.md)). With no workspace yet, the page is
-the create form: image (the host's images with their descriptions,
-`isb-workspace` first when it is built, or another), name, user, CPUs,
-memory, root size, home size, the token's role (viewer, member, admin; admin
-by default, with what each grants), a first-boot script and environment,
-with the org's project, network and limits shown read-only. When the host lacks isb's default image, the form says so
-and platform admins get **Build the default image**, which follows the
-build's log and picks the image when it is published ([Workspace
-images](../guides/workspace-images.md)). Members and viewers see the form
-read-only with why. Creating the workspace leaves it running, and the
-Terminal tab opens its first shell by itself.
+`/orgs/ORG/sandboxes` lists the org's sandboxes, the short-lived machines
+made with `sandbox_create` over MCP or the API (`isb sandbox ls` lists them
+from the CLI; [Sandboxes are short-lived](../concepts/sandboxes.md#sandboxes-are-short-lived)).
+Each row shows the name, state, who made it, its age, its expiry
+(highlighted in its last hour), its idle limit and last activity, and its CPU
+and memory. Members and up get:
 
-The header shows the status, image, user, live sessions and sandbox count,
-and the warning badge **Nesting allowed** when a superadmin lets the
-workspace run Docker ([The Docker exception](../concepts/security.md#the-docker-exception)).
-Members get Start, Stop and Restart; admins also Rebuild (type the name) and
-Delete (type the name; a switch keeps the home volume). Each disruptive
-action first asks the daemon without `confirm` and shows its answer, the
-live sessions it would end, in the dialog; confirming calls again with
-`confirm: true`. The tabs:
+- **Shell**: a root shell in the browser at
+  `/orgs/ORG/sandboxes/NAME/shell`; closing the page ends it.
+- **Extend by** 4h, 24h or 7d: its creator or an org admin.
+- **Delete**.
 
-| Tab | Shows |
-|---|---|
-| **Terminal** | Shells as tabs: **New** opens another as the workspace user in its home; tabs you are not looking at stay connected. With herdr in the workspace each tab is a herdr session: a reload or a dropped connection reattaches to the same shell, and closing a tab asks whether to detach or end it; without herdr, closing a tab or leaving the page ends its shell. The tab says which ([The web terminal](../concepts/workspaces.md#the-web-terminal)). A sandbox's **Shell** (Sandboxes tab) opens as its own tab, as root. Not for viewers. |
-| **Connect** | The workspace's MCP credential: role, created, last used, path inside (`/run/isb/token`), id, audit actor `workspace`, and Rotate for admins (no token value is ever shown); the variables login shells get; MCP client snippets for use inside the workspace (`$ISB_URL/orgs/ORG/mcp`, `$ISB_TOKEN`); SSH and herdr: `isb key add`, `isb workspace ssh-config`, `ssh NAME.ORG.isb` and the `herdr machine add` line ([SSH](../guides/ssh.md)). |
-| **Ports** | The published ports: each with its preview host, and its hostname, URL and ingress state when it has one; **Open** opens the preview through isb in a new tab (a one-time link, [Previews through isb](../concepts/workspaces.md#previews-through-isb)), the bin unpublishes it, and the form publishes a port, with an optional hostname (`default`, `auto` or a name) when the server runs an ingress. Not for viewers. |
-| **Resources** | CPU, memory, disk, address, last activity, sessions, a CPU sparkline; admins resize CPUs, memory and the root disk (confirmed). |
-| **Home** | The volume, pool and its driver, size, mount path (or the host folder); admins grow it (confirmed). For a volume home, the Volume panel: snapshots, backups and staged restores, with a warning on a pool where every snapshot is a full copy. |
-| **Environment** | `KEY=VALUE` variables for login shells (`ISB_*` refused) and the org secrets delivered as files; admins save, which delivers them again. |
-| **Sandboxes** | Each sandbox: status, creator, age, expiry (highlighted in its last hour), idle limit, last activity, limits and use; Shell, Extend by 4h, 24h or 7d (its creator, or admins) and Delete; the org's expiry and idle defaults. |
-| **History** | The history panel, filtered to the workspace. |
-
-Viewers see Connect, Resources, Home, Environment, Sandboxes and History,
-without actions.
+Org admins also get **Defaults**, the org's settings for new sandboxes (the
+`sandbox_settings` tool): the lifetime (e.g. 24h or 7d, at most 30d) and the
+idle limit (e.g. 2h, or none). Sandboxes that exist keep their deadlines.
+Viewers see the list without actions.
 
 ## Projects and apps
 

@@ -2,24 +2,48 @@
 //! `isb ssh-proxy`, and a known_hosts file of the instances' host keys
 //! under each block's `HostKeyAlias`, so plain `ssh`, `scp`, editors and
 //! `herdr machine add` pin the right key without ever trusting on first use.
+//!
+//! A stack service (`ORG/STACK/SERVICE`) is a target that outlives its
+//! replicas: every deploy makes a new instance, with a new name and new host
+//! keys. Its block names the service, `ssh-proxy` reaches whichever replica
+//! runs now, and ssh asks isb for that replica's keys at each connection
+//! (`KnownHostsCommand isb ssh-proxy --known-hosts ...`) rather than pinning
+//! keys a deploy would make stale.
 
 use std::path::Path;
 
-/// One instance's block.
+/// One instance's block, or one stack service's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostEntry {
     pub org: String,
+    /// The instance; for a service, the replica running when the block was
+    /// written (its user was read there).
     pub instance: String,
+    /// `(stack, service)`: the block follows the service's replicas.
+    pub service: Option<(String, String)>,
     /// The guest user to log in as.
     pub user: String,
-    /// `algorithm base64` host keys; empty when the instance has none yet.
+    /// `algorithm base64` host keys; empty when the instance has none yet,
+    /// and for a service, whose keys are asked for at each connection.
     pub host_keys: Vec<String>,
 }
 
 impl HostEntry {
-    /// `<instance>.<org>.isb`: the `Host` name, and the key alias.
+    /// `<instance>.<org>.isb`, or `<service>.<stack>.<org>.isb`: the `Host`
+    /// name, and the key alias.
     pub fn alias(&self) -> String {
-        alias(&self.org, &self.instance)
+        match &self.service {
+            Some((stack, svc)) => format!("{svc}.{stack}.{}.isb", self.org),
+            None => alias(&self.org, &self.instance),
+        }
+    }
+
+    /// What `isb ssh-proxy` is given: `ORG/INSTANCE` or `ORG/STACK/SERVICE`.
+    pub fn target(&self) -> String {
+        match &self.service {
+            Some((stack, svc)) => format!("{}/{stack}/{svc}", self.org),
+            None => format!("{}/{}", self.org, self.instance),
+        }
     }
 }
 
@@ -56,40 +80,59 @@ fn word(s: &str) -> String {
     }
 }
 
-/// The `Host` block for one instance.
-pub fn render(e: &HostEntry, o: &ProxyOptions) -> String {
-    let a = e.alias();
-    let mut proxy = format!("{} ssh-proxy {}/{}", word(&o.isb), e.org, e.instance);
+/// `isb ssh-proxy [--known-hosts] TARGET` with the options every call
+/// carries.
+fn proxy_command(e: &HostEntry, o: &ProxyOptions, known_hosts: bool) -> String {
+    let mut c = format!("{} ssh-proxy", word(&o.isb));
+    if known_hosts {
+        c.push_str(" --known-hosts");
+    }
+    c.push(' ');
+    c.push_str(&e.target());
     if let Some(u) = &o.url {
-        proxy.push_str(&format!(" --url {}", word(u)));
+        c.push_str(&format!(" --url {}", word(u)));
     }
     if let Some(t) = &o.token_file {
-        proxy.push_str(&format!(" --token-file {}", word(t)));
+        c.push_str(&format!(" --token-file {}", word(t)));
     }
     if let Some(k) = &o.keys_of {
-        proxy.push_str(&format!(" --as {}", word(k)));
+        c.push_str(&format!(" --as {}", word(k)));
     }
+    c
+}
+
+/// The `Host` block for one instance or service.
+pub fn render(e: &HostEntry, o: &ProxyOptions) -> String {
+    let a = e.alias();
     let mut s = format!(
-        "# {org}/{inst}: isb ssh-proxy over isb serve's websocket (isb ssh-config)\n\
+        "# {target}: isb ssh-proxy over isb serve's websocket (isb ssh-config)\n\
          Host {a}\n\
          \x20 HostName {a}\n\
          \x20 User {user}\n\
          \x20 ProxyCommand {proxy}\n\
          \x20 HostKeyAlias {a}\n\
-         \x20 UserKnownHostsFile {kh}\n\
-         \x20 StrictHostKeyChecking {strict}\n\
-         \x20 ServerAliveInterval 30\n\
-         \x20 ServerAliveCountMax 4\n",
-        org = e.org,
-        inst = e.instance,
+         \x20 UserKnownHostsFile {kh}\n",
+        target = e.target(),
         user = word(&e.user),
+        proxy = proxy_command(e, o, false),
         kh = word(&o.known_hosts),
-        strict = if e.host_keys.is_empty() {
-            "accept-new"
-        } else {
-            "yes"
-        },
     );
+    let strict = if e.service.is_some() {
+        // The replica's keys, from isb, at each connection: isb runs the
+        // replica's sshd before ssh checks its key, so they exist by then.
+        s.push_str(&format!(
+            "  KnownHostsCommand {}\n",
+            proxy_command(e, o, true)
+        ));
+        "yes"
+    } else if e.host_keys.is_empty() {
+        "accept-new"
+    } else {
+        "yes"
+    };
+    s.push_str(&format!(
+        "  StrictHostKeyChecking {strict}\n  ServerAliveInterval 30\n  ServerAliveCountMax 4\n"
+    ));
     if let Some(i) = &o.identity {
         s.push_str(&format!(
             "  IdentityFile {}\n  IdentitiesOnly yes\n",
@@ -101,12 +144,16 @@ pub fn render(e: &HostEntry, o: &ProxyOptions) -> String {
 
 /// The `herdr machine add` line for an entry.
 pub fn herdr_line(e: &HostEntry) -> String {
-    format!(
-        "herdr machine add {} --label {}/{}",
-        e.alias(),
-        e.org,
-        e.instance
-    )
+    format!("herdr machine add {} --label {}", e.alias(), e.target())
+}
+
+/// known_hosts lines for an entry's keys, under its alias: what
+/// `isb ssh-proxy --known-hosts` prints for ssh's `KnownHostsCommand`.
+pub fn known_hosts_lines(e: &HostEntry) -> String {
+    e.host_keys
+        .iter()
+        .map(|k| format!("{} {k}\n", e.alias()))
+        .collect()
 }
 
 /// `existing` known_hosts with every line for these entries' aliases
@@ -121,7 +168,8 @@ pub fn update_known_hosts(existing: &str, entries: &[HostEntry]) -> String {
         })
         .map(String::from)
         .collect();
-    for e in entries {
+    // A service's keys are never pinned: the next deploy replaces them.
+    for e in entries.iter().filter(|e| e.service.is_none()) {
         for k in &e.host_keys {
             out.push(format!("{} {k}", e.alias()));
         }
@@ -157,6 +205,7 @@ mod tests {
         HostEntry {
             org: "acme".into(),
             instance: "box".into(),
+            service: None,
             user: "dev".into(),
             host_keys: keys.iter().map(|s| s.to_string()).collect(),
         }
@@ -205,6 +254,42 @@ mod tests {
         assert!(s.contains("StrictHostKeyChecking accept-new\n"), "{s}");
         assert!(s.contains("ProxyCommand isb ssh-proxy acme/box --as me@example.com\n"));
         assert!(s.contains("  IdentityFile /tmp/k\n  IdentitiesOnly yes\n"));
+    }
+
+    #[test]
+    fn a_service_follows_its_replicas_and_asks_isb_for_their_keys() {
+        let o = ProxyOptions {
+            isb: "isb".into(),
+            keys_of: Some("me@example.com".into()),
+            known_hosts: "/kh".into(),
+            ..Default::default()
+        };
+        let mut e = entry(&["ssh-ed25519 AAAA"]);
+        e.instance = "dev-box-1-ab12".into();
+        e.service = Some(("dev".into(), "box".into()));
+        assert_eq!(e.alias(), "box.dev.acme.isb");
+        let s = render(&e, &o);
+        assert!(s.starts_with("# acme/dev/box: "), "{s}");
+        assert!(s.contains("Host box.dev.acme.isb\n"), "{s}");
+        assert!(
+            s.contains("ProxyCommand isb ssh-proxy acme/dev/box --as me@example.com\n"),
+            "{s}"
+        );
+        assert!(
+            s.contains(
+                "KnownHostsCommand isb ssh-proxy --known-hosts acme/dev/box --as me@example.com\n"
+            ),
+            "{s}"
+        );
+        assert!(s.contains("StrictHostKeyChecking yes\n"), "{s}");
+        assert_eq!(known_hosts_lines(&e), "box.dev.acme.isb ssh-ed25519 AAAA\n");
+        assert_eq!(
+            herdr_line(&e),
+            "herdr machine add box.dev.acme.isb --label acme/dev/box"
+        );
+        // Never pinned, and an old pin under its alias goes.
+        let old = "box.dev.acme.isb ssh-ed25519 OLD\nkeep.acme.isb ssh-rsa K\n";
+        assert_eq!(update_known_hosts(old, &[e]), "keep.acme.isb ssh-rsa K\n");
     }
 
     #[test]

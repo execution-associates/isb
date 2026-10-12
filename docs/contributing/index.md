@@ -112,7 +112,7 @@ which re-exports the internal crates' modules under their original paths
 | `crates/isb-server` | auth, audit, history, server, web (its `build.rs` embeds `web/dist`) |
 | `crates/isb-apps` | app, build, jobs, backup, s3, template, notify, volume_backup |
 | `crates/isb-tui` | tui |
-| `crates/isb-daemon` | daemon, workspace |
+| `crates/isb-daemon` | daemon |
 
 `isb-server`, `isb-apps`, `isb-egress` and `isb-tui` depend only on
 `isb-core`, so they compile in parallel; `isb-daemon` needs all but the TUI. An edit recompiles

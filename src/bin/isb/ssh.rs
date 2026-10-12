@@ -113,22 +113,124 @@ pub enum KeyCmd {
     },
 }
 
-/// `ORG/INSTANCE`, or `INSTANCE` in `--org` (default: default).
-pub fn target(t: &str, org: &Option<String>) -> Result<(String, String)> {
-    let (o, i) = match t.split_once('/') {
-        Some((o, i)) => (o.to_string(), i.to_string()),
-        None => (
-            org.clone().unwrap_or_else(|| "default".into()),
-            t.to_string(),
-        ),
+/// What to reach: an instance, or a stack service's current replica.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Target {
+    Instance {
+        org: String,
+        instance: String,
+    },
+    Service {
+        org: String,
+        stack: String,
+        service: String,
+    },
+}
+
+/// `ORG/INSTANCE`, `ORG/STACK/SERVICE`, or `INSTANCE` in `--org` (default:
+/// default).
+pub fn target(t: &str, org: &Option<String>) -> Result<Target> {
+    let parts: Vec<&str> = t.split('/').collect();
+    let (o, rest) = match parts.as_slice() {
+        [i] => (org.clone().unwrap_or_else(|| "default".into()), vec![*i]),
+        [o, rest @ ..] if rest.len() <= 2 => (o.to_string(), rest.to_vec()),
+        _ => (String::new(), vec![]),
     };
-    isb::org::OrgId::new(o.clone())?;
-    if !isb::server::terminal::plain_name(&i) {
+    if rest.is_empty() || !rest.iter().all(|p| isb::server::terminal::plain_name(p)) {
         return Err(inv(format!(
-            "{t:?}: want ORG/INSTANCE (lower-case letters, digits, dashes)"
+            "{t:?}: want ORG/INSTANCE or ORG/STACK/SERVICE (lower-case letters, digits, dashes)"
         )));
     }
-    Ok((o, i))
+    isb::org::OrgId::new(o.clone())?;
+    Ok(match rest.as_slice() {
+        [i] => Target::Instance {
+            org: o,
+            instance: i.to_string(),
+        },
+        [st, sv] => Target::Service {
+            org: o,
+            stack: st.to_string(),
+            service: sv.to_string(),
+        },
+        _ => unreachable!("one or two parts after the org"),
+    })
+}
+
+/// The org and the instance to reach now: a service's running replica, in
+/// rotation first, then the lowest slot.
+fn instance_of(r: &Remote, t: &Target) -> Result<(String, String)> {
+    let (org, stack, service) = match t {
+        Target::Instance { org, instance } => return Ok((org.clone(), instance.clone())),
+        Target::Service {
+            org,
+            stack,
+            service,
+        } => (org, stack, service),
+    };
+    let v = r.call_tool(org, "stack_status", json!({"name": stack}))?;
+    let svc = v["services"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|s| s["service"] == service.as_str())
+        .ok_or_else(|| {
+            Error::NotFound(format!(
+                "stack {stack} in org {org} has no service {service}"
+            ))
+        })?;
+    let mut running: Vec<&Value> = svc["instances"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|i| {
+            i["status"]
+                .as_str()
+                .is_some_and(|s| s.eq_ignore_ascii_case("running"))
+        })
+        .collect();
+    running.sort_by_key(|i| {
+        (
+            !i["in_rotation"].as_bool().unwrap_or(false),
+            i["slot"].as_u64(),
+        )
+    });
+    running
+        .first()
+        .and_then(|i| i["name"].as_str())
+        .map(|n| (org.clone(), n.to_string()))
+        .ok_or_else(|| inv(format!("{org}/{stack}/{service} has no running replica")))
+}
+
+/// The instance's SSH host keys (parsed again: they came out of the
+/// instance) and the user to log in as.
+fn host_keys(r: &Remote, org: &str, instance: &str) -> Result<(Vec<String>, Option<String>)> {
+    let v = r.call_tool(org, "ssh_host_keys", json!({"name": instance}))?;
+    let keys = v["keys"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|k| k["key"].as_str())
+        .filter_map(|k| isb::auth::ssh_keys::PublicKey::parse(k).ok())
+        .map(|k| k.line())
+        .collect();
+    Ok((keys, v["user"].as_str().map(String::from)))
+}
+
+/// The block's entry for a target: the instance it reaches now, its user
+/// and keys.
+fn entry_of(r: &Remote, t: &Target) -> Result<HostEntry> {
+    let (org, instance) = instance_of(r, t)?;
+    let (host_keys, user) = host_keys(r, &org, &instance)?;
+    Ok(HostEntry {
+        service: match t {
+            Target::Service { stack, service, .. } => Some((stack.clone(), service.clone())),
+            Target::Instance { .. } => None,
+        },
+        org,
+        instance,
+        user: user.unwrap_or_else(|| "root".into()),
+        host_keys,
+    })
 }
 
 /// On the host: `--user`, else the only platform admin.
@@ -347,15 +449,23 @@ pub fn key(c: KeyCmd) -> Result<u8> {
     }
 }
 
-/// `isb ssh-proxy`: SSH's stdio over the websocket, for `ProxyCommand`.
+/// `isb ssh-proxy`: SSH's stdio over the websocket, for `ProxyCommand`;
+/// with `known_hosts`, the target's host keys as known_hosts lines, for
+/// `KnownHostsCommand`.
 pub fn proxy(
     org: &Option<String>,
     t: &str,
     keys_of: Option<String>,
     remote: &RemoteArgs,
+    known_hosts: bool,
 ) -> Result<u8> {
-    let (o, i) = target(t, org)?;
+    let t = target(t, org)?;
     let r = remote.remote()?;
+    if known_hosts {
+        print!("{}", ssh_config::known_hosts_lines(&entry_of(&r, &t)?));
+        return Ok(0);
+    }
+    let (o, i) = instance_of(&r, &t)?;
     let req = isb::server::ssh::SshRequest {
         instance: i,
         keys_of,
@@ -368,7 +478,9 @@ pub fn proxy(
 /// `isb ssh-config`'s options.
 #[derive(Args)]
 pub struct ConfigArgs {
-    /// ORG/INSTANCE (or INSTANCE in --org); none: every instance in --org.
+    /// ORG/INSTANCE, ORG/STACK/SERVICE (a service's current replica, which
+    /// the block follows across deploys), or INSTANCE in --org; none: every
+    /// running sandbox in --org.
     pub targets: Vec<String>,
     /// The guest user to log in as (default: the instance's first ordinary
     /// user, else root).
@@ -415,13 +527,9 @@ fn absolute(p: &Path) -> String {
 }
 
 /// `isb ssh-config`: Host blocks, known_hosts, and the herdr lines.
-#[expect(
-    clippy::too_many_lines,
-    reason = "predates the lint ratchet; split it when next changed"
-)]
 pub fn config(org: &Option<String>, a: ConfigArgs) -> Result<u8> {
     let r = a.remote.remote()?;
-    let mut targets: Vec<(String, String)> = a
+    let mut targets: Vec<Target> = a
         .targets
         .iter()
         .map(|t| target(t, org))
@@ -432,7 +540,10 @@ pub fn config(org: &Option<String>, a: ConfigArgs) -> Result<u8> {
         for s in v["sandboxes"].as_array().into_iter().flatten() {
             if s["status"] == "Running" {
                 if let Some(n) = s["name"].as_str() {
-                    targets.push((o.clone(), n.to_string()));
+                    targets.push(Target::Instance {
+                        org: o.clone(),
+                        instance: n.to_string(),
+                    });
                 }
             }
         }
@@ -452,32 +563,18 @@ pub fn config(org: &Option<String>, a: ConfigArgs) -> Result<u8> {
         (Remote::Url { .. }, None) => None,
     };
     let mut entries = Vec::new();
-    for (o, i) in &targets {
-        let v = r.call_tool(o, "ssh_host_keys", json!({"name": i}))?;
-        let host_keys: Vec<String> = v["keys"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|k| k["key"].as_str())
-            // Parsed again: this came out of the instance.
-            .filter_map(|k| isb::auth::ssh_keys::PublicKey::parse(k).ok())
-            .map(|k| k.line())
-            .collect();
-        if host_keys.is_empty() {
+    for t in &targets {
+        let mut e = entry_of(&r, t)?;
+        if e.host_keys.is_empty() && e.service.is_none() {
             eprintln!(
-                "isb: {o}/{i} has no SSH host keys yet: its first connection makes them and is trusted (StrictHostKeyChecking accept-new); run isb ssh-config again after it to pin them"
+                "isb: {} has no SSH host keys yet: its first connection makes them and is trusted (StrictHostKeyChecking accept-new); run isb ssh-config again after it to pin them",
+                e.target()
             );
         }
-        entries.push(HostEntry {
-            org: o.clone(),
-            instance: i.clone(),
-            user: a
-                .user
-                .clone()
-                .or_else(|| v["user"].as_str().map(String::from))
-                .unwrap_or_else(|| "root".into()),
-            host_keys,
-        });
+        if let Some(u) = &a.user {
+            e.user = u.clone();
+        }
+        entries.push(e);
     }
     let kh = a.known_hosts.unwrap_or_else(default_known_hosts);
     ssh_config::write_known_hosts(&kh, &entries)
@@ -536,16 +633,32 @@ mod tests {
 
     #[test]
     fn targets() {
-        assert_eq!(
-            target("acme/box", &None).unwrap(),
-            ("acme".into(), "box".into())
-        );
+        let inst = |o: &str, i: &str| Target::Instance {
+            org: o.into(),
+            instance: i.into(),
+        };
+        assert_eq!(target("acme/box", &None).unwrap(), inst("acme", "box"));
         assert_eq!(
             target("box", &Some("acme".into())).unwrap(),
-            ("acme".into(), "box".into())
+            inst("acme", "box")
         );
-        assert_eq!(target("box", &None).unwrap().0, "default");
-        for bad in ["acme/Box", "acme/", "/box", "a/b/c"] {
+        assert_eq!(target("box", &None).unwrap(), inst("default", "box"));
+        assert_eq!(
+            target("acme/dev/box", &None).unwrap(),
+            Target::Service {
+                org: "acme".into(),
+                stack: "dev".into(),
+                service: "box".into()
+            }
+        );
+        for bad in [
+            "acme/Box",
+            "acme/",
+            "/box",
+            "a/b/c/d",
+            "acme/dev/",
+            "Acme/box",
+        ] {
             assert!(target(bad, &None).is_err(), "{bad}");
         }
     }

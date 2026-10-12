@@ -134,14 +134,13 @@ export function instanceOrgs(list: MonitorInstance[]): string[] {
 
 /**
  * The page an instance belongs to: its stack's (an app's or a compose
- * stack's; /stacks/ redirects to the right one), or its org's workspace.
- * Null for anything else (a sandbox, a non-isb instance).
+ * stack's; /stacks/ redirects to the right one). Null for anything else (a
+ * sandbox, a build, a non-isb instance).
  */
 export function instanceLink(i: Pick<MonitorInstance, "name" | "org" | "stack">): string | null {
   if (!i.org) return null;
   const o = encodeURIComponent(i.org);
   if (i.stack) return `/orgs/${o}/stacks/${encodeURIComponent(i.stack)}`;
-  if (i.name === "workspace") return `/orgs/${o}/workspace`;
   return null;
 }
 

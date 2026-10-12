@@ -1,4 +1,4 @@
-//! The account rules every surface shares: roles, scopes, workspaces and
+//! The account rules every surface shares: roles, scopes and
 //! who may mint a token.
 
 use super::*;
@@ -172,7 +172,7 @@ fn members_follow_the_role_matrix() {
 }
 
 #[test]
-fn scoped_tokens_only_read_and_workspaces_reach_nothing() {
+fn scoped_tokens_only_read() {
     let w = world();
     let (s, acme) = (&w.s, org("acme"));
     let read = org_token(s, &w.owner, "acme", &["read"]);
@@ -185,26 +185,6 @@ fn scoped_tokens_only_read_and_workspaces_reach_nothing() {
     // `admin` in the scopes lifts it.
     let admin = org_token(s, &w.owner, "acme", &["admin"]);
     assert!(invite(s, &admin, &acme, "n@x.io", None, None).is_ok());
-    // A workspace is nobody's account.
-    let ws = Principal::workspace(&acme, "dev", Role::Admin);
-    assert!(forbidden(members(s, &ws, &acme)));
-    assert!(forbidden(invitations(s, &ws, &acme)));
-    assert!(forbidden(invite(s, &ws, &acme, "n@x.io", None, None)));
-    assert!(forbidden(tokens(s, &ws, None)));
-    assert!(forbidden(org_tokens(s, &ws, &acme)));
-    assert!(forbidden(ssh_keys(s, &ws)));
-    assert!(forbidden(sessions(s, &ws)));
-    assert!(forbidden(users(s, &ws)));
-    let t = NewToken {
-        name: "x".into(),
-        org: Some(acme.clone()),
-        expires: None,
-        scopes: vec![],
-        superadmin: false,
-    };
-    assert!(forbidden(create_token(s, &ws, t)));
-    // But it may ask who it is.
-    assert_eq!(me(s, &ws, None).unwrap()["auth"]["kind"], "workspace");
 }
 
 fn new_token(o: &str) -> NewToken {

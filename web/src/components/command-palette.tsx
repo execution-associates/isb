@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   Bell,
+  Box,
   Boxes,
   Building2,
   CornerDownLeft,
@@ -19,7 +20,6 @@ import {
   Monitor,
   Palette as PaletteIcon,
   Plug,
-  SquareTerminal,
   Moon,
   Rocket,
   ScrollText,
@@ -59,7 +59,7 @@ export const usePalette = () => useContext(Ctx);
 export const SECTIONS: { path: string; label: string; icon: LucideIcon; key: string; keywords?: string[] }[] = [
   { path: "", label: "Overview", icon: LayoutDashboard, key: "o" },
   { path: "/projects", label: "Projects", icon: FolderKanban, key: "p" },
-  { path: "/workspace", label: "Workspace", icon: SquareTerminal, key: "w", keywords: ["machine", "box", "terminal", "sandboxes", "home"] },
+  { path: "/sandboxes", label: "Sandboxes", icon: Box, key: "x", keywords: ["machine", "box", "terminal", "shell", "expiry"] },
   { path: "/templates", label: "Templates", icon: LayoutTemplate, key: "t" },
   { path: "/backups", label: "Backups", icon: DatabaseBackup, key: "b" },
   { path: "/uptime", label: "Uptime", icon: Activity, key: "u", keywords: ["monitors", "monitoring", "status", "down", "incidents", "heartbeat"] },

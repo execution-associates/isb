@@ -93,8 +93,7 @@ manage the values in 1Password.
   answer (kept 20 seconds) rather than one read per reference and replica.
   A field the item's JSON does not carry as text (a file, an OTP) is read
   with `op read`. Budget about one read per item per `refresh` interval:
-  50 items at `refresh: 5m` is 14,400 reads a day. Workspaces' references
-  are polled in a round of their own, per org, every `secret_refresh`.
+  50 items at `refresh: 5m` is 14,400 reads a day.
 - `isb secret refresh REF` asks 1Password once, however many stacks use it.
 - The token reaches `op` through the environment of that one child process,
   never its arguments, and nothing else from the daemon's environment goes
@@ -327,7 +326,6 @@ Everything that uses a secret, and what a new version does to it:
 | Database app | Its passwords (`db.<app>.password`, MySQL's and MariaDB's `db.<app>.root-password`) carry a `rotate` command: before anything is stored, isb changes the password inside the running database, authenticating with the old one, then stores the new value and rewrites `db.<app>.url` and the database's `urls` (the same URL with a driver's options), so apps using them follow. A copy of the password anywhere else goes stale: give it to apps through `urls` instead. If that fails (the database is not running, say), `secret_set` stores nothing and says why. The engines read their password variables only when the data is first made, which is why it has to happen in the database. |
 | Job, `run` mode | Reads the values when each run starts: always current. |
 | Job, `exec` mode | Runs in a replica: whatever the replica has. |
-| Workspace (`--secret NAME`) | Never restarted (a workspace restarts only with `confirm`): `secret_set` writes the new file to `/run/isb/secrets/NAME` in each running workspace using it, and reports the workspace under `skipped`. A driver reference (`vault/item/field`) is polled every org's `secret_refresh` (`isb workspace settings --secret-refresh`, default `1h`), one lookup per item, and a new version is written the same way, with a `secret.rotated` event; `isb secret refresh REF` checks now. A program that read the old value keeps it. |
 | Sandbox egress secret (`{env, secret, hosts}`) | Read by the egress proxy when a request needs it, cached for a few seconds: live. |
 | `isb up` | Reads values when it runs; nothing to cycle. |
 
@@ -341,7 +339,6 @@ $ printf %s "$NEW" | isb secret set smtp-password -
 smtp-password: version 4
 shop-production/web: web.smtp-password v3 -> v4: restarting its replicas in place
 shop-production/worker: web.smtp-password v3 -> v4: not cycled (on_change: none): files updated, the app keeps v3 until it next starts
-workspace main: delivered /run/isb/secrets/smtp-password; not restarted (a workspace restarts only with confirm): processes that read the old value keep it
 ```
 
 ### Changing the value where it is kept
@@ -372,7 +369,7 @@ secrets:
     rotate: [sh, -c, 'pw=$$(cat) && q="''" && printf ''ALTER ROLE :"u" PASSWORD :%spw%s;\n'' "$$q" "$$q" | psql -v ON_ERROR_STOP=1 -q -h 127.0.0.1 -U "$$POSTGRES_USER" -v u="$$POSTGRES_USER" -v pw="$$pw"']
 ```
 
-Each service (and workspace) a new version reaches also gets a
+Each service a new version reaches also gets a
 `secret.rotated` event, `warn` when nothing restarts: it lands in the
 history (`history_query`, kind `secret.rotated`) and goes to the
 [notification channels](notifications.md) that want it. `stack_status`

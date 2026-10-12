@@ -204,15 +204,7 @@ fn instance_list(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     let a: A = args(a)?;
     d.oc(&a.org)?;
     if let Some(k) = &a.kind {
-        let ok = [
-            "app",
-            "database",
-            "stack",
-            "tunnel",
-            "workspace",
-            "build",
-            "sandbox",
-        ];
+        let ok = ["app", "database", "stack", "tunnel", "build", "sandbox"];
         if !ok.contains(&k.as_str()) {
             return Err(Error::invalid(format!("kind is one of {}", ok.join(", "))));
         }
@@ -587,13 +579,13 @@ pub(super) fn register(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<(
         d,
         "instance_list",
         "List instances",
-        "Every instance isb manages in the org, one row each (kubectl get pods): kind (app replica `app`, `database`, a compose service's `stack`, `tunnel`, `workspace`, `sandbox`, `build`), the owning app or stack and service, replica slot, revision, status, health (healthy, unhealthy, starting, none) and whether it is in rotation (receiving traffic), IP, restarts, age, CPU and memory now. Filter by app, stack, service, kind or status. instance_get describes one.",
+        "Every instance isb manages in the org, one row each (kubectl get pods): kind (app replica `app`, `database`, a compose service's `stack`, `tunnel`, `sandbox`, `build`), the owning app or stack and service, replica slot, revision, status, health (healthy, unhealthy, starting, none) and whether it is in rotation (receiving traffic), IP, restarts, age, CPU and memory now. Filter by app, stack, service, kind or status. instance_get describes one.",
         obj(
             json!({
                 "app": {"type": "string"},
                 "stack": {"type": "string"},
                 "service": {"type": "string"},
-                "kind": {"type": "string", "enum": ["app", "database", "stack", "tunnel", "workspace", "build", "sandbox"]},
+                "kind": {"type": "string", "enum": ["app", "database", "stack", "tunnel", "build", "sandbox"]},
                 "status": {"type": "string", "description": "Running, Stopped, ..."}
             }),
             &[]

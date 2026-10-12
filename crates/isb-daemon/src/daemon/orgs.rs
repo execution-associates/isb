@@ -467,7 +467,6 @@ mod tests {
             cloudflare_zone: None,
             dns_dir: None,
             instances: 0,
-            allow_nesting: false,
         }
     }
 

@@ -159,7 +159,7 @@ new bridges, so org networks would come up without addresses or internet.
   stays on one bridge, so traffic between two orgs (routed between bridges)
   is still denied.
 - **The same for `incusbr0`**, incus' own default bridge, where isb builds
-  workspace images and builder images: DHCP and
+  builder images: DHCP and
   same-bridge traffic in the `before.rules` block, `ufw allow in on incusbr0
   to any port 53` and `ufw route allow in on incusbr0 out on <uplink>`
   (commented `isb image builds: DNS` and `...: egress`). Without them a build
@@ -173,13 +173,13 @@ new bridges, so org networks would come up without addresses or internet.
   `ufw allow in on isbbr+ to any port 8480 proto tcp`, which a
   Cloudflare-tunnel org's cloudflared sends its requests to
   ([Domains](../guides/domains.md#cloudflare-tunnel-provider)).
-- **The org-bound MCP for each org's workspace** on its own bridge address:
+- **The org API** (org-bound MCP and REST) on each org's own bridge address:
   `ufw allow in on isbbr+ to any port 8481 proto tcp`
-  ([Workspaces](../concepts/workspaces.md#reaching-isb-from-inside-the-bridge-listener)).
+  ([The org API listener](../reference/http-api.md#the-org-api-listener)).
   The daemon answers only the org's own subnet there.
 
 Each rule carries a comment (`isb org bridges: DNS`, `...: egress`,
-`...: tunnel ingress`, `...: workspace MCP`). ufw's routed default-deny then
+`...: tunnel ingress`, `...: org API`). ufw's routed default-deny then
 keeps org bridges apart from each other and from the host's other networks.
 When ufw is not active, the command says so and skips the firewall: incus'
 own firewall rules already let org bridges through.
@@ -302,8 +302,8 @@ always under `orgs/<org>/`, the default org included.
 | `<org root>/backups/` | Backup destinations, schedules, runs and restore runs with logs. |
 | `<org root>/jobs/` | Scheduled jobs and their runs. |
 | `<org root>/volumes/` | Volume snapshot settings and runs. |
-| `<org root>/workspaces/` | The workspace definition, its token encrypted to the daemon's key (`<name>.token.age`), `settings.json`. |
 | `<org root>/templates/instances/` | Deployed templates. |
+| `<org root>/sandboxes.json` | The org's defaults for new sandboxes (`sandbox_settings`). |
 | `orgs/<org>/secrets/` | The org's local secrets: `<name>.age` (age ciphertext) and `<name>.json` (metadata). |
 | `orgs/<org>/notify/` | Notification channels and each channel's delivery log. |
 | `orgs/<org>/metrics.db` | A month of metrics history (SQLite, WAL). |

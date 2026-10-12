@@ -1,5 +1,5 @@
-//! The authorizer's side of the account tools: workspaces, scopes, org
-//! pinning and platform tools. What happens past it (roles, minting) is
+//! The authorizer's side of the account tools: scopes, org pinning and
+//! platform tools. What happens past it (roles, minting) is
 //! `crate::auth::ops`'s, tested there.
 
 use super::super::tests::{token, user};
@@ -29,27 +29,6 @@ fn auth(c: &Caller, tool: &str, args: Value, scope: Option<&str>) -> Result<Valu
 
 fn ok(c: &Caller, tool: &str) -> bool {
     auth(c, tool, json!({}), None).is_ok()
-}
-
-fn workspace() -> Caller {
-    Caller::User {
-        principal: Arc::new(Principal::workspace(
-            &OrgId::new("acme").unwrap(),
-            "dev",
-            Role::Admin,
-        )),
-    }
-}
-
-#[test]
-fn workspaces_reach_no_account_tool_but_whoami() {
-    let ws = workspace();
-    for t in TOOLS {
-        assert_eq!(ok(&ws, t), *t == "whoami", "{t}");
-    }
-    // Nor through its own org's endpoint.
-    assert!(auth(&ws, "member_list", json!({}), Some("acme")).is_err());
-    assert!(auth(&ws, "token_create", json!({"name": "x"}), Some("acme")).is_err());
 }
 
 #[test]

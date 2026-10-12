@@ -48,13 +48,13 @@ directory's file; with none, the command says so and names the directory.
   root-equivalent on the host.
 - **Platform commands** (`stack`, `app`, `project`, `secret`, `db`,
   `backup`, `job`, `build`, `template`, `notify`, `org update`,
-  `workspace`, `volume snapshot|show|restore`, `ingress`,
+  `sandbox ls|extend|settings`, `volume snapshot|show|restore`, `ingress`,
   `registry ls|gc`) call tools on the `isb serve` daemon over its unix socket
   (`$ISB_SERVE_SOCKET`, else `$XDG_RUNTIME_DIR/isb/serve.sock`, else
   `<tmp>/isb-<uid>/serve.sock`; on macOS the machine's
   `~/.isb/machine/isb/serve.sock`). Where there is no such socket and
-  `ISB_URL` is set (inside an org's [workspace](../concepts/workspaces.md)),
-  they call `$ISB_URL` with the API token in `ISB_TOKEN`, in the org from
+  `ISB_URL` is set (in an org's instance, the [org API
+  listener](http-api.md#the-org-api-listener)), they call `$ISB_URL` with the API token in `ISB_TOKEN`, in the org from
   `--org`, else `$ISB_ORG`.
 - **Identity and log commands** (`user`, `invite`, `token`, `audit`,
   `history`, and `key` without `--url`) open the daemon's files under its
@@ -260,35 +260,25 @@ refuses an org with stacks or instances unless `--force`, which deletes its
 apps, stacks and sandboxes first. See [Orgs](../concepts/orgs.md) and
 [Host firewall](../operations/host-setup.md#host-firewall).
 
-## Workspaces
+## Sandboxes (through isb serve)
 
 ```text
-isb workspace create [--image IMAGE] [--name N] [--user dev] [--cpus N] [--memory SIZE]
-                     [--root-size SIZE] [--home-size 20GiB] [-e KEY=VALUE]... [--secret NAME]...
-                     [--token-role viewer|member|admin] [--home-bind DIR]
-isb workspace show [NAME] [--json]      alias get
-isb workspace ls [--json]               alias list
-isb workspace start [NAME]
-isb workspace stop|restart [NAME] [--yes]
-isb workspace rebuild [NAME] [--image IMAGE] --yes
-isb workspace update [NAME] [--image I] [--cpus N] [--memory M] [--root-size S]
-                     [--home-size S] [--token-role R] [--yes]
-isb workspace rm [NAME] [--keep-home] --yes          alias delete
-isb workspace rotate-token [NAME]
-isb workspace setup [NAME] [--run]
-isb workspace image build [NAME] [--recipe FILE] [--base IMAGE] [--description T] [--timeout 30m] [--force]
-isb workspace image ls|logs ID|rm NAME
-isb workspace settings [--max-workspaces N] [--sandbox-expiry 24h] [--sandbox-idle 2h|none]
-                       [--home-kind volume|host] [--home-pool POOL]
-isb workspace sandboxes [--json]
-isb workspace extend SANDBOX [--by 24h] [--idle-timeout 4h|none]
-isb workspace ssh-config [--name N] [ssh-config flags]
-isb workspace ssh [--name N] [--as EMAIL] [--url URL] [--token-file FILE]
+isb sandbox ls [--json]
+isb sandbox extend NAME [--by 24h] [--idle-timeout 4h|none]
+isb sandbox settings [--expiry 24h] [--idle 2h|none]
 ```
 
-`--yes` confirms what ends live sessions. `--home-bind` is for
-superadmins; `--max-workspaces`, `--home-kind` and `--home-pool` for
-platform admins. See [Workspaces](../concepts/workspaces.md).
+The org's sandboxes made through `isb serve` (`sandbox_create`, the web UI),
+which expire and are deleted when idle ([Sandboxes are
+short-lived](../concepts/sandboxes.md#sandboxes-are-short-lived)). `ls`
+shows each one's creator, age, expiry, idle timeout and use. `extend` pushes
+the expiry out (`--by`, default 24h) or changes the idle timeout; the
+sandbox's creator or the org's admins may. `settings` prints the org's
+defaults for new sandboxes and, with `--expiry` (at most 30d) or `--idle`
+(`none` turns idle reaping off), changes them (org admins and up). Over the
+API they are `sandbox_list`, `sandbox_extend` and `sandbox_settings`. The
+top-level `isb create`, `ls`, `rm` work on this host's incus directly
+instead.
 
 ## Secrets
 
@@ -371,8 +361,7 @@ isb cp INSTANCE:/path LOCAL             a small file out (at most 4 MiB)
 isb cp LOCAL INSTANCE:/path             and in (at most 2 MiB)
 ```
 
-`--kind` is `app`, `database`, `stack`, `tunnel`, `workspace`, `build` or
-`sandbox`. `exec` runs argv with no shell, prints the command's output and exits
+`--kind` is `app`, `database`, `stack`, `tunnel`, `build` or `sandbox`. `exec` runs argv with no shell, prints the command's output and exits
 with its status (124 when `--timeout`, default 60s and at most 15m, killed it);
 `-i` feeds this process's stdin (at most 1 MiB); without it, piped input is
 left unread and said on stderr, which `-n` keeps quiet. These go through the daemon's
@@ -544,9 +533,9 @@ Passwords never come from argv.
 isb key add FILE|- [--name N] [--user EMAIL] [--url URL] [--token-file FILE]
 isb key ls [--user EMAIL] [--json] [--url URL] [--token-file FILE]
 isb key rm ID... [--user EMAIL] [--url URL] [--token-file FILE]
-isb ssh-config [ORG/INSTANCE...] [--user U] [--as EMAIL] [--known-hosts FILE] [--identity FILE]
-               [--isb PATH] [-o FILE] [--url URL] [--token-file FILE]
-isb ssh-proxy ORG/INSTANCE [--as EMAIL] [--url URL] [--token-file FILE]
+isb ssh-config [ORG/INSTANCE | ORG/STACK/SERVICE ...] [--user U] [--as EMAIL] [--known-hosts FILE]
+               [--identity FILE] [--isb PATH] [-o FILE] [--url URL] [--token-file FILE]
+isb ssh-proxy ORG/INSTANCE|ORG/STACK/SERVICE [--known-hosts] [--as EMAIL] [--url URL] [--token-file FILE]
 ```
 
 With `--url` (or `ISB_URL`) and a token (`ISB_TOKEN`, or `--token-file`),
@@ -554,9 +543,12 @@ With `--url` (or `ISB_URL`) and a token (`ISB_TOKEN`, or `--token-file`),
 daemon. Without, `key` edits the identity store on the host for `--user`
 (default: the only platform admin), and `ssh-proxy` uses the local
 daemon's socket with the keys of `--as`. `ssh-config` prints a `Host` block
-per instance (every running instance in `--org` when none is named), pins
+per instance (every running sandbox in `--org` when none is named), pins
 host keys in `~/.config/isb/known_hosts`, and prints a `herdr machine add`
-line per instance on stderr. See [SSH and herdr](../guides/ssh.md).
+line per instance on stderr. A stack service (`ORG/STACK/SERVICE`) reaches
+its current replica, and its block asks isb for that replica's keys at each
+connection (`KnownHostsCommand isb ssh-proxy --known-hosts`) instead of
+pinning them. See [SSH and herdr](../guides/ssh.md).
 
 ## Audit and history
 

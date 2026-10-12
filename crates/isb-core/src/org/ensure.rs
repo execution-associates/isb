@@ -335,8 +335,7 @@ fn network_access(bridge: &str, existing: Option<&Value>) -> String {
 }
 
 /// The project's config: restricted to the org's bridge and uid, its
-/// limits, isb's own keys, and the disk paths it may bind (the bind roots
-/// and its workspaces' host-folder homes).
+/// limits, isb's own keys, and the disk paths it may bind (the bind roots).
 fn project_config(org: &OrgId, k: &Kept, opts: &OrgOptions, existing: Option<&Value>) -> Value {
     let bridge = bridge_name(org);
     let uid = rustix::process::getuid().as_raw();
@@ -374,15 +373,22 @@ fn project_config(org: &OrgId, k: &Kept, opts: &OrgOptions, existing: Option<&Va
         .iter()
         .map(|p| p.display().to_string())
         .collect();
-    let homes = existing
-        .map(|p| homes::recorded(&p["config"]))
-        .unwrap_or_default();
-    let paths = homes::disk_paths(&roots, &homes);
-    if paths.is_empty() {
+    if roots.is_empty() {
         config["restricted.devices.disk"] = json!("managed");
     } else {
         config["restricted.devices.disk"] = json!("allow");
-        config["restricted.devices.disk.paths"] = json!(paths.join(","));
+        config["restricted.devices.disk.paths"] = json!(roots.join(","));
+    }
+    // Null: removed by `put_project`. isb 2 orgs may carry the keys of a
+    // workspace's host-folder home and its Docker exception; without them
+    // the project binds only its roots and blocks nesting (incus' default).
+    for k in [
+        "user.isb.workspace-homes",
+        "user.isb.allow-nesting",
+        "restricted.containers.nesting",
+        "restricted.containers.interception",
+    ] {
+        config[k] = Value::Null;
     }
     for (key, v) in [
         ("limits.cpu", opts.cpus.map(|c| c.to_string())),
@@ -567,9 +573,7 @@ fn set_default_profile(
 }
 
 /// Create an org, or bring an existing one in line with `opts`. The project's
-/// disk paths are `opts.bind_roots` plus the host-folder workspace homes
-/// recorded on it ([`allow_home`]), so rewriting the bind roots never
-/// drops a home.
+/// disk paths are `opts.bind_roots`.
 pub fn ensure(
     base: &Client,
     org: &OrgId,
@@ -697,22 +701,15 @@ mod tests {
     }
 
     #[test]
-    fn rewriting_an_org_keeps_its_workspace_homes_bindable() {
+    fn rewriting_an_org_binds_its_roots_and_drops_workspace_keys() {
         let org = OrgId::new("lab").unwrap();
         let existing = json!({"config": {
             "restricted.devices.disk": "allow",
             "restricted.devices.disk.paths": "/srv/ws/lab",
-            homes::KEY_WORKSPACE_HOMES: "/srv/ws/lab",
+            "user.isb.workspace-homes": "/srv/ws/lab",
+            "user.isb.allow-nesting": "true",
+            "restricted.containers.nesting": "allow",
         }});
-        // `isb org create lab` again, without bind roots.
-        let c = project_config(
-            &org,
-            &kept_default(),
-            &OrgOptions::default(),
-            Some(&existing),
-        );
-        assert_eq!(c["restricted.devices.disk"], "allow");
-        assert_eq!(c["restricted.devices.disk.paths"], "/srv/ws/lab");
         // With a bind root of its own.
         let opts = OrgOptions {
             bind_roots: vec!["/data/lab".into()],
@@ -720,9 +717,17 @@ mod tests {
             ..Default::default()
         };
         let c = project_config(&org, &kept_default(), &opts, Some(&existing));
-        assert_eq!(c["restricted.devices.disk.paths"], "/data/lab,/srv/ws/lab");
+        assert_eq!(c["restricted.devices.disk.paths"], "/data/lab");
         assert_eq!(c["limits.cpu"], "2");
-        // An org without homes or roots binds managed volumes only.
+        let merged = merged_config(&existing["config"], &c);
+        for k in [
+            "user.isb.workspace-homes",
+            "user.isb.allow-nesting",
+            "restricted.containers.nesting",
+        ] {
+            assert!(merged.get(k).is_none(), "{k}");
+        }
+        // An org without roots binds managed volumes only.
         let c = project_config(&org, &kept_default(), &OrgOptions::default(), None);
         assert_eq!(c["restricted.devices.disk"], "managed");
         assert!(c.get("restricted.devices.disk.paths").is_none());

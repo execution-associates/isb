@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { canWrite } from "@/lib/admin";
 import { canManage, canOpenOrg, rememberOrg, roleIn, useMe } from "@/lib/session";
 import { DownMonitorsBanner } from "@/uptime/cards";
-import { WorkspaceCard } from "@/workspace/workspace-card";
 
 /** Events name their stack `org/stack`, or just `stack` in the default org. */
 export function eventOrg(stack: string): string {
@@ -47,7 +46,7 @@ export function OrgPage() {
             )}
           </>
         }
-        description="The workspace, apps, deployments and activity across this org."
+        description="Projects, apps, deployments and activity across this org."
         actions={
           <>
             {canManage(me, org) && (
@@ -66,7 +65,6 @@ export function OrgPage() {
         }
       />
       <DownMonitorsBanner org={org} />
-      <WorkspaceCard org={org} admin={canManage(me, org)} />
       <OrgDashboard org={org} />
       <InviteDialog org={org} open={inviteOpen} onOpenChange={setInviteOpen} />
       <NewProjectDialog org={org} open={newProject} onOpenChange={setNewProject} />

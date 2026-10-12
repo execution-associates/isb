@@ -33,7 +33,7 @@ describe("volume helpers", () => {
 
   it("names a volume's backup from the volume", () => {
     expect(defaultBackupName("pg")).toBe("pg-daily");
-    expect(defaultBackupName("acme_workspace_home")).toBe("acme-workspace-home-daily");
+    expect(defaultBackupName("acme_dev_home")).toBe("acme-dev-home-daily");
     expect(defaultBackupName("Shop-Production_PG_Data_with_a_long_tail")).toBe("shop-production-pg-dat-daily");
   });
 });

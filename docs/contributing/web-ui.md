@@ -66,12 +66,12 @@ holds the defaults and the event mapping, with tests beside it.
   changed or removed elsewhere emits none, so the live views poll every
   `LIVE_POLL` (15 s) while the tab is visible: the project, app and stack
   lists, a stack's status and the org overview. Pages with their own pace
-  (a deployment in progress, logs, metrics, workspaces) set a
+  (a deployment in progress, logs, metrics, sandboxes) set a
   `refetchInterval` of their own. The signed-in user (`["me"]`, whose orgs
   fill the org switcher) refetches every minute.
 
 Every key for org-scoped data carries the org right after its family
-(`["apps", org, ...]`, `["stacks", org, ...]`, `["workspace", org]`,
+(`["apps", org, ...]`, `["stacks", org, ...]`, `["sandboxes", org]`,
 `["templates", "list", org]`), so switching orgs never shows another org's
 cached data, and invalidating one org leaves the others alone. One tool
 answer has one key: `secret_list` is `["apps", org, "secret-list"]` and
