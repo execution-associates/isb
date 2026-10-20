@@ -401,21 +401,91 @@ pub fn teardown(client: &Client, instance: &str) -> Result<()> {
 /// The egress bridges incus holds, each with its policy: what the proxy
 /// manager reconciles against.
 pub fn list(client: &Client) -> Result<Vec<Value>> {
-    let v = host(client).get("/1.0/networks?recursion=1")?;
-    Ok(v.as_array()
-        .map(|a| {
-            a.iter()
-                .filter(|n| n["config"][KEY_FOR].is_string())
-                .cloned()
-                .collect()
-        })
-        .unwrap_or_default())
+    // Names, then each egress bridge on its own. With recursion incus reads
+    // every host interface once per network it lists (a full netlink dump
+    // each), and the proxy manager asks every few seconds.
+    let h = host(client);
+    let urls = h.get("/1.0/networks")?;
+    let mut out = Vec::new();
+    for url in urls
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+    {
+        let Some(name) = url.strip_prefix("/1.0/networks/") else {
+            continue;
+        };
+        let name = name.split('?').next().unwrap_or_default();
+        if !name.starts_with(NET_PREFIX) {
+            continue;
+        }
+        // Gone since the listing: nothing to reconcile.
+        let Some(n) = h.get_opt(&format!("/1.0/networks/{}", encode_segment(name)))? else {
+            continue;
+        };
+        if n["config"][KEY_FOR].is_string() {
+            out.push(n);
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::fake::{Route, serve};
     use crate::egress::policy::EgressSpec;
+
+    #[test]
+    fn listing_fetches_only_egress_bridges() {
+        // A recursive listing costs incus a host interface dump per network:
+        // the fake refuses it, and any network but the egress bridges.
+        let (_d, c) = serve(vec![
+            Route {
+                prefix: "GET /1.0/networks?recursion=1",
+                status: 500,
+                body: json!("recursive listing"),
+            },
+            Route {
+                prefix: "GET /1.0/networks/isbbrxaaaa",
+                status: 200,
+                body: json!({"name": "isbbrxaaaa", "config": {KEY_FOR: "isb-acme/web-1"}}),
+            },
+            Route {
+                prefix: "GET /1.0/networks/isbbrxbbbb",
+                status: 200,
+                body: json!({"name": "isbbrxbbbb", "config": {}}),
+            },
+            Route {
+                prefix: "GET /1.0/networks/isbbrxgone",
+                status: 404,
+                body: json!("not found"),
+            },
+            Route {
+                prefix: "GET /1.0/networks/",
+                status: 500,
+                body: json!("not an egress bridge"),
+            },
+            Route {
+                prefix: "GET /1.0/networks",
+                status: 200,
+                body: json!([
+                    "/1.0/networks/incusbr0",
+                    "/1.0/networks/isbbrxaaaa",
+                    "/1.0/networks/isbbrxbbbb",
+                    "/1.0/networks/isbbrxgone",
+                    "/1.0/networks/eth0",
+                ]),
+            },
+        ]);
+        let names: Vec<String> = list(&c)
+            .unwrap()
+            .iter()
+            .map(|n| n["name"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(names, ["isbbrxaaaa"]);
+    }
 
     fn plumbing(spec: &EgressSpec) -> Plumbing {
         let n = network_name("default", "plugin");
