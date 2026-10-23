@@ -12,11 +12,15 @@
 //!   run by `isb serve`.
 
 pub mod ca;
+pub mod names;
 pub mod plumb;
 pub mod policy;
+pub mod presets;
 
 pub use plumb::Plumbing;
 pub use policy::{EgressSecretSpec, EgressSpec, Entry, HostPattern, Policy, SecretBinding};
+
+use std::time::{Duration, Instant};
 
 use crate::client::Client;
 use crate::error::Result;
@@ -63,8 +67,67 @@ pub fn before_apply(client: &Client, p: &Plumbing, report: &mut dyn FnMut(&str))
     Ok(())
 }
 
-/// Once the instance runs: make the guest trust the CA, when there are secrets.
+/// How long a started sandbox may take to resolve an allowed name.
+const RESOLVER_WAIT: Duration = Duration::from_secs(60);
+
+/// Wait until the guest resolves one of the policy's names. For about a
+/// second after a container starts, /etc/resolv.conf does not exist yet
+/// (systemd-resolved writes it) and the DHCP lease from the egress bridge
+/// may not have arrived, so the first command of a fresh sandbox would fail
+/// DNS. An image without `getent` (exit 126/127) is not waited for.
+pub fn wait_resolver(client: &Client, instance: &str, policy: &Policy) -> Result<()> {
+    let Some(name) = policy.probe_name() else {
+        return Ok(());
+    };
+    let argv = ["getent".to_string(), "hosts".into(), name.clone()];
+    let until = Instant::now() + RESOLVER_WAIT;
+    let mut last = String::new();
+    while Instant::now() < until {
+        match crate::exec::run_captured(
+            client,
+            instance,
+            &argv,
+            &crate::exec::Request::default(),
+            crate::exec::Stdin::Null,
+            Some(Duration::from_secs(20)),
+        ) {
+            Ok(o) if o.success() || matches!(o.exit_code, 126 | 127) => return Ok(()),
+            Ok(o) => last = format!("getent exited {}", o.exit_code),
+            Err(e) => last = e.to_string(),
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    Err(crate::error::Error::invalid(format!(
+        "{instance}: the guest could not resolve {name} through its egress DNS within {}s ({last}); \
+check that /etc/resolv.conf names a nameserver and that `isb serve` is running",
+        RESOLVER_WAIT.as_secs()
+    )))
+}
+
+/// After an existing sandbox starts again: its DNS races just like a new
+/// one's. `config` is the instance's config, which holds the policy.
+pub fn after_start(
+    client: &Client,
+    instance: &str,
+    config: &std::collections::BTreeMap<String, String>,
+) -> Result<()> {
+    match stored_policy(config) {
+        Some(p) if !p.is_none() => wait_resolver(client, instance, &p),
+        _ => Ok(()),
+    }
+}
+
+/// The policy a running instance carries in its config, if any.
+pub fn stored_policy(config: &std::collections::BTreeMap<String, String>) -> Option<Policy> {
+    serde_json::from_str(config.get(KEY_POLICY)?).ok()
+}
+
+/// Once the instance runs: wait for its DNS, then make the guest trust the
+/// CA, when there are secrets.
 pub fn after_ready(client: &Client, p: &Plumbing) -> Result<()> {
+    if !p.policy.is_none() {
+        wait_resolver(client, &p.instance, &p.policy)?;
+    }
     if p.policy.secrets.is_empty() {
         return Ok(());
     }
@@ -74,5 +137,25 @@ pub fn after_ready(client: &Client, p: &Plumbing) -> Result<()> {
             "{}: the egress CA is missing from this host's state directory; recreate the sandbox",
             p.instance
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_stored_policy_reads_back_for_a_restart() {
+        let spec = EgressSpec::allow(["registry.npmjs.org", "*.githubusercontent.com"]);
+        let c = contribute(&spec, "default", "web").unwrap();
+        let config = c
+            .config
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let p = stored_policy(&config).expect("the policy parses");
+        assert_eq!(p, c.plumbing.policy);
+        assert!(!p.is_none());
+        assert!(stored_policy(&Default::default()).is_none());
     }
 }

@@ -177,6 +177,7 @@ fn rig() -> Rig {
             format!("plain.example.test:{plain_port}"),
         ],
         none: false,
+        dns_all: false,
         secrets: vec![
             EgressSecretSpec::parse(&format!("API_TOKEN=api-token@api.example.test:{tls_port}"))
                 .unwrap(),

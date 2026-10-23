@@ -59,9 +59,11 @@ pub(crate) struct CreateArgs {
     #[arg(long)]
     pub(crate) no_ready: bool,
     /// Let the sandbox reach only these hosts: `HOST[:PORT]` (port 443 by
-    /// default; `*.example.com` for subdomains), repeatable; `none` denies
-    /// all network. Everything else, public or private, is refused, through
-    /// the proxy `isb serve` runs (docs/guides/egress.md).
+    /// default; `*.example.com` for subdomains; `@npm`, `@pypi`, `@github`
+    /// and the other presets for a package manager's hosts; `@public` for
+    /// any public name), repeatable; `none` denies all network. Everything
+    /// else, and every private address, is refused, through the proxy
+    /// `isb serve` runs (docs/guides/egress.md).
     #[arg(long = "egress", value_name = "HOST[:PORT]|none")]
     pub(crate) egress: Vec<String>,
     /// A secret the sandbox sees only as a placeholder in $NAME, swapped for
@@ -83,7 +85,8 @@ pub(crate) struct ExecArgs {
     /// Working directory.
     #[arg(short = 'w', long)]
     pub(crate) cwd: Option<String>,
-    /// `KEY=VALUE` (repeatable).
+    /// `KEY=VALUE`, or `KEY` to pass the caller's own `$KEY` (skipped when
+    /// unset), which keeps a secret out of the process list (repeatable).
     #[arg(short, long = "env")]
     pub(crate) env: Vec<String>,
     /// Run via the user's login shell.
@@ -292,6 +295,7 @@ fn egress_spec(allow: &[String], secrets: &[String]) -> Result<Option<isb::egres
     }
     Ok(Some(EgressSpec {
         none,
+        dns_all: false,
         allow: if none { Vec::new() } else { allow.to_vec() },
         secrets: secrets
             .iter()
@@ -392,6 +396,22 @@ fn service_of_instance(p: &isb::compose::Project, name: &str) -> Option<String> 
         .map(|(k, _)| k.clone())
 }
 
+/// One `-e`: `KEY=VALUE` as given, or a bare `KEY` taken from the caller's
+/// environment (docker's rule), so the value never appears in argv. An
+/// unset `KEY` is left out.
+pub(crate) fn exec_env(
+    e: &str,
+    lookup: impl Fn(&str) -> Option<String>,
+) -> Result<Option<(String, String)>> {
+    if e.contains('=') {
+        return shorthand::key_value(e).map(Some);
+    }
+    if e.is_empty() {
+        return Err(Error::Invalid("expected KEY or KEY=VALUE, got \"\"".into()));
+    }
+    Ok(lookup(e).map(|v| (e.to_string(), v)))
+}
+
 pub(crate) fn exec(ctx: &Ctx, a: ExecArgs) -> Result<u8> {
     // A compose service if a file was named (or exists here) and defines it;
     // otherwise an instance name.
@@ -435,8 +455,9 @@ pub(crate) fn exec(ctx: &Ctx, a: ExecArgs) -> Result<u8> {
     };
     let mut env = BTreeMap::new();
     for e in &a.env {
-        let (k, v) = shorthand::key_value(e)?;
-        env.insert(k, v);
+        if let Some((k, v)) = exec_env(e, |k| std::env::var(k).ok())? {
+            env.insert(k, v);
+        }
     }
     let (width, height) = isb::exec::terminal_size().unzip();
     let stdin = stdin_for(&a, tty);
@@ -613,6 +634,29 @@ mod tests {
         // `-n` wins, even over a terminal.
         assert!(!forwards(&["-n", "web", "--", "sh"], true));
         assert!(Cli::try_parse_from(["isb", "exec", "-i", "-n", "web", "--", "ls"]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod exec_env_tests {
+    use super::*;
+
+    #[test]
+    fn a_bare_key_comes_from_the_callers_environment() {
+        let env = |k: &str| (k == "API_KEY").then(|| "s3cret".to_string());
+        assert_eq!(
+            exec_env("API_KEY", env).unwrap(),
+            Some(("API_KEY".into(), "s3cret".into()))
+        );
+        // Unset: left out, as docker does.
+        assert_eq!(exec_env("MISSING", env).unwrap(), None);
+        // An explicit value wins and may itself contain '='.
+        assert_eq!(
+            exec_env("A=b=c", env).unwrap(),
+            Some(("A".into(), "b=c".into()))
+        );
+        assert!(exec_env("", env).is_err());
+        assert!(exec_env("=v", env).is_err());
     }
 }
 
