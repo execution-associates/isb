@@ -482,11 +482,16 @@ impl Policy {
     }
 
     /// A name the guest's DNS answers, to tell when it is up.
+    /// With `dns: all` any name answers, and an ordinary one is asked: a
+    /// listed name may be one resolvers never forward (`*.invalid`).
     pub fn probe_name(&self) -> Option<String> {
-        self.dns_names()
-            .into_iter()
-            .next()
-            .or_else(|| (self.dns_all && !self.is_none()).then(|| "example.com".into()))
+        if self.is_none() {
+            return None;
+        }
+        if self.dns_all {
+            return Some("example.com".into());
+        }
+        self.dns_names().into_iter().next()
     }
 
     /// The secrets that may be put on the wire towards `host:port`.

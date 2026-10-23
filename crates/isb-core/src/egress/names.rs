@@ -22,6 +22,42 @@ fn path(network: &str) -> PathBuf {
     super::ca::root().join("names").join(network)
 }
 
+fn applied_path(network: &str) -> PathBuf {
+    super::ca::root()
+        .join("names")
+        .join(format!("{network}.applied"))
+}
+
+/// The proxy took up `policy`: say so, for a caller that just changed the
+/// list and must not start a command before the proxy knows it.
+pub fn mark_applied(network: &str, policy: &super::Policy) {
+    let p = applied_path(network);
+    if let Some(d) = p.parent() {
+        let _ = super::ca::make_private_dir(d);
+    }
+    if let Ok(json) = serde_json::to_string(policy) {
+        let _ = crate::secrets::local::write_atomic(&p, json.as_bytes());
+    }
+}
+
+/// Wait, at most `within`, until the proxy of `network` says it applies
+/// `policy`. False when it did not in time (an older `isb serve`, or none).
+pub fn wait_applied(network: &str, policy: &super::Policy, within: std::time::Duration) -> bool {
+    let Ok(want) = serde_json::to_string(policy) else {
+        return false;
+    };
+    let until = std::time::Instant::now() + within;
+    loop {
+        if std::fs::read_to_string(applied_path(network)).is_ok_and(|got| got == want) {
+            return true;
+        }
+        if std::time::Instant::now() >= until {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
 /// Append one line. Best effort: a full disk must not break a connection.
 pub fn record(network: &str, allowed: bool, host: &str, port: u16) {
     let p = path(network);
@@ -69,6 +105,7 @@ pub fn clear(network: &str) {
 
 pub(crate) fn forget(network: &str) {
     clear(network);
+    let _ = std::fs::remove_file(applied_path(network));
 }
 
 #[cfg(test)]

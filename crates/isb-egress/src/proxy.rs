@@ -126,6 +126,7 @@ impl Proxy {
 
     /// Replace the policy and the CA connections are intercepted with.
     pub fn set_policy(&self, policy: Policy, ca: Option<Ca>) {
+        isb_core::egress::names::mark_applied(&self.shared.network, &policy);
         let mut st = self.shared.state.write().expect("state lock");
         st.policy = Arc::new(policy);
         st.ca = ca.map(Arc::new);

@@ -336,6 +336,57 @@ fn a_host_that_is_not_on_the_list_gets_nothing() {
 }
 
 #[test]
+fn the_record_says_what_was_refused_and_which_policy_is_applied() {
+    use isb_core::egress::names;
+    let r = rig();
+    let mut c = TcpStream::connect(("127.0.0.1", r.plain_port)).unwrap();
+    c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    write!(
+        c,
+        "GET / HTTP/1.1\r\nHost: refused-record.example.test\r\n\r\n"
+    )
+    .unwrap();
+    let mut out = String::new();
+    let _ = c.read_to_string(&mut out);
+    let seen = names::read(NETWORK);
+    assert!(
+        seen.iter().any(|s| !s.allowed
+            && s.host == "refused-record.example.test"
+            && s.port == r.plain_port),
+        "{seen:?}"
+    );
+    // A proxy marks the policy it applies; another policy is not marked.
+    let net = "isbbrxe2e00009";
+    let p = Policy::from_spec(&EgressSpec::allow(["a.example.test"]), net).unwrap();
+    let env = Arc::new(Env {
+        settings: Arc::new(Settings::default()),
+        secrets: Arc::new(Store),
+        log: Arc::new(|l| eprintln!("{l}")),
+    });
+    let proxy = Proxy::new(
+        env,
+        Config {
+            project: "default".into(),
+            instance: "marker".into(),
+            network: net.into(),
+            ip: "127.0.0.1".parse().unwrap(),
+            policy: p.clone(),
+            guests_only: false,
+        },
+    );
+    proxy.set_policy(p.clone(), None);
+    assert!(names::wait_applied(net, &p, Duration::from_secs(2)));
+    let other = Policy::from_spec(&EgressSpec::allow(["b.example.test"]), net).unwrap();
+    assert!(!names::wait_applied(
+        net,
+        &other,
+        Duration::from_millis(200)
+    ));
+    proxy.set_policy(other.clone(), None);
+    assert!(names::wait_applied(net, &other, Duration::from_secs(2)));
+}
+
+#[test]
 fn a_port_that_is_not_allowed_is_not_listened_on() {
     let r = rig();
     assert!(!r.proxy.ports().contains(&80));
