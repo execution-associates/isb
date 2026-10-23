@@ -376,6 +376,16 @@ pub(crate) fn doctor(ctx: &Ctx) -> Result<u8> {
         Sandbox::list_with(&client, &[]).is_ok(),
         "incus answers on its socket".into(),
     );
+    // The proxy runs as the daemon's user and listens on 443 and 80.
+    if let Ok(v) = std::fs::read_to_string("/proc/sys/net/ipv4/ip_unprivileged_port_start") {
+        let p: u32 = v.trim().parse().unwrap_or(1024);
+        check(
+            p <= 80,
+            format!(
+                "unprivileged ports start at {p}: 80 or lower lets isb serve's proxy listen on 443 and 80 (`sudo isb host setup --sandbox-egress`)"
+            ),
+        );
+    }
     let tools = Tool::all();
     let mut names: Vec<String> = tools.iter().flat_map(|t| t.bins.keys().cloned()).collect();
     names.extend(shim::list().into_iter().map(|(n, _)| n));

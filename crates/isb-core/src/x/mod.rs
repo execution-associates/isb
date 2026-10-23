@@ -43,13 +43,15 @@ pub fn image(asked: Option<&str>, vm: bool) -> String {
     }
 }
 
-/// Readiness for an isbx sandbox: a VM's user comes from cloud-init, after
-/// the agent answers.
+/// Readiness for an isbx sandbox: commands run as uid 1000, which a cloud
+/// image's cloud-init creates a moment after it starts (a VM's, after its
+/// agent answers).
 pub fn ready(vm: bool) -> serde_json::Value {
+    let user = serde_json::json!({"command": ["getent", "passwd", "1000"]});
     if vm {
-        serde_json::json!(["running", "agent", {"command": ["getent", "passwd", "1000"]}])
+        serde_json::json!(["running", "agent", user])
     } else {
-        serde_json::json!(["running"])
+        serde_json::json!(["running", user])
     }
 }
 /// Where the cache volume is mounted; each tool's cache is a directory in it.

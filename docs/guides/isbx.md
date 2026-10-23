@@ -273,6 +273,11 @@ isb x rm x-run-1a2b3c4d5e      # delete one (its list starts closed again)
 isb x doctor                   # isb serve, incus, the shims' place on PATH, every tool
 ```
 
+`isb serve` stops an isbx sandbox that no command has used for 30 minutes
+(an `isbx.idle` label, such as `user.isbx.idle=2h` in incus, sets another
+time), and never one a command is running in; it never deletes one. The
+next command starts it again in about a second.
+
 Everything isbx makes is named `x-…` and labelled `isbx.kind` (`run` or
 `tool`), with `isbx.root` (the project) or `isbx.tool` (the tool), so
 `isb ls -l isbx.kind` finds it too.

@@ -24,6 +24,9 @@ use crate::server::{Caller, Registry, Tool};
 const REAP_EVERY: Duration = Duration::from_secs(60);
 /// A sandbox using this much of a core is active.
 const ACTIVE_CPU_PCT: f32 = 2.0;
+/// How long an isbx sandbox stays running after its last run, unless its
+/// `isbx.idle` label says otherwise.
+const ISBX_IDLE: Duration = Duration::from_secs(30 * 60);
 
 /// A sandbox's root disk size when it gives none in an org with a disk
 /// quota.
@@ -150,6 +153,7 @@ impl Sandboxes {
                     std::thread::sleep(REAP_EVERY);
                     me.warn_unmanaged(&ctl, &mut warned);
                     me.reap(&ctl);
+                    me.stop_idle_isbx(&ctl);
                 }
             });
     }
@@ -182,6 +186,41 @@ impl Sandboxes {
             details: d,
             ..Default::default()
         });
+    }
+
+    /// Stop isbx's sandboxes (`isb x`: outside every org, kept between
+    /// runs) that no run has used for their `isbx.idle` (default 30m), so
+    /// they hold no memory until the next run starts one again, in about a
+    /// second. Never deletes; leaves alone one with a run going, and one
+    /// isbx never marked as used here (another user's, or one made by hand).
+    fn stop_idle_isbx(&self, ctl: &crate::stack::Controller) {
+        for i in ctl.snapshot().instances.values() {
+            if !i.labels.contains_key(crate::x::LABEL_KIND)
+                || !i.status.eq_ignore_ascii_case("running")
+                || OrgId::from_incus_project(&i.project).is_some()
+            {
+                continue;
+            }
+            let idle = i
+                .labels
+                .get("isbx.idle")
+                .and_then(|d| crate::flex::parse_duration(d).ok())
+                .unwrap_or(ISBX_IDLE);
+            let quiet = crate::x::last_used(&i.name).and_then(|t| t.elapsed().ok());
+            if quiet.is_none_or(|q| q < idle) || crate::x::live::busy(&i.name) {
+                continue;
+            }
+            let c = self.client.clone().project(&i.project);
+            match Sandbox::get(&c, &i.name).and_then(|sb| sb.stop(false, Duration::from_secs(30))) {
+                Ok(()) => eprintln!(
+                    "isb serve: stopped isbx sandbox {} (unused for {}m)",
+                    i.name,
+                    quiet.unwrap_or_default().as_secs() / 60
+                ),
+                Err(e) if e.is_not_found() => {}
+                Err(e) => eprintln!("isb serve: could not stop idle {}: {e}", i.name),
+            }
+        }
     }
 
     /// Delete sandboxes past their expiry or idle timeout. Idempotent: an
