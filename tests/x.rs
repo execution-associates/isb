@@ -13,7 +13,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use common::enabled;
+use common::{enabled, image};
 use isb::sandbox::LabelFilter;
 use isb::{Client, Sandbox};
 
@@ -68,7 +68,14 @@ impl Rig {
     }
 
     fn isbx(&self, cwd: &Path, args: &[&str]) -> Output {
-        self.cmd("isbx", cwd).arg("-q").args(args).output().unwrap()
+        self.x(cwd).args(args).output().unwrap()
+    }
+
+    /// `isbx -q --image ISB_TEST_IMAGE`, for more arguments.
+    fn x(&self, cwd: &Path) -> Command {
+        let mut c = self.cmd("isbx", cwd);
+        c.args(["-q", "--image", &image()]);
+        c
     }
 }
 
@@ -107,8 +114,8 @@ fn a_one_off_command_feels_like_the_host_and_reaches_nothing_of_it() {
 
     // stdin is forwarded; stdout and stderr stay apart without a terminal.
     let mut child = r
-        .cmd("isbx", &sub)
-        .args(["-q", "sh", "-c", "tr a-z A-Z; echo err >&2"])
+        .x(&sub)
+        .args(["sh", "-c", "tr a-z A-Z; echo err >&2"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -143,13 +150,13 @@ fn a_one_off_command_feels_like_the_host_and_reaches_nothing_of_it() {
     assert!(!root.join(".git/hooks/pre-commit").exists());
 
     // Only display variables pass, and -e KEY names another.
-    let mut c = r.cmd("isbx", &sub);
-    c.args(["-q", "sh", "-c", "echo \"[$ISBX_T_SECRET][$HOME]\""])
+    let mut c = r.x(&sub);
+    c.args(["sh", "-c", "echo \"[$ISBX_T_SECRET][$HOME]\""])
         .env("ISBX_T_SECRET", "s3cret");
-    assert_eq!(text(&c.output().unwrap()).trim(), "[][/home/dev]");
-    let mut c = r.cmd("isbx", &sub);
+    let out = text(&c.output().unwrap());
+    assert!(out.starts_with("[][/home/"), "{out}");
+    let mut c = r.x(&sub);
     c.args([
-        "-q",
         "-e",
         "ISBX_T_SECRET",
         "sh",
@@ -197,7 +204,16 @@ fn a_tool_installs_runs_from_its_shim_updates_and_goes() {
     let o = r
         .cmd("isb", &root)
         .args([
-            "x", "install", &name, "--mount", "none", "--from", &hello, "-q",
+            "x",
+            "install",
+            &name,
+            "--mount",
+            "none",
+            "--image",
+            &image(),
+            "--from",
+            &hello,
+            "-q",
         ])
         .output()
         .unwrap();
