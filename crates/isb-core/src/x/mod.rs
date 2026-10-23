@@ -93,7 +93,7 @@ const PASS_ENV: &[&str] = &[
     "LINES",
 ];
 
-/// The environment passed from the host: [`PASS_ENV`], every `LC_*`, and
+/// The environment passed from the host: the display variables above, every `LC_*`, and
 /// the `extra` names asked for (each only when set).
 pub fn passed_env<'a>(
     host: impl IntoIterator<Item = (String, String)>,
