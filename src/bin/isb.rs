@@ -76,6 +76,8 @@ mod sandboxes;
 mod volumes;
 #[path = "isb/x.rs"]
 mod x;
+#[path = "isb/x_tools.rs"]
+mod x_tools;
 
 /// Declarative incus sandboxes.
 ///

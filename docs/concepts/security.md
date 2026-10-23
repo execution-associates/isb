@@ -199,8 +199,10 @@ or a VM:
   the host side of the virtual NIC, so nothing inside the guest can undo it.
 - The proxy lets through a connection only to a listed name on a listed port,
   by the TLS server name or HTTP `Host` the client sends, and connects as the
-  host resolves that name (public addresses only). The bridge's DNS answers
-  only the listed names. `egress: none` leaves the bridge with no address.
+  host resolves that name (public addresses only). The bridge's DNS has no
+  upstream: it answers only the listed names, or with `dns: all` every name
+  with the proxy's address, leaving the proxy to refuse. `egress: none`
+  leaves the bridge with no address.
 - A **secret** reaches the guest as a placeholder, and is swapped for the real
   value on the wire to its approved hosts only: the proxy terminates TLS with
   a CA made for that sandbox (its key stays on the host), and verifies the real
@@ -212,6 +214,30 @@ or a VM:
   secret is approved for the proxy refuses a `Host` that differs from the
   handshake's name); code inside **using** a secret against its approved
   hosts; and any sandbox without `egress`, which keeps its open network.
+
+## isbx
+
+[isbx](../guides/isbx.md) runs a command line (a package install, a vendor
+CLI, an installer piped to bash) in a sandbox instead of on the host:
+
+- **What it mounts:** the project the command is run in, at its own path,
+  with `.git` read-only. `/`, the home directory and its ancestors, and any
+  directory that is, holds or sits inside a credential or host directory
+  (`~/.ssh`, `~/.config`, `~/.local`, `/etc`, `/run`, `/var/lib/incus`, …)
+  are refused, after following symlinks. The incus socket is never mounted.
+- **Its network:** always an egress list, never the open network:
+  closed until a package manager's preset or `--egress` adds hosts; `--net
+  public` is any public name on 443 and 80, never a private address.
+- **Its environment:** display variables only; anything else is named with
+  `-e`. A secret is a placeholder swapped in on the wire, or (`--secret-env`)
+  read on the host per run and sent in the exec request, never in a
+  process's arguments.
+- **Who it runs as:** uid 1000 in a container (root inside is not root
+  outside), or in a VM with `--vm`.
+- **What it does not stop:** the mounted project is writable, so code inside
+  can change files the host later runs or trusts (`package.json` scripts,
+  `.envrc`, `mise.toml` tasks, editor task files, symlinks). A container
+  shares the host's kernel.
 
 ## Outbound connections
 

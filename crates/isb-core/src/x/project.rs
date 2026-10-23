@@ -129,7 +129,7 @@ impl RunSpec {
             "MISE_YES": "1",
         });
         if self.cache {
-            volumes.push(format!("{}:{CACHE_DIR}:owner=dev", self.cache_volume()));
+            volumes.push(format!("{}:{CACHE_DIR}:owner={USER}", self.cache_volume()));
             for (k, sub) in [
                 ("npm_config_cache", "npm"),
                 ("PIP_CACHE_DIR", "pip"),
@@ -148,6 +148,7 @@ impl RunSpec {
             "labels": { LABEL_KIND: "run", LABEL_ROOT: root },
             "volumes": volumes,
             "user": USER,
+            "ready": super::ready(self.vm),
             "working_dir": root,
             "exec": { "env": env },
             "egress": self.egress(),
@@ -218,7 +219,7 @@ const PROXY_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Wait until `isb serve`'s proxy applies the list in `spec`, so the first
 /// connection of the command is not refused by the list it replaced.
-fn wait_proxy(network: &str, spec: &SandboxSpec, report: Reporter<'_>) -> Result<()> {
+pub(crate) fn wait_proxy(network: &str, spec: &SandboxSpec, report: Reporter<'_>) -> Result<()> {
     let egress = spec.egress.clone().unwrap_or_default();
     let policy = Policy::from_spec(&egress, network)?;
     if !crate::egress::names::wait_applied(network, &policy, PROXY_WAIT) {

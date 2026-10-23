@@ -4,10 +4,17 @@
 //!
 //! - [`guard`]: which host directory is mounted, and which never are;
 //! - [`project`]: the warm sandbox per project root that one-off commands
-//!   run in.
+//!   run in;
+//! - [`tool`], [`install`], [`shim`]: installed tools, each in a sandbox of
+//!   its own, run from host shims;
+//! - [`live`]: runs in progress, which mounts and idle stops respect.
 
 pub mod guard;
+pub mod install;
+pub mod live;
 pub mod project;
+pub mod shim;
+pub mod tool;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -23,6 +30,28 @@ pub const LABEL_ROOT: &str = "isbx.root";
 pub const USER: &str = "1000:1000";
 /// The image sandboxes start from unless `--image` says otherwise.
 pub const IMAGE: &str = "dev-base";
+/// The image of a VM: dev-base is a container image. Its `ubuntu` user is
+/// uid 1000, as `dev` is; it has none of dev-base's toolchains.
+pub const VM_IMAGE: &str = "images:ubuntu/24.04/cloud";
+
+/// The image to use: the one asked for, else the default for the type.
+pub fn image(asked: Option<&str>, vm: bool) -> String {
+    match asked {
+        Some(i) => i.to_string(),
+        None if vm => VM_IMAGE.into(),
+        None => IMAGE.into(),
+    }
+}
+
+/// Readiness for an isbx sandbox: a VM's user comes from cloud-init, after
+/// the agent answers.
+pub fn ready(vm: bool) -> serde_json::Value {
+    if vm {
+        serde_json::json!(["running", "agent", {"command": ["getent", "passwd", "1000"]}])
+    } else {
+        serde_json::json!(["running"])
+    }
+}
 /// Where the cache volume is mounted; each tool's cache is a directory in it.
 pub const CACHE_DIR: &str = "/var/cache/isbx";
 

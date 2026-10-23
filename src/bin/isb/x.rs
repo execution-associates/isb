@@ -1,6 +1,7 @@
 //! `isb x`, and `isbx` (the same binary under that name): commands run in
 //! sandboxes instead of on the host (docs/guides/isbx.md).
 
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -47,6 +48,55 @@ pub(crate) enum XCmd {
     /// Stop isbx sandboxes (the named ones, else all). The next run starts
     /// them again in about a second.
     Stop { names: Vec<String> },
+    /// Install a CLI into a sandbox of its own, with host shims for its
+    /// programs: `isb x install sume --from 'sh:curl -fsSL … | bash'`.
+    Install(super::x_tools::InstallArgs),
+    /// Run an installed tool's program (what its shims do), or any command
+    /// in its sandbox: `isb x tool sume sume --help`, `isb x tool sume bash`.
+    Tool {
+        name: String,
+        bin: String,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Reinstall tools from their recipes into a new sandbox, switching only
+    /// once that works.
+    Update {
+        names: Vec<String>,
+        #[arg(long)]
+        all: bool,
+        /// Keep the sandbox of a failed install, to look inside.
+        #[arg(long)]
+        keep_failed: bool,
+    },
+    /// Remove tools (sandboxes, shims, definitions) or x-run sandboxes.
+    #[command(alias = "remove")]
+    Rm {
+        #[arg(required = true)]
+        names: Vec<String>,
+    },
+    /// Make plain host commands run through isbx (`isb x shim npm npx`), or
+    /// list the shims.
+    Shim {
+        names: Vec<String>,
+        #[arg(long)]
+        remove: bool,
+    },
+    /// Let an installed tool reach more hosts (presets too), at once.
+    Allow {
+        name: String,
+        #[arg(required = true)]
+        hosts: Vec<String>,
+    },
+    /// Take hosts off an installed tool's list.
+    Deny {
+        name: String,
+        #[arg(required = true)]
+        hosts: Vec<String>,
+    },
+    /// Check what isbx relies on: isb serve, incus, the shims' place on PATH,
+    /// every tool's sandbox and shims.
+    Doctor,
     /// Stop sandboxes idle longer than --idle, and delete those whose
     /// project directory is gone (--missing).
     Gc {
@@ -110,7 +160,7 @@ pub(crate) struct RunArgs {
     /// Skip the shared package cache.
     #[arg(long)]
     no_cache: bool,
-    /// The image (default: dev-base).
+    /// The image (default: dev-base; for a VM, images:ubuntu/24.04/cloud).
     #[arg(long)]
     image: Option<String>,
     /// The command and its arguments.
@@ -124,10 +174,22 @@ pub(crate) fn x(ctx: &Ctx, cmd: XCmd) -> Result<u8> {
         XCmd::Ls { json } => ls(ctx, json),
         XCmd::Stop { names } => stop(ctx, names),
         XCmd::Gc { idle, missing, yes } => gc(ctx, idle, missing, yes),
+        XCmd::Install(a) => super::x_tools::install(ctx, a),
+        XCmd::Tool { name, bin, args } => super::x_tools::tool(ctx, &name, &bin, args),
+        XCmd::Update {
+            names,
+            all,
+            keep_failed,
+        } => super::x_tools::update(ctx, names, all, keep_failed),
+        XCmd::Rm { names } => super::x_tools::rm(ctx, names),
+        XCmd::Shim { names, remove } => super::x_tools::shims(names, remove),
+        XCmd::Allow { name, hosts } => super::x_tools::allow(ctx, &name, hosts, true),
+        XCmd::Deny { name, hosts } => super::x_tools::allow(ctx, &name, hosts, false),
+        XCmd::Doctor => super::x_tools::doctor(ctx),
     }
 }
 
-fn home() -> Result<PathBuf> {
+pub(crate) fn home() -> Result<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
         .ok_or_else(|| Error::Invalid("$HOME is not set".into()))
@@ -170,6 +232,13 @@ fn network_for(a: &RunArgs) -> Result<(project::Net, EgressSpec)> {
 }
 
 fn run(ctx: &Ctx, a: RunArgs) -> Result<u8> {
+    // `isbx sume`: an installed tool's program runs in that tool's sandbox.
+    if !a.argv[0].contains('/') {
+        if let Some((t, bin)) = x::tool::Tool::owning(&a.argv[0]) {
+            let args = a.argv[1..].to_vec();
+            return super::x_tools::tool_run(ctx, &t, &bin, args, &a.env);
+        }
+    }
     let home = home()?;
     let cwd = std::env::current_dir()?;
     let root = match &a.root {
@@ -179,7 +248,7 @@ fn run(ctx: &Ctx, a: RunArgs) -> Result<u8> {
     let (net, grant) = network_for(&a)?;
     let rs = RunSpec {
         root: x::guard::check_root(&root, &home)?,
-        image: a.image.clone().unwrap_or_else(|| x::IMAGE.into()),
+        image: x::image(a.image.as_deref(), a.vm),
         vm: a.vm,
         git_rw: a.git_rw,
         cache: !a.no_cache,
@@ -193,7 +262,14 @@ fn run(ctx: &Ctx, a: RunArgs) -> Result<u8> {
     } else {
         x::project::ensure(&client, &rs, &mut report)?
     };
-    let code = exec(&client, &sb, &rs, &cwd, &a);
+    let hint = if rs.net == project::Net::None {
+        Hint::None
+    } else {
+        Hint::Refused("rerun with --egress for each:".into())
+    };
+    let guest_cwd = x::project::guest_cwd(&rs.root, &cwd);
+    let code = run_env(&a.env, &[])
+        .and_then(|env| attach(&client, &sb, a.argv.clone(), &guest_cwd, env, hint));
     if a.fresh {
         if let Err(e) = Sandbox::remove(&client, sb.name(), true) {
             eprintln!("isbx: could not delete {}: {e}", sb.name());
@@ -204,55 +280,76 @@ fn run(ctx: &Ctx, a: RunArgs) -> Result<u8> {
     code
 }
 
-/// Run `a.argv` in `sb` as if on the host: a terminal when there is one,
-/// stdin forwarded, the command's exit code. After a failure, say which
-/// hosts the sandbox was refused.
-fn exec(client: &isb::Client, sb: &Sandbox, rs: &RunSpec, cwd: &Path, a: &RunArgs) -> Result<u8> {
-    let mut env = x::passed_env(
-        std::env::vars(),
-        a.env
-            .iter()
-            .filter(|e| !e.contains('='))
-            .map(String::as_str),
-    );
-    for e in a.env.iter().filter(|e| e.contains('=')) {
+/// The environment a run gets: the display variables, plus `-e KEY`
+/// (from the host) and `-e KEY=VALUE`.
+pub(crate) fn run_env(flags: &[String], more: &[String]) -> Result<BTreeMap<String, String>> {
+    let names = flags
+        .iter()
+        .chain(more)
+        .filter(|e| !e.contains('='))
+        .map(String::as_str);
+    let mut env = x::passed_env(std::env::vars(), names);
+    for e in flags.iter().filter(|e| e.contains('=')) {
         let (k, v) = isb::shorthand::key_value(e)?;
         env.insert(k, v);
     }
+    Ok(env)
+}
+
+/// What the network hint after a failed run says.
+#[derive(PartialEq)]
+pub(crate) enum Hint {
+    /// No network at all.
+    None,
+    /// Refused hosts, and the flag that allows each (`--egress` for a run,
+    /// `isb x allow TOOL` for a tool).
+    Refused(String),
+}
+
+/// Run `argv` in `sb` as if on the host: a terminal when there is one,
+/// stdin forwarded, the command's exit code (125 when isbx itself failed).
+/// After a failure, say which hosts the sandbox was refused.
+pub(crate) fn attach(
+    client: &isb::Client,
+    sb: &Sandbox,
+    argv: Vec<String>,
+    cwd: &Path,
+    env: BTreeMap<String, String>,
+    hint: Hint,
+) -> Result<u8> {
     let network = isb::egress::plumb::network_name(client.project_name(), sb.name());
     let seen_before = isb::egress::names::read(&network).len();
-    let tty = isb::exec::stdio_is_tty();
     let (width, height) = isb::exec::terminal_size().unzip();
     let opts = ExecOptions {
-        cwd: Some(x::project::guest_cwd(&rs.root, cwd).display().to_string()),
+        cwd: Some(cwd.display().to_string()),
         env,
-        tty,
+        tty: isb::exec::stdio_is_tty(),
         width,
         height,
         stdin: Stdin::Inherit,
         ..Default::default()
     };
-    let code = match sb.attach(a.argv.clone(), opts) {
+    let code = match sb.attach(argv, opts) {
         Ok(c) => c.clamp(0, 255) as u8,
         Err(e) => {
             eprintln!("isbx: {e}");
             return Ok(125);
         }
     };
-    if code != 0 && rs.net == project::Net::None {
-        eprintln!("isbx: it ran with no network (--net none)");
-    } else if code != 0 {
-        let refused = refused_since(&network, seen_before);
-        if !refused.is_empty() {
-            eprintln!(
-                "isbx: the sandbox was refused {}; to allow it, add {}",
-                refused.join(", "),
-                refused
-                    .iter()
-                    .map(|h| format!("--egress {h}"))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            );
+    if code == 0 {
+        return Ok(0);
+    }
+    match hint {
+        Hint::None => eprintln!("isbx: it ran with no network (--net none)"),
+        Hint::Refused(how) => {
+            let refused = refused_since(&network, seen_before);
+            if !refused.is_empty() {
+                eprintln!(
+                    "isbx: the sandbox was refused {}; to allow it: {how} {}",
+                    refused.join(", "),
+                    refused.join(" ")
+                );
+            }
         }
     }
     Ok(code)
@@ -302,7 +399,7 @@ fn ls(ctx: &Ctx, json: bool) -> Result<u8> {
         "KIND".into(),
         "STATUS".into(),
         "USED".into(),
-        "ROOT".into(),
+        "MOUNTS".into(),
     ]];
     for i in list {
         let label = |k: &str| i.labels.get(k).cloned().unwrap_or_else(|| "-".into());
@@ -311,7 +408,10 @@ fn ls(ctx: &Ctx, json: bool) -> Result<u8> {
             label(x::LABEL_KIND),
             i.status.clone(),
             ago(x::last_used(&i.name)),
-            label(x::LABEL_ROOT),
+            match i.labels.get(x::tool::LABEL_TOOL) {
+                Some(t) => format!("(tool {t})"),
+                None => label(x::LABEL_ROOT),
+            },
         ]);
     }
     table(rows);
