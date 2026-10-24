@@ -1,14 +1,15 @@
 # The ratchet budgets checked by scripts/ratchet.sh: Rust files allowed over
-# its line LIMIT (`path max-lines`, not counting inline test modules), and how many times each ratcheted clippy
-# lint may be named in an exemption (`lint:<name> max-count`). Numbers only go
-# down: run `scripts/ratchet.sh --update` after shrinking something.
+# its line LIMIT (`path max-lines`, not counting inline test modules), and
+# how many times each ratcheted clippy lint may be named in an exemption
+# (`lint:<name> max-count`). Numbers only go down: run
+# `scripts/ratchet.sh --update` after shrinking something.
 crates/isb-apps/src/app/deploy.rs 1736
 crates/isb-apps/src/app/preview.rs 1574
 crates/isb-apps/src/backup.rs 1501
 crates/isb-apps/src/s3.rs 1263
 crates/isb-core/src/plan.rs 1517
 crates/isb-core/src/registry/oci.rs 1081
-crates/isb-core/src/sandbox.rs 1352
+crates/isb-core/src/sandbox.rs 1313
 crates/isb-core/src/spec.rs 1518
 crates/isb-core/src/stack/controller.rs 2325
 crates/isb-daemon/src/daemon/mod.rs 1089

@@ -89,6 +89,12 @@ export type EgressSpec =
        */
       allow?: string[];
       /**
+       * `listed` (the default): DNS answers only the listed names. `all`:
+       * every name resolves to the proxy, which refuses and records the
+       * ones not on the list.
+       */
+      dns?: string | null;
+      /**
        * Secrets the guest sees only as placeholders.
        */
       secrets?: EgressSecretSpec[];
