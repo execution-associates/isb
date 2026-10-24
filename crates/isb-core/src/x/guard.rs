@@ -62,10 +62,19 @@ fn sensitive(home: &Path) -> Vec<PathBuf> {
         .map(|p| home.join(p))
         .chain(host.iter().map(PathBuf::from))
         .flat_map(|p| {
-            let real = p.canonicalize().ok().filter(|c| *c != p);
+            let real = resolved(&p).filter(|c| *c != p);
             std::iter::once(p).chain(real)
         })
         .collect()
+}
+
+/// `p` with its nearest existing ancestor canonicalized, so a path that
+/// does not exist yet (`/var/lib/incus` on macOS) still has its target.
+fn resolved(p: &Path) -> Option<PathBuf> {
+    p.ancestors().find_map(|a| {
+        let rest = p.strip_prefix(a).ok()?;
+        Some(a.canonicalize().ok()?.join(rest))
+    })
 }
 
 /// `root` made canonical (symlinks followed), or why it may not be mounted:
@@ -160,5 +169,15 @@ mod tests {
         std::os::unix::fs::symlink(t.path().join("keys"), home.join(".ssh")).unwrap();
         let e = check_root(&keys, &home).unwrap_err().to_string();
         assert!(e.contains("inside"), "{e}");
+        // As /var/lib/incus on macOS: a sensitive path that does not exist
+        // is judged by its nearest existing ancestor's target.
+        let cargo = t.path().join("cargo-real");
+        std::fs::create_dir_all(&cargo).unwrap();
+        std::os::unix::fs::symlink(&cargo, home.join(".cargo")).unwrap();
+        let e = check_root(&cargo, &home).unwrap_err().to_string();
+        assert!(
+            e.contains("contains") && e.contains("credentials.toml"),
+            "{e}"
+        );
     }
 }
