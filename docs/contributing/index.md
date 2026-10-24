@@ -53,8 +53,8 @@ Inside the sandbox, as `dev` (except `apt`, which is root's):
 
 ```sh
 mise use -g rust@stable bun@latest                     # cargo, rustc, rustup, bun
-rustup toolchain install 1.85 --profile minimal \
-  -c clippy -c rustfmt                                 # the minimum supported version: cargo +1.85 build
+rustup toolchain install 1.87 --profile minimal \
+  -c clippy -c rustfmt                                 # the minimum supported version: cargo +1.87 build
 rustup target add x86_64-unknown-linux-musl            # the release target (aarch64-... on arm64)
 apt-get install -y musl-tools                          # root: provides musl-gcc
 ```
@@ -149,7 +149,7 @@ Plain `cargo test`, `cargo clippy`, `cargo doc` and `cargo build` cover the
 whole workspace (`default-members`). CI runs the same steps
 (`.github/workflows/ci.yml` and `build-health.yml`), plus `cargo doc` with
 warnings denied, a `cargo package` dry run, a macOS build and test on arm64
-and x86_64, the minimum supported Rust version (1.85), and the web UI's lint,
+and x86_64, the minimum supported Rust version (1.87), and the web UI's lint,
 tests and build.
 
 ## The legibility ratchet
