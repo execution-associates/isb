@@ -265,6 +265,7 @@ impl Lab {
                 EgressSecretSpec::parse(&format!("IT_TOKEN=it-token@api.example.test:{port}"))
                     .unwrap(),
             ],
+            dns_all: false,
         });
         let sb = Sandbox::create(&self.client, &s).expect("create the egress sandbox");
         settle(&self.manager, 1);

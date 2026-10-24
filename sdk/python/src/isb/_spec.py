@@ -92,6 +92,10 @@ class EgressSpec2(TypedDict, total=False):
     """Hosts and secrets."""
     #: The hosts the sandbox may reach: `host[:port]`.
     allow: Sequence[str]
+    #: `listed` (the default): DNS answers only the listed names. `all`:
+    #: every name resolves to the proxy, which refuses and records the
+    #: ones not on the list.
+    dns: Optional[str]
     #: Secrets the guest sees only as placeholders.
     secrets: Sequence[EgressSecretSpec]
 

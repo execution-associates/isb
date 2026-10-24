@@ -17,6 +17,10 @@ const SKILL_FILES: &[(&str, &str)] = &[
         include_str!("../../../docs/guides/egress.md"),
     ),
     (
+        "docs/guides/isbx.md",
+        include_str!("../../../docs/guides/isbx.md"),
+    ),
+    (
         "docs/reference/compose.md",
         include_str!("../../../docs/reference/compose.md"),
     ),

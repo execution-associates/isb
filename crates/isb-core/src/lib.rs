@@ -39,6 +39,7 @@ pub mod spec;
 pub mod stack;
 pub mod supervise;
 pub mod volume;
+pub mod x;
 
 pub use client::{Client, Timeouts};
 pub use compose::{LoadOptions, Project};

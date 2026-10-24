@@ -13,11 +13,14 @@ use crate::exec::{self, ExecOptions, ExecOutput, ExecStream, Stdin};
 use crate::idmap::SubIds;
 use crate::lock::NameLock;
 pub mod images;
+mod prune;
+
 use crate::plan::{
     self, Action, Actual, Desired, DesiredDevice, DiffOptions, HostFacts, Props, SandboxPlan,
     VolumeDefs, split_addr,
 };
 use crate::spec::{ExecDefaults, PortSpec, ReadyCheck, SandboxSpec};
+pub use prune::{PruneItem, prune_missing_path};
 
 /// Config key recording which isb call created an instance. A half-created
 /// instance is only ever cleaned up by the call whose token it carries.
@@ -645,7 +648,7 @@ fn stop_instance(client: &Client, name: &str, force: bool, timeout: Duration) ->
         .map(|_| ())
 }
 
-fn force_delete(client: &Client, name: &str) -> Result<()> {
+pub(crate) fn force_delete(client: &Client, name: &str) -> Result<()> {
     if let Some(a) = get_actual(client, name)? {
         if !a.status.eq_ignore_ascii_case("stopped") {
             let _ = stop_instance(client, name, true, Duration::from_secs(5));
@@ -1137,7 +1140,8 @@ impl Sandbox {
             &mut |_| {},
         )?;
         retry_once(&mut |_| {}, || start_instance(&self.client, &self.name))?;
-        self.wait_ready()
+        self.wait_ready()?;
+        crate::egress::after_start(&self.client, &self.name, &self.info()?.config)
     }
 
     /// Stop. `force` kills instead of a clean shutdown; `timeout` bounds the
@@ -1303,49 +1307,6 @@ impl Sandbox {
         )?;
         Ok(found)
     }
-}
-
-/// One instance `prune` considered.
-#[derive(Debug, Clone, Serialize)]
-pub struct PruneItem {
-    pub name: String,
-    pub path: String,
-    pub deleted: bool,
-}
-
-/// Delete instances whose `label` value is a host path that no longer exists.
-/// Instances without the label, or whose path exists, are never touched.
-/// With `dry_run`, nothing is deleted.
-pub fn prune_missing_path(
-    client: &Client,
-    label: &str,
-    dry_run: bool,
-    report: Reporter<'_>,
-) -> Result<Vec<PruneItem>> {
-    let mut out = Vec::new();
-    for i in Sandbox::list_with(client, &[LabelFilter::parse(label)])? {
-        let Some(path) = i.labels.get(label) else {
-            continue;
-        };
-        if path.is_empty() || !path.starts_with('/') || Path::new(path).exists() {
-            continue;
-        }
-        if dry_run {
-            report(&format!(
-                "would delete {}  ({label}={path} is gone)",
-                i.name
-            ));
-        } else {
-            report(&format!("deleting {}  ({label}={path} is gone)", i.name));
-            force_delete(client, &i.name)?;
-        }
-        out.push(PruneItem {
-            name: i.name,
-            path: path.clone(),
-            deleted: !dry_run,
-        });
-    }
-    Ok(out)
 }
 
 #[cfg(test)]

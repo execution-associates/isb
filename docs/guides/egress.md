@@ -44,10 +44,34 @@ isb create plugin -i dev-base --secret API_TOKEN=acme-api-token@api.example.com
 | omitted | open network, as before |
 | `none` | no network at all: no address, no DNS, no route |
 | a list of `host[:port]` | only those; `*.example.com` covers every name below it (not `example.com` itself: list that too); the port is 443 unless given |
-| `{allow: [...], secrets: [...]}` | the list, plus secrets |
+| `{allow: [...], secrets: [...], dns: all}` | the list, plus secrets; `dns: all` is below |
+
+In a list:
+
+- `*` (or `*:PORT`) is any public name on that port. Private addresses stay
+  refused (below), so `["*:443", "*:80"]` is the web without the host's
+  networks.
+- `@NAME` is a preset, the hosts a package manager needs:
+
+| Preset | Hosts |
+|---|---|
+| `@npm` | registry.npmjs.org, registry.yarnpkg.com |
+| `@pypi` | pypi.org, files.pythonhosted.org |
+| `@crates` | crates.io, index.crates.io, static.crates.io, static.rust-lang.org |
+| `@go` | proxy.golang.org, sum.golang.org, storage.googleapis.com |
+| `@github` | github.com, api.github.com, codeload.github.com, objects.githubusercontent.com, `*.githubusercontent.com` (release downloads, which install scripts fetch) |
+| `@mise` | mise-versions.jdx.dev, mise.jdx.dev, nodejs.org |
+| `@public` | `*:443`, `*:80` |
+
+`dns:` says what the bridge's DNS answers. `listed` (the default) answers
+the listed names and nothing else. `all` answers every name with the
+proxy's address, so a connection to a name that is not on the list reaches
+the proxy and is refused and recorded there (below), instead of failing as
+an unknown host; a list with `*` always works this way. Either way the DNS
+server has no upstream.
 
 - Hosts are **names**. An IP address cannot be allowed, and neither can a
-  wildcard with a single label (`*.com`). Everything else, public or private,
+  wildcard with a single label (`*.com`); `*` alone is any name. Everything else, public or private,
   is refused, including a direct connection to an IP address.
 - A list that is empty means `none`.
 - A name that resolves to a private, loopback or link-local address is
@@ -59,6 +83,10 @@ isb create plugin -i dev-base --secret API_TOKEN=acme-api-token@api.example.com
   is fixed when it is created in practice: recreate it to add or remove
   `egress`. Changing the list or the secrets of one that has `egress` is
   live, within a couple of seconds, with no restart.
+- A sandbox with a list is ready only once its guest resolves through the
+  bridge's DNS. For about a second after a container starts it has no
+  `/etc/resolv.conf` yet, so `isb create`, `isb up`, `isb start` and the
+  tools wait for it, and the first command never fails DNS.
 - `egress` needs `isb serve` running: the proxy is its. A sandbox made while
   it is down comes up with a network that goes nowhere (connections are
   refused) until the daemon runs, and works from then on, also after the
@@ -75,10 +103,12 @@ Say it exactly, because it is a security boundary:
    tailnet are unreachable. This holds for containers and VMs alike, because
    it is enforced by incus on the host side of the sandbox's virtual NIC, not
    inside the guest. IPv6 is off on the bridge.
-2. **The guest resolves only the allowed names.** The bridge's DNS server
-   has no upstream: it answers the listed names (with the proxy's address) and
-   returns NXDOMAIN for everything else, so it cannot be used to leak data
-   through queries. With `egress: none` the bridge has no address at all.
+2. **The guest's DNS has no upstream.** The bridge's DNS server answers the
+   listed names with the proxy's address and returns NXDOMAIN for everything
+   else (with `dns: all`, it answers every name with the proxy's address,
+   and point 3 refuses the unlisted ones). It never asks anyone else, so it
+   cannot be used to leak data through queries. With `egress: none` the
+   bridge has no address at all.
 3. **The proxy lets a connection through only if the name the client says is
    on the list, on the port it connected to.** The name is the TLS server
    name (SNI) of a TLS connection, or the `Host` of a plain HTTP request. The
@@ -191,6 +221,14 @@ variable, the store name, the hosts and the placeholder, never a value). The
 sandbox's bridge is `isbbrx<hash>` and its ACL `isbx-<hash>` in incus. Denied
 connections are logged by `isb serve`, once per target per half minute
 (`egress <project>/<sandbox>: denied host:port: reason`).
+
+The proxy also keeps a record per sandbox of each `host:port` a connection
+named, once, with its verdict: `<state>/egress/names/<network>`, lines like
+`allowed registry.npmjs.org:443` and `denied example.com:443`, at most 1024
+names. Beside it, `<network>.applied` holds the list the proxy enforces now,
+so a caller that changed the list can wait until it is in force.
+[isbx](isbx.md) reads both: it names the hosts a failed command was refused,
+and `isb x install --learn` keeps the hosts an install used.
 
 When a sandbox is removed its bridge, ACL and CA go with it; `isb serve`
 removes any left behind by a sandbox deleted some other way, ten minutes after

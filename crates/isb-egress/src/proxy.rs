@@ -8,7 +8,7 @@
 //! TLS connection to the real host and swaps placeholders for real values
 //! ([`crate::mitm`]).
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -80,6 +80,9 @@ struct Shared {
     server_tls: Mutex<HashMap<String, (Instant, Arc<rustls::ServerConfig>)>>,
     secrets: Mutex<HashMap<String, (Instant, Vec<u8>)>>,
     denied: Mutex<HashMap<String, Instant>>,
+    network: String,
+    /// The `host:port` verdicts already in the name record.
+    seen: Mutex<HashSet<String>>,
 }
 
 struct Listener {
@@ -112,6 +115,8 @@ impl Proxy {
             server_tls: Mutex::new(HashMap::new()),
             secrets: Mutex::new(HashMap::new()),
             denied: Mutex::new(HashMap::new()),
+            network: cfg.network,
+            seen: Mutex::new(HashSet::new()),
         };
         Proxy {
             shared: Arc::new(shared),
@@ -121,6 +126,7 @@ impl Proxy {
 
     /// Replace the policy and the CA connections are intercepted with.
     pub fn set_policy(&self, policy: Policy, ca: Option<Ca>) {
+        isb_core::egress::names::mark_applied(&self.shared.network, &policy);
         let mut st = self.shared.state.write().expect("state lock");
         st.policy = Arc::new(policy);
         st.ca = ca.map(Arc::new);
@@ -249,6 +255,17 @@ impl Shared {
         ));
     }
 
+    /// Put a verdict on a named target in the sandbox's name record, once.
+    fn record(&self, host: &str, port: u16, allowed: bool) {
+        let key = format!("{allowed} {host}:{port}");
+        let mut seen = self.seen.lock().expect("seen lock");
+        if seen.len() >= isb_core::egress::names::MAX_NAMES || !seen.insert(key) {
+            return;
+        }
+        drop(seen);
+        isb_core::egress::names::record(&self.network, allowed, host, port);
+    }
+
     /// Log a denial, once per target per half minute.
     fn deny(&self, host: &str, port: u16, why: &str) {
         let key = format!("{host}:{port}:{why}");
@@ -341,9 +358,11 @@ fn handle(sh: &Arc<Shared>, mut c: TcpStream, port: u16) {
         },
     };
     if !policy.allows(&host, port) {
+        sh.record(&host, port, false);
         sh.deny(&host, port, "not on the egress list");
         return;
     }
+    sh.record(&host, port, true);
     let bindings: Vec<_> = policy.secrets_for(&host, port).cloned().collect();
     if tls && !bindings.is_empty() {
         intercept(sh, c, &buf, &host, port, &bindings);

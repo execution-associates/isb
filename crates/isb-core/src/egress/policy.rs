@@ -18,13 +18,15 @@ use crate::error::{Error, Result};
 /// The port an entry gets when it names none.
 pub const DEFAULT_PORT: u16 = 443;
 
-/// A host the policy names: one exact hostname, or every name under a
-/// suffix (`*.example.com`, not `example.com` itself).
+/// A host the policy names: one exact hostname, every name under a suffix
+/// (`*.example.com`, not `example.com` itself), or any name at all (`*`;
+/// the proxy still refuses private addresses).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum HostPattern {
     Exact(String),
     /// The domain after `*.`.
     Suffix(String),
+    Any,
 }
 
 impl HostPattern {
@@ -35,6 +37,7 @@ impl HostPattern {
             HostPattern::Suffix(d) => host
                 .strip_suffix(d.as_str())
                 .is_some_and(|rest| rest.len() > 1 && rest.ends_with('.')),
+            HostPattern::Any => true,
         }
     }
 }
@@ -79,7 +82,7 @@ pub fn normalize_host(raw: &str) -> Result<String> {
 impl FromStr for Entry {
     type Err = Error;
 
-    /// `host`, `host:port`, `*.suffix` or `*.suffix:port`.
+    /// `host`, `host:port`, `*.suffix`, `*.suffix:port`, `*` or `*:port`.
     fn from_str(s: &str) -> Result<Entry> {
         let s = s.trim();
         let (host, port) = match s.rsplit_once(':') {
@@ -94,6 +97,7 @@ impl FromStr for Entry {
             None => (s, DEFAULT_PORT),
         };
         let host = match host.strip_prefix("*.") {
+            None if host == "*" => HostPattern::Any,
             Some(domain) => {
                 let d = normalize_host(domain)?;
                 if !d.contains('.') {
@@ -119,6 +123,7 @@ impl fmt::Display for Entry {
         match &self.host {
             HostPattern::Exact(h) => write!(f, "{h}:{}", self.port),
             HostPattern::Suffix(d) => write!(f, "*.{d}:{}", self.port),
+            HostPattern::Any => write!(f, "*:{}", self.port),
         }
     }
 }
@@ -244,6 +249,10 @@ pub struct EgressSpec {
     /// `egress: none`: no network at all. Also what an empty list means.
     pub none: bool,
     pub secrets: Vec<EgressSecretSpec>,
+    /// `dns: all`: the bridge's DNS answers every name with the proxy's
+    /// address, so a connection to a name not on the list reaches the proxy
+    /// and is refused and recorded there, instead of failing at DNS.
+    pub dns_all: bool,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -262,6 +271,11 @@ enum EgressRepr {
         /// Secrets the guest sees only as placeholders.
         #[serde(default)]
         secrets: Vec<EgressSecretSpec>,
+        /// `listed` (the default): DNS answers only the listed names. `all`:
+        /// every name resolves to the proxy, which refuses and records the
+        /// ones not on the list.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dns: Option<String>,
     },
 }
 
@@ -279,12 +293,13 @@ impl Serialize for EgressSpec {
     fn serialize<S: Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
         let repr = if self.none {
             EgressRepr::Keyword("none".into())
-        } else if self.secrets.is_empty() {
+        } else if self.secrets.is_empty() && !self.dns_all {
             EgressRepr::List(self.allow.clone())
         } else {
             EgressRepr::Full {
                 allow: self.allow.clone(),
                 secrets: self.secrets.clone(),
+                dns: self.dns_all.then(|| "all".into()),
             }
         };
         repr.serialize(s)
@@ -307,10 +322,23 @@ impl<'de> Deserialize<'de> for EgressSpec {
                 allow,
                 ..Default::default()
             },
-            EgressRepr::Full { allow, secrets } => EgressSpec {
+            EgressRepr::Full {
+                allow,
+                secrets,
+                dns,
+            } => EgressSpec {
                 allow,
                 none: false,
                 secrets,
+                dns_all: match dns.as_deref() {
+                    None | Some("listed") => false,
+                    Some("all") => true,
+                    Some(d) => {
+                        return Err(serde::de::Error::custom(format!(
+                            "egress dns: {d:?} is not `listed` or `all`"
+                        )));
+                    }
+                },
             },
         })
     }
@@ -344,6 +372,10 @@ pub struct Policy {
     /// Everything reachable: the allow list and every secret's hosts.
     pub entries: Vec<Entry>,
     pub secrets: Vec<SecretBinding>,
+    /// DNS answers every name with the proxy's address (`dns: all`, or a
+    /// `*` entry).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dns_all: bool,
 }
 
 /// Most entries a sandbox may carry: the proxy and the DNS config are sized
@@ -370,7 +402,7 @@ impl Policy {
             ));
         }
         let mut entries = BTreeSet::new();
-        for a in &spec.allow {
+        for a in super::presets::expand(&spec.allow)? {
             entries.insert(a.parse::<Entry>()?);
         }
         let mut secrets: Vec<SecretBinding> = Vec::new();
@@ -413,9 +445,11 @@ impl Policy {
                 "egress: at most {MAX_ENTRIES} hosts and {MAX_SECRETS} secrets per sandbox"
             )));
         }
+        let dns_all = spec.dns_all || entries.iter().any(|e| e.host == HostPattern::Any);
         Ok(Policy {
             entries: entries.into_iter().collect(),
             secrets,
+            dns_all,
         })
     }
 
@@ -439,11 +473,25 @@ impl Policy {
     pub fn dns_names(&self) -> BTreeSet<String> {
         self.entries
             .iter()
-            .map(|e| match &e.host {
-                HostPattern::Exact(h) => h.clone(),
-                HostPattern::Suffix(d) => d.clone(),
+            .filter_map(|e| match &e.host {
+                HostPattern::Exact(h) => Some(h.clone()),
+                HostPattern::Suffix(d) => Some(d.clone()),
+                HostPattern::Any => None,
             })
             .collect()
+    }
+
+    /// A name the guest's DNS answers, to tell when it is up.
+    /// With `dns: all` any name answers, and an ordinary one is asked: a
+    /// listed name may be one resolvers never forward (`*.invalid`).
+    pub fn probe_name(&self) -> Option<String> {
+        if self.is_none() {
+            return None;
+        }
+        if self.dns_all {
+            return Some("example.com".into());
+        }
+        self.dns_names().into_iter().next()
     }
 
     /// The secrets that may be put on the wire towards `host:port`.
@@ -533,7 +581,6 @@ mod tests {
             "example.com:70000",
             "example.com:x",
             "*.com",
-            "*",
             "a*.example.com",
             "ex ample.com",
             "-bad.example.com",
@@ -608,6 +655,7 @@ mod tests {
             allow: vec!["registry.npmjs.org".into()],
             none: false,
             secrets: vec![EgressSecretSpec::parse("GH_TOKEN=gh-prod@api.github.com").unwrap()],
+            dns_all: false,
         };
         let p = Policy::from_spec(&spec, "isbbrxabc").unwrap();
         assert!(p.allows("registry.npmjs.org", 443));
@@ -641,6 +689,34 @@ mod tests {
             ..Default::default()
         };
         assert!(Policy::from_spec(&both, "n").is_err());
+    }
+
+    #[test]
+    fn a_star_allows_any_name_on_its_port_and_resolves_everything() {
+        let p = Policy::from_spec(&EgressSpec::allow(["@public"]), "n").unwrap();
+        assert!(p.allows("anything.example.org", 443));
+        assert!(p.allows("example.org", 80));
+        assert!(!p.allows("example.org", 22));
+        assert!(p.dns_all);
+        assert!(p.dns_names().is_empty());
+        assert_eq!(p.probe_name().as_deref(), Some("example.com"));
+        assert_eq!(p.pinned_host(443), None);
+        assert_eq!("*:8080".parse::<Entry>().unwrap().to_string(), "*:8080");
+        assert!("*example.com".parse::<Entry>().is_err());
+    }
+
+    #[test]
+    fn dns_all_is_written_and_read_in_the_full_form() {
+        let spec: EgressSpec = serde_yaml_ng::from_str("{allow: ['@npm'], dns: all}").unwrap();
+        assert!(spec.dns_all);
+        let p = Policy::from_spec(&spec, "n").unwrap();
+        assert!(p.dns_all && p.allows("registry.npmjs.org", 443));
+        let back = serde_yaml_ng::to_string(&spec).unwrap();
+        assert!(back.contains("dns: all"), "{back}");
+        assert!(serde_yaml_ng::from_str::<EgressSpec>("{allow: [a.com], dns: some}").is_err());
+        // A plain list stays a plain list, and its stored policy has no dns_all key.
+        let plain = Policy::from_spec(&EgressSpec::allow(["a.example.com"]), "n").unwrap();
+        assert!(!serde_json::to_string(&plain).unwrap().contains("dns_all"));
     }
 
     #[test]

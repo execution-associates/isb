@@ -30,7 +30,7 @@ pub fn set_state_dir(dir: &Path) {
     let _ = STATE_DIR.set(dir.to_path_buf());
 }
 
-fn root() -> PathBuf {
+pub(crate) fn root() -> PathBuf {
     STATE_DIR
         .get()
         .cloned()
@@ -74,7 +74,7 @@ fn err(step: &str, e: rcgen::Error) -> Error {
     Error::invalid(format!("egress CA: {step}: {e}"))
 }
 
-fn make_private_dir(d: &Path) -> Result<()> {
+pub(crate) fn make_private_dir(d: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::create_dir_all(d)?;
     std::fs::set_permissions(d, std::fs::Permissions::from_mode(0o700))?;
@@ -198,6 +198,7 @@ pub fn kicked_at() -> Option<std::time::SystemTime> {
 /// Delete a sandbox's CA.
 pub fn forget(network: &str) {
     let _ = std::fs::remove_dir_all(dir(network));
+    super::names::forget(network);
 }
 
 /// Where the guest keeps what [`install`] writes.

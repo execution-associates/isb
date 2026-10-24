@@ -1034,16 +1034,23 @@ network is open.
 ```yaml
 egress: none                          # no network at all
 egress: [registry.npmjs.org, "*.example.com:8443"]
+egress: ["@npm", "@github"]           # presets
 egress:
   allow: [db.example.com:5432]
+  dns: all                            # every name resolves to the proxy, which decides
   secrets:
     - API_TOKEN=acme-api-token@api.example.com        # ENV[=SECRET]@host1,host2
     - {env: OTHER, secret: other-token, hosts: [api.other.example:8443]}
 ```
 
 - An entry is `host[:port]` (port 443 by default); `*.example.com` covers every
-  name below `example.com`, not `example.com` itself. A host is a name, never
-  an IP address.
+  name below `example.com`, not `example.com` itself; `*` (or `*:PORT`) is
+  any public name. A host is a name, never an IP address. `@npm`, `@pypi`,
+  `@crates`, `@go`, `@github`, `@mise` and `@public` are presets
+  ([the list](../guides/egress.md#the-rules)).
+- `dns:` is `listed` (default: the bridge's DNS answers only listed names) or
+  `all` (it answers every name with the proxy's address, and the proxy
+  refuses and records the unlisted ones). A list with `*` is `all`.
 - A secret's `env` is the variable the guest sees, holding a placeholder;
   `secret` names the org [secret](../guides/secrets.md) (default: `env`);
   `hosts` are where the real value may be sent, and are allowed too.

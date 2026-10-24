@@ -17,6 +17,10 @@ domains with certificates, a web UI, and an MCP server for AI agents.
 
 - **For agents and untrusted code:** each task gets its own machine with one
   directory mounted, not your home directory and its credentials.
+- **For package installs and vendor CLIs:** `isbx npm install` runs it in
+  the project's sandbox, with the project at its own path and a closed
+  network; `isb x install` keeps a CLI in a sandbox of its own behind a host
+  command.
 - **For a dev environment per branch:** one sandbox per worktree, side by
   side, with hot reload that survives every `isb up`.
 - **For apps that run for months:** replicated, health-checked,
