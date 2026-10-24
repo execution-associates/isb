@@ -855,9 +855,11 @@ fn sandbox_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     }
     // Short-lived by rule: the org's defaults unless the call says otherwise.
     let settings = d.sandboxes.settings(&org)?;
+    // The call's `expires`, else the spec's; the reconcile below leaves it.
+    let expires = a.expires.or(spec.expires.take());
     let (expires_at, idle) = crate::sandbox_life::sandbox_deadlines(
         &settings,
-        a.expires.as_deref(),
+        expires.as_deref(),
         a.idle_timeout.as_deref(),
         now_secs(),
     )?;
@@ -904,113 +906,11 @@ fn sandbox_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
 }
 
 /// What `isb.owner` says about a sandbox this caller creates.
-fn owner_label(c: &Caller) -> String {
+pub(super) fn owner_label(c: &Caller) -> String {
     match c {
         Caller::Superadmin(s) => s.label(),
         _ => format!("mcp:{}", caller_name(c)),
     }
-}
-
-fn sandbox_extend(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct A {
-        name: String,
-        #[serde(default)]
-        by: Option<String>,
-        #[serde(default)]
-        idle_timeout: Option<String>,
-        #[serde(default)]
-        org: Option<String>,
-    }
-    let org = arg_org(&a)?;
-    let a: A = args(a)?;
-    let oc = d.oc(&a.org)?;
-    let info = d.reach(c, &oc, &a.name)?;
-    let labels: BTreeMap<String, String> = info
-        .config
-        .iter()
-        .filter_map(|(k, v)| k.strip_prefix("user.").map(|k| (k.to_string(), v.clone())))
-        .collect();
-    if crate::sandbox_life::kind_of(&labels) != "sandbox" {
-        return Err(Error::invalid(format!(
-            "{} is a {}, not a sandbox: it does not expire",
-            a.name,
-            crate::sandbox_life::kind_of(&labels)
-        )));
-    }
-    // Its creator, or the org's admins.
-    let mine = labels
-        .get("isb.owner")
-        .is_some_and(|o| *o == owner_label(c));
-    let admin = match c {
-        Caller::Local { .. } | Caller::Superadmin(_) => true,
-        Caller::User { principal } => {
-            principal.platform_admin
-                || principal
-                    .role_in(&org)
-                    .is_some_and(|r| r >= crate::auth::Role::Admin)
-        }
-        _ => false,
-    };
-    if !mine && !admin {
-        return Err(Error::Forbidden(format!(
-            "{} was created by {}; its creator or the org's admins extend it",
-            a.name,
-            labels
-                .get("isb.owner")
-                .map(String::as_str)
-                .unwrap_or("someone else")
-        )));
-    }
-    let now = now_secs();
-    let mut patch = serde_json::Map::new();
-    let current = labels
-        .get("isb.expires_at")
-        .and_then(|v| v.parse::<u64>().ok());
-    let by = match &a.by {
-        Some(b) => crate::flex::parse_duration(b).map_err(Error::invalid)?,
-        None if a.idle_timeout.is_some() => Duration::ZERO,
-        None => Duration::from_secs(86400),
-    };
-    let mut expires_at = current;
-    if !by.is_zero() {
-        let e = crate::sandbox_life::extended(current, by, now)?;
-        patch.insert(
-            crate::sandbox_life::KEY_EXPIRES_AT.into(),
-            json!(e.to_string()),
-        );
-        expires_at = Some(e);
-    }
-    let mut idle = labels
-        .get("isb.idle_timeout")
-        .and_then(|v| v.parse::<u64>().ok())
-        .filter(|s| *s > 0);
-    if let Some(t) = &a.idle_timeout {
-        idle = crate::sandbox_life::idle(t)?.map(|d| d.as_secs());
-        patch.insert(
-            crate::sandbox_life::KEY_IDLE_TIMEOUT.into(),
-            json!(idle.unwrap_or(0).to_string()),
-        );
-    }
-    oc.mutate(
-        "PATCH",
-        &format!("/1.0/instances/{}", crate::client::encode_segment(&a.name)),
-        Some(&json!({"config": patch})),
-        &format!("extend sandbox {}", a.name),
-        oc.timeouts.other,
-    )?;
-    d.sandboxes.mark_active(&org.incus_project(), &a.name);
-    Ok(json!({
-        "name": a.name,
-        "expires_at": expires_at,
-        "idle_timeout": idle,
-        "message": format!(
-            "{} now expires {} from now.",
-            a.name,
-            crate::sandbox_life::human(expires_at.unwrap_or(now).saturating_sub(now))
-        ),
-    }))
 }
 
 const OUTPUT_CAP: usize = 256 * 1024;

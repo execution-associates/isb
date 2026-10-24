@@ -17,7 +17,7 @@ use crate::error::{Error, Result};
 use crate::org::OrgId;
 
 /// Instance config keys (`user.*`) isb keeps on sandboxes.
-pub const KEY_EXPIRES_AT: &str = "user.isb.expires_at";
+pub use crate::sandbox::expiry::KEY_EXPIRES_AT;
 pub const KEY_IDLE_TIMEOUT: &str = "user.isb.idle_timeout";
 
 /// The longest a sandbox may live from now, by default or extended.
@@ -106,6 +106,11 @@ pub fn put_settings(state: &Path, org: &OrgId, s: &Settings) -> Result<()> {
 
 /// A sandbox lifetime: a duration up to [`MAX_SANDBOX_LIFETIME`].
 pub fn lifetime(s: &str) -> Result<Duration> {
+    if matches!(s.trim(), "never" | "none" | "off") {
+        return Err(Error::invalid(format!(
+            "expiry {s:?}: a sandbox made through isb serve lives at most 30 days; `never` is for the host's own (`isb create`, `isb up`)"
+        )));
+    }
     let d = crate::flex::parse_duration(s.trim())
         .map_err(|e| Error::invalid(format!("expiry {s:?}: {e}")))?;
     if d.is_zero() || d > MAX_SANDBOX_LIFETIME {
@@ -163,26 +168,7 @@ pub fn extended(current: Option<u64>, by: Duration, now: u64) -> Result<u64> {
     Ok(want)
 }
 
-/// `90061` -> `1d 1h`: the two largest units.
-pub fn human(secs: u64) -> String {
-    let units = [(86400, "d"), (3600, "h"), (60, "m"), (1, "s")];
-    let mut parts = Vec::new();
-    let mut rest = secs;
-    for (n, u) in units {
-        if rest >= n {
-            parts.push(format!("{}{u}", rest / n));
-            rest %= n;
-        }
-        if parts.len() == 2 {
-            break;
-        }
-    }
-    if parts.is_empty() {
-        "0s".into()
-    } else {
-        parts.join(" ")
-    }
-}
+pub use crate::sandbox::expiry::human;
 
 /// What kind of instance this is to isb, from its `user.*` config (keys
 /// without the `user.` prefix, as the metrics sample has them).
@@ -296,6 +282,7 @@ mod tests {
         let (exp, idle) = sandbox_deadlines(&s, Some("1h"), Some("none"), 0).unwrap();
         assert_eq!((exp, idle), (3600, None));
         assert!(sandbox_deadlines(&s, Some("40d"), None, 0).is_err());
+        assert!(sandbox_deadlines(&s, Some("never"), None, 0).is_err());
         assert!(sandbox_deadlines(&s, None, Some("10s"), 0).is_err());
         // From the later of now and the current expiry.
         assert_eq!(

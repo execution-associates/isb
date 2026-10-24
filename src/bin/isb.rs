@@ -23,6 +23,8 @@ mod audit;
 mod auth;
 #[path = "isb/data.rs"]
 mod data;
+#[path = "isb/expiry.rs"]
+mod expiry;
 #[path = "isb/host.rs"]
 mod host;
 #[path = "isb/instances.rs"]
@@ -171,6 +173,9 @@ enum Cmd {
         #[arg(short, long)]
         force: bool,
     },
+    /// Show sandboxes' expiry, or change it: `--in 24h` from now, `--by 24h`
+    /// later, `--never` (docs/concepts/sandboxes.md#expiry).
+    Expiry(expiry::ExpiryArgs),
     /// List sandboxes, optionally filtered by label (`key` or `key=value`).
     #[command(alias = "list")]
     Ls {
@@ -595,6 +600,7 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         Cmd::Audit(c) => audit_cmd(c),
         Cmd::History(a) => history_cmd(a),
         Cmd::Create(a) => create(ctx, a),
+        Cmd::Expiry(a) => expiry::expiry(ctx, a),
         Cmd::Start { names } => each(ctx, names, |c, n| Sandbox::get(c, n)?.start()),
         Cmd::Stop {
             names,
@@ -603,30 +609,7 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         } => each(ctx, names, |c, n| Sandbox::get(c, n)?.stop(force, timeout)),
         Cmd::Restart { names } => each(ctx, names, |c, n| Sandbox::get(c, n)?.restart()),
         Cmd::Rm { names, force } => each(ctx, names, |c, n| Sandbox::remove(c, n, force)),
-        Cmd::Ls { labels, json } => {
-            let filters: Vec<LabelFilter> = labels.iter().map(|l| LabelFilter::parse(l)).collect();
-            let list = Sandbox::list_with(&ctx.client(None), &filters)?;
-            if json {
-                print_json(&list);
-            } else {
-                let mut rows = vec![vec![
-                    "NAME".into(),
-                    "STATUS".into(),
-                    "TYPE".into(),
-                    "LABELS".into(),
-                ]];
-                for i in &list {
-                    rows.push(vec![
-                        i.name.clone(),
-                        i.status.to_uppercase(),
-                        i.instance_type.clone(),
-                        labels_brief(i),
-                    ]);
-                }
-                table(rows);
-            }
-            Ok(0)
-        }
+        Cmd::Ls { labels, json } => ls(ctx, labels, json),
         Cmd::Ps { services, json, .. } => ps(ctx, services, json),
         Cmd::Inspect { name, json, .. } => {
             let c = ctx.client(None);
@@ -656,32 +639,10 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
             missing_path,
             yes,
             json,
-        } => {
-            if !missing_path {
-                return Err(Error::Invalid(
-                    "prune needs a criterion: --missing-path".into(),
-                ));
-            }
-            let c = ctx.client(None);
-            let mut rep = ctx.report();
-            let mut say = |l: &str| {
-                if json { rep(l) } else { println!("{l}") }
-            };
-            let items = sandbox::prune_missing_path(&c, &label, !yes, &mut say)?;
-            if json {
-                print_json(&items);
-            } else if items.is_empty() {
-                println!("nothing to prune");
-            } else if !yes {
-                println!(
-                    "dry run; re-run with -y to delete ({} sandbox(es))",
-                    items.len()
-                );
-            }
-            Ok(0)
-        }
+        } => prune(ctx, &label, missing_path, yes, json),
         Cmd::Rpc => {
-            isb::rpc::serve(std::io::stdin().lock(), std::io::stdout(), ctx.client(None))?;
+            let (input, output) = (std::io::stdin().lock(), std::io::stdout());
+            isb::rpc::serve_with(input, output, ctx.client(None), expiry::org_expiry)?;
             Ok(0)
         }
         Cmd::Schema => {

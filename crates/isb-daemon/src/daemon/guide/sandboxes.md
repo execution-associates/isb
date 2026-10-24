@@ -5,7 +5,8 @@ Linux machine, starts in seconds) or a VM.
 
 - `sandbox_create`: `spec` is one compose service with `container_name`, as
   an object or YAML (the `isb.yaml` format, topic `cli`). `expires` (default
-  24h, at most 30d), `idle_timeout` (default 2h, or `none`). Remote callers'
+  24h, at most 30d; or the spec's own `expires`), `idle_timeout` (default
+  2h, or `none`). Remote callers'
   specs are refused privileged mode, raw config, host bind mounts outside the
   org's bind roots, and non-loopback ports.
 - `sandbox_exec`: `name`, `argv` (a list, never a shell string: use
