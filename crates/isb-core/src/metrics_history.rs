@@ -827,7 +827,7 @@ mod tests {
         let a = db.query(&q2, now).unwrap();
         assert_eq!(a.tier_step, 60);
         assert!(
-            a.step >= 2 * 86_400 / MAX_POINTS && a.step % 60 == 0,
+            a.step >= 2 * 86_400 / MAX_POINTS && a.step.is_multiple_of(60),
             "{}",
             a.step
         );

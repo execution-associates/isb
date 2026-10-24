@@ -11,7 +11,7 @@ crates/isb-core/src/ingress/caddy.rs 1130
 crates/isb-core/src/machine.rs 1097
 crates/isb-core/src/plan.rs 1517
 crates/isb-core/src/registry/oci.rs 1081
-crates/isb-core/src/sandbox.rs 1352
+crates/isb-core/src/sandbox.rs 1313
 crates/isb-core/src/spec.rs 1518
 crates/isb-core/src/stack/controller.rs 2325
 crates/isb-daemon/src/daemon/mod.rs 1089

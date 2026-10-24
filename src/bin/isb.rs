@@ -35,6 +35,8 @@ mod machine;
 mod notify;
 #[path = "isb/org.rs"]
 mod org;
+#[path = "isb/output.rs"]
+mod output;
 #[path = "isb/project.rs"]
 mod project;
 #[path = "isb/registry.rs"]
@@ -62,6 +64,7 @@ use host::*;
 use instances::*;
 use machine::*;
 use org::*;
+use output::{labels_brief, print_json, table};
 use project::*;
 use registry::*;
 use secret::*;
@@ -71,6 +74,10 @@ use stack::*;
 mod sandboxes;
 #[path = "isb/volumes.rs"]
 mod volumes;
+#[path = "isb/x.rs"]
+mod x;
+#[path = "isb/x_tools.rs"]
+mod x_tools;
 
 /// Declarative incus sandboxes.
 ///
@@ -410,6 +417,11 @@ enum Cmd {
     /// The audit log of `isb serve` (`<state>/audit.db`): who did what.
     #[command(subcommand)]
     Audit(AuditCmd),
+    /// Run any command line in a sandbox instead of on the host: the project
+    /// mounted at its own path, a closed network (`isbx CMD` is `isb x run
+    /// CMD`; docs/guides/isbx.md).
+    #[command(subcommand)]
+    X(x::XCmd),
     /// The history of `isb serve`: the controller's events, incus lifecycle
     /// events in every project (with who requested them), audit rows, and
     /// markers for when nothing was watching (docs/operations/history.md).
@@ -503,45 +515,8 @@ fn each(ctx: &Ctx, names: Vec<String>, f: impl Fn(&Client, &str) -> Result<()>) 
     Ok(0)
 }
 
-fn print_json<T: Serialize>(v: &T) {
-    println!("{}", serde_json::to_string_pretty(v).expect("serializable"));
-}
-
-fn table(rows: Vec<Vec<String>>) {
-    let n = rows.iter().map(Vec::len).max().unwrap_or(0);
-    let mut w = vec![0; n];
-    for r in &rows {
-        for (i, c) in r.iter().enumerate() {
-            w[i] = w[i].max(c.chars().count());
-        }
-    }
-    for r in rows {
-        let line: Vec<String> = r
-            .iter()
-            .enumerate()
-            .map(|(i, c)| {
-                if i + 1 == r.len() {
-                    c.clone()
-                } else {
-                    format!("{c:<width$}", width = w[i])
-                }
-            })
-            .collect();
-        println!("{}", line.join("  ").trim_end());
-    }
-}
-
-fn labels_brief(i: &SandboxInfo) -> String {
-    i.labels
-        .iter()
-        .filter(|(k, _)| !k.starts_with("isb."))
-        .map(|(k, v)| format!("{k}={v}"))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let cli = Cli::parse_from(x::args());
     let mut ctx = Ctx { global: cli.global };
     if let Some(f) = cli.cmd.files() {
         ctx.global.files.extend(f.files.iter().cloned());
@@ -593,6 +568,7 @@ fn run(ctx: &Ctx, cmd: Cmd) -> Result<u8> {
         Cmd::Registry(r) => registry_cmd(ctx, r),
         Cmd::Notify(n) => notify::notify(&ctx.global.org, n),
         Cmd::Sandbox(s) => sandboxes::sandbox(&ctx.global.org, s),
+        Cmd::X(c) => x::x(ctx, c),
         Cmd::Tui => {
             isb::tui::run(ctx.client(None), isb::server::default_socket_path())?;
             Ok(0)

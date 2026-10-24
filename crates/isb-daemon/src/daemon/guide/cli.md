@@ -52,6 +52,12 @@ services:
   type are fixed at creation: `isb down` then `isb up` to change them.
 - One-off: `isb create task1 -i images:ubuntu/24.04 -v ./repo:/work -l owner=me`,
   `isb exec task1 -w /work -- make test`, `isb rm -f task1`.
+- A package install or a vendor CLI on the host: `isbx npm install` (the
+  `isb` binary named `isbx`, = `isb x run`) runs it in the project's kept
+  sandbox, the repository mounted at its own path, `.git` read-only, a
+  closed network that a package manager's registry joins; `isb x install
+  NAME --from npm:PKG|pypi:PKG|sh:LINE` keeps a CLI in its own sandbox
+  behind a host shim.
 
 ## SDKs
 

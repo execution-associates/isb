@@ -35,7 +35,7 @@ pub use isb_apps::{app, backup, build, jobs, monitor, notify, s3, template, volu
 pub use isb_core::{
     balance, client, compose, cron, discovery, egress, error, exec, foreground, idmap, image_check,
     ingress, interp, lock, machine, metrics, metrics_history, net, org, owner, plan, registry, rpc,
-    sandbox, secrets, self_update, sftp, shorthand, spec, stack, supervise, volume,
+    sandbox, secrets, self_update, sftp, shorthand, spec, stack, supervise, volume, x,
 };
 #[doc(inline)]
 pub use isb_daemon::{daemon, sandbox_life};

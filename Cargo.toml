@@ -54,20 +54,20 @@ members = ["crates/*"]
 default-members = [".", "crates/*"]
 
 [workspace.package]
-version = "3.0.0"
+version = "3.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.87"
 license = "MIT"
 repository = "https://github.com/execution-associates/isb"
 homepage = "https://github.com/execution-associates/isb"
 
 [workspace.dependencies]
-isb-core = { path = "crates/isb-core", version = "=3.0.0" }
-isb-server = { path = "crates/isb-server", version = "=3.0.0" }
-isb-apps = { path = "crates/isb-apps", version = "=3.0.0" }
-isb-daemon = { path = "crates/isb-daemon", version = "=3.0.0" }
-isb-tui = { path = "crates/isb-tui", version = "=3.0.0" }
-isb-egress = { path = "crates/isb-egress", version = "=3.0.0" }
+isb-core = { path = "crates/isb-core", version = "=3.1.0" }
+isb-server = { path = "crates/isb-server", version = "=3.1.0" }
+isb-apps = { path = "crates/isb-apps", version = "=3.1.0" }
+isb-daemon = { path = "crates/isb-daemon", version = "=3.1.0" }
+isb-tui = { path = "crates/isb-tui", version = "=3.1.0" }
+isb-egress = { path = "crates/isb-egress", version = "=3.1.0" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -107,9 +107,9 @@ rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"]
 time = { version = "0.3", default-features = false, features = ["std"] }
 
 # Database backups: gzip and zstd in pure Rust (no C toolchain for the
-# static build). ruzstd 0.8.2 needs Rust 1.87 despite its metadata.
+# static build).
 flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
-ruzstd = "=0.8.1"
+ruzstd = "0.9.1"
 
 # macOS has no /proc: process info, host stats and peer credentials come from
 # libproc, mach and getpeereid.

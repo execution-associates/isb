@@ -70,8 +70,8 @@ directory's file; with none, the command says so and names the directory.
 | 1 | an error |
 | 2 | `isb plan --exit-code` found changes |
 | 2 | `isb update --check` found a newer release |
-| the command's own | `isb exec`, and a foreground `isb up` (the first failing `command`) |
-| 125 | `isb exec`: isb itself failed (no such sandbox, incusd unreachable), not the command |
+| the command's own | `isb exec`, `isbx` / `isb x run`, `isb x tool`, and a foreground `isb up` (the first failing `command`) |
+| 125 | `isb exec`, `isbx`, `isb x tool`: isb itself failed (no such sandbox, incusd unreachable), not the command |
 | 128 + N | a foreground `isb up` stopped by signal N (130 for Ctrl-C) |
 | 129 | a foreground `isb up` whose starting process went away |
 | 141 | a foreground `isb up` whose stdout was closed |
@@ -91,7 +91,7 @@ isb restart NAME...
 isb rm NAME... [-f]                    delete (-f stops a running one first); aliases remove, delete
 isb ls [-l KEY[=VALUE]]... [--json]    list, filtered by labels; alias list
 isb inspect NAME [--json]              one sandbox, by service or instance name
-isb exec TARGET [-u USER] [-w DIR] [-e K=V]... [-l] [-t|-T] [-i|-n] [--timeout D] -- ARGV...
+isb exec TARGET [-u USER] [-w DIR] [-e K=V|K]... [-l] [-t|-T] [-i|-n] [--timeout D] -- ARGV...
 isb prune --label KEY --missing-path [-y] [--json]
 ```
 
@@ -106,7 +106,8 @@ isb prune --label KEY --missing-path [-y] [--json]
   to those hosts only. Both are [`egress`](compose.md#egress) in a compose
   file; [Sandbox egress and secrets](../guides/egress.md) has the guarantees.
 - `start` and `restart` wait for `running` only, not a file's `ready`
-  checks.
+  checks; a sandbox with an egress list also waits until its guest resolves
+  names.
 - `exec` runs argv with no shell. `TARGET` is a compose service when a
   compose file defines one by that name, or the instance name of one of its
   services (`myproject-web`), else any instance. A service runs as its `user`
@@ -121,10 +122,48 @@ isb prune --label KEY --missing-path [-y] [--json]
   forwarded without -i`). `-n` gives the command an empty stdin even from a
   terminal, and keeps that line quiet;
   `-l` runs it through the user's login shell; `--timeout` kills it (no
-  limit by default).
+  limit by default). `-e KEY` without a value passes the caller's own
+  `$KEY` (left out when unset), so a secret given that way never appears in
+  the host's process list.
 - `prune` deletes sandboxes whose `KEY` label is an absolute host path that
   no longer exists. It is a dry run unless `-y`, and never touches a
   sandbox without the label or whose path still exists.
+
+## isbx
+
+```text
+isbx [OPTIONS] CMD [ARGS...]           = isb x run (the isb binary named isbx)
+isb x run [--egress HOST[:PORT]]... [--net default|none|public] [--vm] [--fresh]
+          [--root DIR] [--secret NAME[=SECRET]@HOSTS]... [-e KEY|KEY=VALUE]...
+          [--git-rw] [--no-cache] [--image IMAGE] CMD [ARGS...]
+isb x install NAME --from RECIPE [--sha256 HEX] [--bin NAME[=PATH]]... [--egress HOST]...
+          [--learn] [--secret NAME[=SECRET]@HOSTS]... [--secret-env VAR=op://...]...
+          [-e KEY]... [--mount project|none|DIR] [--vm] [--image IMAGE] [--keep-failed]
+isb x tool NAME BIN [ARGS...]          run a tool's program (what its shims do), or any command
+isb x update NAME... | --all [--keep-failed]
+isb x rm NAME...                       a tool (sandboxes, shims, definition) or an x-run sandbox
+isb x shim [CMD...] [--remove]         host shims that run CMD through isbx; none: list them
+isb x allow NAME HOST...               add to a tool's egress list, live
+isb x deny NAME HOST...                take off a tool's egress list, live
+isb x ls [--json]                      isbx sandboxes, status, last use, mounts
+isb x stop [NAME...]                   stop them (all running ones by default)
+isb x gc [--idle D] [--missing [-y]]   stop idle ones; delete those whose project is gone
+isb x doctor                           isb serve, incus, the shims' place on PATH, every tool
+```
+
+- Flags go before `CMD`; everything from `CMD` on is the command's.
+- The project (the repository you are in, else the directory) is mounted at
+  its own path, `.git` read-only unless `--git-rw`; `/`, `$HOME` and its
+  ancestors, and credential and host directories are refused. Commands run
+  as uid 1000, with only display variables from the host and `-e`.
+- `--net default` is the project's growing list; `none` and `public` are
+  sandboxes of their own. RECIPE is `npm:PKG`, `pypi:PKG`, `cargo:CRATE`,
+  `go:MODULE`, `script:URL` or `sh:LINE`.
+- Tool definitions are `$XDG_CONFIG_HOME/isb/x/tools/NAME.yaml`, shims are
+  in `$XDG_DATA_HOME/isb/x/bin` (which goes first on PATH), and marks of use
+  and runs in progress under `$XDG_STATE_HOME/isb/x`.
+
+[Run any CLI in a sandbox](../guides/isbx.md) is the guide.
 
 ## Compose files
 

@@ -230,7 +230,7 @@ impl Sampler {
         for i in v.as_array().into_iter().flatten() {
             out.push(self.instance(i, now));
         }
-        if self.n % DISK_EVERY == 0 {
+        if self.n.is_multiple_of(DISK_EVERY) {
             // Disk I/O is optional: the rest of the sample stands without it.
             if let Ok(text) = client.get_raw("/1.0/metrics") {
                 let io = parse_disk_metrics(&String::from_utf8_lossy(&text));

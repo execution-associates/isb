@@ -16,8 +16,13 @@ ignore = [
     # time (via rcgen, for the local registry's certificates): stack
     # exhaustion parsing RFC 2822 dates. isb parses no dates with it, only
     # formats certificate validity; the fix (0.3.47) needs Rust newer than
-    # the 1.85 MSRV.
+    # the 1.87 MSRV.
     { id = "RUSTSEC-2026-0009", reason = "isb never parses RFC 2822 input with time" },
+    # crypto-bigint 0.5 (via age's p256, for its p256tag and mlkem768p256tag
+    # recipients): timing in constant-time arithmetic. isb encrypts only to
+    # x25519 and ssh recipients and holds no P-256 key; no age release takes
+    # the fixed crypto-bigint 0.7 yet.
+    { id = "RUSTSEC-2026-0387", reason = "isb uses no P-256 age recipients or keys" },
 ]
 
 [licenses]

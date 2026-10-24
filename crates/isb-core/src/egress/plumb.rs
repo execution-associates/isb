@@ -110,11 +110,14 @@ impl Plumbing {
         if self.policy.is_none() {
             return String::new();
         }
-        let mut lines = vec![
-            "no-resolv".to_string(),
-            "no-hosts".into(),
-            "address=/#/".into(),
-        ];
+        let mut lines = vec!["no-resolv".to_string(), "no-hosts".into()];
+        // `dns: all`: every name is the proxy, which decides. Otherwise every
+        // name but the listed ones is NXDOMAIN.
+        if self.policy.dns_all {
+            lines.push(format!("address=/#/{ip}"));
+            return lines.join("\n");
+        }
+        lines.push("address=/#/".into());
         lines.extend(
             self.policy
                 .dns_names()
@@ -440,6 +443,19 @@ mod tests {
             "no-resolv\nno-hosts\naddress=/#/\naddress=/api.example.com/10.9.8.1\naddress=/cdn.net/10.9.8.1"
         );
         assert_eq!(plumbing(&EgressSpec::none()).dnsmasq("10.9.8.1"), "");
+    }
+
+    #[test]
+    fn dns_all_sends_every_name_to_the_proxy() {
+        let p = plumbing(&EgressSpec {
+            allow: vec!["registry.npmjs.org".into()],
+            dns_all: true,
+            ..Default::default()
+        });
+        assert_eq!(
+            p.dnsmasq("10.9.8.1"),
+            "no-resolv\nno-hosts\naddress=/#/10.9.8.1"
+        );
     }
 
     #[test]
