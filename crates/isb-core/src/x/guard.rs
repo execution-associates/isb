@@ -22,7 +22,9 @@ pub fn project_root(cwd: &Path, home: &Path) -> PathBuf {
     }
 }
 
-/// Paths a sandbox must never see, nor any directory holding one of them.
+/// Paths a sandbox must never see, nor any directory holding one of them,
+/// each also as its symlink target: on macOS `/etc` is `/private/etc`, and
+/// a root is compared after canonicalizing.
 fn sensitive(home: &Path) -> Vec<PathBuf> {
     let in_home = [
         ".ssh",
@@ -59,6 +61,10 @@ fn sensitive(home: &Path) -> Vec<PathBuf> {
         .iter()
         .map(|p| home.join(p))
         .chain(host.iter().map(PathBuf::from))
+        .flat_map(|p| {
+            let real = p.canonicalize().ok().filter(|c| *c != p);
+            std::iter::once(p).chain(real)
+        })
         .collect()
 }
 
@@ -140,5 +146,19 @@ mod tests {
         // A symlink into a credential directory is judged by its target.
         std::os::unix::fs::symlink(home.join(".ssh"), home.join("proj2/link")).unwrap();
         assert!(check_root(&home.join("proj2/link"), &home).is_err());
+    }
+
+    #[test]
+    fn a_credential_dir_that_is_a_symlink_guards_its_target() {
+        // As /etc -> /private/etc on macOS: the root is canonical, so the
+        // sensitive path must be compared as its target too.
+        let t = tempfile::tempdir().unwrap();
+        let home = t.path().join("home");
+        let keys = t.path().join("keys/sub");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&keys).unwrap();
+        std::os::unix::fs::symlink(t.path().join("keys"), home.join(".ssh")).unwrap();
+        let e = check_root(&keys, &home).unwrap_err().to_string();
+        assert!(e.contains("inside"), "{e}");
     }
 }
