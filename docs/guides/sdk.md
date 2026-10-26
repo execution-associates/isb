@@ -155,6 +155,10 @@ fn main() -> isb::Result<()> {
 
 API docs are on [docs.rs/isb](https://docs.rs/isb).
 
+The Rust API gives a sandbox no expiry unless asked: set the spec's
+`expires`, or pass `EnsureOptions { default_expiry: Some(...), .. }` to the
+`_with` calls to get the CLI's default.
+
 ## What every SDK shares
 
 - **Converge, don't recreate.** `connect_or_create` / `connectOrCreate`
@@ -170,6 +174,9 @@ API docs are on [docs.rs/isb](https://docs.rs/isb).
   terminal resizes.
 - **A service's `command`** is for the foreground CLI `isb up`; `Project.up`
   behaves like `isb up -d` and does not run it.
+- **Sandboxes expire.** Python and TypeScript go through `isb rpc`, so a
+  sandbox they create gets the CLI's [expiry](../concepts/sandboxes.md#expiry)
+  (7 days, renewed by each `up`), unless the spec's `expires` says otherwise.
 - **Errors carry a stable code** (`not_found`, `already_exists`,
   `not_ready`, `connect`, ...) from [the rpc protocol](../reference/rpc.md#errors).
 

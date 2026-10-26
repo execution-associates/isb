@@ -1,8 +1,9 @@
 //! Sandboxes in the daemon (docs/concepts/sandboxes.md#sandboxes-are-short-lived):
 //! the activity isb sees on instances (exec, terminals, CPU), the org's
-//! sandbox defaults and the `sandbox_settings` tool, and the reaper that
-//! deletes sandboxes past their expiry or idle timeout, only those isb gave
-//! deadlines, never a replica, and records each in the history.
+//! sandbox defaults, the `sandbox_settings` and `sandbox_extend` tools, and
+//! the reaper that deletes sandboxes past their expiry or idle timeout, in
+//! orgs and outside them, only those isb gave deadlines, never a replica,
+//! and records each in the history.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -12,9 +13,9 @@ use std::time::Duration;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::{Daemon, args, obj};
+use super::{Daemon, arg_org, args, obj, owner_label};
 use crate::client::{Client, encode_segment};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::org::OrgId;
 use crate::sandbox::Sandbox;
 use crate::sandbox_life::{self as life, Settings};
@@ -171,11 +172,11 @@ impl Sandboxes {
         }
     }
 
-    fn record(&self, org: &OrgId, object: &str, msg: String, d: Value) {
+    fn record(&self, org: Option<&OrgId>, project: &str, object: &str, msg: String, d: Value) {
         self.recorder.record(crate::history::NewRecord {
             source: "controller".into(),
-            org: Some(org.as_str().to_string()),
-            project: Some(org.incus_project()),
+            org: org.map(|o| o.as_str().to_string()),
+            project: Some(project.to_string()),
             kind: "sandbox.reaped".into(),
             object_type: Some("instance".into()),
             object: Some(object.to_string()),
@@ -242,10 +243,11 @@ impl Sandboxes {
             else {
                 continue;
             };
-            let Some(org) = OrgId::from_incus_project(&i.project) else {
-                continue;
-            };
-            let oc = crate::org::client(&self.client, &org);
+            // A plain sandbox (`isb create`, `isb up` without an org) lives
+            // in a project outside every org, and is reaped the same way.
+            let org = OrgId::from_incus_project(&i.project);
+            let oc = self.client.clone().project(&i.project);
+            let place = org.as_ref().map_or(i.project.as_str(), |o| o.as_str());
             // Read it again: the sample may be stale, and only an instance
             // that still has the deadline it was sampled with is taken.
             let Ok(sb) = Sandbox::get(&oc, &i.name) else {
@@ -262,9 +264,10 @@ impl Sandboxes {
             }
             match Sandbox::remove(&oc, &i.name, true) {
                 Ok(()) => {
-                    eprintln!("isb serve: reaped sandbox {org}/{} ({reason})", i.name);
+                    eprintln!("isb serve: reaped sandbox {place}/{} ({reason})", i.name);
                     self.record(
-                        &org,
+                        org.as_ref(),
+                        &i.project,
                         &i.name,
                         format!("sandbox {} deleted: {reason}", i.name),
                         json!({
@@ -276,7 +279,7 @@ impl Sandboxes {
                     );
                 }
                 Err(e) if e.is_not_found() => {}
-                Err(e) => eprintln!("isb serve: could not reap {org}/{}: {e}", i.name),
+                Err(e) => eprintln!("isb serve: could not reap {place}/{}: {e}", i.name),
             }
             self.activity
                 .lock()
@@ -296,6 +299,109 @@ pub fn project_has_disk_limit(client: &Client, org: &OrgId) -> bool {
         .ok()
         .flatten()
         .is_some_and(|p| p["config"]["limits.disk"].as_str().is_some())
+}
+
+/// `sandbox_extend`: push a sandbox's expiry out, or change its idle timeout.
+pub(super) fn sandbox_extend(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct A {
+        name: String,
+        #[serde(default)]
+        by: Option<String>,
+        #[serde(default)]
+        idle_timeout: Option<String>,
+        #[serde(default)]
+        org: Option<String>,
+    }
+    let org = arg_org(&a)?;
+    let a: A = args(a)?;
+    let oc = d.oc(&a.org)?;
+    let info = d.reach(c, &oc, &a.name)?;
+    let labels: BTreeMap<String, String> = info
+        .config
+        .iter()
+        .filter_map(|(k, v)| k.strip_prefix("user.").map(|k| (k.to_string(), v.clone())))
+        .collect();
+    if crate::sandbox_life::kind_of(&labels) != "sandbox" {
+        return Err(Error::invalid(format!(
+            "{} is a {}, not a sandbox: it does not expire",
+            a.name,
+            crate::sandbox_life::kind_of(&labels)
+        )));
+    }
+    // Its creator, or the org's admins.
+    let mine = labels
+        .get("isb.owner")
+        .is_some_and(|o| *o == owner_label(c));
+    let admin = match c {
+        Caller::Local { .. } | Caller::Superadmin(_) => true,
+        Caller::User { principal } => {
+            principal.platform_admin
+                || principal
+                    .role_in(&org)
+                    .is_some_and(|r| r >= crate::auth::Role::Admin)
+        }
+        _ => false,
+    };
+    if !mine && !admin {
+        return Err(Error::Forbidden(format!(
+            "{} was created by {}; its creator or the org's admins extend it",
+            a.name,
+            labels
+                .get("isb.owner")
+                .map(String::as_str)
+                .unwrap_or("someone else")
+        )));
+    }
+    let now = now();
+    let mut patch = serde_json::Map::new();
+    let current = labels
+        .get("isb.expires_at")
+        .and_then(|v| v.parse::<u64>().ok());
+    let by = match &a.by {
+        Some(b) => crate::flex::parse_duration(b).map_err(Error::invalid)?,
+        None if a.idle_timeout.is_some() => Duration::ZERO,
+        None => Duration::from_secs(86400),
+    };
+    let mut expires_at = current;
+    if !by.is_zero() {
+        let e = crate::sandbox_life::extended(current, by, now)?;
+        patch.insert(
+            crate::sandbox_life::KEY_EXPIRES_AT.into(),
+            json!(e.to_string()),
+        );
+        expires_at = Some(e);
+    }
+    let mut idle = labels
+        .get("isb.idle_timeout")
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|s| *s > 0);
+    if let Some(t) = &a.idle_timeout {
+        idle = crate::sandbox_life::idle(t)?.map(|d| d.as_secs());
+        patch.insert(
+            crate::sandbox_life::KEY_IDLE_TIMEOUT.into(),
+            json!(idle.unwrap_or(0).to_string()),
+        );
+    }
+    oc.mutate(
+        "PATCH",
+        &format!("/1.0/instances/{}", crate::client::encode_segment(&a.name)),
+        Some(&json!({"config": patch})),
+        &format!("extend sandbox {}", a.name),
+        oc.timeouts.other,
+    )?;
+    d.sandboxes.mark_active(&org.incus_project(), &a.name);
+    Ok(json!({
+        "name": a.name,
+        "expires_at": expires_at,
+        "idle_timeout": idle,
+        "message": format!(
+            "{} now expires {} from now.",
+            a.name,
+            crate::sandbox_life::human(expires_at.unwrap_or(now).saturating_sub(now))
+        ),
+    }))
 }
 
 #[derive(Deserialize)]

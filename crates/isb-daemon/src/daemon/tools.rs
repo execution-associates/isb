@@ -649,6 +649,8 @@ pub(super) fn sandbox_list_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) ->
                         "created_at": created,
                         "age_secs": created.map(|c| now.saturating_sub(c as u64)),
                         "expires_at": num(crate::sandbox_life::KEY_EXPIRES_AT),
+                        // As stored: unix seconds, or `never`.
+                        "expires": i.config.get(crate::sandbox_life::KEY_EXPIRES_AT),
                         "idle_timeout": num(crate::sandbox_life::KEY_IDLE_TIMEOUT),
                         "last_active": d.sandboxes.last_seen(&project, &i.name),
                         "cpus": i.config.get("limits.cpu"),
@@ -748,7 +750,7 @@ pub(super) fn sandbox_extend_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) 
             &["name"]
         ),
         ann.write,
-        sandbox_extend
+        super::sandboxes::sandbox_extend
     );
     Ok(())
 }

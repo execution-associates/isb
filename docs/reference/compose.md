@@ -53,10 +53,10 @@ Interpolation produces strings, so typed fields also accept strings:
 - Booleans (`privileged`, `read_only`, `external`, `login`) accept `true`/`false`
   or a string: `true`, `yes`, `on`, `1`, `false`, `no`, `off`, `0` or empty,
   case-insensitive.
-- `cpus`, `cpuset`, `mem_limit`, `ready_timeout`, `user`, a mount's `owner` and
+- `cpus`, `cpuset`, `mem_limit`, `ready_timeout`, `expires`, `user`, a mount's `owner` and
   a port's `target` and `published` accept a non-negative integer or a string.
   Floats are rejected.
-- Durations (`ready_timeout`): a number with an optional unit `ms`, `s`/`sec`/
+- Durations (`ready_timeout`, `expires`): a number with an optional unit `ms`, `s`/`sec`/
   `secs`, `m`/`min`/`mins`, `h`, `d`. No unit means seconds. Decimals work (`1.5m`).
 - The values of free-form string maps (`labels`, `environment`, `raw_config`,
   the properties in `raw_devices`, mount and port `options`, top-level volume
@@ -1059,6 +1059,32 @@ egress:
   remove `egress`. Editing the list or the secrets later is live. Needs
   `isb serve` for its proxy.
 
+### `expires`
+
+How long the sandbox lives: a duration (`24h`, `7d`), or `never`. isb keeps
+the deadline on the instance as `user.isb.expires_at` (unix seconds, or
+`never`), and `isb serve` deletes the sandbox once it passes
+([Expiry](../concepts/sandboxes.md#expiry)).
+
+```yaml
+expires: 3d       # deleted 3 days after the last `isb up`
+expires: never    # a tool container that should stay
+```
+
+- **Omitted:** 7 days for a plain sandbox (incus' `default` project, or any
+  project outside an org); in an org (`--org`), the org's `sandbox_expiry`
+  (24 h unless its admins changed it).
+- **A lease.** Each `isb up` (and `isb create --ensure`) renews the deadline
+  to now plus the lifetime, so a sandbox someone keeps bringing up stays. It
+  never shortens a later deadline (one set with `isb expiry --in`), and the
+  default never adds one to an instance that has none: a sandbox made before
+  isb had expiries, or set to `never`, keeps no deadline until the file says
+  `expires:`. `expires: never` clears it.
+- Not part of the plan: `isb plan` does not report a renewal as a change.
+- Named volumes outlive the sandbox, as with `isb rm`; only the instance and
+  its root disk go.
+- Stacks ignore it: a replica is its stack's, and never expires.
+
 ### `raw_config`
 
 Map of string to string, set verbatim as instance config. Applied after every
@@ -1141,7 +1167,7 @@ written, so it boots with the right devices.
 **Summary of `isb up` on an existing instance.** It will: create missing named
 volumes, set differing config keys, replace wrong devices, add missing ones,
 start a stopped instance, add searched ports, chown newly attached owned mounts,
-and run readiness checks (skip them with `--no-ready`). It will not: recreate
+renew the expiry ([`expires`](#expires)), and run readiness checks (skip them with `--no-ready`). It will not: recreate
 the instance, change its type, root pool, incus profiles or image, unset config keys,
 remove `raw.idmap`, restart the instance, touch a correct device, or remove any
 device without `--prune-devices`.
@@ -1225,6 +1251,8 @@ short syntax, ranges included.
 The full form. `OPT` is one of the proxy options `nat`, `proxy_protocol`, `uid`,
 `gid`, `mode`, `security.uid`, `security.gid`; any other key is an error. Values
 cannot contain commas.
+
+**`--expires DURATION|never`** The sandbox's [`expires`](#expires).
 
 **`--ready CHECK`** (repeatable) `running`, `agent`, `default_route`,
 `user_exists=USER`, `path_writable=PATH`, `command=ARG[,ARG...]`.

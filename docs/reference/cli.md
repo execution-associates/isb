@@ -84,12 +84,13 @@ isb create NAME -i IMAGE [--vm] [--cpus N | --cpuset-cpus SET] [-m MEM] [-s POOL
                 [-l KEY=VALUE]... [-e KEY=VALUE]... [-v SRC:GUEST[:OPTS]]... [-p PORT]...
                 [--ready CHECK]... [--ready-timeout D] [-c KEY=VALUE]... [--profile P]...
                 [--egress HOST[:PORT]|none]... [--secret NAME[=SECRET]@HOSTS]...
-                [--ensure] [--no-ready]
+                [--expires DURATION|never] [--ensure] [--no-ready]
 isb start NAME...                      start, and wait until running
 isb stop NAME... [-f] [-t 30s]         clean shutdown (or kill with -f) within -t
 isb restart NAME...
 isb rm NAME... [-f]                    delete (-f stops a running one first); aliases remove, delete
-isb ls [-l KEY[=VALUE]]... [--json]    list, filtered by labels; alias list
+isb ls [-l KEY[=VALUE]]... [--json]    list, filtered by labels, with each one's expiry; alias list
+isb expiry NAME... [--in D | --by D | --never]   show or change when sandboxes are deleted
 isb inspect NAME [--json]              one sandbox, by service or instance name
 isb exec TARGET [-u USER] [-w DIR] [-e K=V|K]... [-l] [-t|-T] [-i|-n] [--timeout D] -- ARGV...
 isb prune --label KEY --missing-path [-y] [--json]
@@ -105,6 +106,15 @@ isb prune --label KEY --missing-path [-y] [--json]
   secret as a placeholder in `$NAME`, swapped for the real value on the wire
   to those hosts only. Both are [`egress`](compose.md#egress) in a compose
   file; [Sandbox egress and secrets](../guides/egress.md) has the guarantees.
+- `--expires` is the sandbox's lifetime: 7 days by default, the org's
+  `sandbox_expiry` with `--org`, or `never` ([`expires`](compose.md#expires)).
+  `isb serve` deletes it once that passes. `create --ensure` renews it, as
+  `up` does.
+- `expiry` prints when each sandbox expires; `--in 24h` sets the deadline
+  to that long from now, `--by 24h` pushes it out from the later of now and
+  the current one, `--never` clears it. Not for a stack replica or a build.
+  `ls`'s EXPIRES column shows `-` for a sandbox without a deadline (made
+  before isb had expiries, or by hand).
 - `start` and `restart` wait for `running` only, not a file's `ready`
   checks; a sandbox with an egress list also waits until its guest resolves
   names.
@@ -316,8 +326,8 @@ sandbox's creator or the org's admins may. `settings` prints the org's
 defaults for new sandboxes and, with `--expiry` (at most 30d) or `--idle`
 (`none` turns idle reaping off), changes them (org admins and up). Over the
 API they are `sandbox_list`, `sandbox_extend` and `sandbox_settings`. The
-top-level `isb create`, `ls`, `rm` work on this host's incus directly
-instead.
+top-level `isb create`, `ls`, `rm` and `expiry` work on this host's incus
+directly instead.
 
 ## Secrets
 
