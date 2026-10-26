@@ -485,8 +485,11 @@ fn refuse<S: std::io::Read + std::io::Write>(ws: &mut WebSocket<S>, message: &st
     let _ = ws.flush();
 }
 
+/// Nothing to read yet, or a read cut short by a signal (SIGWINCH in `exec
+/// -t`): try again on the next turn.
 fn would_block(e: &tungstenite::Error) -> bool {
-    matches!(e, tungstenite::Error::Io(io) if matches!(io.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut))
+    use std::io::ErrorKind::{Interrupted, TimedOut, WouldBlock};
+    matches!(e, tungstenite::Error::Io(io) if matches!(io.kind(), WouldBlock | TimedOut | Interrupted))
 }
 
 /// Shuttle bytes between the websocket and the terminal until either ends,
