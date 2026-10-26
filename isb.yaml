@@ -12,7 +12,7 @@ services:
     type: vm
     image: images:ubuntu/24.04/cloud
     cpus: 8
-    mem_limit: 16g
+    mem_limit: 24g                # ra-jit's build daemon holds ~10 GB (scripts/preview/build.sh)
     labels: { owner: isb-preview }
     # The firmware refuses this image's bootloader under secure boot
     # ("prohibited by secure boot policy"), so the VM never boots.
