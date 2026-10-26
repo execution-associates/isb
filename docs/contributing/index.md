@@ -180,6 +180,8 @@ but never worse.
   `scripts/ratchet.txt`, so a new exemption cannot slip in unnoticed.
 - **File size**: the same script fails any `.rs` file over 1000 lines, except
   the files listed in `scripts/ratchet.txt`, each capped at its listed size.
+  Inline `#[cfg(test)] mod` blocks don't count, so a test never has to be cut
+  short to fit.
 
 Both budgets go down only. After splitting a long function or file, run
 `scripts/ratchet.sh --update` to lower them (it never raises one) and commit
