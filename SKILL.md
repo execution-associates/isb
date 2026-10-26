@@ -222,7 +222,8 @@ cannot exec or read secrets.
   `stdin`. No port-forward: `curl` through `app_exec`. CLI: `isb instance
   ls|get|exec|restart`, `isb app exec|logs|restart|scale|top|events`,
   `isb stack exec|logs` (`--failed`: the last replica that failed to start),
-  `isb cp`.
+  `isb cp`. `exec -it` is for a person at a terminal (refused without one);
+  agents run commands to completion.
 - **Data:** `database_create`, `database_get`, `backup_*`, `volume_*`,
   `job_*`. **Secrets:** `secret_create`, `secret_set` (values base64; a new
   version rolls the stacks using it), `secret_list` (no values).

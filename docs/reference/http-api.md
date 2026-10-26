@@ -31,7 +31,7 @@ calling REST, something following the event stream.
 | `GET /api/v1/events` | server-sent events: deploys, rollouts, health and restarts in the caller's orgs |
 | `GET /api/v1/audit/stream` | server-sent events: new audit entries the caller may read |
 | `GET /api/v1/history/stream` | server-sent events: new history items the caller may read |
-| `GET /orgs/<org>/api/v1/terminal?app=NAME` (or `?instance=NAME`) | a websocket to a shell ([below](#the-web-terminal)) |
+| `GET /orgs/<org>/api/v1/terminal?app=NAME` (or `?stack=NAME&service=SERVICE`, or `?instance=NAME`) | a websocket to a shell or a command ([below](#the-web-terminal)) |
 | `GET /orgs/<org>/api/v1/ssh?instance=NAME` | a websocket carrying SSH, for `isb ssh-proxy` ([below](#the-ssh-websocket)) |
 | `POST /api/v1/webhooks/<org>/<app>` | an app's push and pull request webhooks ([Deploy apps](../guides/deploy-apps.md#webhooks)) |
 | `GET /api/v1/templates/<catalog>/<id>/logo` | a template's logo, from isb's cached copy ([Templates](../guides/templates.md#logos)) |
@@ -180,23 +180,31 @@ every 15 s. See [The audit log](../operations/audit.md) and
 `GET /orgs/<org>/api/v1/terminal?app=NAME[&slot=N][&cols=C&rows=R]`
 upgrades to a websocket bridged to a login shell (bash, else sh) in one of
 the app's running replicas (`slot`, or one in rotation), with a
-pseudo-terminal. With `?instance=NAME` instead of `app`, the shell is in
-that instance of the org (a sandbox, a replica), as root. The web UI's
+pseudo-terminal. With `?stack=NAME&service=SERVICE` instead of `app`, the
+replica is one of that stack service's; with `?instance=NAME`, the shell is
+in that instance of the org (a sandbox, a replica), as root. The web UI's
 terminals use it.
 
+With `argv=` it runs a command instead of a shell, as the exec tools do
+(`isb stack exec -it` and its siblings use it): one `argv=` per argument, in
+order, each percent-encoded, with `user=`, `cwd=` and `env=KEY=VALUE`
+(repeatable) as `app_exec` takes them. At most 1024 arguments and 128
+variables; `TERM` is `xterm-256color` unless `env=` sets it.
+
 - **Who**: the caller signs in as for any tool and is admitted as if calling
-  `sandbox_exec` in the org: its members, admins and owners (not viewers,
-  nor tokens whose scopes leave out `sandbox_exec`), platform admins, and
-  nobody when `--deny-tools` covers `sandbox_exec`. Only the org's own apps
-  and instances are reachable.
+  `sandbox_exec` in the org (a command: `app_exec`, `stack_exec` or
+  `instance_exec`, the tool that runs it without a terminal): its members,
+  admins and owners (not viewers, nor tokens whose scopes leave out that
+  tool), platform admins, and nobody when `--deny-tools` covers it. Only the
+  org's own apps, stacks and instances are reachable.
 - **Cross-site**: a session cookie rides along on a websocket from any
   site, so a cookie-authenticated upgrade must carry an `Origin` naming the
   request's `Host`. A bearer token needs no `Origin` (a browser never adds
-  one by itself).
+  one by itself), nor does the daemon's unix socket.
 - **Wire**: binary frames are terminal bytes both ways. Text frames are
   JSON: `{"type": "resize", "cols", "rows"}` from the client;
-  `{"type": "exit", "code"}` and `{"type": "error", "message"}` from the
-  server before it closes. What fails after the upgrade (no such app, a
+  `{"type": "exit", "code"}` (the program's exit status) and `{"type":
+  "error", "message"}` from the server before it closes. What fails after the upgrade (no such app, a
   replica that is not running, an image without a shell) arrives as an
   error frame.
 - **Bounds**: 16 terminals at once per daemon, closed after 30 minutes

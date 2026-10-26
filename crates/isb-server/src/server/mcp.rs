@@ -700,16 +700,13 @@ impl Endpoint {
             Ok(t) => t,
             Err(m) => return rest_error(400, "invalid", &m),
         };
-        let args = match &t.instance {
-            Some(i) => json!({"org": org.as_str(), "name": i}),
-            None => json!({"org": org.as_str(), "app": t.app}),
-        };
-        let (open, o) = (open.clone(), org.clone());
+        let args = t.audit_args(org);
+        let (open, o, tool) = (open.clone(), org.clone(), t.tool());
         self.session(
             req,
             caller,
             org,
-            Session::Terminal,
+            (Session::Terminal, tool),
             args,
             &key,
             move |c: &Caller| open(c, &o, &t),
@@ -751,22 +748,23 @@ impl Endpoint {
             req,
             caller,
             org,
-            Session::Ssh,
+            (Session::Ssh, "sandbox_exec"),
             args,
             &key,
             move |c: &Caller| open(c, &o, &s),
         )
     }
 
-    /// Admit a websocket session as `sandbox_exec` in `org`, then upgrade
-    /// and open it, telling the audit hook when it opens and closes.
+    /// Admit a websocket session as `tool` (`sandbox_exec`, or the exec
+    /// tool a command's session stands for) in `org`, then upgrade and open
+    /// it, telling the audit hook when it opens and closes.
     #[expect(clippy::too_many_arguments)]
     fn session<F>(
         &self,
         req: &Request,
         caller: Caller,
         org: &crate::org::OrgId,
-        kind: Session,
+        (kind, tool): (Session, &str),
         args: Value,
         key: &str,
         open: F,
@@ -776,7 +774,7 @@ impl Endpoint {
     {
         let origin = origin(req, &caller, false);
         let audit = self.hooks.audit.clone();
-        match self.admit("sandbox_exec", json!({}), &caller, Some(org)) {
+        match self.admit(tool, json!({}), &caller, Some(org)) {
             Ok(_) => {}
             Err(Admit::Unknown) => {
                 return rest_error(404, "not_found", kind.not_offered());
@@ -798,6 +796,7 @@ impl Endpoint {
         let what = args
             .get("app")
             .or_else(|| args.get("name"))
+            .or_else(|| args.get("service"))
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
@@ -806,7 +805,8 @@ impl Endpoint {
             let r = open(&caller);
             let Some(a) = audit else { return r };
             let mut args = args;
-            if let (Ok(p), Session::Terminal, Some(_)) = (&r, kind, args.get("app")) {
+            let replicated = args.get("app").or_else(|| args.get("stack"));
+            if let (Ok(p), Session::Terminal, Some(_)) = (&r, kind, replicated) {
                 args["replica"] = json!(p.target());
             }
             a(&Audited {
@@ -1916,6 +1916,28 @@ mod tests {
         ep.policy = ToolPolicy::from_lists("", "sandbox_exec");
         assert_eq!(
             get(&ep, "/orgs/alpha/api/v1/terminal", "app=web", &ws).status,
+            404
+        );
+        // A command (exec -t) is admitted as its exec tool, not as a shell.
+        let cmd = "stack=shop&service=web&argv=sh";
+        assert_eq!(
+            get(&ep, "/orgs/alpha/api/v1/terminal", cmd, &ws).status,
+            404,
+            "this registry has no stack_exec"
+        );
+        let mut r = registry();
+        r.register(Tool::new("stack_exec", "Exec", json!({}), |_, _| {
+            Ok(Value::Null)
+        }))
+        .unwrap();
+        ep.registry = Arc::new(r);
+        assert_eq!(
+            get(&ep, "/orgs/alpha/api/v1/terminal", cmd, &ws).status,
+            101
+        );
+        ep.policy = ToolPolicy::from_lists("", "stack_exec");
+        assert_eq!(
+            get(&ep, "/orgs/alpha/api/v1/terminal", cmd, &ws).status,
             404
         );
     }

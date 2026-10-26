@@ -1,7 +1,8 @@
-//! The web terminal's other end: a login shell in one of an app's replicas,
-//! for [`crate::server::terminal`]; or a login shell in any instance of the
-//! org the caller may exec into (a sandbox, a replica). Nothing outside the
-//! org is reachable this way.
+//! The web terminal's other end: a login shell, or a command (`isb ...
+//! exec -t`), in one of an app's or a stack service's replicas, for
+//! [`crate::server::terminal`]; or in any instance of the org the caller
+//! may exec into (a sandbox, a replica). Nothing outside the org is
+//! reachable this way.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,6 +25,9 @@ struct ExecPty {
     ctl: ExecController,
     done: bool,
     instance: String,
+    /// What runs, for the message when it cannot: "the shell", or the
+    /// command's name.
+    what: String,
     /// Counts the session (a sandbox's activity: the reaper leaves it
     /// alone) until it closes.
     guard: Option<super::sandboxes::SessionGuard>,
@@ -52,7 +56,8 @@ impl Pty for ExecPty {
             Err(Err(e)) => {
                 self.done = true;
                 PtyOutput::Failed(format!(
-                    "the shell could not run: {e}. Images built FROM scratch have no /bin/sh"
+                    "{} could not run: {e}. Images built FROM scratch have no /bin/sh",
+                    self.what
                 ))
             }
         }
@@ -86,70 +91,79 @@ pub(super) fn terminal(d: Arc<Daemon>) -> Terminal {
                         info.status.to_lowercase()
                     )));
                 }
-                let mut pty = shell(&oc, name, t)?;
+                let mut pty = open(&oc, name, t)?;
                 pty.guard = Some(d.sandboxes.session(&org.incus_project(), name));
                 return Ok(pty);
             }
-            let app = d.apps.get(org, &t.app)?;
-            let stack = crate::stack::qualified(org, &app.spec.stack()?);
+            // An app is the service of its own stack; a stack names its own.
+            let (stack, service) = match &t.stack {
+                Some(s) => (crate::stack::qualified(org, s), t.app.clone()),
+                None => {
+                    let app = d.apps.get(org, &t.app)?;
+                    (
+                        crate::stack::qualified(org, &app.spec.stack()?),
+                        t.app.clone(),
+                    )
+                }
+            };
+            let what = t.target();
             let st = d
                 .ctl
                 .status(&stack)
-                .map_err(|_| Error::NotFound(format!("{} is not deployed", t.app)))?;
+                .map_err(|_| Error::NotFound(format!("{what} is not deployed")))?;
             let svc = st
                 .services
                 .iter()
-                .find(|s| s.service == t.app)
-                .ok_or_else(|| Error::NotFound(format!("{} is not deployed", t.app)))?;
-            let inst = match t.slot {
-                Some(n) => svc
-                    .instances
-                    .iter()
-                    .find(|i| i.slot == n)
-                    .ok_or_else(|| Error::NotFound(format!("{} has no replica {n}", t.app)))?,
-                None => svc
-                    .instances
-                    .iter()
-                    .filter(|i| i.status == "Running")
-                    .min_by_key(|i| (!i.in_rotation, i.slot))
-                    .ok_or_else(|| Error::NotFound(format!("{} has no running replica", t.app)))?,
+                .find(|s| s.service == service)
+                .ok_or_else(|| Error::NotFound(format!("{what} is not deployed")))?;
+            let inst = super::kube::pick_replica(&what, &svc.instances, t.slot, None)?;
+            let pty = open(&oc, &inst.name, t)?;
+            let opened = match &t.command {
+                Some(_) => "exec -t",
+                None => "terminal",
             };
-            if inst.status != "Running" {
-                return Err(Error::invalid(format!(
-                    "replica {} is {}, not running",
-                    inst.slot,
-                    inst.status.to_lowercase()
-                )));
-            }
-            let pty = shell(&oc, &inst.name, t)?;
             d.ctl.service_event(
                 "info",
                 &stack,
-                &t.app,
-                format!("terminal opened on replica {} by {c}", inst.slot),
+                &service,
+                format!("{opened} opened on replica {} by {c}", inst.slot),
             );
             Ok(pty)
         },
     )
 }
 
-/// A login shell in `instance`, on a pseudo-terminal of the asked size.
-fn shell(oc: &crate::client::Client, instance: &str, t: &TermRequest) -> Result<Box<ExecPty>> {
+/// The terminal's program in `instance`, on a pseudo-terminal of the asked
+/// size: its command (as the exec tools would run it), else a login shell.
+fn open(oc: &crate::client::Client, instance: &str, t: &TermRequest) -> Result<Box<ExecPty>> {
     let sb = Sandbox::get(oc, instance)?;
-    let mut opts = ExecOptions::default()
-        .tty(true)
-        .stdin(Stdin::Piped)
-        .env("TERM", "xterm-256color");
+    let mut opts = ExecOptions::default().tty(true).stdin(Stdin::Piped);
     opts.width = Some(t.cols);
     opts.height = Some(t.rows);
+    let (argv, what) = match &t.command {
+        Some(cmd) => {
+            opts.user = cmd.user.clone();
+            opts.cwd = cmd.cwd.clone();
+            opts.env = cmd.env.clone();
+            (cmd.argv.clone(), format!("{:?}", cmd.argv[0]))
+        }
+        None => (
+            ["/bin/sh", "-c", SHELL].map(String::from).to_vec(),
+            "the shell".to_string(),
+        ),
+    };
+    opts.env
+        .entry("TERM".into())
+        .or_insert_with(|| "xterm-256color".into());
     let stream = sb
-        .exec_stream(["/bin/sh", "-c", SHELL], opts)
-        .map_err(|e| Error::invalid(format!("cannot start a shell in {instance}: {e}")))?;
+        .exec_stream(argv, opts)
+        .map_err(|e| Error::invalid(format!("cannot start {what} in {instance}: {e}")))?;
     Ok(Box::new(ExecPty {
         ctl: stream.controller(),
         stream,
         done: false,
         instance: instance.to_string(),
+        what,
         guard: None,
     }))
 }

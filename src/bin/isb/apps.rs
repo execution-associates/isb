@@ -217,8 +217,9 @@ pub enum AppCmd {
     /// The app's replicas' recent output (kubectl logs): all of them, or
     /// one with --replica; --tail N, --since 10m.
     Logs(kube::AppLogs),
-    /// Run a command in one of the app's replicas, as kubectl exec does
-    /// (not interactive): `isb app exec web -- ls -l`; -i feeds stdin.
+    /// Run a command in one of the app's replicas, as kubectl exec does:
+    /// `isb app exec web -- ls -l`; -i feeds stdin; -it runs it
+    /// interactively, on a terminal (`isb app exec -it web -- sh`).
     Exec {
         name: String,
         #[command(flatten)]

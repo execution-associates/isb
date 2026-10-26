@@ -129,10 +129,12 @@ pub const SURFACE: &[Surface] = &[
         method: "get",
         path: "/orgs/{org}/api/v1/terminal",
         summary: "Web terminal (websocket)",
-        description: "Upgrades to a websocket bridged to a login shell in an app replica (?app, ?slot) or an instance (?instance), with a pseudo-terminal. Binary frames are terminal bytes; text frames are JSON resize/exit/error messages. Admitted as `sandbox_exec` in the org. docs/reference/http-api.md#the-web-terminal.",
+        description: "Upgrades to a websocket bridged to a login shell, or to a command (?argv), in an app replica (?app, ?slot), a stack service's replica (?stack, ?service, ?slot) or an instance (?instance), with a pseudo-terminal. Binary frames are terminal bytes; text frames are JSON resize/exit/error messages. A shell is admitted as `sandbox_exec` in the org; a command as `app_exec`, `stack_exec` or `instance_exec`. docs/reference/http-api.md#the-web-terminal.",
         answers: "websocket",
         query: &[
             ("app", "string", "An app to open a shell in."),
+            ("stack", "string", "Or a compose stack (with service)."),
+            ("service", "string", "The stack's service."),
             (
                 "slot",
                 "integer",
@@ -145,6 +147,18 @@ pub const SURFACE: &[Surface] = &[
             ),
             ("cols", "integer", "Initial columns."),
             ("rows", "integer", "Initial rows."),
+            (
+                "argv",
+                "string",
+                "Run this command instead of a shell: one argument per argv=, in order, percent-encoded.",
+            ),
+            (
+                "user",
+                "string",
+                "The command's guest user (name, uid or uid:gid).",
+            ),
+            ("cwd", "string", "The command's working directory."),
+            ("env", "string", "KEY=VALUE for the command (repeatable)."),
         ],
         signed_in: true,
         agents: Agents::BrowserOnly(

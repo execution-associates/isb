@@ -874,12 +874,13 @@ fn has_input(fd: impl rustix::fd::AsFd, wait: Duration) -> bool {
 }
 
 /// Puts the local terminal in raw mode for the life of the guard.
-struct RawMode {
+pub struct RawMode {
     saved: rustix::termios::Termios,
 }
 
 impl RawMode {
-    fn enable() -> Option<RawMode> {
+    /// `None` when stdin is not a terminal (nothing to restore).
+    pub fn enable() -> Option<RawMode> {
         let stdin = std::io::stdin();
         let saved = rustix::termios::tcgetattr(&stdin).ok()?;
         let mut raw = saved.clone();
