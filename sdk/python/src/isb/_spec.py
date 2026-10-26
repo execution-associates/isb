@@ -327,6 +327,12 @@ class SandboxSpec(TypedDict, total=False):
     environment: EnvMapOrList
     #: More exec defaults: an exec-only environment and the login shell.
     exec: ExecSpec
+    #: How long the sandbox lives (`24h`, `7d`), or `never`. Kept on the
+    #: instance as `user.isb.expires_at`; `isb serve` deletes it once that
+    #: passes. Each `isb up` renews it from now, and never shortens it.
+    #: Omitted: 7 days for a plain sandbox, the org's `sandbox_expiry` in an
+    #: org (docs/concepts/sandboxes.md#expiry). Stacks ignore it.
+    expires: Optional[IntOrString]
     #: A recurring health test, as in docker compose. `isb stack deploy`
     #: routes traffic only to healthy replicas and replaces unhealthy ones;
     #: `depends_on` can wait for it.
@@ -566,6 +572,12 @@ class SandboxSpecFields(TypedDict, total=False):
     environment: EnvMapOrList
     #: More exec defaults: an exec-only environment and the login shell.
     exec: ExecSpec
+    #: How long the sandbox lives (`24h`, `7d`), or `never`. Kept on the
+    #: instance as `user.isb.expires_at`; `isb serve` deletes it once that
+    #: passes. Each `isb up` renews it from now, and never shortens it.
+    #: Omitted: 7 days for a plain sandbox, the org's `sandbox_expiry` in an
+    #: org (docs/concepts/sandboxes.md#expiry). Stacks ignore it.
+    expires: Optional[IntOrString]
     #: A recurring health test, as in docker compose. `isb stack deploy`
     #: routes traffic only to healthy replicas and replaces unhealthy ones;
     #: `depends_on` can wait for it.

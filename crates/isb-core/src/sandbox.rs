@@ -12,8 +12,10 @@ use crate::error::{Error, Result};
 use crate::exec::{self, ExecOptions, ExecOutput, ExecStream, Stdin};
 use crate::idmap::SubIds;
 use crate::lock::NameLock;
+pub mod expiry;
 pub mod images;
 mod prune;
+mod update;
 
 use crate::plan::{
     self, Action, Actual, Desired, DesiredDevice, DiffOptions, HostFacts, Props, SandboxPlan,
@@ -21,6 +23,8 @@ use crate::plan::{
 };
 use crate::spec::{ExecDefaults, PortSpec, ReadyCheck, SandboxSpec};
 pub use prune::{PruneItem, prune_missing_path};
+#[doc(hidden)]
+pub use update::update_instance;
 
 /// Config key recording which isb call created an instance. A half-created
 /// instance is only ever cleaned up by the call whose token it carries.
@@ -131,6 +135,9 @@ pub struct EnsureOptions {
     pub wait_ready: bool,
     /// How long to wait for another isb holding this sandbox's lock.
     pub lock_wait: Duration,
+    /// The lifetime of a sandbox whose spec gives no `expires` ([`expiry`]):
+    /// set by the CLI and `isb rpc`; `None` gives it no deadline.
+    pub default_expiry: Option<Duration>,
 }
 
 impl Default for EnsureOptions {
@@ -139,6 +146,7 @@ impl Default for EnsureOptions {
             diff: DiffOptions::default(),
             wait_ready: true,
             lock_wait: Duration::from_secs(900),
+            default_expiry: None,
         }
     }
 }
@@ -470,55 +478,6 @@ fn flush_updates(
         out.applied.push(a.clone());
     }
     Ok(())
-}
-
-type Obj = serde_json::Map<String, Value>;
-
-/// Read-modify-write of an instance under `If-Match`, so a concurrent change by
-/// another tool is never silently overwritten (a 412 re-reads and retries).
-#[doc(hidden)]
-pub fn update_instance(
-    client: &Client,
-    name: &str,
-    step: &str,
-    modify: &mut dyn FnMut(&mut Obj, &mut Obj) -> Result<()>,
-) -> Result<()> {
-    let path = inst_path(name);
-    for attempt in 0..5 {
-        let (inst, etag) = client.get_etag(&path)?;
-        let mut config = inst
-            .get("config")
-            .and_then(Value::as_object)
-            .cloned()
-            .unwrap_or_default();
-        let mut devices = inst
-            .get("devices")
-            .and_then(Value::as_object)
-            .cloned()
-            .unwrap_or_default();
-        modify(&mut config, &mut devices)?;
-        let body = json!({
-            "architecture": inst.get("architecture"),
-            "config": config,
-            "devices": devices,
-            "ephemeral": inst.get("ephemeral"),
-            "profiles": inst.get("profiles"),
-            "stateful": inst.get("stateful"),
-            "description": inst.get("description"),
-        });
-        match client.mutate_if_match(
-            "PUT",
-            &path,
-            &body,
-            etag.as_deref(),
-            step,
-            client.timeouts.other,
-        ) {
-            Err(Error::Api { status: 412, .. }) if attempt < 4 => continue,
-            r => return r.map(|_| ()),
-        }
-    }
-    unreachable!()
 }
 
 fn create_instance(client: &Client, desired: &Desired, report: &mut dyn FnMut(&str)) -> Result<()> {
@@ -904,7 +863,13 @@ pub fn ensure(
         },
     )?;
     let plan = plan_desired(client, desired, opts.diff)?;
-    let mut out = apply(client, desired, &plan, report)?;
+    let stamped = expiry::stamped(desired, &plan, opts.default_expiry);
+    let mut out = apply(client, &stamped, &plan, report)?;
+    if out.created {
+        expiry::report_created(&stamped, report);
+    } else {
+        expiry::renew(client, desired, opts.default_expiry, report)?;
+    }
     // Report the settled listen address of every searched port, whether this
     // call added it or found it already correct somewhere in its range.
     if desired.devices.values().any(|d| d.search.is_some()) {
@@ -1006,7 +971,9 @@ impl Sandbox {
             return Err(Error::AlreadyExists(d.name.clone()));
         }
         let plan = plan_desired(client, &d, opts.diff)?;
-        apply(client, &d, &plan, report)?;
+        let stamped = expiry::stamped(&d, &plan, opts.default_expiry);
+        apply(client, &stamped, &plan, report)?;
+        expiry::report_created(&stamped, report);
         if opts.wait_ready {
             wait_ready(client, &d.name, &d.ready, d.ready_timeout, &d.exec)?;
             if let Some(p) = &d.egress {

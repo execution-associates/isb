@@ -1,4 +1,4 @@
-//! `isb create`, `ps`, `exec` and the `volume`, `port` and `device` commands: sandboxes one at a time.
+//! `isb create`, `ls`, `ps`, `prune`, `exec` and the `volume`, `port` and `device` commands: sandboxes one at a time.
 
 use super::*;
 
@@ -71,6 +71,10 @@ pub(crate) struct CreateArgs {
     /// these hosts and nowhere else: `NAME[=SECRET]@host1,host2`.
     #[arg(long = "secret", value_name = "NAME@HOSTS")]
     pub(crate) secrets: Vec<String>,
+    /// Delete the sandbox this long from now (`24h`, `7d`), or `never`.
+    /// Default: 7d, or the org's `sandbox_expiry` with --org.
+    #[arg(long, value_name = "DURATION|never")]
+    pub(crate) expires: Option<String>,
 }
 
 #[derive(Args)]
@@ -267,16 +271,78 @@ pub(crate) fn create(ctx: &Ctx, a: CreateArgs) -> Result<u8> {
         spec.profiles = Some(a.profiles);
     }
     spec.egress = egress_spec(&a.egress, &a.secrets)?;
+    spec.expires = a.expires;
     let c = ctx.client(None);
     let mut rep = ctx.report();
     let opts = EnsureOptions {
         wait_ready: !a.no_ready,
+        default_expiry: super::expiry::default_expiry(&c),
         ..Default::default()
     };
     if a.ensure {
         Sandbox::connect_or_create_with(&c, &spec, &Default::default(), opts, &mut rep)?;
     } else {
         Sandbox::create_with(&c, &spec, &Default::default(), opts, &mut rep)?;
+    }
+    Ok(0)
+}
+
+pub(crate) fn ls(ctx: &Ctx, labels: Vec<String>, json: bool) -> Result<u8> {
+    let filters: Vec<LabelFilter> = labels.iter().map(|l| LabelFilter::parse(l)).collect();
+    let list = Sandbox::list_with(&ctx.client(None), &filters)?;
+    if json {
+        print_json(&list);
+        return Ok(0);
+    }
+    let now = isb::stack::now_secs();
+    let mut rows = vec![vec![
+        "NAME".into(),
+        "STATUS".into(),
+        "TYPE".into(),
+        "EXPIRES".into(),
+        "LABELS".into(),
+    ]];
+    for i in &list {
+        let expires = i.config.get(isb::sandbox::expiry::KEY_EXPIRES_AT);
+        rows.push(vec![
+            i.name.clone(),
+            i.status.to_uppercase(),
+            i.instance_type.clone(),
+            expires.map_or_else(|| "-".into(), |v| isb::sandbox::expiry::describe(v, now)),
+            labels_brief(i),
+        ]);
+    }
+    table(rows);
+    Ok(0)
+}
+
+pub(crate) fn prune(
+    ctx: &Ctx,
+    label: &str,
+    missing_path: bool,
+    yes: bool,
+    json: bool,
+) -> Result<u8> {
+    if !missing_path {
+        return Err(Error::Invalid(
+            "prune needs a criterion: --missing-path".into(),
+        ));
+    }
+    let c = ctx.client(None);
+    let mut rep = ctx.report();
+    let mut say = |l: &str| {
+        if json { rep(l) } else { println!("{l}") }
+    };
+    let items = sandbox::prune_missing_path(&c, label, !yes, &mut say)?;
+    if json {
+        print_json(&items);
+    } else if items.is_empty() {
+        println!("nothing to prune");
+    } else if !yes {
+        println!(
+            "dry run; re-run with -y to delete ({} sandbox(es))",
+            items.len()
+        );
     }
     Ok(0)
 }

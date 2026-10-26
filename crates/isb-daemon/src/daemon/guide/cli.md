@@ -18,7 +18,7 @@ Only the CLI: `isb up`/`down`/`plan` of a whole compose file, `isb host setup`,
 Docker compose's format (`services`, `container_name`, `environment`,
 `volumes`, `ports`, `user`, `working_dir`, `command`, `mem_limit`) plus
 incus keys: `type: vm`, `storage`, `idmap`, `ready`, `incus_profiles`,
-`raw_config`, `raw_devices`, `egress`.
+`raw_config`, `raw_devices`, `egress`, `expires`.
 
 ```yaml
 services:
@@ -58,6 +58,10 @@ services:
   closed network that a package manager's registry joins; `isb x install
   NAME --from npm:PKG|pypi:PKG|sh:LINE` keeps a CLI in its own sandbox
   behind a host shim.
+- **Every sandbox expires:** 7 days after its last `isb up` (in an org, the
+  org's `sandbox_expiry`), when `isb serve` deletes it. `expires: 4h` or
+  `--expires 4h` for a one-off, `expires: never` for one that must stay;
+  `isb ls` shows it, `isb expiry NAME --by 24h` or `--never` changes it.
 
 ## SDKs
 

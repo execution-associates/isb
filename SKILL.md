@@ -329,8 +329,12 @@ The SDKs drive the local `isb` binary, so they need the incus socket too.
   to boot, and wait for the incus agent before `exec` works. Host edits do
   not reach file watchers inside a VM (use polling). Port forwards into a VM
   must not listen on host 127.0.0.1.
-- **Sandboxes made through the daemon expire.** Extend one you still need
-  (`sandbox_extend`) before its expiry, or it is deleted.
+- **Every sandbox expires.** One from `isb create` or `isb up` is deleted 7
+  days after it was last brought up (an org's: its `sandbox_expiry`, 24 h by
+  default); each `isb up` renews it. Set `expires: 4h` (`--expires 4h`) for
+  a one-off, `expires: never` for a tool container that must stay, and see
+  or change it with `isb ls` and `isb expiry NAME --by 24h`. Through the
+  daemon: `sandbox_extend` before its expiry, or it is deleted.
 - A stalled incus step fails with the step's name rather than hanging;
   `--create-timeout 20m` allows slow image downloads.
 

@@ -59,7 +59,11 @@ struct Server {
     out: Out,
     client: Client,
     execs: Mutex<HashMap<String, ExecSlot>>,
+    org_expiry: OrgExpiry,
 }
+
+/// Looks up an org's `sandbox_expiry` (the CLI reads `isb serve`'s state).
+pub type OrgExpiry = fn(&crate::org::OrgId) -> Option<std::time::Duration>;
 
 #[derive(Deserialize)]
 struct Request {
@@ -76,10 +80,21 @@ pub fn serve<R: BufRead, W: Write + Send + 'static>(
     output: W,
     client: Client,
 ) -> Result<()> {
+    serve_with(input, output, client, |_| None)
+}
+
+/// [`serve`], with the orgs' default sandbox expiry from `org_expiry`.
+pub fn serve_with<R: BufRead, W: Write + Send + 'static>(
+    input: R,
+    output: W,
+    client: Client,
+    org_expiry: OrgExpiry,
+) -> Result<()> {
     let server = Arc::new(Server {
         out: Arc::new(Mutex::new(Box::new(output))),
         client,
         execs: Mutex::new(HashMap::new()),
+        org_expiry,
     });
     server.send(&json!({"isb": env!("CARGO_PKG_VERSION"), "protocol": PROTOCOL}));
     let mut workers = Vec::new();
@@ -139,6 +154,13 @@ impl Server {
         }
     }
 
+    fn default_expiry(&self, c: &Client) -> Option<std::time::Duration> {
+        Some(sandbox::expiry::default_for(
+            c.project_name(),
+            self.org_expiry,
+        ))
+    }
+
     fn client(&self, project: &Option<String>) -> Client {
         match project {
             Some(p) => self.client.clone().project(p),
@@ -163,6 +185,7 @@ impl Server {
                 let c = self.client(&a.project);
                 let opts = EnsureOptions {
                     wait_ready: a.wait_ready,
+                    default_expiry: self.default_expiry(&c),
                     ..Default::default()
                 };
                 let d = resolve_spec(&c, &a)?;
@@ -177,6 +200,7 @@ impl Server {
                     diff: DiffOptions {
                         prune_devices: a.prune_devices,
                     },
+                    default_expiry: self.default_expiry(&c),
                     ..Default::default()
                 };
                 let d = resolve_spec(&c, &a)?;
@@ -344,20 +368,16 @@ impl Server {
             "compose.up" => {
                 let a: ComposeParams = params(p)?;
                 let proj = compose::load(&a.load())?;
+                let c = self.client(&a.project);
                 let opts = EnsureOptions {
                     wait_ready: a.wait_ready,
                     diff: DiffOptions {
                         prune_devices: a.prune_devices,
                     },
+                    default_expiry: self.default_expiry(&compose::client_for(&c, &proj)),
                     ..Default::default()
                 };
-                let out = compose::up(
-                    &self.client(&a.project),
-                    &proj,
-                    &a.services,
-                    opts,
-                    &mut progress,
-                )?;
+                let out = compose::up(&c, &proj, &a.services, opts, &mut progress)?;
                 Ok(json!(
                     out.into_iter()
                         .map(|(s, r)| json!({"service": s, "report": r}))
@@ -532,7 +552,9 @@ fn create_desired(
         return Err(Error::AlreadyExists(d.name.clone()));
     }
     let plan = sandbox::plan_desired(c, d, opts.diff)?;
-    sandbox::apply(c, d, &plan, report)?;
+    let stamped = sandbox::expiry::stamped(d, &plan, opts.default_expiry);
+    sandbox::apply(c, &stamped, &plan, report)?;
+    sandbox::expiry::report_created(&stamped, report);
     if opts.wait_ready {
         sandbox::wait_ready(c, &d.name, &d.ready, d.ready_timeout, &d.exec)?;
     }

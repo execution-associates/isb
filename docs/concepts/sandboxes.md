@@ -180,9 +180,41 @@ load balancer and rolling updates, deploy the same file as a
 - **`isb prune --label KEY --missing-path`** deletes sandboxes whose `KEY`
   label names a host path that no longer exists (a deleted worktree). It is a
   dry run unless given `-y`.
-- Sandboxes made by `isb create` and `isb up` on the host have no expiry.
-  Sandboxes made through the daemon do: see
-  [Sandboxes are short-lived](#sandboxes-are-short-lived).
+- **Every sandbox expires** unless it says `never`, so one nobody comes back
+  to goes away on its own: see [Expiry](#expiry).
+
+## Expiry
+
+A sandbox's deadline is kept on the instance as `user.isb.expires_at`, and
+`isb serve`'s reaper deletes the sandbox once it passes, wherever it lives:
+in an org, or a plain sandbox in incus' `default` project.
+
+| Made by | Lives, unless told otherwise | Set it with |
+|---|---|---|
+| `isb create`, `isb up`, the Python and TypeScript SDKs, without an org | 7 days from its last `isb up` | `expires:` in the file, `--expires`; `never` to keep it |
+| the same, with `--org` | the org's `sandbox_expiry` (24 h), from its last `isb up` | the same |
+| `sandbox_create` (MCP, API, web UI) | the org's `sandbox_expiry` (24 h), at most 30 days, plus an idle timeout | the call's `expires` or the spec's; see [below](#sandboxes-are-short-lived) |
+
+- **A lease, not a timer.** Each `isb up` (or `isb create --ensure`) renews
+  the deadline to now plus the lifetime, so a sandbox someone keeps using
+  stays, and one left behind by a finished task or a deleted worktree is
+  gone a week later. An `up` never shortens a later deadline.
+- **Seeing and changing it.** `isb ls` has an EXPIRES column (`in 6d 23h`,
+  `never`, or `-` for none). `isb expiry NAME --in 24h` sets it from now,
+  `--by 24h` pushes it out, `--never` clears it. Through the daemon,
+  `sandbox_list` and `sandbox_extend`.
+- **What goes.** The instance and its root disk. Named volumes stay, as they
+  do after `isb rm` and `isb down`: they are shared by name and outlive their
+  sandboxes by design. `isb down --volumes` or `isb volume rm` removes them.
+- **Sandboxes without a deadline keep none.** The default applies when isb
+  creates a sandbox. One made before isb had expiries, or by hand, has no
+  `user.isb.expires_at`, is never reaped, and an `isb up` does not give it
+  one until its file says `expires:`.
+- Stack replicas and builds never expire: their controller owns them.
+  Neither do the sandboxes `isbx` keeps, nor ones made through the Rust API
+  without an `expires` ([isb from code](../guides/sdk.md)).
+- Nothing is reaped while `isb serve` is not running; the reaper takes what
+  has expired when it starts.
 
 ## Sandboxes are short-lived
 
@@ -190,7 +222,7 @@ Every sandbox made through `isb serve` (`sandbox_create`) gets deadlines,
 kept on the instance as `user.isb.expires_at` and `user.isb.idle_timeout`:
 
 - **an expiry**: the org's `sandbox_expiry` (default 24 h; at most 30 days),
-  or the call's `expires`;
+  or the call's `expires`, or the spec's (`never` is refused);
 - **an idle timeout**: the org's `sandbox_idle` (default 2 h), or the call's
   `idle_timeout`, or `none`. Idle means no exec or terminal through isb and
   under 2 % of a core of CPU since the daemon last saw it used (a daemon that
@@ -206,9 +238,10 @@ the caller would get) or the org's admins may. `sandbox_list`
 `build`), creator, age, expiry, idle timeout, last activity, limits and use,
 and whether the caller made it (`mine`).
 
-**The reaper** in the daemon checks every minute and deletes a sandbox past
-either deadline, recording `sandbox.reaped` in the history with the reason.
-It only takes instances that carry isb's deadlines and are neither a stack
-replica nor a build, re-reads each before deleting it, and skips one with a
-terminal open. Sandboxes made by `isb create` and `isb up` on the host have
-no deadlines and are never reaped.
+**The reaper** in the daemon checks every minute, in every incus project,
+and deletes a sandbox past either deadline, recording `sandbox.reaped` in
+the history with the reason. It only takes instances that carry isb's
+deadlines and are neither a stack replica nor a build, re-reads each before
+deleting it, and skips one with a terminal open. Idle timeouts are only set
+through the daemon, which sees the exec and terminals that count as use;
+`isb create` and `isb up` set an expiry alone.

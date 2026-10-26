@@ -50,11 +50,7 @@ pub(crate) fn read_store_secrets(ctx: &Ctx, p: &mut Project) -> Result<()> {
     } else {
         let config =
             isb::secrets::SecretsConfig::load(&isb::secrets::SecretsConfig::default_path())?;
-        // The daemon's state dir, as `isb serve` picks it.
-        let state = std::env::var_os("ISB_SERVE_STATE_DIR")
-            .filter(|s| !s.is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(isb::daemon::default_state_dir);
+        let state = super::expiry::serve_state_dir();
         let secrets = isb::secrets::Secrets::open_existing(
             &state,
             &isb::secrets::KeySources::from_env(),
@@ -76,16 +72,18 @@ pub(crate) fn read_store_secrets(ctx: &Ctx, p: &mut Project) -> Result<()> {
 pub(crate) fn up(ctx: &Ctx, services: Vec<String>, flags: UpFlags) -> Result<u8> {
     let mut p = ctx.load()?;
     read_store_secrets(ctx, &mut p)?;
+    let c = ctx.client(None);
     let opts = EnsureOptions {
         diff: DiffOptions {
             prune_devices: flags.prune_devices,
         },
         wait_ready: !flags.no_ready,
+        default_expiry: super::expiry::default_expiry(&compose::client_for(&c, &p)),
         ..Default::default()
     };
     let mut rep = ctx.report();
     rep(&format!("using {}", p.files_display()));
-    let ups = compose::up_handles(&ctx.client(None), &p, &services, opts, &mut rep)?;
+    let ups = compose::up_handles(&c, &p, &services, opts, &mut rep)?;
     if flags.json {
         let r: Vec<_> = ups.iter().map(|(_, r, _)| r).collect();
         print_json(&r);

@@ -21,10 +21,13 @@ use serde_json::{Value, json};
 use crate::error::{Error, Result};
 use crate::flex::parse_duration;
 use crate::idmap::{self, SubIds};
+use crate::sandbox::expiry::Expires;
 use crate::spec::{ExecDefaults, InstanceType, MountType, PortBind, ReadyCheck, SandboxSpec};
 
 mod boot;
+mod names;
 mod owner;
+pub use names::{device_name_for_path, validate_instance_name};
 
 pub use boot::{BOOT_DELAY_CONTAINER, BOOT_DELAY_VM, boot_config, dev_disk_limits};
 
@@ -373,59 +376,14 @@ pub struct Desired {
     /// can be written while it is stopped.
     #[serde(skip)]
     pub before_start: Option<BeforeStart>,
+    /// The spec's `expires` (crate::sandbox::expiry).
+    #[serde(skip)]
+    pub expires: Option<crate::sandbox::expiry::Expires>,
 }
 
 /// Named-volume definitions available to a sandbox (from a compose file's
 /// top-level `volumes:`).
 pub type VolumeDefs = BTreeMap<String, crate::spec::NamedVolumeSpec>;
-
-/// Valid incus instance name: <= 63 chars, [a-zA-Z0-9-], starts with a letter,
-/// does not end with '-'.
-pub fn validate_instance_name(name: &str) -> Result<()> {
-    let ok = !name.is_empty()
-        && name.len() <= 63
-        && name.starts_with(|c: char| c.is_ascii_alphabetic())
-        && !name.ends_with('-')
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
-    if ok {
-        Ok(())
-    } else {
-        Err(Error::invalid(format!(
-            "invalid sandbox name {name:?}: use at most 63 of [a-z0-9-], starting with a letter"
-        )))
-    }
-}
-
-/// Deterministic device name for a guest mount path.
-pub fn device_name_for_path(guest: &str) -> String {
-    let mut s = String::new();
-    for c in guest.to_ascii_lowercase().chars() {
-        if c.is_ascii_alphanumeric() {
-            s.push(c);
-        } else if !s.ends_with('-') {
-            s.push('-');
-        }
-    }
-    let s = s.trim_matches('-').to_string();
-    let s = if s.is_empty() { "mount".to_string() } else { s };
-    if s.len() <= 48 {
-        return s;
-    }
-    format!(
-        "{}-{:08x}",
-        s[s.len() - 39..].trim_start_matches('-'),
-        fnv32(guest)
-    )
-}
-
-fn fnv32(s: &str) -> u32 {
-    let mut h: u32 = 0x811c9dc5;
-    for b in s.bytes() {
-        h ^= b as u32;
-        h = h.wrapping_mul(0x01000193);
-    }
-    h
-}
 
 /// Split `tcp:1.2.3.4:5173` into ("tcp", "1.2.3.4", 5173). IPv6 in brackets works.
 pub fn split_addr(addr: &str) -> Option<(&str, &str, u16)> {
@@ -965,6 +923,7 @@ pub fn resolve(
             .collect(),
         egress,
         before_start: None,
+        expires: spec.expires.as_deref().map(Expires::parse).transpose()?,
     })
 }
 
