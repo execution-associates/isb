@@ -1643,18 +1643,18 @@ impl Worker {
                 self.message = Some(format!("{}: restart limit reached", i.name));
                 return Ok(());
             }
-            self.event(
-                "warn",
-                Some(&i.name),
-                &format!("{} is {}; starting it", i.name, i.status),
-            );
-            self.count_restart(&i.name);
             // Held through the setup below: the guest's boot is the load.
             let held = &mut |p: f64| self.held(&i.name, p);
             let Some(p) = inner.gate.acquire(&self.shared.stop, held) else {
                 return Ok(());
             };
             permit = Some(p);
+            self.event(
+                "warn",
+                Some(&i.name),
+                &format!("{} is {}; starting it", i.name, i.status),
+            );
+            self.count_restart(&i.name);
             if let Err(e) = sb.start() {
                 self.log(&format!("cannot start {}: {e}", i.name));
                 return Ok(());
