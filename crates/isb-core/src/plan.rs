@@ -22,13 +22,14 @@ use crate::error::{Error, Result};
 use crate::flex::parse_duration;
 use crate::idmap::{self, SubIds};
 use crate::sandbox::expiry::Expires;
-use crate::spec::{
-    ExecDefaults, InstanceType, MountType, PortBind, ReadyCheck, RestartMode, SandboxSpec,
-};
+use crate::spec::{ExecDefaults, InstanceType, MountType, PortBind, ReadyCheck, SandboxSpec};
 
+mod boot;
 mod names;
 mod owner;
 pub use names::{device_name_for_path, validate_instance_name};
+
+pub use boot::{BOOT_DELAY_CONTAINER, BOOT_DELAY_VM, boot_config, dev_disk_limits};
 
 pub type Props = BTreeMap<String, String>;
 
@@ -621,15 +622,9 @@ pub fn resolve(
     for (k, v) in spec.env.file_vars() {
         config.insert(format!("environment.{k}"), v);
     }
-    if let Some(r) = spec.restart {
-        // incus' default (no boot.autostart) already restores the state the
-        // instance had at shutdown, which is exactly unless-stopped.
-        if matches!(r, RestartMode::Always | RestartMode::OnFailure) {
-            config.insert("boot.autostart".into(), "true".into());
-        }
-        if r.is_long_running() {
-            config.insert("boot.autorestart".into(), "true".into());
-        }
+    config.extend(boot_config(spec, vm).map_err(|e| Error::invalid(format!("{name}: {e}")))?);
+    if spec.restart.is_some_and(|r| r.is_long_running()) {
+        config.insert("boot.autorestart".into(), "true".into());
     }
     if oci {
         let mut line: Vec<String> = spec.entrypoint.clone().unwrap_or_default();
@@ -859,7 +854,9 @@ pub fn resolve(
         }
         None => None,
     };
-    let mut root_extra = Props::new();
+    let mut root_extra = (!boot::is_replica(spec))
+        .then(dev_disk_limits)
+        .unwrap_or_default();
     for (dname, props) in &spec.raw_devices {
         if dname == "root" {
             // Tune the root disk (size, ...): merged over the generated one below.

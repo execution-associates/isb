@@ -16,6 +16,11 @@ export type BoolOrString = boolean | string;
  */
 export type OnChange = "none" | "restart" | "roll";
 /**
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "IntOrString".
+ */
+export type IntOrString = number | string;
+/**
  * A command: argv, or a string split the way a shell splits words.
  *
  * This interface was referenced by `ComposeFile`'s JSON-Schema
@@ -29,11 +34,6 @@ export type Command = string | Scalar[];
  * via the `definition` "Scalar".
  */
 export type Scalar = string | boolean | number;
-/**
- * This interface was referenced by `ComposeFile`'s JSON-Schema
- * via the `definition` "IntOrString".
- */
-export type IntOrString = number | string;
 /**
  * This interface was referenced by `ComposeFile`'s JSON-Schema
  * via the `definition` "DependsOnRepr".
@@ -353,6 +353,13 @@ export interface SecretDef {
  */
 export interface SandboxSpec {
   /**
+   * Whether and in what order incus starts the instance with the host
+   * (`boot.autostart`, `.priority`, `.delay`). Default: from `restart`,
+   * with a stack replica in the first start wave and every autostarting
+   * instance spaced from the next (docs/reference/compose.md#boot).
+   */
+  boot?: BootSpec | null;
+  /**
    * The sandbox's main command, run by a foreground `isb up` once the
    * sandbox is ready, as `user` in `working_dir`. Its output is streamed,
    * and `up` stops the sandbox when every command has exited. A list is
@@ -503,6 +510,28 @@ export interface SandboxSpec {
    * Working directory for `command` and `isb exec`. Default: the user's home.
    */
   working_dir?: string | null;
+}
+/**
+ * How incus starts an instance with the host. Every field left out takes
+ * its default ([`crate::plan::boot_config`]).
+ *
+ * This interface was referenced by `ComposeFile`'s JSON-Schema
+ * via the `definition` "BootSpec".
+ */
+export interface BootSpec {
+  /**
+   * Start with the host (`boot.autostart`).
+   */
+  autostart?: BoolOrString | null;
+  /**
+   * How long incus waits after starting this instance before it starts
+   * the next (`boot.autostart.delay`), e.g. `5s`; whole seconds.
+   */
+  delay?: IntOrString | null;
+  /**
+   * Start order (`boot.autostart.priority`): higher starts first.
+   */
+  priority?: number | null;
 }
 /**
  * This interface was referenced by `ComposeFile`'s JSON-Schema

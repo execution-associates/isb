@@ -235,6 +235,27 @@ fn instance_specs_are_labelled_and_unpublished() {
 }
 
 #[test]
+fn first_slots_start_with_the_host_before_the_rest() {
+    let d = def("services:\n  web: {image: x, deploy: {replicas: 3}}\n");
+    let web = d.service("web").unwrap();
+    let boot = |slot| {
+        let s = instance_spec(&d, "web", web, slot, "abcd").unwrap();
+        crate::plan::boot_config(&s, false).unwrap()
+    };
+    assert_eq!(boot(1)["boot.autostart"], "true");
+    assert_eq!(boot(1)["boot.autostart.priority"], "2");
+    assert_eq!(boot(1)["boot.autostart.delay"], "2");
+    assert_eq!(boot(2)["boot.autostart.priority"], "1");
+    assert_eq!(boot(3)["boot.autostart.priority"], "1");
+    // The spec's own order wins.
+    let d = def("services:\n  web: {image: x, boot: {priority: 9, delay: 5s}}\n");
+    let s = instance_spec(&d, "web", d.service("web").unwrap(), 2, "abcd").unwrap();
+    let b = crate::plan::boot_config(&s, false).unwrap();
+    assert_eq!(b["boot.autostart.priority"], "9");
+    assert_eq!(b["boot.autostart.delay"], "5");
+}
+
+#[test]
 fn deploy_diff() {
     let a = def("services:\n  web: {image: x}\n  db: {image: y}\n");
     let b = def("services:\n  web: {image: x, deploy: {replicas: 3}}\n  api: {image: z}\n");

@@ -888,6 +888,8 @@ makes the service long-running: it is meant to outlive `isb up`.
   `boot.autostart: true`; `unless-stopped` leaves it unset, which in incus
   restores whatever state the instance had at shutdown. All three set
   `boot.autorestart: true`, so incus restarts an instance whose init dies.
+  `no` sets `boot.autostart: false`: a dev sandbox stays down after a host
+  reboot even if it was running. [`boot`](#boot) changes any of this.
 - On a system image, `command` is installed as a systemd unit,
   `isb-<service>.service`, with `Restart=always` (`on-failure` for
   `on-failure`) after 5 s, its environment (`environment` plus `exec.env`) in a
@@ -905,6 +907,35 @@ makes the service long-running: it is meant to outlive `isb up`.
 ```yaml
 restart: always
 command: [node, server.js]
+```
+
+### `boot`
+
+Whether and in what order incus starts the instance when the host boots:
+`autostart` (bool), `priority` (integer, higher first) and `delay` (a
+duration, whole seconds: how long incus waits after starting this instance
+before it starts the next). They set `boot.autostart`,
+`boot.autostart.priority` and `boot.autostart.delay`; `raw_config` still wins
+over them.
+
+Incus starts autostart instances one at a time, highest priority first, but a
+start returns as soon as the guest's init runs, so without a delay a reboot
+wakes every instance within seconds and they all boot against the same disk
+at once. The defaults space them:
+
+| | `autostart` | `priority` | `delay` |
+|---|---|---|---|
+| `restart: always` or `on-failure` | `true` | unset (0) | `2s`, a VM `10s` |
+| `restart: unless-stopped` | unset: the state at shutdown | unset | unset |
+| `restart: no` (the default) | `false` | unset | unset |
+| a stack replica | `true` | `2` in slot 1, `1` in the others | `2s`, a VM `10s` |
+
+So after a reboot every service's first replica comes back before any extra
+one. A stack's `boot` is set on its running replicas in place, never by
+replacing them: it is not part of the service's revision.
+
+```yaml
+boot: {priority: 5, delay: 10s}   # a database the other services wait for
 ```
 
 ### `healthcheck`
@@ -1100,7 +1131,12 @@ Reconciled per the device rules.
 
 `root` is special: its properties are merged over the generated root disk
 (`{type: disk, path: /, pool: <storage pool>}`), for example to set `size`, and
-need no `type`. `root: {size: ...}` alone is allowed for remote callers without
+need no `type`. A sandbox that is not a stack replica gets I/O caps on it by
+default, `limits.read: 128MiB` and `limits.write: 64MiB` (bytes per second),
+so one busy sandbox cannot queue every other instance's I/O behind its own on
+a host where they share a disk; set either here to change it (a stack replica
+has no caps unless it sets them). Caps far lower than these starve the
+guest rather than bound it. `root: {size: ...}` alone is allowed for remote callers without
 `--allow-raw`: it is how a stack service sizes its root disk against an org's
 disk limit ([Orgs](../concepts/orgs.md#limits-are-budgets)); in such an org a
 root disk without one gets 10GiB at creation, outside the spec (a stack

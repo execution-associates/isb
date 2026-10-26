@@ -7,11 +7,11 @@ crates/isb-apps/src/app/deploy.rs 1736
 crates/isb-apps/src/app/preview.rs 1574
 crates/isb-apps/src/backup.rs 1501
 crates/isb-apps/src/s3.rs 1263
-crates/isb-core/src/plan.rs 1476
+crates/isb-core/src/plan.rs 1473
 crates/isb-core/src/registry/oci.rs 1081
 crates/isb-core/src/sandbox.rs 1280
-crates/isb-core/src/spec.rs 1442
-crates/isb-core/src/stack/controller.rs 2325
+crates/isb-core/src/spec.rs 1415
+crates/isb-core/src/stack/controller.rs 2316
 crates/isb-server/src/auth/http.rs 1040
 crates/isb-server/src/auth/mod.rs 1658
 crates/isb-server/src/history.rs 1305

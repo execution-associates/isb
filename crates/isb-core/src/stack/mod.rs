@@ -22,6 +22,7 @@ pub mod controller;
 pub mod deployments;
 pub mod failure;
 pub mod migrate;
+pub mod pacing;
 mod ports;
 pub mod secrets;
 pub mod source;
@@ -187,6 +188,8 @@ impl StackDef {
         s.env.on_change.clear();
         // Domains are the ingress's: changing them never replaces an instance.
         s.domains.clear();
+        // Boot order is set on the running instances in place.
+        s.boot = None;
         // Published ports are the balancer's, not the instance's (UDP: below).
         s.ports.retain(|p| p.bind == crate::spec::PortBind::Guest);
         if let Some(d) = &mut s.deploy {
@@ -568,6 +571,15 @@ mod tests {
         let mut d = a.clone();
         d.force.insert("web".into(), 1);
         assert_ne!(a.revision("web").unwrap(), d.revision("web").unwrap());
+    }
+
+    #[test]
+    fn revision_ignores_boot_order() {
+        // Set on running replicas in place, so changing it rolls nothing.
+        let a = def("services:\n  web: {image: x}\n");
+        let b =
+            def("services:\n  web: {image: x, boot: {autostart: false, priority: 3, delay: 9s}}\n");
+        assert_eq!(a.revision("web").unwrap(), b.revision("web").unwrap());
     }
 
     #[test]

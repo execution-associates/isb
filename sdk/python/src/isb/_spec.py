@@ -25,6 +25,19 @@ SecretAs = Literal["env", "file"]
 UpdateOrder = Literal["stop-first", "start-first"]
 
 
+class BootSpec(TypedDict, total=False):
+    """How incus starts an instance with the host. Every field left out takes
+    its default ([`crate::plan::boot_config`]).
+    """
+    #: Start with the host (`boot.autostart`).
+    autostart: Optional[BoolOrString]
+    #: How long incus waits after starting this instance before it starts
+    #: the next (`boot.autostart.delay`), e.g. `5s`; whole seconds.
+    delay: Optional[IntOrString]
+    #: Start order (`boot.autostart.priority`): higher starts first.
+    priority: Optional[int]
+
+
 class Dependency(TypedDict, total=False):
     condition: DependCondition
 
@@ -268,6 +281,11 @@ class RestartPolicy(TypedDict, total=False):
 
 class SandboxSpec(TypedDict, total=False):
     """Everything about one sandbox: a compose service."""
+    #: Whether and in what order incus starts the instance with the host
+    #: (`boot.autostart`, `.priority`, `.delay`). Default: from `restart`,
+    #: with a stack replica in the first start wave and every autostarting
+    #: instance spaced from the next (docs/reference/compose.md#boot).
+    boot: Optional[BootSpec]
     #: The sandbox's main command, run by a foreground `isb up` once the
     #: sandbox is ready, as `user` in `working_dir`. Its output is streamed,
     #: and `up` stops the sandbox when every command has exited. A list is
@@ -511,6 +529,11 @@ class ComposeFile(TypedDict, total=False):
 
 class SandboxSpecFields(TypedDict, total=False):
     """SandboxSpec without `container_name` and `image`: the keyword arguments of Sandbox.create."""
+    #: Whether and in what order incus starts the instance with the host
+    #: (`boot.autostart`, `.priority`, `.delay`). Default: from `restart`,
+    #: with a stack replica in the first start wave and every autostarting
+    #: instance spaced from the next (docs/reference/compose.md#boot).
+    boot: Optional[BootSpec]
     #: The sandbox's main command, run by a foreground `isb up` once the
     #: sandbox is ready, as `user` in `working_dir`. Its output is streamed,
     #: and `up` stops the sandbox when every command has exited. A list is
@@ -622,6 +645,7 @@ VolumeSpec = Union[str, VolumeMount]
 
 __all__ = [
     "BoolOrString",
+    "BootSpec",
     "Command",
     "ComposeFile",
     "DependCondition",

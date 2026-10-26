@@ -105,6 +105,8 @@ pub struct ServeConfig {
     pub policy: RemotePolicy,
     pub state_dir: PathBuf,
     pub interval: Duration,
+    /// How the stack controller paces instance starts.
+    pub start_pacing: crate::stack::pacing::Pacing,
     /// Where the secrets key is looked for (and generated).
     pub keys: crate::secrets::KeySources,
     /// `~/.config/isb/secrets.toml`: break-glass recipients.
@@ -345,12 +347,13 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     let observer = ingress
         .clone()
         .map(|m| m as Arc<dyn crate::stack::controller::Observer>);
-    let ctl = Controller::start_with(
+    let ctl = Controller::start_paced(
         client.clone(),
         store,
         cfg.interval,
         secrets.clone(),
         observer,
+        cfg.start_pacing,
     )?;
     if let Some(m) = &ingress {
         m.start(ctl.clone())?;
@@ -913,18 +916,6 @@ pub(super) fn owner_label(c: &Caller) -> String {
     }
 }
 
-const OUTPUT_CAP: usize = 256 * 1024;
-
-fn cap(b: &[u8]) -> (String, bool) {
-    if b.len() <= OUTPUT_CAP {
-        return (String::from_utf8_lossy(b).into_owned(), false);
-    }
-    (
-        String::from_utf8_lossy(&b[b.len() - OUTPUT_CAP..]).into_owned(),
-        true,
-    )
-}
-
 fn sandbox_exec(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     #[derive(Deserialize)]
     struct A {
@@ -964,8 +955,8 @@ fn sandbox_exec(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
         }
         r => r?,
     };
-    let (stdout, t1) = cap(&out.stdout);
-    let (stderr, t2) = cap(&out.stderr);
+    let (stdout, t1) = sandboxes::cap(&out.stdout);
+    let (stderr, t2) = sandboxes::cap(&out.stderr);
     Ok(
         json!({"exit_code": out.exit_code, "stdout": stdout, "stderr": stderr, "truncated": t1 || t2}),
     )

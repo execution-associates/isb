@@ -65,7 +65,7 @@ Three layers, each working without the ones above it:
    nothing else involved.
 2. **incus starts the instances with the host** (`boot.autostart`), and the
    unit restores the app's secrets before every start, so a reboot needs no
-   isb.
+   isb ([After a host reboot](#after-a-host-reboot)).
 3. **The daemon heals what the guest cannot see:** it runs each
    `healthcheck`, takes failing replicas out of the load balancer and
    restarts their app (and replaces the instance after three restarts that
@@ -76,6 +76,29 @@ Stopping or upgrading the daemon never stops an app. What stops with it is
 the load balancer: published ports close until it starts again (systemd
 restarts it within seconds), and it resumes every stack from its state
 directory without touching healthy instances.
+
+## After a host reboot
+
+incus starts autostart instances one at a time, highest
+`boot.autostart.priority` first, waiting `boot.autostart.delay` seconds after
+each. Every replica gets both ([`boot`](../reference/compose.md#boot)): slot
+1 of every service at priority 2, the other slots at 1, each 2 s (a VM 10 s)
+from the next. A host with a hundred replicas brings them back over a few
+minutes, each service serving again before its extra replicas start, instead
+of booting them all against the same disk in one second. Dev sandboxes
+(`restart: no`) do not come back at all.
+
+The daemon reconciles those keys on running replicas in place, with a config
+change incus applies without a restart; they are not part of the revision,
+so a replica made before them is updated, never replaced.
+
+The daemon's own starts and creates are paced the same way, across every
+stack and org: at most `--start-concurrency` (4) at once, a second apart, and
+none while the host's io pressure is at or above `--start-io-pressure` (40%
+`full avg10`), each waiting at most 5 minutes for it to fall. So `isb serve`
+coming up right after a boot, beside replicas incus has not reached yet,
+adds to the waves rather than starting everything itself
+([Configuration](../reference/configuration.md#stack-controller)).
 
 ## Replicas and names
 
