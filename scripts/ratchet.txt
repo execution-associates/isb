@@ -1,27 +1,24 @@
 # The ratchet budgets checked by scripts/ratchet.sh: Rust files allowed over
-# its line LIMIT (`path max-lines`), and how many times each ratcheted clippy
-# lint may be named in an exemption (`lint:<name> max-count`). Numbers only go
-# down: run `scripts/ratchet.sh --update` after shrinking something.
+# its line LIMIT (`path max-lines`, not counting inline test modules), and
+# how many times each ratcheted clippy lint may be named in an exemption
+# (`lint:<name> max-count`). Numbers only go down: run
+# `scripts/ratchet.sh --update` after shrinking something.
 crates/isb-apps/src/app/deploy.rs 1736
-crates/isb-apps/src/app/preview.rs 1812
-crates/isb-apps/src/backup.rs 1675
-crates/isb-apps/src/notify/mod.rs 1263
+crates/isb-apps/src/app/preview.rs 1574
+crates/isb-apps/src/backup.rs 1501
 crates/isb-apps/src/s3.rs 1263
-crates/isb-core/src/ingress/caddy.rs 1130
-crates/isb-core/src/machine.rs 1097
 crates/isb-core/src/plan.rs 1514
 crates/isb-core/src/registry/oci.rs 1081
 crates/isb-core/src/sandbox.rs 1313
 crates/isb-core/src/spec.rs 1491
 crates/isb-core/src/stack/controller.rs 2316
 crates/isb-daemon/src/daemon/mod.rs 1080
-crates/isb-server/src/audit.rs 1153
 crates/isb-server/src/auth/http.rs 1040
 crates/isb-server/src/auth/mod.rs 1658
-crates/isb-server/src/history.rs 1581
+crates/isb-server/src/history.rs 1305
 crates/isb-server/src/server/http.rs 1085
-crates/isb-server/src/server/mcp.rs 2120
-crates/isb-tui/src/tui/ui.rs 1564
+crates/isb-server/src/server/mcp.rs 1304
+crates/isb-tui/src/tui/ui.rs 1259
 lint:cognitive_complexity 14
 lint:excessive_nesting 8
 lint:too_many_arguments 12

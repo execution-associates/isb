@@ -245,6 +245,12 @@ CREATE TABLE IF NOT EXISTS samples(
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v INTEGER NOT NULL);
 ";
 
+/// Drops series with no samples left. The tiers are named because the key
+/// starts with `tier`: with `sid` alone each series is a scan of the whole
+/// table. Keep the list in step with [`TIERS`].
+const PRUNE_SERIES: &str = "DELETE FROM series WHERE NOT EXISTS
+    (SELECT 1 FROM samples WHERE tier IN (0, 1, 2) AND sid = series.id)";
+
 fn db_err(step: &str, e: rusqlite::Error) -> Error {
     Error::invalid(format!("metrics history: {step}: {e}"))
 }
@@ -347,11 +353,8 @@ impl OrgDb {
             )
             .map_err(|e| db_err("retention", e))?;
         }
-        tx.execute(
-            "DELETE FROM series WHERE NOT EXISTS (SELECT 1 FROM samples WHERE sid = series.id)",
-            [],
-        )
-        .map_err(|e| db_err("prune series", e))?;
+        tx.execute(PRUNE_SERIES, [])
+            .map_err(|e| db_err("prune series", e))?;
         tx.commit().map_err(|e| db_err("commit", e))?;
         let _ = self.conn.execute_batch("PRAGMA incremental_vacuum;");
         Ok(())
@@ -868,6 +871,63 @@ mod tests {
             .unwrap();
         assert_eq!(a.series.len(), 1);
         assert_eq!(a.series[0].name, "web-2");
+    }
+
+    /// `maintain` drops a series once its last sample is gone, keeps one
+    /// whose samples survive in any tier, and finds each by key instead of
+    /// scanning the table once per series (seconds per org, every minute,
+    /// once replicas have come and gone).
+    #[test]
+    fn maintain_prunes_empty_series_by_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = OrgDb::open(&dir.path().join("m.db")).unwrap();
+        let plan: Vec<String> = db
+            .conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {PRUNE_SERIES}"))
+            .unwrap()
+            .query_map([], |r| r.get(3))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert!(
+            plan.iter().any(|d| d.contains("samples USING PRIMARY KEY")),
+            "{plan:?}"
+        );
+
+        // One series whose only samples are in each tier, and one with none.
+        let now: u64 = 1_800_000_000 / 600 * 600;
+        let mut rows: Vec<Row> = (0..TIERS.len())
+            .map(|t| row(&format!("tier-{t}"), now - 600, 1.0, 1.0))
+            .collect();
+        rows.push(row("empty", now - 600, 1.0, 1.0));
+        db.insert(&rows).unwrap();
+        for t in 0..TIERS.len() {
+            db.conn
+                .execute(
+                    "UPDATE samples SET tier = ?1
+                     WHERE sid = (SELECT id FROM series WHERE instance = ?2)",
+                    params![t as i64, format!("tier-{t}")],
+                )
+                .unwrap();
+        }
+        db.conn
+            .execute(
+                "DELETE FROM samples WHERE sid = (SELECT id FROM series WHERE instance = 'empty')",
+                [],
+            )
+            .unwrap();
+
+        db.maintain(now).unwrap();
+        let left: Vec<String> = db
+            .conn
+            .prepare("SELECT instance FROM series ORDER BY instance")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        let want: Vec<String> = (0..TIERS.len()).map(|t| format!("tier-{t}")).collect();
+        assert_eq!(left, want);
     }
 
     #[test]

@@ -4,7 +4,9 @@
 #
 #  - File size: no Rust file may exceed LIMIT lines, except the files listed
 #    (`path lines`), each capped at its listed size. Once a listed file is
-#    under LIMIT it must leave the list.
+#    under LIMIT it must leave the list. A file's inline `#[cfg(test)] mod`
+#    block is not counted: the limit keeps code legible, and a test should
+#    never be cut short to fit under it.
 #  - Lint exemptions: clippy enforces the thresholds in clippy.toml, and an
 #    existing offender carries an `#[expect(clippy::<lint>, reason = ...)]`.
 #    The number of times each ratcheted lint is named in the source
@@ -35,7 +37,14 @@ while read -r f; do [ -f "$f" ] && files+=("$f"); done < <(sort -u <<<"$list")
 
 # `path lines` for every file, then `lint:<name> count` for every lint.
 measure() {
-  wc -l "${files[@]}" | awk '$2 != "total" { print $2, $1 }'
+  # Every line outside a top-level `#[cfg(test)] mod name { ... }` block.
+  awk '
+    function emit() { if (f != "") print f, n }
+    FNR == 1 { emit(); f = FILENAME; n = 0; test = 0; prev = "" }
+    test { if (/^}/) test = 0; next }
+    prev == "#[cfg(test)]" && /^mod [A-Za-z_]+ *\{/ { test = 1; n--; prev = ""; next }
+    { n++; prev = $0 }
+    END { emit() }' "${files[@]}"
   for l in $LINTS; do
     printf 'lint:%s %s\n' "$l" "$(cat "${files[@]}" | grep -o "clippy::$l\b" | wc -l)"
   done
