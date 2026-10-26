@@ -32,6 +32,19 @@ const ISBX_IDLE: Duration = Duration::from_secs(30 * 60);
 /// quota.
 pub const SANDBOX_ROOT_SIZE: &str = crate::org::DEFAULT_ROOT_SIZE;
 
+const OUTPUT_CAP: usize = 256 * 1024;
+
+/// The last [`OUTPUT_CAP`] bytes of an exec's output, and whether it was cut.
+pub(super) fn cap(b: &[u8]) -> (String, bool) {
+    if b.len() <= OUTPUT_CAP {
+        return (String::from_utf8_lossy(b).into_owned(), false);
+    }
+    (
+        String::from_utf8_lossy(&b[b.len() - OUTPUT_CAP..]).into_owned(),
+        true,
+    )
+}
+
 fn now() -> u64 {
     crate::stack::now_secs()
 }

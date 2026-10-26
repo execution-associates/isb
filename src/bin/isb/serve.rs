@@ -23,6 +23,14 @@ pub(crate) struct ServeArgs {
     /// How often each service is reconciled and health-checked.
     #[arg(long, value_parser = dur, default_value = "5s")]
     pub(crate) interval: Duration,
+    /// Instance starts and creates the stack controller runs at once,
+    /// across every stack.
+    #[arg(long, env = "ISB_START_CONCURRENCY", default_value_t = isb::stack::pacing::DEFAULT_CONCURRENCY, value_parser = clap::value_parser!(u32).range(1..))]
+    pub(crate) start_concurrency: u32,
+    /// Hold new starts while the host's io pressure (/proc/pressure/io,
+    /// full avg10) is at or above this percentage; 0 turns it off.
+    #[arg(long, env = "ISB_START_IO_PRESSURE", default_value_t = isb::stack::pacing::DEFAULT_IO_PRESSURE)]
+    pub(crate) start_io_pressure: f64,
     /// Cloudflare Access team domain (https://TEAM.cloudflareaccess.com).
     #[arg(long, env = "CF_ACCESS_TEAM_DOMAIN")]
     pub(crate) access_team_domain: Option<String>,
@@ -313,6 +321,10 @@ pub(crate) fn serve(ctx: &Ctx, a: ServeArgs) -> Result<u8> {
         },
         state_dir: a.state_dir.unwrap_or_else(isb::daemon::default_state_dir),
         interval: a.interval,
+        start_pacing: isb::stack::pacing::Pacing {
+            concurrency: a.start_concurrency as usize,
+            io_pressure: Some(a.start_io_pressure).filter(|p| *p > 0.0),
+        },
         keys: isb::secrets::KeySources::from_env(),
         secrets_config: isb::secrets::SecretsConfig::default_path(),
         auth: isb::auth::AuthConfig {

@@ -16,8 +16,10 @@ pub use secret::{DEFAULT_SECRET_REFRESH, OnChange, SecretAs, SecretDef};
 mod env;
 pub use env::Environment;
 mod mount;
+mod restart;
 pub(crate) use mount::is_host_path;
 pub use mount::{MountType, VolumeOptions, VolumeSpec};
+pub use restart::{BootSpec, RestartMode};
 
 /// A compose file: named volumes plus any number of services, each one
 /// sandbox. Mirrors docker compose wherever incus allows.
@@ -321,6 +323,13 @@ pub struct SandboxSpec {
     /// held open by `isb up`, so it survives isb exiting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restart: Option<RestartMode>,
+
+    /// Whether and in what order incus starts the instance with the host
+    /// (`boot.autostart`, `.priority`, `.delay`). Default: from `restart`,
+    /// with a stack replica in the first start wave and every autostarting
+    /// instance spaced from the next (docs/reference/compose.md#boot).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boot: Option<BootSpec>,
 
     /// A recurring health test, as in docker compose. `isb stack deploy`
     /// routes traffic only to healthy replicas and replaces unhealthy ones;
@@ -943,42 +952,6 @@ impl ExecDefaults {
 // ----------------------------------------------------------------------------
 // Long-running services: restart, healthcheck, depends_on, deploy, secrets.
 // ----------------------------------------------------------------------------
-
-/// docker's `restart:`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")]
-pub enum RestartMode {
-    #[default]
-    No,
-    Always,
-    OnFailure,
-    UnlessStopped,
-}
-
-// By hand so that YAML 1.1 habits (`restart: no` read as false) still work.
-impl<'de> Deserialize<'de> for RestartMode {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        use serde::de::Error as _;
-        let s = flex::Scalar::deserialize(d)?.into_string();
-        Ok(match s.as_str() {
-            "no" | "false" | "" => RestartMode::No,
-            "always" => RestartMode::Always,
-            "on-failure" => RestartMode::OnFailure,
-            "unless-stopped" => RestartMode::UnlessStopped,
-            other => {
-                return Err(D::Error::custom(format!(
-                    "unknown restart {other:?} (no, always, on-failure, unless-stopped)"
-                )));
-            }
-        })
-    }
-}
-
-impl RestartMode {
-    pub fn is_long_running(&self) -> bool {
-        *self != RestartMode::No
-    }
-}
 
 /// docker compose's `healthcheck:`. Durations are strings (`30s`, `1m30s`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]

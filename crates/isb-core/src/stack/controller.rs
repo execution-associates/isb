@@ -18,10 +18,7 @@ use serde::Serialize;
 use super::changes::diff;
 use super::ports::{Published, published};
 use super::secrets::{Cycle, LABEL_SECRETS, StaleSecret};
-use super::{
-    LABEL_REV, LABEL_SERVICE, LABEL_SLOT, LABEL_STACK, StackDef, Store, instance_name, new_id,
-    now_secs, validate_stack_name,
-};
+use super::{StackDef, Store, instance_name, new_id, now_secs, validate_stack_name};
 use crate::balance::Balancer;
 use crate::client::{Client, encode_segment};
 use crate::error::{Error, Result};
@@ -35,13 +32,14 @@ use crate::spec::{
 };
 use crate::supervise;
 
+mod boot;
 mod dns;
 mod health;
 mod instances;
 pub use dns::{DnsScope, DnsScopeFn};
 use health::InstRt;
-use instances::instance_state;
-pub use instances::list_instances;
+pub use instances::{Inst, list_instances};
+use instances::{instance_spec, instance_state, live_versions};
 
 /// How long a replaced instance's connections may drain before it is stopped.
 const DRAIN: Duration = Duration::from_secs(10);
@@ -290,6 +288,8 @@ struct Inner {
     metrics_sink: Mutex<Option<std::sync::mpsc::SyncSender<crate::metrics_history::Sample>>>,
     /// Which project environment a stack's services are also named in.
     dns_scope: Mutex<Option<DnsScopeFn>>,
+    /// Paces instance starts and creates across every stack.
+    gate: super::pacing::StartGate,
 }
 
 impl Inner {
@@ -368,6 +368,25 @@ impl Controller {
         secrets: Arc<Secrets>,
         observer: Option<Arc<dyn Observer>>,
     ) -> Result<Controller> {
+        Controller::start_paced(
+            client,
+            store,
+            interval,
+            secrets,
+            observer,
+            Default::default(),
+        )
+    }
+
+    /// [`Controller::start_with`], pacing instance starts by `pacing`.
+    pub fn start_paced(
+        client: Client,
+        store: Store,
+        interval: Duration,
+        secrets: Arc<Secrets>,
+        observer: Option<Arc<dyn Observer>>,
+        pacing: super::pacing::Pacing,
+    ) -> Result<Controller> {
         let c = Controller {
             inner: Arc::new(Inner {
                 client,
@@ -387,6 +406,7 @@ impl Controller {
                 event_sink: Mutex::new(None),
                 metrics_sink: Mutex::new(None),
                 dns_scope: Mutex::new(None),
+                gate: super::pacing::StartGate::host(pacing),
             }),
         };
         // Driver-backed secrets are polled on their refresh intervals; the
@@ -952,69 +972,6 @@ fn limit_error(msg: &str) -> bool {
     msg.contains(" quota (") || msg.contains(" limit (")
 }
 
-/// The spec an instance of `service` is created from: labelled, with its
-/// published TCP ports removed (the balancer serves them) and its UDP ports
-/// as NAT proxies (see [`super::ports`]), and always long-running, as swarm
-/// ignores `restart` in favour of `restart_policy`.
-fn instance_spec(
-    def: &StackDef,
-    service: &str,
-    spec: &SandboxSpec,
-    slot: u32,
-    rev: &str,
-) -> Result<SandboxSpec> {
-    let mut s = spec.clone();
-    s.image = def.instance_image(service, &spec.image);
-    s.restart = Some(RestartMode::Always);
-    (s.ports, s.stack_udp) = super::ports::instance_ports(spec)?;
-    s.domains.clear();
-    if let Some(d) = &s.deploy {
-        s.labels.extend(d.labels.clone());
-    }
-    s.labels.insert(LABEL_STACK.into(), def.name.clone());
-    s.labels.insert(LABEL_SERVICE.into(), service.into());
-    s.labels.insert(LABEL_SLOT.into(), slot.to_string());
-    s.labels.insert(LABEL_REV.into(), rev.into());
-    let live = live_versions(def, service);
-    if !live.is_empty() {
-        s.labels
-            .insert(LABEL_SECRETS.into(), super::secrets::versions_label(&live));
-    }
-    Ok(s)
-}
-
-/// The versions bound now of the secrets `service` takes in place.
-fn live_versions(def: &StackDef, service: &str) -> BTreeMap<String, u64> {
-    def.live_secrets(service)
-        .into_iter()
-        .map(|(k, (_, v))| (k, v))
-        .collect()
-}
-
-/// A stack's instance as listed.
-#[derive(Debug, Clone)]
-#[doc(hidden)]
-pub struct Inst {
-    pub name: String,
-    pub(super) slot: u32,
-    pub rev: String,
-    status: String,
-    /// [`LABEL_SECRETS`]: the `restart`/`none` secret versions its app last
-    /// started with; `None` on an instance from before the label.
-    secrets: Option<BTreeMap<String, u64>>,
-}
-
-impl Inst {
-    #[doc(hidden)]
-    pub fn is_running(&self) -> bool {
-        self.running()
-    }
-
-    fn running(&self) -> bool {
-        self.status.eq_ignore_ascii_case("running")
-    }
-}
-
 /// A service's worker.
 struct Worker {
     inner: Arc<Inner>,
@@ -1362,6 +1319,7 @@ impl Worker {
 
         // Keep what exists running, set up and healthy.
         for i in &insts {
+            self.set_boot_order(def, i, &spec, &rev);
             self.maintain(def, i, &spec, oci, probe.as_ref())?;
         }
         // An interrupted rollout can leave an old instance next to a current
@@ -1674,6 +1632,8 @@ impl Worker {
             .and_then(|p| p.condition)
             .unwrap_or_default();
         let sb = self.handle(&i.name);
+        let inner = self.inner.clone();
+        let mut permit = None;
         if !i.running() {
             self.set_rotation(&i.name, false);
             if condition == RestartCondition::None {
@@ -1689,6 +1649,12 @@ impl Worker {
                 &format!("{} is {}; starting it", i.name, i.status),
             );
             self.count_restart(&i.name);
+            // Held through the setup below: the guest's boot is the load.
+            let held = &mut |p: f64| self.held(&i.name, p);
+            let Some(p) = inner.gate.acquire(&self.shared.stop, held) else {
+                return Ok(());
+            };
+            permit = Some(p);
             if let Err(e) = sb.start() {
                 self.log(&format!("cannot start {}: {e}", i.name));
                 return Ok(());
@@ -1708,6 +1674,13 @@ impl Worker {
             rt.pid = pid;
             rt.started(Instant::now());
             rt.next_probe = None;
+            if permit.is_none() {
+                // Booted by incus or found running at startup: as many as
+                // there are replicas at once, so wait out io pressure.
+                inner
+                    .gate
+                    .wait_pressure(&self.shared.stop, &mut |p| self.held(&i.name, p));
+            }
             let r = self.setup(def, &sb, spec, oci);
             if let Err(e) = r {
                 // Leave pid unset so the next pass tries again.
@@ -1725,6 +1698,7 @@ impl Worker {
                 self.mark_started(def, &i.name)?;
             }
         }
+        drop(permit);
         let alive = self.alive(&sb, spec, oci);
         let healthy = match probe {
             None => alive,
@@ -1927,6 +1901,16 @@ impl Worker {
         } else {
             None
         };
+        // Before a stop-first retire, so the old instance serves while it
+        // waits; held through the create, start and readiness checks.
+        let inner = self.inner.clone();
+        let held = &mut |p: f64| self.held(&format!("slot {slot}"), p);
+        let Some(permit) = inner.gate.acquire(&self.shared.stop, held) else {
+            return Err(Error::OperationFailed {
+                step: format!("slot {slot}"),
+                message: "isb serve is stopping".into(),
+            });
+        };
         if let (Some(o), UpdateOrder::StopFirst) = (old, order) {
             self.log(&format!("slot {slot}: replacing {o} (stop-first)"));
             self.slot_state(def, slot, Some("draining"), None, None);
@@ -1946,6 +1930,7 @@ impl Worker {
         let mut report = |m: &str| eprintln!("isb serve: {stack}: {m}");
         let created =
             crate::sandbox::ensure(self.client(), &d, EnsureOptions::default(), &mut report);
+        drop(permit);
         let result = created.and_then(|_| {
             let inst = Inst {
                 name: name.clone(),
@@ -1953,6 +1938,12 @@ impl Worker {
                 rev: rev.to_string(),
                 status: "Running".into(),
                 secrets: Some(live_versions(def, &self.service)),
+                boot: d
+                    .config
+                    .iter()
+                    .filter(|(k, _)| k.starts_with("boot.autostart"))
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
             };
             self.insts.push(inst.clone());
             self.slot_state(def, slot, None, None, Some("probing"));

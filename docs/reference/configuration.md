@@ -126,6 +126,18 @@ settings for it.
 | `--egress-pin` | `ISB_EGRESS_PINS` | none | `NAME=IP[:PORT]`, comma-separated: the proxy connects to `NAME` at that address instead of resolving it, and may reach a private one. The only way a name that resolves to a private address is reachable. |
 | `--egress-ca` | `ISB_EGRESS_CA` | none | PEM files of certificates the proxy trusts for the hosts it connects to, besides the system's (a private CA) |
 
+### Stack controller
+
+| Flag | Environment | Default | |
+|---|---|---|---|
+| `--interval` | none | `5s` | how often each service is reconciled and health-checked |
+| `--start-concurrency` | `ISB_START_CONCURRENCY` | `4` | instance starts and creates the controller runs at once, across every stack and org |
+| `--start-io-pressure` | `ISB_START_IO_PRESSURE` | `40` | hold new starts while the host's io pressure (`full avg10` in `/proc/pressure/io`, percent) is at or above this, for at most 5 minutes each; `0` turns it off |
+
+Starts are also spaced a second apart. Together they keep a host boot, or a
+daemon restart beside many stopped replicas, from starting everything in the
+same second ([Stacks](../concepts/stacks.md#after-a-host-reboot)).
+
 ### Audit and history
 
 | Flag | Environment | Default | |

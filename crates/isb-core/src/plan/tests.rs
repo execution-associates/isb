@@ -1,5 +1,5 @@
 use super::*;
-use crate::spec::{IdmapMode, IdmapSpec, NamedVolumeSpec, PortBinding, Volume};
+use crate::spec::{IdmapMode, IdmapSpec, NamedVolumeSpec, PortBinding, RestartMode, Volume};
 
 const TITAN: &str = "root:1000000:1000000000\nroot:1000:1\n";
 
@@ -902,4 +902,99 @@ fn a_new_volume_belongs_to_the_service_user() {
     assert_eq!(d.volumes[0].config["initial.uid"], "7");
     let (d, fixes) = owner_plan(Volume::named("v"), None, &h, true);
     assert!(d.volumes[0].config.is_empty() && fixes.is_empty());
+}
+
+fn resolved(spec: &SandboxSpec) -> Desired {
+    resolve(spec, &VolumeDefs::new(), &host(), Path::new("/")).unwrap()
+}
+
+fn boot_keys(d: &Desired) -> Vec<(String, String)> {
+    d.config
+        .iter()
+        .filter(|(k, _)| k.starts_with("boot."))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
+fn kv(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+}
+
+#[test]
+fn a_plain_sandbox_does_not_come_back_after_a_reboot() {
+    // incus would restore an unset autostart from the last state.
+    let s = SandboxSpec::new("dev", "dev-base");
+    assert_eq!(boot_keys(&resolved(&s)), kv(&[("boot.autostart", "false")]));
+    let mut s = s;
+    s.restart = Some(RestartMode::No);
+    assert_eq!(boot_keys(&resolved(&s)), kv(&[("boot.autostart", "false")]));
+}
+
+#[test]
+fn a_long_running_sandbox_autostarts_spaced() {
+    let mut s = SandboxSpec::new("dev", "dev-base");
+    s.restart = Some(RestartMode::Always);
+    assert_eq!(
+        boot_keys(&resolved(&s)),
+        kv(&[
+            ("boot.autorestart", "true"),
+            ("boot.autostart", "true"),
+            ("boot.autostart.delay", "2"),
+        ])
+    );
+    s.instance_type = InstanceType::VirtualMachine;
+    assert_eq!(boot_config(&s, true).unwrap()["boot.autostart.delay"], "10");
+    // unless-stopped is incus' restore-the-last-state.
+    s.restart = Some(RestartMode::UnlessStopped);
+    assert_eq!(
+        boot_keys(&resolved(&s)),
+        kv(&[("boot.autorestart", "true")])
+    );
+}
+
+#[test]
+fn boot_is_overridable_in_the_spec() {
+    let mut s = SandboxSpec::new("dev", "dev-base");
+    s.boot = Some(crate::spec::BootSpec {
+        autostart: Some(true),
+        priority: Some(7),
+        delay: Some("1m".into()),
+    });
+    assert_eq!(
+        boot_keys(&resolved(&s)),
+        kv(&[
+            ("boot.autostart", "true"),
+            ("boot.autostart.delay", "60"),
+            ("boot.autostart.priority", "7"),
+        ])
+    );
+    // raw_config still has the last word.
+    s.raw_config
+        .insert("boot.autostart.delay".into(), "0".into());
+    assert_eq!(resolved(&s).config["boot.autostart.delay"], "0");
+    s.boot.as_mut().unwrap().delay = Some("soon".into());
+    let e = resolve(&s, &VolumeDefs::new(), &host(), Path::new("/")).unwrap_err();
+    assert!(e.to_string().contains("boot.delay"), "{e}");
+}
+
+#[test]
+fn a_dev_sandbox_root_disk_is_io_capped_and_a_replica_is_not() {
+    let s = SandboxSpec::new("dev", "dev-base");
+    let root = &resolved(&s).devices["root"].props;
+    assert_eq!(root["limits.read"], "128MiB");
+    assert_eq!(root["limits.write"], "64MiB");
+    // Overridden through raw_devices.root, like its size.
+    let s = SandboxSpec::new("dev", "dev-base").raw_device(
+        "root",
+        BTreeMap::from([("limits.write".into(), "256MiB".into())]),
+    );
+    let root = &resolved(&s).devices["root"].props;
+    assert_eq!(root["limits.read"], "128MiB");
+    assert_eq!(root["limits.write"], "256MiB");
+    let s = SandboxSpec::new("web-web-1-abcd", "dev-base").label(crate::stack::LABEL_STACK, "web");
+    let root = &resolved(&s).devices["root"].props;
+    assert!(!root.contains_key("limits.read") && !root.contains_key("limits.write"));
 }

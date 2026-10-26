@@ -9,12 +9,12 @@ crates/isb-apps/src/notify/mod.rs 1263
 crates/isb-apps/src/s3.rs 1263
 crates/isb-core/src/ingress/caddy.rs 1130
 crates/isb-core/src/machine.rs 1097
-crates/isb-core/src/plan.rs 1517
+crates/isb-core/src/plan.rs 1514
 crates/isb-core/src/registry/oci.rs 1081
 crates/isb-core/src/sandbox.rs 1313
-crates/isb-core/src/spec.rs 1518
-crates/isb-core/src/stack/controller.rs 2325
-crates/isb-daemon/src/daemon/mod.rs 1089
+crates/isb-core/src/spec.rs 1491
+crates/isb-core/src/stack/controller.rs 2316
+crates/isb-daemon/src/daemon/mod.rs 1080
 crates/isb-server/src/audit.rs 1153
 crates/isb-server/src/auth/http.rs 1040
 crates/isb-server/src/auth/mod.rs 1658
