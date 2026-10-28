@@ -100,8 +100,9 @@ pub(crate) enum StackCmd {
         #[arg(long)]
         failed: bool,
     },
-    /// Run a command in one of a service's replicas (not interactive):
-    /// `isb stack exec shop web -- ls -l`; -i feeds stdin.
+    /// Run a command in one of a service's replicas: `isb stack exec shop
+    /// web -- ls -l`; -i feeds stdin; -it runs it interactively, on a
+    /// terminal (`isb stack exec -it shop web -- sh`).
     Exec {
         name: String,
         service: String,

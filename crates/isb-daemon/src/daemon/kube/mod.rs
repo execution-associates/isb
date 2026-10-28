@@ -26,6 +26,7 @@ use crate::stack::controller::ServiceStatus;
 
 #[cfg(test)]
 use self::{exec::*, files::*, look::*};
+pub(super) use exec::pick_replica;
 pub(super) use look::{SINCE_NOTE, read_lines, since_cutoff, window_logs};
 
 /// Tools that only read.

@@ -1,11 +1,15 @@
 //! A terminal over a websocket: `GET /orgs/<org>/api/v1/terminal?app=NAME`
-//! (or `?instance=NAME`) upgrades to a websocket bridged to a
-//! pseudo-terminal the embedder opens (`isb serve`: a shell in one of the
-//! app's replicas, or in an instance of the org).
+//! (or `?stack=NAME&service=SERVICE`, or `?instance=NAME`) upgrades to a
+//! websocket bridged to a pseudo-terminal the embedder opens (`isb serve`: a
+//! shell in one of the app's or service's replicas, or in an instance of the
+//! org). With `argv=` (repeated, in order) it runs that command instead of a
+//! shell, with `user=`, `cwd=` and `env=KEY=VALUE` (repeated): `isb stack
+//! exec -t` and its siblings.
 //!
 //! The gate is the REST surface's: the caller authenticates as for any tool
 //! (session, API token, Access), and is admitted as if calling
-//! `sandbox_exec` in the org, so the org rules and `--deny-tools` apply.
+//! `sandbox_exec` in the org (a command: the exec tool that runs it without
+//! a terminal), so the org rules and `--deny-tools` apply.
 //! A browser's cookie rides along on a cross-site websocket too, so a
 //! cookie-authenticated upgrade must come from this site (`Origin` naming
 //! the request's `Host`).
@@ -18,8 +22,9 @@
 //! Bounded: at most [`MAX_SESSIONS`] at once, [`IDLE`] without a byte either
 //! way, [`MAX_AGE`] in all, messages up to [`MAX_MESSAGE`].
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use serde_json::json;
@@ -37,36 +42,106 @@ pub const MAX_MESSAGE: usize = 64 * 1024;
 /// terminal's output.
 const POLL: Duration = Duration::from_millis(15);
 
-/// What the browser asked for.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The most arguments and environment variables a command may have (as
+/// the exec tools take).
+const MAX_ARGV: usize = 1024;
+const MAX_ENV: usize = 128;
+
+/// What the browser (or `isb ... exec -t`) asked for.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TermRequest {
-    /// The app, or empty when `instance` names the target.
+    /// The app; with `stack`, that stack's service; empty when `instance`
+    /// names the target.
     pub app: String,
+    /// The compose stack `app` is a service of.
+    pub stack: Option<String>,
     /// A replica's slot; `None` picks one.
     pub slot: Option<u32>,
     /// An instance of the org (a sandbox, a replica) instead of an app.
     pub instance: Option<String>,
     pub cols: u16,
     pub rows: u16,
+    /// Run this instead of a login shell.
+    pub command: Option<TermCommand>,
+}
+
+/// A command to run on the terminal, as the exec tools take one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TermCommand {
+    pub argv: Vec<String>,
+    pub user: Option<String>,
+    pub cwd: Option<String>,
+    pub env: BTreeMap<String, String>,
 }
 
 impl TermRequest {
-    /// The query string that asks for this terminal again (forwarding).
+    /// The query string that asks for this terminal again (forwarding, and
+    /// the CLI's `exec -t`).
     pub fn query(&self) -> String {
-        let mut q = match &self.instance {
-            Some(i) => format!("instance={i}"),
-            None => format!("app={}", self.app),
+        let mut q = match (&self.instance, &self.stack) {
+            (Some(i), _) => format!("instance={i}"),
+            (None, Some(s)) => format!("stack={s}&service={}", encode(&self.app)),
+            (None, None) => format!("app={}", self.app),
         };
         q.push_str(&format!("&cols={}&rows={}", self.cols, self.rows));
         if let Some(n) = self.slot {
             q.push_str(&format!("&slot={n}"));
         }
+        if let Some(c) = &self.command {
+            for a in &c.argv {
+                q.push_str(&format!("&argv={}", encode(a)));
+            }
+            if let Some(u) = &c.user {
+                q.push_str(&format!("&user={}", encode(u)));
+            }
+            if let Some(w) = &c.cwd {
+                q.push_str(&format!("&cwd={}", encode(w)));
+            }
+            for (k, v) in &c.env {
+                q.push_str(&format!("&env={}", encode(&format!("{k}={v}"))));
+            }
+        }
         q
     }
 
-    /// What it opens on, for logs: the app or the instance.
-    pub fn target(&self) -> &str {
-        self.instance.as_deref().unwrap_or(&self.app)
+    /// What it opens on, for logs: the app, the stack's service or the
+    /// instance.
+    pub fn target(&self) -> String {
+        match (&self.instance, &self.stack) {
+            (Some(i), _) => i.clone(),
+            (None, Some(s)) => format!("{s}/{}", self.app),
+            (None, None) => self.app.clone(),
+        }
+    }
+
+    /// What the audit log keeps of the request: the target, and a
+    /// command's argv, user and cwd, as an exec tool's call is kept, with
+    /// its environment's names only.
+    pub fn audit_args(&self, org: &crate::org::OrgId) -> serde_json::Value {
+        let mut args = match (&self.instance, &self.stack) {
+            (Some(i), _) => json!({"org": org.as_str(), "name": i}),
+            (None, Some(s)) => json!({"org": org.as_str(), "stack": s, "service": self.app}),
+            (None, None) => json!({"org": org.as_str(), "app": self.app}),
+        };
+        if let Some(c) = &self.command {
+            args["argv"] = json!(c.argv);
+            args["user"] = json!(c.user);
+            args["cwd"] = json!(c.cwd);
+            args["env"] = json!(c.env.keys().collect::<Vec<_>>());
+        }
+        args
+    }
+
+    /// The tool whose admission a session of this kind takes: a shell is
+    /// `sandbox_exec`'s; a command, that of the exec tool that would run it
+    /// without a terminal.
+    pub fn tool(&self) -> &'static str {
+        match (&self.command, &self.instance, &self.stack) {
+            (None, _, _) => "sandbox_exec",
+            (Some(_), Some(_), _) => "instance_exec",
+            (Some(_), None, Some(_)) => "stack_exec",
+            (Some(_), None, None) => "app_exec",
+        }
     }
 }
 
@@ -136,10 +211,112 @@ impl Drop for Slot {
 }
 
 fn param(req: &Request, key: &str) -> Option<String> {
-    req.query.as_deref()?.split('&').find_map(|kv| {
-        let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
-        (k == key).then(|| v.to_string())
-    })
+    params(req, key).into_iter().next()
+}
+
+/// Every raw value of a repeated query parameter, in order.
+fn params(req: &Request, key: &str) -> Vec<String> {
+    let Some(q) = req.query.as_deref() else {
+        return Vec::new();
+    };
+    q.split('&')
+        .filter_map(|kv| {
+            let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
+            (k == key).then(|| v.to_string())
+        })
+        .collect()
+}
+
+/// Percent-encode a query value.
+pub(crate) fn encode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'@' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// Undo [`encode`] (and a form's `+`); `None` when it is not UTF-8 or a
+/// `%` is not followed by two hex digits.
+pub(crate) fn decode(s: &str) -> Option<String> {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'%' => {
+                let h = std::str::from_utf8(b.get(i + 1..i + 3)?).ok()?;
+                out.push(u8::from_str_radix(h, 16).ok()?);
+                i += 3;
+            }
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            c => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+/// A compose service's name: letters, digits, `.`, `_` and `-`, at most 64.
+fn service_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+/// The command a request carries in `argv=` (with `user=`, `cwd=`, `env=`),
+/// if any.
+fn term_command(req: &Request) -> std::result::Result<Option<TermCommand>, String> {
+    let all = |k: &str| -> std::result::Result<Vec<String>, String> {
+        params(req, k)
+            .iter()
+            .map(|v| decode(v).ok_or_else(|| format!("{k}= is not percent-encoded UTF-8")))
+            .collect()
+    };
+    let one = |k: &str| -> std::result::Result<Option<String>, String> {
+        Ok(all(k)?.into_iter().next().filter(|v| !v.is_empty()))
+    };
+    let argv = all("argv")?;
+    if argv.is_empty() {
+        for k in ["user", "cwd", "env"] {
+            if param(req, k).is_some() {
+                return Err(format!("{k}= is for a command (argv=)"));
+            }
+        }
+        return Ok(None);
+    }
+    if argv[0].is_empty() || argv.len() > MAX_ARGV || argv.iter().any(|a| a.contains('\0')) {
+        return Err(format!(
+            "argv=: a command, at most {MAX_ARGV} arguments, none with a NUL"
+        ));
+    }
+    let mut env = BTreeMap::new();
+    for e in all("env")? {
+        match e.split_once('=') {
+            Some((k, v)) if !k.is_empty() && !k.contains('\0') && !v.contains('\0') => {
+                env.insert(k.to_string(), v.to_string());
+            }
+            _ => return Err(format!("env= wants KEY=VALUE (it was {e:?})")),
+        }
+    }
+    if env.len() > MAX_ENV {
+        return Err(format!("env=: at most {MAX_ENV} variables"));
+    }
+    Ok(Some(TermCommand {
+        argv,
+        user: one("user")?,
+        cwd: one("cwd")?,
+        env,
+    }))
 }
 
 /// A lower-case name of letters, digits and dashes, at most 64 long (an
@@ -158,14 +335,35 @@ pub fn query_param(req: &Request, key: &str) -> Option<String> {
 
 /// The request's terminal parameters, or what is wrong with them.
 pub fn term_request(req: &Request) -> std::result::Result<TermRequest, String> {
-    let (app, instance) = match (param(req, "app"), param(req, "instance")) {
-        (Some(a), None) if plain_name(&a) => (a, None),
-        (Some(_), None) => return Err("app= is not an app name".into()),
-        (None, Some(i)) if plain_name(&i) => (String::new(), Some(i)),
-        (None, Some(_)) => return Err("instance= is not an instance name".into()),
-        (Some(_), Some(_)) => return Err("give app= or instance=, not both".into()),
-        (None, None) => return Err("app= (or instance=) is required".into()),
+    let service = match param(req, "service") {
+        Some(s) => Some(
+            decode(&s)
+                .filter(|s| service_name(s))
+                .ok_or("service= is not a service name")?,
+        ),
+        None => None,
     };
+    let (app, stack, instance) = match (
+        param(req, "app"),
+        param(req, "stack"),
+        param(req, "instance"),
+    ) {
+        (Some(a), None, None) if plain_name(&a) => (a, None, None),
+        (Some(_), None, None) => return Err("app= is not an app name".into()),
+        (None, Some(s), None) if plain_name(&s) => (
+            service.clone().ok_or("stack= needs service=")?,
+            Some(s),
+            None,
+        ),
+        (None, Some(_), None) => return Err("stack= is not a stack name".into()),
+        (None, None, Some(i)) if plain_name(&i) => (String::new(), None, Some(i)),
+        (None, None, Some(_)) => return Err("instance= is not an instance name".into()),
+        (None, None, None) => return Err("app= (or stack= or instance=) is required".into()),
+        _ => return Err("give one of app=, stack= or instance=".into()),
+    };
+    if service.is_some() && stack.is_none() {
+        return Err("service= is for stack=".into());
+    }
     let num = |k: &str, lo: u32, hi: u32, def: u32| -> std::result::Result<u32, String> {
         match param(req, k) {
             None => Ok(def),
@@ -178,15 +376,17 @@ pub fn term_request(req: &Request) -> std::result::Result<TermRequest, String> {
     };
     let slot = match param(req, "slot") {
         None => None,
-        Some(_) if instance.is_some() => return Err("slot= is for apps".into()),
+        Some(_) if instance.is_some() => return Err("slot= is for apps and stacks".into()),
         Some(_) => Some(num("slot", 1, 1000, 1)?),
     };
     Ok(TermRequest {
         app,
+        stack,
         slot,
         instance,
         cols: num("cols", 2, 1000, 80)? as u16,
         rows: num("rows", 2, 1000, 24)? as u16,
+        command: term_command(req)?,
     })
 }
 
@@ -199,11 +399,13 @@ fn origin_authority(origin: &str) -> Option<&str> {
 }
 
 /// A cookie-authenticated upgrade must come from a page on this site. A
-/// bearer token is not sent by browsers on their own, so it needs no Origin.
+/// bearer token is not sent by browsers on their own, nor is the unix
+/// socket reached by one (`isb ... exec -t` on the daemon's host), so
+/// neither needs an Origin; an Origin that is there must name this site.
 pub fn origin_allowed(req: &Request) -> bool {
     let bearer = req.header("authorization").is_some();
     match req.header("origin") {
-        None => bearer,
+        None => bearer || matches!(req.peer, super::http::Peer::Unix { .. }),
         Some(o) => match (origin_authority(o), req.header("host")) {
             (Some(a), Some(h)) => a.eq_ignore_ascii_case(h.trim()),
             _ => false,
@@ -283,8 +485,11 @@ fn refuse<S: std::io::Read + std::io::Write>(ws: &mut WebSocket<S>, message: &st
     let _ = ws.flush();
 }
 
+/// Nothing to read yet, or a read cut short by a signal (SIGWINCH in `exec
+/// -t`): try again on the next turn.
 fn would_block(e: &tungstenite::Error) -> bool {
-    matches!(e, tungstenite::Error::Io(io) if matches!(io.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut))
+    use std::io::ErrorKind::{Interrupted, TimedOut, WouldBlock};
+    matches!(e, tungstenite::Error::Io(io) if matches!(io.kind(), WouldBlock | TimedOut | Interrupted))
 }
 
 /// Shuttle bytes between the websocket and the terminal until either ends,
@@ -404,6 +609,89 @@ pub fn bridge(
     }
 }
 
+/// The client's end of a terminal (`isb ... exec -t`): what `input` gives
+/// goes out as terminal bytes and what comes back goes to `output`; the
+/// window size, `size()`, is sent whenever `resized` is set (on SIGWINCH);
+/// `stop` (a signal to this process) ends the session, which kills the
+/// program. Returns the program's exit code, `None` when it ended without
+/// one.
+pub fn attach<S: super::ssh::Conn + ?Sized>(
+    ws: &mut WebSocket<Box<S>>,
+    input: impl std::io::Read + Send + 'static,
+    mut output: impl std::io::Write,
+    size: impl Fn() -> Option<(u16, u16)>,
+    resized: &AtomicBool,
+    stop: &AtomicBool,
+) -> crate::Result<Option<i32>> {
+    use crate::error::Error;
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(64);
+    // A thread of its own: a read of a terminal blocks. It is left behind,
+    // blocked, when the session ends, and goes with the process.
+    std::thread::spawn(move || {
+        let mut input = input;
+        let mut buf = vec![0u8; 32 * 1024];
+        while let Ok(n) = input.read(&mut buf) {
+            if n == 0 || tx.send(buf[..n].to_vec()).is_err() {
+                return;
+            }
+        }
+    });
+    let sent = |ws: &mut WebSocket<Box<S>>, m: Message| match ws.send(m) {
+        Err(e) if !would_block(&e) => Err(Error::WebSocket(e.to_string())),
+        _ => Ok(()),
+    };
+    ws.get_ref().set_timeout(Some(POLL))?;
+    loop {
+        if stop.load(Ordering::SeqCst) {
+            let _ = ws.close(None);
+            let _ = ws.flush();
+            return Ok(None);
+        }
+        if resized.swap(false, Ordering::SeqCst) {
+            if let Some((cols, rows)) = size() {
+                sent(
+                    ws,
+                    control(json!({"type": "resize", "cols": cols, "rows": rows})),
+                )?;
+            }
+        }
+        match ws.read() {
+            Ok(Message::Binary(b)) => {
+                output.write_all(&b)?;
+                output.flush()?;
+            }
+            Ok(Message::Text(t)) => {
+                let v: serde_json::Value = serde_json::from_str(t.as_str()).unwrap_or_default();
+                match v["type"].as_str() {
+                    Some("exit") => return Ok(v["code"].as_i64().map(|c| c as i32)),
+                    Some("error") => {
+                        return Err(Error::Remote {
+                            code: "terminal".into(),
+                            message: v["message"].as_str().unwrap_or("refused").to_string(),
+                            data: serde_json::Value::Null,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Message::Close(_)) => return Ok(None),
+            Ok(_) => {}
+            Err(e) if would_block(&e) => {}
+            Err(tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed) => {
+                return Ok(None);
+            }
+            Err(e) => return Err(Error::WebSocket(e.to_string())),
+        }
+        while let Ok(d) = rx.try_recv() {
+            sent(ws, Message::binary(d))?;
+        }
+        match ws.flush() {
+            Err(e) if !would_block(&e) => return Err(Error::WebSocket(e.to_string())),
+            _ => {}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -422,7 +710,7 @@ mod tests {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
             body: vec![],
-            peer: Peer::Unix { uid: None },
+            peer: Peer::Tcp("127.0.0.1:5000".parse().unwrap()),
         }
     }
 
@@ -434,9 +722,9 @@ mod tests {
             TermRequest {
                 app: "web".into(),
                 slot: Some(2),
-                instance: None,
                 cols: 120,
-                rows: 40
+                rows: 40,
+                ..Default::default()
             }
         );
         let t = term_request(&req("instance=box-1", &[])).unwrap();
@@ -456,9 +744,68 @@ mod tests {
             "instance=Box",
             "instance=a&app=b",
             "instance=a&slot=1",
+            "stack=shop",
+            "stack=Shop&service=web",
+            "stack=shop&service=a%2Fb",
+            "app=web&service=db",
+            "app=web&stack=shop&service=web",
+            "app=web&user=root",
+            "app=web&argv=",
+            "app=web&argv=sh&env=NOEQUALS",
+            "app=web&argv=%zz",
+            "app=web&argv=a%00b",
         ] {
             assert!(term_request(&req(bad, &[])).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_stack_service_and_a_command_go_through_the_query() {
+        let t = TermRequest {
+            app: "my_svc.1".into(),
+            stack: Some("shop".into()),
+            slot: Some(2),
+            cols: 100,
+            rows: 30,
+            command: Some(TermCommand {
+                argv: vec![
+                    "stalwart-migrate".into(),
+                    "prepare".into(),
+                    "--to=a b&c".into(),
+                    "ünï".into(),
+                ],
+                user: Some("1000:1000".into()),
+                cwd: Some("/var/lib/x y".into()),
+                env: [("TERM".into(), "xterm".into()), ("A".into(), "1=2".into())].into(),
+            }),
+            ..Default::default()
+        };
+        let back = term_request(&req(&t.query(), &[])).unwrap();
+        assert_eq!(back, t);
+        assert_eq!(t.target(), "shop/my_svc.1");
+        assert_eq!(t.tool(), "stack_exec");
+        // A shell is sandbox_exec's, whatever it opens in; a command, its
+        // exec tool's.
+        let shell = TermRequest {
+            command: None,
+            ..t.clone()
+        };
+        assert_eq!(shell.tool(), "sandbox_exec");
+        let app = TermRequest {
+            stack: None,
+            app: "web".into(),
+            ..t.clone()
+        };
+        assert_eq!(app.tool(), "app_exec");
+        let inst = TermRequest {
+            instance: Some("box-1".into()),
+            app: String::new(),
+            stack: None,
+            slot: None,
+            ..t
+        };
+        assert_eq!(inst.tool(), "instance_exec");
+        assert_eq!(term_request(&req(&inst.query(), &[])).unwrap(), inst);
     }
 
     #[test]
@@ -493,6 +840,14 @@ mod tests {
             "",
             &[host, ("Authorization", "Bearer isb_tok_x")]
         )));
+        // The unix socket: no browser reaches it, so no Origin is needed;
+        // one that is there must still name this site.
+        let mut unix = req("", &[host]);
+        unix.peer = Peer::Unix { uid: None };
+        assert!(origin_allowed(&unix));
+        unix.headers
+            .push(("Origin".into(), "https://evil.example".into()));
+        assert!(!origin_allowed(&unix));
     }
 
     #[test]
@@ -602,6 +957,68 @@ mod tests {
         t.join().unwrap();
         assert_eq!(*resized.lock().unwrap(), Some((100, 30)));
         assert!(*closed.lock().unwrap());
+    }
+
+    /// `exec -t`'s end against the server's: keys out, output back, a
+    /// resize on SIGWINCH, and the program's exit code.
+    #[test]
+    fn the_client_end_relays_keys_resizes_and_the_exit_code() {
+        let (server, client) = UnixStream::pair().unwrap();
+        let (pty, resized, closed) = echo();
+        let t = std::thread::spawn(move || {
+            let mut s = server;
+            let d: &mut dyn Duplex = &mut s;
+            let mut ws = WebSocket::from_raw_socket(d, Role::Server, None);
+            bridge(&mut ws, pty, IDLE, MAX_AGE);
+        });
+        let mut ws = WebSocket::from_raw_socket(Box::new(client), Role::Client, None);
+        // The keys: "ls", then "exit" a moment later (one frame each).
+        let (mut keys, input) = UnixStream::pair().unwrap();
+        std::thread::spawn(move || {
+            use std::io::Write;
+            keys.write_all(b"ls").unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+            keys.write_all(b"exit").unwrap();
+            std::thread::sleep(Duration::from_secs(5));
+        });
+        let winch = AtomicBool::new(true);
+        let stop = AtomicBool::new(false);
+        let mut out = Vec::new();
+        let code = attach(&mut ws, input, &mut out, || Some((132, 43)), &winch, &stop).unwrap();
+        assert_eq!(code, Some(3));
+        assert_eq!(out, b"LS");
+        t.join().unwrap();
+        assert_eq!(*resized.lock().unwrap(), Some((132, 43)));
+        assert!(*closed.lock().unwrap());
+    }
+
+    #[test]
+    fn a_stopped_client_closes_the_session_and_a_refusal_is_an_error() {
+        let (server, client) = UnixStream::pair().unwrap();
+        let (pty, _, closed) = echo();
+        let t = std::thread::spawn(move || {
+            let mut s = server;
+            let d: &mut dyn Duplex = &mut s;
+            let mut ws = WebSocket::from_raw_socket(d, Role::Server, None);
+            bridge(&mut ws, pty, IDLE, MAX_AGE);
+        });
+        let mut ws = WebSocket::from_raw_socket(Box::new(client), Role::Client, None);
+        let (_keys, input) = UnixStream::pair().unwrap();
+        let (no, yes) = (AtomicBool::new(false), AtomicBool::new(true));
+        let code = attach(&mut ws, input, Vec::new(), || None, &no, &yes).unwrap();
+        assert_eq!(code, None);
+        t.join().unwrap();
+        assert!(*closed.lock().unwrap(), "the program goes with the session");
+
+        let (server, client) = UnixStream::pair().unwrap();
+        std::thread::spawn(move || {
+            let mut ws = WebSocket::from_raw_socket(server, Role::Server, None);
+            refuse(&mut ws, "stack_exec is not allowed");
+        });
+        let mut ws = WebSocket::from_raw_socket(Box::new(client), Role::Client, None);
+        let (_keys, input) = UnixStream::pair().unwrap();
+        let e = attach(&mut ws, input, Vec::new(), || None, &no, &no).unwrap_err();
+        assert!(e.to_string().contains("stack_exec is not allowed"), "{e}");
     }
 
     #[test]

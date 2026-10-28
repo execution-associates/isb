@@ -31,9 +31,9 @@ use std::time::Duration;
 use serde_json::Value;
 use tungstenite::{Message, WebSocket};
 
-use super::http::{Peer, Request};
+use super::http::Request;
 use super::mcp::Caller;
-use super::terminal::{Limits, Pty, plain_name, query_param};
+use super::terminal::{Limits, Pty, decode, encode, plain_name, query_param};
 use crate::error::{Error, Result};
 
 /// What the client asked for.
@@ -97,45 +97,7 @@ pub fn ssh_request(req: &Request) -> std::result::Result<SshRequest, String> {
 /// naming this site, as for the terminal. An `Origin` that is there must
 /// name this site, whatever the transport.
 pub fn origin_allowed(req: &Request) -> bool {
-    match req.header("origin") {
-        Some(_) => super::terminal::origin_allowed(req),
-        None => matches!(req.peer, Peer::Unix { .. }) || super::terminal::origin_allowed(req),
-    }
-}
-
-fn encode(s: &str) -> String {
-    s.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'@' => {
-                (b as char).to_string()
-            }
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
-}
-
-fn decode(s: &str) -> Option<String> {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        match b[i] {
-            b'%' => {
-                let h = std::str::from_utf8(b.get(i + 1..i + 3)?).ok()?;
-                out.push(u8::from_str_radix(h, 16).ok()?);
-                i += 3;
-            }
-            b'+' => {
-                out.push(b' ');
-                i += 1;
-            }
-            c => {
-                out.push(c);
-                i += 1;
-            }
-        }
-    }
-    String::from_utf8(out).ok()
+    super::terminal::origin_allowed(req)
 }
 
 // ---- the client half ----
@@ -470,6 +432,7 @@ pub fn pump<S: Conn + ?Sized>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::http::Peer;
 
     fn req(query: &str, peer: Peer, headers: &[(&str, &str)]) -> Request {
         Request {

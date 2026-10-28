@@ -4701,7 +4701,7 @@ export interface paths {
         };
         /**
          * Web terminal (websocket)
-         * @description Upgrades to a websocket bridged to a login shell in an app replica (?app, ?slot) or an instance (?instance), with a pseudo-terminal. Binary frames are terminal bytes; text frames are JSON resize/exit/error messages. Admitted as `sandbox_exec` in the org. docs/reference/http-api.md#the-web-terminal.
+         * @description Upgrades to a websocket bridged to a login shell, or to a command (?argv), in an app replica (?app, ?slot), a stack service's replica (?stack, ?service, ?slot) or an instance (?instance), with a pseudo-terminal. Binary frames are terminal bytes; text frames are JSON resize/exit/error messages. A shell is admitted as `sandbox_exec` in the org; a command as `app_exec`, `stack_exec` or `instance_exec`. docs/reference/http-api.md#the-web-terminal.
          */
         get: operations["get_orgs_org_api_v1_terminal"];
         put?: never;
@@ -14822,6 +14822,10 @@ export interface operations {
             query?: {
                 /** @description An app to open a shell in. */
                 app?: string;
+                /** @description Or a compose stack (with service). */
+                stack?: string;
+                /** @description The stack's service. */
+                service?: string;
                 /** @description Which replica (default: one in rotation). */
                 slot?: number;
                 /** @description Or an instance of the org (a sandbox, a replica). */
@@ -14830,6 +14834,14 @@ export interface operations {
                 cols?: number;
                 /** @description Initial rows. */
                 rows?: number;
+                /** @description Run this command instead of a shell: one argument per argv=, in order, percent-encoded. */
+                argv?: string;
+                /** @description The command's guest user (name, uid or uid:gid). */
+                user?: string;
+                /** @description The command's working directory. */
+                cwd?: string;
+                /** @description KEY=VALUE for the command (repeatable). */
+                env?: string;
             };
             header?: never;
             path: {

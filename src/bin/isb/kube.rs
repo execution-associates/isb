@@ -9,6 +9,7 @@ use std::time::Duration;
 use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 
+use isb::server::terminal::{TermCommand, TermRequest};
 use isb::{Error, Result};
 
 use super::{SHORT, call, print_json, table};
@@ -41,6 +42,11 @@ pub struct ExecArgs {
     /// Feed this process's stdin to the command (at most 1 MiB).
     #[arg(short = 'i', long, conflicts_with = "no_stdin")]
     pub stdin: bool,
+    /// Interactive, on a pseudo-terminal: keys, output and window size go
+    /// to and fro live until the command exits (`-it`, as docker and
+    /// kubectl take it; -i is implied). Needs stdin to be a terminal.
+    #[arg(short = 't', long, conflicts_with_all = ["no_stdin", "timeout"])]
+    pub tty: bool,
     /// Never feed stdin, and say nothing about piped input left unread.
     #[arg(short = 'n', long)]
     pub no_stdin: bool,
@@ -115,7 +121,7 @@ fn dur_s(t: &Option<String>) -> Duration {
         .unwrap_or(Duration::from_secs(60))
 }
 
-fn exec_args(org: &Option<String>, name: &str, a: &ExecArgs) -> Result<Value> {
+fn env_of(a: &ExecArgs) -> Result<BTreeMap<String, String>> {
     let mut env = BTreeMap::new();
     for e in &a.env {
         let (k, v) = e
@@ -123,6 +129,11 @@ fn exec_args(org: &Option<String>, name: &str, a: &ExecArgs) -> Result<Value> {
             .ok_or_else(|| Error::Invalid(format!("--env {e}: want KEY=VALUE")))?;
         env.insert(k.to_string(), v.to_string());
     }
+    Ok(env)
+}
+
+fn exec_args(org: &Option<String>, name: &str, a: &ExecArgs) -> Result<Value> {
+    let env = env_of(a)?;
     let mut args = json!({"name": name, "argv": a.argv});
     if let Some(r) = a.replica {
         args["replica"] = json!(r);
@@ -157,6 +168,19 @@ fn exec_args(org: &Option<String>, name: &str, a: &ExecArgs) -> Result<Value> {
 
 /// Run `tool` (app_exec or instance_exec) and relay its output and exit code.
 pub fn exec(org: &Option<String>, tool: &str, name: &str, a: &ExecArgs) -> Result<u8> {
+    if a.tty {
+        let t = match tool {
+            "instance_exec" => TermRequest {
+                instance: Some(name.to_string()),
+                ..Default::default()
+            },
+            _ => TermRequest {
+                app: name.to_string(),
+                ..Default::default()
+            },
+        };
+        return tty_exec(org, t, a);
+    }
     let args = exec_args(org, name, a)?;
     let timeout = dur_s(&a.timeout) + SHORT;
     relay(call(tool, args, timeout)?)
@@ -179,9 +203,84 @@ fn relay(r: Value) -> Result<u8> {
 
 /// `isb stack exec`: run argv in one of a stack service's replicas.
 pub fn stack_exec(org: &Option<String>, stack: &str, service: &str, a: &ExecArgs) -> Result<u8> {
+    if a.tty {
+        let t = TermRequest {
+            app: service.to_string(),
+            stack: Some(stack.to_string()),
+            ..Default::default()
+        };
+        return tty_exec(org, t, a);
+    }
     let mut args = exec_args(org, stack, a)?;
     args["service"] = json!(service);
     relay(call("stack_exec", args, dur_s(&a.timeout) + SHORT)?)
+}
+
+/// `exec -t`: the command on a pseudo-terminal, through isb serve's
+/// terminal websocket (docs/reference/http-api.md#the-web-terminal), with
+/// this terminal raw until it ends. Returns the command's exit code.
+fn tty_exec(org: &Option<String>, mut t: TermRequest, a: &ExecArgs) -> Result<u8> {
+    use signal_hook::consts::signal::{SIGHUP, SIGINT, SIGTERM, SIGWINCH};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    if !rustix::termios::isatty(std::io::stdin()) {
+        return Err(Error::Invalid(
+            "-t needs a terminal, and stdin is not one: drop -t (-i feeds piped input)".into(),
+        ));
+    }
+    if a.instance.is_some() {
+        return Err(Error::Invalid(
+            "--instance with -t: use `isb instance exec -t NAME`".into(),
+        ));
+    }
+    let mut env = env_of(a)?;
+    if let Ok(term) = std::env::var("TERM") {
+        env.entry("TERM".into()).or_insert(term);
+    }
+    (t.cols, t.rows) = isb::exec::terminal_size().unwrap_or((80, 24));
+    t.slot = a.replica;
+    t.command = Some(TermCommand {
+        argv: a.argv.clone(),
+        user: a.user.clone(),
+        cwd: a.cwd.clone(),
+        env,
+    });
+    let remote = match super::serve_url()? {
+        Some(r) => r,
+        None => isb::server::ssh::Remote::Socket(isb::server::default_socket_path()),
+    };
+    let o = super::org_or_env(org.as_deref());
+    let mut ws = remote.websocket(&format!("/orgs/{o}/api/v1/terminal?{}", t.query()))?;
+    // Raw mode turns ^C into a byte for the command; a signal from
+    // elsewhere ends the session, with the terminal restored.
+    let resized = Arc::new(AtomicBool::new(false));
+    let stop = Arc::new(AtomicBool::new(false));
+    signal_hook::flag::register(SIGWINCH, resized.clone())?;
+    for sig in [SIGINT, SIGTERM, SIGHUP] {
+        signal_hook::flag::register(sig, stop.clone())?;
+    }
+    let code = {
+        let _raw = isb::exec::RawMode::enable();
+        isb::server::terminal::attach(
+            &mut ws,
+            std::io::stdin(),
+            std::io::stdout(),
+            isb::exec::terminal_size,
+            &resized,
+            &stop,
+        )
+    }?;
+    match code {
+        Some(c) => Ok(c.clamp(0, 255) as u8),
+        None if stop.load(Ordering::SeqCst) => {
+            eprintln!("isb: interrupted; the command was killed");
+            Ok(130)
+        }
+        None => {
+            eprintln!("isb: the session ended without the command's exit code");
+            Ok(1)
+        }
+    }
 }
 
 pub fn logs(org: &Option<String>, a: AppLogs) -> Result<u8> {

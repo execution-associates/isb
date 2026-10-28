@@ -752,25 +752,35 @@ fn volume_local(ctx: &Ctx, v: VolumeCmd) -> Result<u8> {
     Ok(0)
 }
 
-/// Call a tool on the local daemon.
-fn call(tool: &str, args: serde_json::Value, timeout: Duration) -> Result<serde_json::Value> {
-    let socket = isb::server::default_socket_path();
-    // Where there is no daemon socket (an org's instance, another
-    // machine): isb serve's URL (`$ISB_URL`, such as the org API listener on
-    // the org's bridge) with an API token (`$ISB_TOKEN`), as `isb
-    // ssh-config` and `isb key` use them.
-    if !socket.exists() {
-        let remote = ssh::RemoteArgs::default().or_env();
-        if remote.url.is_some() {
-            let org = args
-                .get("org")
-                .and_then(serde_json::Value::as_str)
-                .map(String::from)
-                .or_else(|| std::env::var("ISB_ORG").ok().filter(|o| !o.is_empty()))
-                .unwrap_or_else(|| "default".into());
-            return remote.remote()?.call_tool(&org, tool, args);
-        }
+/// isb serve where there is no daemon socket (an org's instance, another
+/// machine): its URL (`$ISB_URL`, such as the org API listener on the org's
+/// bridge) with an API token (`$ISB_TOKEN`), as `isb ssh-config` and `isb
+/// key` use them. `None`: the local daemon's socket.
+fn serve_url() -> Result<Option<isb::server::ssh::Remote>> {
+    if isb::server::default_socket_path().exists() {
+        return Ok(None);
     }
+    let remote = ssh::RemoteArgs::default().or_env();
+    match remote.url {
+        Some(_) => remote.remote().map(Some),
+        None => Ok(None),
+    }
+}
+
+/// The org a call is for: `--org`, else `$ISB_ORG`, else the default org.
+fn org_or_env(org: Option<&str>) -> String {
+    org.map(String::from)
+        .or_else(|| std::env::var("ISB_ORG").ok().filter(|o| !o.is_empty()))
+        .unwrap_or_else(|| "default".into())
+}
+
+/// Call a tool on the local daemon (or the one at `$ISB_URL`).
+fn call(tool: &str, args: serde_json::Value, timeout: Duration) -> Result<serde_json::Value> {
+    if let Some(remote) = serve_url()? {
+        let org = org_or_env(args.get("org").and_then(serde_json::Value::as_str));
+        return remote.call_tool(&org, tool, args);
+    }
+    let socket = isb::server::default_socket_path();
     // The error already says "cannot connect to isb serve at <socket>: <why>".
     isb::server::client::call_tool(&socket, tool, args, timeout).map_err(|e| match e {
         Error::Io(_) if cfg!(target_os = "macos") => Error::Invalid(format!(

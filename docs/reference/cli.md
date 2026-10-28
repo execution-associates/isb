@@ -250,7 +250,7 @@ isb stack deploy [NAME] [-f FILE]... [-d] [--timeout 10m] [--project P [--env E]
 isb stack ls [--json]               every org you see (an ORG column), or --org ORG's
 isb stack ps NAME [--json]
 isb stack logs NAME SERVICE [--slot N] [-n|--tail 100] [--since 10m|TIME] [--failed]
-isb stack exec NAME SERVICE [--replica|--slot N] [-u USER] [-w DIR] [-e K=V]... [-i] [--timeout 60s] -- CMD...
+isb stack exec NAME SERVICE [--replica|--slot N] [-u USER] [-w DIR] [-e K=V]... [-i | -it] [--timeout 60s] -- CMD...   -it: interactive, on a terminal
 isb stack scale NAME SERVICE=N...
 isb stack redeploy NAME SERVICE
 isb stack rollback NAME [--to ID]   ID: a kept deployment (isb stack deployments)
@@ -373,7 +373,7 @@ isb app rollback NAME [ID] [-d]         a previous deployment's image and settin
 isb app deployments NAME [--json]
 isb app deploy-log NAME [ID] [-f]      a deployment's build and rollout log
 isb app logs NAME [--replica N] [-n 200] [--since 10m]   the replicas' output, by app name
-isb app exec NAME [--replica N] [-u USER] [-w DIR] [-e K=V]... [-i] [--timeout D] -- ARGV...
+isb app exec NAME [--replica N] [-u USER] [-w DIR] [-e K=V]... [-i | -it] [--timeout D] -- ARGV...
 isb app restart NAME [--wait]           rolling replace, same settings
 isb app scale NAME N                    also saved as the app's replicas
 isb app top NAME [--json]               per replica CPU and memory
@@ -404,7 +404,7 @@ What runs in an org, like `kubectl get pods`, `describe`, `exec` and `cp`
 ```text
 isb instance ls [--app A] [--stack S] [--service V] [--kind K] [--status S] [--json]   aliases list, ps
 isb instance get NAME [--json]          alias describe
-isb instance exec NAME [-u USER] [-w DIR] [-e K=V]... [-i] [--timeout D] -- ARGV...
+isb instance exec NAME [-u USER] [-w DIR] [-e K=V]... [-i | -it] [--timeout D] -- ARGV...
 isb instance restart NAME [--wait]      a replica is replaced, a sandbox restarts
 isb cp INSTANCE:/path LOCAL             a small file out (at most 4 MiB)
 isb cp LOCAL INSTANCE:/path             and in (at most 2 MiB)

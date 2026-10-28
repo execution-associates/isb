@@ -118,7 +118,7 @@ impl Run {
 
 /// Which replica of an app a call means: the one at `slot`, the one named
 /// `name`, else a running one, preferring those in rotation and healthy.
-pub(super) fn pick_replica<'a>(
+pub(in crate::daemon) fn pick_replica<'a>(
     app: &str,
     replicas: &'a [InstanceStatus],
     slot: Option<u32>,

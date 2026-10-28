@@ -333,9 +333,11 @@ outlives a restart of the daemon.
 `isb stack exec STACK SERVICE -- CMD...` runs a command in one of the
 service's replicas, as `isb app exec` does for an app: a running replica,
 healthy and in rotation first, or the one `--replica N` names. It prints the
-output and exits with the command's status; it is not interactive (`-i` feeds
-stdin), and it works over the socket and, against a remote daemon, over
-`$ISB_URL`.
+output and exits with the command's status (`-i` feeds it stdin), and it
+works over the socket and, against a remote daemon, over `$ISB_URL`. With
+`-it` it runs interactively, on a terminal, as `docker exec -it` does: `isb
+stack exec -it shop web -- sh` (see [Interactive, on a
+terminal](../guides/kubectl.md#interactive-on-a-terminal)).
 Members and up.
 
 ## Editing in the web UI
@@ -434,7 +436,7 @@ isb stack deploy [NAME] [-f FILE...] [-d] [--timeout 10m]   deploy or update; wa
 isb stack ls [--json]
 isb stack ps NAME [--json]
 isb stack logs NAME SERVICE [--slot N] [-n|--tail 100] [--since 10m|TIME] [--failed]
-isb stack exec NAME SERVICE [--replica N] [-u USER] [-w DIR] [-e K=V]... [-i] -- CMD...
+isb stack exec NAME SERVICE [--replica N] [-u USER] [-w DIR] [-e K=V]... [-i | -it] -- CMD...
 isb stack scale NAME SERVICE=N...
 isb stack redeploy NAME SERVICE
 isb stack rollback NAME [--to ID]

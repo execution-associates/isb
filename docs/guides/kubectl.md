@@ -136,7 +136,8 @@ is not interactive and not a shell: argv is a list, so use `["sh", "-c",
 | output | each stream keeps its **last 1 MiB**; `stdout_truncated`, `stderr_truncated` and `truncated` say so, and `stdout_bytes`/`stderr_bytes` how much there was |
 
 `isb app exec` prints the output, exits with the command's status (124 on a
-timeout), and says on stderr when the output was cut. An image built `FROM
+timeout), and says on stderr when the output was cut. `-it` runs the
+command [on a terminal](#interactive-on-a-terminal) instead. An image built `FROM
 scratch` (traefik/whoami, say) has no shell or tools: run its own binary
 (`isb app exec whoami -- /whoami --help`), or [`isb cp`](#copy-small-files).
 
@@ -147,6 +148,41 @@ runs `--deny-tools app_exec,instance_exec` (the web terminal is admitted as
 audit log with the **argv** (up to 64 arguments), the names of the `env`
 variables and the size of `stdin`, never their values. Treat argv as logged:
 pass a password in `env` or on `stdin`, not in the command line.
+
+### Interactive, on a terminal
+
+```sh
+isb stack exec -it shop web -- sh
+isb --org ocai stack exec -it email stalwart -- stalwart-migrate prepare
+isb app exec -it web --replica 2 -u app -- bash
+isb instance exec -it scratch1 -- htop
+```
+
+`-t` (`--tty`, almost always written `-it`, as for `docker exec` and
+`kubectl exec`) gives the command a pseudo-terminal and wires it to yours:
+your keys go to it as you type them (Ctrl-C included: it reaches the
+command, not isb), its output comes back as it is written, a resize of your
+window resizes its terminal, and `isb` exits with the command's status once it
+ends, your terminal restored. `-i` is implied; stdout and stderr arrive
+merged, as on any terminal. `$TERM` is passed along unless `-e TERM=...`
+sets it.
+
+- **stdin must be a terminal.** In a script or a pipe, `-t` is refused: use
+  `-i` to feed piped input to a command that is not interactive.
+- **No time limit but the terminal's**: `--timeout` does not apply; the
+  session closes after 30 minutes without a byte either way and after 8
+  hours in all. A signal to `isb` itself (SIGTERM, SIGHUP) ends the session
+  and kills the command.
+- **The same replica choice and options** as without `-t` (`--replica`, `-u`,
+  `-w`, `-e`), and the same reach: over the daemon's socket on its host, or
+  anywhere with `$ISB_URL` and `$ISB_TOKEN`.
+- **Who may:** whoever may run the command without `-t`: `-it` is admitted as
+  `app_exec`, `stack_exec` or `instance_exec`, so `--deny-tools` and token
+  scopes apply the same way. It rides [the web terminal's
+  websocket](../reference/http-api.md#the-web-terminal), and the audit log
+  records its opening and closing as a terminal's.
+- **Not for agents over MCP**: the `*_exec` tools run a command to completion
+  and return its output; a terminal needs a person at a keyboard.
 
 ## Copy small files
 
