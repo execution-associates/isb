@@ -161,14 +161,11 @@ pub(crate) fn install(ctx: &Ctx, a: InstallArgs) -> Result<u8> {
     Ok(0)
 }
 
-/// Say how to put the shims first on PATH, when they are not.
+/// Say how to put the shims first on PATH, when they are not, offering to
+/// do it on a terminal.
 fn shim_path_hint(names: &[String]) {
-    let path = std::env::var("PATH").unwrap_or_default();
-    if !shim::shadows(&path, names) {
-        eprintln!(
-            "isbx: put the shims first on PATH, e.g. in ~/.bashrc: export PATH=\"{}:$PATH\"",
-            shim::dir().display()
-        );
+    if let Some(h) = super::x_shell::path_hint(names, true) {
+        eprintln!("isbx: {h}");
     }
 }
 
@@ -390,10 +387,14 @@ pub(crate) fn doctor(ctx: &Ctx) -> Result<u8> {
     let mut names: Vec<String> = tools.iter().flat_map(|t| t.bins.keys().cloned()).collect();
     names.extend(shim::list().into_iter().map(|(n, _)| n));
     let path = std::env::var("PATH").unwrap_or_default();
+    let hint = super::x_shell::path_hint(&names, false);
     check(
-        names.is_empty() || shim::shadows(&path, &names),
+        hint.is_none(),
         format!("{} comes first on PATH", shim::dir().display()),
     );
+    if let Some(h) = hint {
+        println!("      {h}");
+    }
     for t in &tools {
         check(
             Sandbox::get(&client, &t.instance).is_ok(),

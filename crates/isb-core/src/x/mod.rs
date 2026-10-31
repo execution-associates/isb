@@ -7,12 +7,14 @@
 //!   run in;
 //! - [`tool`], [`install`], [`shim`]: installed tools, each in a sandbox of
 //!   its own, run from host shims;
+//! - [`shell`]: the shim directory's place on PATH in shell startup files;
 //! - [`live`]: runs in progress, which mounts and idle stops respect.
 
 pub mod guard;
 pub mod install;
 pub mod live;
 pub mod project;
+pub mod shell;
 pub mod shim;
 pub mod tool;
 

@@ -153,6 +153,8 @@ isb x tool NAME BIN [ARGS...]          run a tool's program (what its shims do),
 isb x update NAME... | --all [--keep-failed]
 isb x rm NAME...                       a tool (sandboxes, shims, definition) or an x-run sandbox
 isb x shim [CMD...] [--remove]         host shims that run CMD through isbx; none: list them
+isb x update-shell [--shell bash|zsh|fish]... [--remove]
+                                       put the shims first on PATH in shell startup files
 isb x allow NAME HOST...               add to a tool's egress list, live
 isb x deny NAME HOST...                take off a tool's egress list, live
 isb x ls [--json]                      isbx sandboxes, status, last use, mounts
@@ -170,7 +172,7 @@ isb x doctor                           isb serve, incus, the shims' place on PAT
   sandboxes of their own. RECIPE is `npm:PKG`, `pypi:PKG`, `cargo:CRATE`,
   `go:MODULE`, `script:URL` or `sh:LINE`.
 - Tool definitions are `$XDG_CONFIG_HOME/isb/x/tools/NAME.yaml`, shims are
-  in `$XDG_DATA_HOME/isb/x/bin` (which goes first on PATH), and marks of use
+  in `$XDG_DATA_HOME/isb/x/bin` (which goes first on PATH: `isb x update-shell`), and marks of use
   and runs in progress under `$XDG_STATE_HOME/isb/x`.
 
 [Run any CLI in a sandbox](../guides/isbx.md) is the guide.

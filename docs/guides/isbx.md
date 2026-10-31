@@ -164,14 +164,9 @@ exec isb x tool sume sume "$@"
 ```
 
 **The shim directory must come first on PATH,** before version managers'
-directories, or a host `npm` wins over a shim named `npm`:
-
-```sh
-export PATH="$HOME/.local/share/isb/x/bin:$PATH"   # in ~/.bashrc or ~/.zshrc
-```
-
-`isb x doctor` checks it. `isbx sume …` also finds an installed tool's
-program.
+directories, or a host `npm` wins over a shim named `npm`
+([Putting the shims on PATH](#putting-the-shims-on-path)). `isbx sume …`
+also finds an installed tool's program.
 
 What a tool's run mounts is `--mount`:
 
@@ -230,6 +225,50 @@ program stays where it was; call it by its full path when you need it.
 shim never replaces a file isbx did not write, and `isb`, `isbx`, `sh`,
 `bash`, `env` and `sudo` cannot be shims.
 
+## Putting the shims on PATH
+
+```sh
+isb x update-shell                 # $SHELL's startup file, plus any other that exists
+isb x update-shell --shell fish    # just that one (repeatable: bash, zsh, fish)
+isb x update-shell --remove        # take isbx's block out again
+```
+
+It appends this block to the end of each file, where it runs after the
+version managers set up earlier in the file (`mise activate`, nvm, asdf):
+
+```sh
+# >>> isb x shims >>>
+# isbx's shims first on PATH, so they win over host programs and version
+# managers (`isb x update-shell --remove` takes this out).
+export PATH="$HOME/.local/share/isb/x/bin:$PATH"
+# <<< isb x shims <<<
+```
+
+| Shell | File | Line |
+|---|---|---|
+| bash | `~/.bashrc` | `export PATH=…` |
+| zsh | `$ZDOTDIR/.zshrc` (`~/.zshrc`) | `export PATH=…` |
+| fish | `$XDG_CONFIG_HOME/fish/config.fish` | `fish_add_path --global --path --move …` |
+
+It changes nothing in a file that has the block already, or a line of your
+own that puts the directory on PATH (`$HOME/…`, `${HOME}/…`, `~/…` or the
+full path), and `--remove` leaves such a line alone. A missing file is
+created; a symlinked one (dotfiles in a repository) is edited through the
+link. Open a new shell, or `source` the file, to use it. A bash login shell
+reads `~/.bash_profile` instead; the usual one sources `~/.bashrc`.
+
+`isb x install` and `isb x shim` check PATH after writing shims. On a
+terminal they offer to run `isb x update-shell` when no startup file has the
+directory; otherwise (an agent, a script) they print what to do.
+`isb x doctor` fails until the directory comes first, and says why: not on
+PATH, in a startup file this shell has not read, or after a directory that
+holds the same command.
+
+Shims are not linked into `~/.local/bin`: that directory usually comes
+after a version manager's (mise's shims, nvm's node), so a shim named `npm`
+there loses, and it holds programs of your own that a shim could clash
+with.
+
 ## Containers and VMs
 
 A sandbox is a container unless `--vm` says otherwise:
@@ -271,6 +310,7 @@ isb x gc --idle 30m            # stop those unused for 30 minutes
 isb x gc --missing -y          # delete those whose project directory is gone
 isb x rm x-run-1a2b3c4d5e      # delete one (its list starts closed again)
 isb x doctor                   # isb serve, incus, the shims' place on PATH, every tool
+isb x update-shell             # put the shims first on PATH in your shell's startup file
 ```
 
 `isb serve` stops an isbx sandbox that no command has used for 30 minutes
