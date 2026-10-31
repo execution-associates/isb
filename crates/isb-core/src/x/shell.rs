@@ -54,6 +54,36 @@ impl Shell {
         }
     }
 
+    /// Every file to edit for this shell. For bash that is `~/.bashrc`
+    /// and, when a login shell would not read it, the login file too:
+    /// bash's login shell (macOS Terminal, ssh) reads only the first of
+    /// `~/.bash_profile`, `~/.bash_login` and `~/.profile`, and that one
+    /// usually sources `~/.bashrc`. One that does not gets the block of its
+    /// own; with none of them, macOS gets a `~/.bash_profile` (elsewhere a
+    /// new one would hide `~/.profile` from bash, and an interactive bash
+    /// is rarely a login one). `removing`: every file that may hold the
+    /// block.
+    pub fn files(self, env: &Env, removing: bool) -> Vec<PathBuf> {
+        let rc = self.rc(env);
+        if self != Shell::Bash {
+            return vec![rc];
+        }
+        let logins = [".bash_profile", ".bash_login", ".profile"].map(|f| env.home.join(f));
+        if removing {
+            return std::iter::once(rc)
+                .chain(logins.into_iter().filter(|p| p.exists()))
+                .collect();
+        }
+        let login = match logins.iter().find(|p| p.exists()) {
+            Some(p) => {
+                let text = std::fs::read_to_string(p).unwrap_or_default();
+                (!sources_bashrc(&text)).then(|| p.clone())
+            }
+            None => env.macos.then(|| logins[0].clone()),
+        };
+        std::iter::once(rc).chain(login).collect()
+    }
+
     /// The block that puts `dir` first on PATH.
     pub fn block(self, dir: &Path, home: &Path) -> String {
         let d = spell(dir, home);
@@ -78,6 +108,17 @@ impl std::str::FromStr for Shell {
     }
 }
 
+/// Whether a login file runs `~/.bashrc` (`. ~/.bashrc`,
+/// `source "$HOME/.bashrc"`, `[ -f … ] && . …`).
+pub fn sources_bashrc(text: &str) -> bool {
+    text.lines().any(|l| {
+        let t = l.trim_start();
+        !t.starts_with('#')
+            && t.contains(".bashrc")
+            && (t.starts_with(". ") || t.contains(" . ") || t.contains("source "))
+    })
+}
+
 /// What locates the startup files.
 #[derive(Clone, Debug)]
 pub struct Env {
@@ -88,6 +129,8 @@ pub struct Env {
     pub config: Option<PathBuf>,
     /// `$SHELL`.
     pub login: Option<Shell>,
+    /// Whether this is macOS, where a terminal starts bash as a login shell.
+    pub macos: bool,
 }
 
 impl Env {
@@ -102,6 +145,7 @@ impl Env {
             zdotdir: var("ZDOTDIR"),
             config: var("XDG_CONFIG_HOME"),
             login: std::env::var("SHELL").ok().as_deref().and_then(Shell::of),
+            macos: cfg!(target_os = "macos"),
         }
     }
 
@@ -437,6 +481,7 @@ mod tests {
             zdotdir: None,
             config: None,
             login: Shell::of("/usr/bin/zsh"),
+            macos: false,
         };
         assert_eq!(env.targets(&[]).unwrap(), vec![Shell::Zsh]);
         std::fs::write(t.path().join(".bashrc"), "").unwrap();
@@ -447,5 +492,46 @@ mod tests {
         assert!(env.targets(&[]).is_err());
         env.zdotdir = Some(t.path().join("z"));
         assert_eq!(Shell::Zsh.rc(&env), t.path().join("z/.zshrc"));
+    }
+
+    #[test]
+    fn bash_edits_a_login_file_only_when_it_skips_bashrc() {
+        let t = tempfile::tempdir().unwrap();
+        let h = t.path();
+        let mut env = Env {
+            home: h.to_path_buf(),
+            zdotdir: None,
+            config: None,
+            login: Some(Shell::Bash),
+            macos: false,
+        };
+        let rc = h.join(".bashrc");
+        // None of the login files: nothing on Linux, a new ~/.bash_profile on macOS.
+        assert_eq!(Shell::Bash.files(&env, false), vec![rc.clone()]);
+        env.macos = true;
+        assert_eq!(
+            Shell::Bash.files(&env, false),
+            vec![rc.clone(), h.join(".bash_profile")]
+        );
+        // Ubuntu's ~/.profile sources ~/.bashrc: enough.
+        let ubuntu = "if [ -n \"$BASH_VERSION\" ]; then\n    if [ -f \"$HOME/.bashrc\" ]; then\n\t. \"$HOME/.bashrc\"\n    fi\nfi\n";
+        std::fs::write(h.join(".profile"), ubuntu).unwrap();
+        assert_eq!(Shell::Bash.files(&env, false), vec![rc.clone()]);
+        // A ~/.bash_profile hides ~/.profile; one that does not source ~/.bashrc gets the block.
+        std::fs::write(h.join(".bash_profile"), "export EDITOR=vi\n# . ~/.bashrc\n").unwrap();
+        assert_eq!(
+            Shell::Bash.files(&env, false),
+            vec![rc.clone(), h.join(".bash_profile")]
+        );
+        std::fs::write(h.join(".bash_profile"), "[ -f ~/.bashrc ] && . ~/.bashrc\n").unwrap();
+        assert_eq!(Shell::Bash.files(&env, false), vec![rc.clone()]);
+        // Removing looks in every one that exists.
+        assert_eq!(
+            Shell::Bash.files(&env, true),
+            vec![rc, h.join(".bash_profile"), h.join(".profile")]
+        );
+        assert_eq!(Shell::Zsh.files(&env, false), vec![h.join(".zshrc")]);
+        assert!(sources_bashrc("source ~/.bashrc"));
+        assert!(!sources_bashrc("cp ~/.bashrc /tmp"));
     }
 }

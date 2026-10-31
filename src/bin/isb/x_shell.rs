@@ -29,8 +29,11 @@ pub(crate) fn update_shell(shells: &[String], remove: bool) -> Result<u8> {
         .collect::<Result<Vec<Shell>>>()?;
     let dir = shim::dir();
     let mut added = Vec::new();
-    for sh in env.targets(&asked)? {
-        let rc = sh.rc(&env);
+    let files = env
+        .targets(&asked)?
+        .into_iter()
+        .flat_map(|sh| sh.files(&env, remove).into_iter().map(move |f| (sh, f)));
+    for (sh, rc) in files {
         let f = shown(&rc, &env.home);
         let msg = match (shell::apply(&rc, sh, &dir, &env.home, remove)?, remove) {
             (Outcome::Added, _) => {
@@ -79,8 +82,8 @@ pub(crate) fn path_hint(names: &[String], offer: bool) -> Option<String> {
         .targets(&[])
         .unwrap_or_default()
         .into_iter()
-        .find_map(|sh| {
-            let rc = sh.rc(&env);
+        .flat_map(|sh| sh.files(&env, false))
+        .find_map(|rc| {
             let text = std::fs::read_to_string(&rc).ok()?;
             match shell::state(&text, &dir, &env.home) {
                 State::Absent => None,
@@ -126,7 +129,8 @@ fn ask_yes(env: &Env) -> bool {
     };
     let files: Vec<String> = targets
         .iter()
-        .map(|s| shown(&s.rc(env), &env.home))
+        .flat_map(|s| s.files(env, false))
+        .map(|f| shown(&f, &env.home))
         .collect();
     eprint!(
         "isbx: put {} first on PATH in {}? [Y/n] ",

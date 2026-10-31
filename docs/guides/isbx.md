@@ -246,7 +246,7 @@ export PATH="$HOME/.local/share/isb/x/bin:$PATH"
 
 | Shell | File | Line |
 |---|---|---|
-| bash | `~/.bashrc` | `export PATH=…` |
+| bash | `~/.bashrc`, and the login file when it does not source `~/.bashrc` | `export PATH=…` |
 | zsh | `$ZDOTDIR/.zshrc` (`~/.zshrc`) | `export PATH=…` |
 | fish | `$XDG_CONFIG_HOME/fish/config.fish` | `fish_add_path --global --path --move …` |
 
@@ -254,8 +254,15 @@ It changes nothing in a file that has the block already, or a line of your
 own that puts the directory on PATH (`$HOME/…`, `${HOME}/…`, `~/…` or the
 full path), and `--remove` leaves such a line alone. A missing file is
 created; a symlinked one (dotfiles in a repository) is edited through the
-link. Open a new shell, or `source` the file, to use it. A bash login shell
-reads `~/.bash_profile` instead; the usual one sources `~/.bashrc`.
+link. Open a new shell, or `source` the file, to use it.
+
+A bash login shell (macOS Terminal, ssh) reads only the first of
+`~/.bash_profile`, `~/.bash_login` and `~/.profile` that exists, not
+`~/.bashrc`. When that file sources `~/.bashrc`, as Ubuntu's `~/.profile`
+does, `~/.bashrc` is enough; when it does not, it gets the block too. With
+none of them, macOS gets a new `~/.bash_profile` holding the block; on
+Linux none is created, since a new `~/.bash_profile` would hide
+`~/.profile` from bash.
 
 `isb x install` and `isb x shim` check PATH after writing shims. On a
 terminal they offer to run `isb x update-shell` when no startup file has the
