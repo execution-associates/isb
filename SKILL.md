@@ -270,7 +270,9 @@ isb x install sume --from 'sh:curl -fsSL https://sume.com/install.sh | bash' \
 isb x ls; isb x doctor; isb x rm sume
 ```
 
-Shims live in `~/.local/share/isb/x/bin`, which must come first on PATH.
+Shims live in `~/.local/share/isb/x/bin`, which must come first on PATH:
+`isb x update-shell` appends a marked block that does so to the shell's
+startup file (bash, zsh, fish), and `isb x install` offers it on a terminal.
 Details: [docs/guides/isbx.md](docs/guides/isbx.md).
 
 ## Stacks on a host

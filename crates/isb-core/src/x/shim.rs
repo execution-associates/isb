@@ -10,10 +10,13 @@ use crate::error::{Error, Result};
 /// The line that marks a file as isbx's, so nothing else is overwritten.
 pub const MARK: &str = "# isbx shim";
 
-/// `$XDG_DATA_HOME/isb/x/bin`.
+/// `$XDG_DATA_HOME/isb/x/bin`. An empty or relative `$XDG_DATA_HOME` is
+/// ignored, as the XDG spec says, so the directory is never relative to
+/// wherever a command runs.
 pub fn dir() -> PathBuf {
     std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
         .unwrap_or_else(|| PathBuf::from("."))
         .join("isb/x/bin")

@@ -94,6 +94,18 @@ pub(crate) enum XCmd {
         #[arg(required = true)]
         hosts: Vec<String>,
     },
+    /// Put the shim directory first on PATH in your shell's startup file
+    /// (bash, zsh, fish), as a marked block; nothing changes where it is
+    /// already.
+    UpdateShell {
+        /// The shell whose file to edit (bash, zsh, fish; repeatable).
+        /// Default: $SHELL's, plus every other one whose file exists.
+        #[arg(long = "shell", value_name = "SHELL")]
+        shells: Vec<String>,
+        /// Take isbx's block out instead.
+        #[arg(long)]
+        remove: bool,
+    },
     /// Check what isbx relies on: isb serve, incus, the shims' place on PATH,
     /// every tool's sandbox and shims.
     Doctor,
@@ -185,6 +197,7 @@ pub(crate) fn x(ctx: &Ctx, cmd: XCmd) -> Result<u8> {
         XCmd::Shim { names, remove } => super::x_tools::shims(names, remove),
         XCmd::Allow { name, hosts } => super::x_tools::allow(ctx, &name, hosts, true),
         XCmd::Deny { name, hosts } => super::x_tools::allow(ctx, &name, hosts, false),
+        XCmd::UpdateShell { shells, remove } => super::x_shell::update_shell(&shells, remove),
         XCmd::Doctor => super::x_tools::doctor(ctx),
     }
 }
