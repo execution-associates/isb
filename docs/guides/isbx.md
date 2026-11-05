@@ -287,9 +287,14 @@ A sandbox is a container unless `--vm` says otherwise:
 - **A VM** (`isbx --vm …`, `isb x install --vm …`) has its own kernel. Use it
   for code nobody has read: an installer from a vendor you do not know, a
   package that looks wrong. It starts from `images:ubuntu/24.04/cloud`
-  (dev-base is a container image), whose `ubuntu` user is uid 1000 like
-  `dev` but has none of dev-base's toolchains: install what the command
-  needs, or pass `--image` a VM image of your own. It boots in tens of
+  (dev-base is a container image), and isbx makes the image's uid 1000
+  user `dev`, with passwordless sudo, when it creates the VM. An installed
+  tool's VM also gets the toolchain its recipe runs with from mise (node
+  for `npm:`, uv for `pypi:`, go for `go:`, rust for `cargo:`, plus the
+  Ubuntu packages node and cargo link against), with those downloads'
+  hosts open while it installs only. A one-off run
+  has none of dev-base's toolchains: install what the command needs, or
+  pass `--image` a VM image of your own. It boots in tens of
   seconds (once; it is kept like any other), host edits do not fire file
   watchers inside, and only uid 1000 can write the mounted project. A VM
   tool mounts `none` or a fixed directory.

@@ -8,7 +8,8 @@
 //! - [`tool`], [`install`], [`shim`]: installed tools, each in a sandbox of
 //!   its own, run from host shims;
 //! - [`shell`]: the shim directory's place on PATH in shell startup files;
-//! - [`live`]: runs in progress, which mounts and idle stops respect.
+//! - [`live`]: runs in progress, which mounts and idle stops respect;
+//! - [`vm`]: a VM guest made to match dev-base (`dev`, sudo, toolchains).
 
 pub mod guard;
 pub mod install;
@@ -17,6 +18,7 @@ pub mod project;
 pub mod shell;
 pub mod shim;
 pub mod tool;
+pub mod vm;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -32,8 +34,8 @@ pub const LABEL_ROOT: &str = "isbx.root";
 pub const USER: &str = "1000:1000";
 /// The image sandboxes start from unless `--image` says otherwise.
 pub const IMAGE: &str = "dev-base";
-/// The image of a VM: dev-base is a container image. Its `ubuntu` user is
-/// uid 1000, as `dev` is; it has none of dev-base's toolchains.
+/// The image of a VM: dev-base is a container image. Its uid 1000 user
+/// becomes `dev` ([`vm::provision`]).
 pub const VM_IMAGE: &str = "images:ubuntu/24.04/cloud";
 
 /// The image to use: the one asked for, else the default for the type.
@@ -43,6 +45,31 @@ pub fn image(asked: Option<&str>, vm: bool) -> String {
         None if vm => VM_IMAGE.into(),
         None => IMAGE.into(),
     }
+}
+
+/// An existing isbx sandbox, running, with `spec`'s exec defaults. A VM
+/// that was stopped is waited for like a new one (its agent, then uid 1000):
+/// [`crate::sandbox::Sandbox::start`] on a [`crate::sandbox::Sandbox::get`]
+/// handle waits only for Running, and an exec before the agent answers fails.
+pub fn start(
+    client: &crate::client::Client,
+    sb: crate::sandbox::Sandbox,
+    spec: &crate::spec::SandboxSpec,
+    vm: bool,
+) -> crate::error::Result<crate::sandbox::Sandbox> {
+    let sb = sb.with_exec_defaults(spec.exec_defaults());
+    let stopped = vm && !sb.info()?.status.eq_ignore_ascii_case("running");
+    sb.start()?;
+    if stopped {
+        crate::sandbox::wait_ready(
+            client,
+            sb.name(),
+            spec.ready.as_deref().unwrap_or_default(),
+            std::time::Duration::from_secs(300),
+            &spec.exec_defaults(),
+        )?;
+    }
+    Ok(sb)
 }
 
 /// Readiness for an isbx sandbox: commands run as uid 1000, which a cloud

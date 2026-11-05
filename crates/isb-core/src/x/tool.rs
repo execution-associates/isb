@@ -265,7 +265,7 @@ impl Tool {
     pub fn ready(&self, client: &Client, root: Option<&Path>) -> Result<Sandbox> {
         let spec = self.spec(&self.instance)?;
         let sb = match Sandbox::get(client, &self.instance) {
-            Ok(sb) => sb.with_exec_defaults(spec.exec_defaults()),
+            Ok(sb) => super::start(client, sb, &spec, self.vm)?,
             Err(Error::NotFound(_)) => {
                 return Err(Error::NotFound(format!(
                     "{}: tool {}'s sandbox is gone; `isb x update {}` rebuilds it",
@@ -274,7 +274,6 @@ impl Tool {
             }
             Err(e) => return Err(e),
         };
-        sb.start()?;
         if self.mount()? != Mount::Project {
             return Ok(sb);
         }

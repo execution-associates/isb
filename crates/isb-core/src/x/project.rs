@@ -165,8 +165,7 @@ pub fn ensure(client: &Client, rs: &RunSpec, report: Reporter<'_>) -> Result<San
     let name = rs.instance();
     match Sandbox::get(client, &name) {
         Ok(sb) => {
-            let sb = sb.with_exec_defaults(spec.exec_defaults());
-            sb.start()?;
+            let sb = super::start(client, sb, &spec, rs.vm)?;
             if rs.net == Net::None {
                 return Ok(sb);
             }
@@ -204,6 +203,9 @@ pub fn ensure(client: &Client, rs: &RunSpec, report: Reporter<'_>) -> Result<San
                 EnsureOptions::default(),
                 report,
             )?;
+            if rs.vm {
+                super::vm::provision(&sb, report)?;
+            }
             if rs.net != Net::None {
                 let network = crate::egress::plumb::network_name(client.project_name(), &name);
                 wait_proxy(&network, &spec, report)?;

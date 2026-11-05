@@ -289,3 +289,64 @@ fn a_tool_installs_runs_from_its_shim_updates_and_goes() {
             .is_empty()
     );
 }
+
+/// A VM starts from a cloud image, not dev-base: isbx makes its uid 1000
+/// `dev`, with a home and passwordless sudo, before the recipe runs as dev.
+#[test]
+fn a_vm_tool_installs_as_dev_on_the_cloud_image() {
+    if !enabled() {
+        return;
+    }
+    let r = Rig::new();
+    let root = r.root();
+    let name = format!("v{}", std::process::id());
+    let label = format!("isbx.tool={name}");
+    struct Gone(String);
+    impl Drop for Gone {
+        fn drop(&mut self) {
+            let c = Client::new();
+            for i in Sandbox::list_with(&c, &[LabelFilter::parse(&self.0)]).unwrap_or_default() {
+                let _ = Sandbox::remove(&c, &i.name, true);
+            }
+        }
+    }
+    let _gone = Gone(label);
+    let vm_image =
+        std::env::var("ISB_TEST_VM_IMAGE").unwrap_or_else(|_| "images:ubuntu/24.04/cloud".into());
+    let hello = format!(
+        "sh:test \"$(id -un):$(id -g):$HOME:$PWD\" = dev:1000:/home/dev:/home/dev && printf '#!/bin/sh\\necho vm \"$*\"\\n' | sudo tee /usr/local/bin/{name} >/dev/null && sudo chmod +x /usr/local/bin/{name}"
+    );
+    let o = r
+        .cmd("isb", &root)
+        .args([
+            "x", "install", &name, "--vm", "--mount", "none", "--image", &vm_image, "--from",
+            &hello, "-q",
+        ])
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{o:?}");
+    let shim = r.dir.path().join("data/isb/x/bin").join(&name);
+    let o = Command::new(&shim)
+        .arg("a")
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                r.dir.path().join("bin").display(),
+                std::env::var("PATH").unwrap()
+            ),
+        )
+        .env("XDG_CONFIG_HOME", r.dir.path().join("config"))
+        .env("XDG_DATA_HOME", r.dir.path().join("data"))
+        .current_dir(&root)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(text(&o).trim(), "vm a", "{o:?}");
+    let o = r
+        .cmd("isb", &root)
+        .args(["x", "rm", &name, "-q"])
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{o:?}");
+}
