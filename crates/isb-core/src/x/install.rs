@@ -1,5 +1,6 @@
 //! Installing a tool into a new sandbox generation: run its recipe as
-//! `dev`, find the programs it added, and only then let the caller switch
+//! `dev` (on a VM, once [`super::vm`] has set dev and the recipe's
+//! toolchain up), find the programs it added, and only then let the caller switch
 //! to it, so a failed install (a dead download, a bad version) leaves the
 //! working generation alone.
 
@@ -203,9 +204,20 @@ pub fn build(
         Sandbox::remove(client, &next.instance, true)?;
     }
     let mut spec = next.spec(&next.instance)?;
-    if o.learn {
+    // A VM fetches the toolchain dev-base would have had; its hosts are
+    // open while it installs only.
+    let toolchain = if next.vm {
+        super::vm::toolchain(&recipe)
+    } else {
+        None
+    };
+    if o.learn || toolchain.is_some() {
         let mut e = next.egress();
-        e.allow.push("@public".into());
+        if o.learn {
+            e.allow.push("@public".into());
+        }
+        e.allow
+            .extend(toolchain.iter().flat_map(|t| t.hosts.iter().cloned()));
         spec.egress = Some(e);
     }
     report(&format!(
@@ -222,13 +234,19 @@ pub fn build(
     .with_exec_defaults(spec.exec_defaults());
     let network = crate::egress::plumb::network_name(client.project_name(), &next.instance);
     super::project::wait_proxy(&network, &spec, report)?;
-    let result = install_in(&sb, &recipe, &mut next, o, &network, report);
+    let result = (|| {
+        if next.vm {
+            super::vm::provision(&sb, report)?;
+            super::vm::provision_toolchain(&sb, &recipe, report)?;
+        }
+        install_in(&sb, &recipe, &mut next, o, &network, report)
+    })();
     if result.is_err() && !o.keep_failed {
         let _ = Sandbox::remove(client, &next.instance, true);
     }
     result?;
-    if o.learn {
-        // Down to what it used: a live change of the list.
+    if o.learn || toolchain.is_some() {
+        // Down to what it used (or the recipe's own): a live change of the list.
         let spec = next.spec(&next.instance)?;
         Sandbox::connect_or_create_with_base(
             client,
