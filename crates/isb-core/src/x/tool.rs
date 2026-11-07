@@ -256,6 +256,43 @@ fn is_mount_device(name: &str) -> bool {
     name.starts_with("xroot-") || name.starts_with("xgit-")
 }
 
+/// The device changes that take a sandbox from the project mounts it `has`
+/// to the ones it should `want`, as separate updates: first the stale mounts
+/// detached together, then each missing mount on its own, outermost path
+/// first. incus refuses to hot-plug a directory and a mount nested in it
+/// (a project and its `.git`) in one update, and can trip over a stale mount
+/// while starting a new one, so nothing is attached in the same update as
+/// anything else.
+fn mount_steps(has: &[&String], want: &BTreeMap<String, serde_json::Value>) -> Vec<MountStep> {
+    let stale: Vec<String> = has
+        .iter()
+        .filter(|k| is_mount_device(k) && !want.contains_key(k.as_str()))
+        .map(|k| k.to_string())
+        .collect();
+    let mut add: Vec<(&String, &serde_json::Value)> =
+        want.iter().filter(|(k, _)| !has.contains(k)).collect();
+    let depth = |v: &serde_json::Value| {
+        v["path"]
+            .as_str()
+            .map_or(0, |p| Path::new(p).components().count())
+    };
+    add.sort_by_key(|(k, v)| (depth(v), k.as_str()));
+    let mut steps = Vec::new();
+    if !stale.is_empty() {
+        steps.push(MountStep::Detach(stale));
+    }
+    for (k, v) in add {
+        steps.push(MountStep::Attach(k.clone(), v.clone()));
+    }
+    steps
+}
+
+#[derive(Debug, PartialEq)]
+enum MountStep {
+    Detach(Vec<String>),
+    Attach(String, serde_json::Value),
+}
+
 impl Tool {
     /// The tool's sandbox, running, ready for a run from project `root`:
     /// with `mount: project`, that root mounted at its own path (its `.git`
@@ -293,18 +330,25 @@ impl Tool {
             std::time::Duration::from_secs(120),
             &mut |_| {},
         )?;
-        crate::sandbox::update_instance(
-            client,
-            &self.instance,
-            "mount the project",
-            &mut |_, devices| {
-                devices.retain(|k, _| !is_mount_device(k) || want.contains_key(k));
-                for (k, v) in &want {
-                    devices.insert(k.clone(), v.clone());
-                }
-                Ok(())
-            },
-        )?;
+        // Planned against the devices as they are now, under the lock.
+        let have = sb.info()?.devices;
+        let has: Vec<&String> = have.keys().collect();
+        for step in mount_steps(&has, &want) {
+            crate::sandbox::update_instance(
+                client,
+                &self.instance,
+                "mount the project",
+                &mut |_, devices| {
+                    match &step {
+                        MountStep::Detach(names) => devices.retain(|k, _| !names.contains(k)),
+                        MountStep::Attach(k, v) => {
+                            devices.insert(k.clone(), v.clone());
+                        }
+                    }
+                    Ok(())
+                },
+            )?;
+        }
         Ok(sb)
     }
 }
@@ -343,6 +387,38 @@ mod tests {
         assert_eq!(d[1].1["readonly"], "true");
         assert_eq!(d[0].1["path"], r.display().to_string());
         assert!(is_mount_device(&d[1].0) && !is_mount_device("root"));
+    }
+
+    #[test]
+    fn mounts_go_on_one_at_a_time_outermost_first_after_stale_ones_go() {
+        let t = tempfile::tempdir().unwrap();
+        let (a, b) = (t.path().join("a"), t.path().join("b"));
+        for r in [&a, &b] {
+            std::fs::create_dir_all(r.join(".git")).unwrap();
+        }
+        let old: BTreeMap<_, _> = mount_devices(&a).into_iter().collect();
+        let want: BTreeMap<_, _> = mount_devices(&b).into_iter().collect();
+        let (root, git) = (want.keys().nth(1).unwrap(), want.keys().next().unwrap());
+        assert!(root.starts_with("xroot-") && git.starts_with("xgit-"));
+        let other = "root".to_string();
+        let mut has: Vec<&String> = old.keys().collect();
+        has.push(&other);
+        let steps = mount_steps(&has, &want);
+        assert_eq!(steps.len(), 3, "{steps:?}");
+        let mut stale: Vec<String> = old.keys().cloned().collect();
+        stale.sort();
+        assert_eq!(steps[0], MountStep::Detach(stale));
+        assert_eq!(
+            steps[1],
+            MountStep::Attach(root.clone(), want[root].clone())
+        );
+        assert_eq!(steps[2], MountStep::Attach(git.clone(), want[git].clone()));
+        // Already mounted: only the missing .git goes on.
+        let has: Vec<&String> = vec![root, &other];
+        assert_eq!(
+            mount_steps(&has, &want),
+            vec![MountStep::Attach(git.clone(), want[git].clone())]
+        );
     }
 
     #[test]
