@@ -52,11 +52,7 @@ pub fn list_instances(client: &Client, stack: &str, service: Option<&str>) -> Re
             secrets: super::super::secrets::parse_versions_label(
                 c.get(&format!("user.{LABEL_SECRETS}")).map(String::as_str),
             ),
-            boot: c
-                .iter()
-                .filter(|(k, _)| k.starts_with("boot.autostart"))
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect(),
+            boot: super::boot::in_place(c),
         });
     }
     out.sort_by(|a, b| (a.slot, &a.name).cmp(&(b.slot, &b.name)));
@@ -158,7 +154,7 @@ pub struct Inst {
     /// [`LABEL_SECRETS`]: the `restart`/`none` secret versions its app last
     /// started with; `None` on an instance from before the label.
     pub(super) secrets: Option<BTreeMap<String, u64>>,
-    /// Its `boot.autostart*` config.
+    /// Its config keys the controller sets in place ([`super::boot::in_place`]).
     pub(super) boot: crate::plan::Props,
 }
 

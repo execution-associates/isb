@@ -60,9 +60,9 @@ api: 127.0.0.1:8080 -> :8080 (3 backends)
 Three layers, each working without the ones above it:
 
 1. **The guest supervises the app.** On a system image, `command` is a
-   systemd unit with `Restart=`; on an OCI image it is the instance's init,
-   which incus restarts (`boot.autorestart`). A crashed app comes back with
-   nothing else involved.
+   systemd unit with `Restart=`, and a crashed app comes back with nothing
+   else involved. On an OCI image it is the instance's init, so the instance
+   stops when it exits, and the daemon starts it again (layer 3).
 2. **incus starts the instances with the host** (`boot.autostart`), and the
    unit restores the app's secrets before every start, so a reboot needs no
    isb ([After a host reboot](#after-a-host-reboot)).
@@ -71,6 +71,19 @@ Three layers, each working without the ones above it:
    restarts their app (and replaces the instance after three restarts that
    did not help), starts stopped instances, recreates deleted ones, and puts
    back replicas until there are `deploy.replicas`.
+
+The daemon is the one thing that starts a stopped replica: replicas have
+`boot.autorestart: false`, because incus restarting an instance the daemon
+was also starting made two starts overlap, and one came up with no
+nameserver in `/etc/resolv.conf`. The cost is that a replica that stops
+while the daemon is down stays down until it is back. A replica that keeps
+exiting is a crash loop: an exit within 10 minutes of the daemon's last
+start of it counts, the first three are restarted at once, then each start
+waits 10 s, doubling to at most 5 minutes, and a run of 10 minutes or more
+ends the loop. The loop raises `restart.failed` once, and the status says
+when the next start is. After every start the daemon reads an OCI replica's
+`/etc/resolv.conf`, and raises `dns.failed` when it names no nameserver
+(a replica without a NIC is not checked).
 
 Stopping or upgrading the daemon never stops an app. What stops with it is
 the load balancer: published ports close until it starts again (systemd

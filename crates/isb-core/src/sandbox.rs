@@ -169,11 +169,7 @@ pub fn host_facts(client: &Client) -> Result<HostFacts> {
         })
         .unwrap_or_default();
     let info = client.server_info()?;
-    let ext = |n: &str| {
-        info["api_extensions"]
-            .as_array()
-            .is_some_and(|a| a.iter().any(|e| e == n))
-    };
+    let ext = |n: &str| crate::client::lists_extension(&info, n);
     Ok(HostFacts {
         subids: SubIds::read_host(),
         pools,
@@ -186,6 +182,7 @@ pub fn host_facts(client: &Client) -> Result<HostFacts> {
         org: crate::org::OrgId::from_incus_project(client.project_name()),
         registry: crate::registry::info(client)?.map(|i| i.addr),
         project: client.project_name().to_string(),
+        oci_dns: plan::dns::OciDns::detect(client, ext("oci_network_config")),
     })
 }
 

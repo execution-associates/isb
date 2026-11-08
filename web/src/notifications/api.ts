@@ -80,6 +80,16 @@ export const EVENT_GROUPS: { subject: string; label: string; kinds: { kind: stri
     ],
   },
   {
+    subject: "restart",
+    label: "Restarts",
+    kinds: [{ kind: "restart.failed", label: "Crash loop" }],
+  },
+  {
+    subject: "dns",
+    label: "DNS",
+    kinds: [{ kind: "dns.failed", label: "No nameserver" }],
+  },
+  {
     subject: "backup",
     label: "Backups",
     kinds: [
@@ -163,6 +173,8 @@ export function compactEvents(kinds: Set<string>, keep: string[] = []): string[]
   if (allFailed && failed.length > 0) out.push("*.failed");
   for (const g of EVENT_GROUPS) {
     const ks = g.kinds.map((k) => k.kind);
+    // A subject with only a failure kind (restart, dns) is in `*.failed`.
+    if (allFailed && ks.every((k) => k.endsWith(".failed"))) continue;
     if (ks.every((k) => kinds.has(k))) {
       out.push(`${g.subject}.*`);
       continue;

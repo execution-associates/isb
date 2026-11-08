@@ -320,6 +320,19 @@ the process exits. It needs `skopeo` on the host and incus with the
   line break, or with both quotes, is an error when the file is loaded.
 - `working_dir` becomes `oci.cwd`, and `user` must be numeric (`1000` or
   `1000:1000`), becoming `oci.uid`/`oci.gid`.
+- Its DNS is pinned to the resolver of the network its project's default
+  profile gives it, the org bridge: `oci.dns.nameservers` is the bridge's
+  IPv4 address and `oci.dns.domain` its `dns.domain` (`<org>.isb`; incus'
+  default `incus` when unset). incus writes `/etc/resolv.conf` from these
+  keys at every start, so it never depends on the DHCP lease reaching the
+  file, which a start can lose (it then holds only `options edns0`, and every
+  lookup fails until the next start). Not pinned when the instance joins
+  another network (an [`egress`](#egress) policy, or a NIC in `raw_devices`),
+  when `raw_config` sets any `oci.dns.*` key, when the bridge has no IPv4
+  address or `dns.mode: none`, or on an incus without the
+  `oci_network_config` API extension. On an instance that already exists
+  the keys are set in place for its next start (`plan` shows them as config
+  changes, without a restart).
 - It must be a container (`type: vm` is an error).
 
 The string is split at the first `:`, so any other prefix is an error and a local
@@ -887,7 +900,9 @@ makes the service long-running: it is meant to outlive `isb up`.
 - The instance starts with the host: `always` and `on-failure` set
   `boot.autostart: true`; `unless-stopped` leaves it unset, which in incus
   restores whatever state the instance had at shutdown. All three set
-  `boot.autorestart: true`, so incus restarts an instance whose init dies.
+  `boot.autorestart: true` on a sandbox, so incus restarts an instance whose
+  init dies. A stack replica gets `boot.autorestart: false`: the daemon
+  restarts it, alone ([What keeps it running](../concepts/stacks.md#what-keeps-it-running)).
   `no` sets `boot.autostart: false`: a dev sandbox stays down after a host
   reboot even if it was running. [`boot`](#boot) changes any of this.
 - On a system image, `command` is installed as a systemd unit,
@@ -899,7 +914,8 @@ makes the service long-running: it is meant to outlive `isb up`.
   `$PATH` applies. `isb up` rewrites the unit and restarts the app only when
   the unit or its environment changed. The image needs systemd; one without
   it is an error that says so.
-- On an OCI image, incus restarts the app (`boot.autorestart`).
+- On an OCI image, the app is the instance's init: incus restarts a
+  sandbox's (`boot.autorestart`), the daemon a stack replica's.
 - A foreground `isb up` follows the app's output (the journal, or the console
   log) instead of running the command, and Ctrl-C stops the sandboxes as
   before. `isb logs SERVICE` shows recent output at any time.

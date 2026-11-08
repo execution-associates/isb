@@ -245,6 +245,8 @@ fn first_slots_start_with_the_host_before_the_rest() {
     assert_eq!(boot(1)["boot.autostart"], "true");
     assert_eq!(boot(1)["boot.autostart.priority"], "2");
     assert_eq!(boot(1)["boot.autostart.delay"], "2");
+    // The controller restarts a replica, never incus as well.
+    assert_eq!(boot(1)["boot.autorestart"], "false");
     assert_eq!(boot(2)["boot.autostart.priority"], "1");
     assert_eq!(boot(3)["boot.autostart.priority"], "1");
     // The spec's own order wins.
@@ -253,6 +255,31 @@ fn first_slots_start_with_the_host_before_the_rest() {
     let b = crate::plan::boot_config(&s, false).unwrap();
     assert_eq!(b["boot.autostart.priority"], "9");
     assert_eq!(b["boot.autostart.delay"], "5");
+}
+
+#[test]
+fn boot_and_dns_keys_are_kept_in_place() {
+    let c: crate::plan::Props = [
+        ("boot.autorestart", "false"),
+        ("boot.autostart.priority", "2"),
+        ("oci.dns.nameservers", "10.108.36.1"),
+        ("oci.dns.domain", "ocai.isb"),
+        ("oci.entrypoint", "nginx"),
+        ("limits.memory", "128MiB"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    let kept: Vec<String> = boot::in_place(&c).into_keys().collect();
+    assert_eq!(
+        kept,
+        [
+            "boot.autorestart",
+            "boot.autostart.priority",
+            "oci.dns.domain",
+            "oci.dns.nameservers"
+        ]
+    );
 }
 
 #[test]
