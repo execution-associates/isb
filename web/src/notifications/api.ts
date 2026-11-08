@@ -173,6 +173,8 @@ export function compactEvents(kinds: Set<string>, keep: string[] = []): string[]
   if (allFailed && failed.length > 0) out.push("*.failed");
   for (const g of EVENT_GROUPS) {
     const ks = g.kinds.map((k) => k.kind);
+    // A subject with only a failure kind (restart, dns) is in `*.failed`.
+    if (allFailed && ks.every((k) => k.endsWith(".failed"))) continue;
     if (ks.every((k) => kinds.has(k))) {
       out.push(`${g.subject}.*`);
       continue;

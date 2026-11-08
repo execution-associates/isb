@@ -25,6 +25,9 @@ describe("notification rules", () => {
     expect(compactEvents(failures)).toEqual(["*.failed"]);
     failures.add("deploy.succeeded");
     expect(compactEvents(failures)).toEqual(["*.failed", "deploy.*"]);
+    // A subject whose only kind is a failure is covered by `*.failed`, and
+    // written alone when it is the one chosen.
+    expect(compactEvents(new Set(["restart.failed"]))).toEqual(["restart.*"]);
     // A glob for a kind this UI does not know is kept.
     expect(compactEvents(new Set(["deploy.failed"]), ["build.*", "deploy.failed"])).toEqual(["deploy.failed", "build.*"]);
     expect(compactEvents(new Set())).toEqual([]);
