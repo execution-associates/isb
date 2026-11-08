@@ -77,6 +77,7 @@ mod tests {
             org: Some(OrgId::new("acme").unwrap()),
             registry: None,
             project: "isb-acme".into(),
+            oci_dns: None,
         };
         let resolve = |s: &crate::spec::SandboxSpec| {
             crate::plan::resolve(s, &Default::default(), &host, Path::new("/"))

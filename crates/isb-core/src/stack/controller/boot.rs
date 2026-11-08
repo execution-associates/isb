@@ -1,4 +1,4 @@
-//! A replica's boot order, set in place, and what a start waits for.
+//! A replica's boot and DNS config, set in place, and what a start waits for.
 
 use super::{Inst, Worker, instance_spec};
 use crate::error::Error;
@@ -13,13 +13,24 @@ pub(super) fn boot_priority(slot: u32) -> i32 {
     if slot <= 1 { 2 } else { 1 }
 }
 
+/// The config keys [`Worker::set_boot_order`] keeps in place: `boot.*`
+/// (autostart order, and `boot.autorestart` off) and an OCI replica's
+/// pinned `oci.dns.*` ([`crate::plan::dns`]).
+pub(super) fn in_place(config: &crate::plan::Props) -> crate::plan::Props {
+    config
+        .iter()
+        .filter(|(k, _)| k.starts_with("boot.") || k.starts_with("oci.dns."))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
 impl Worker {
-    /// Bring an instance's `boot.autostart*` keys to what its slot should
-    /// have, in place: incus applies them to a running instance without a
-    /// restart, and they are not part of the revision, so a replica made
-    /// before the boot policy gets it without being replaced. Only the keys
-    /// the policy sets are written; a failure is logged and tried again on
-    /// the next pass.
+    /// Bring an instance's [`in_place`] keys to what its slot should have:
+    /// incus takes them on a running instance without a restart (the DNS
+    /// keys are used from its next start), and they are not part of the
+    /// revision, so a replica made before them gets them without being
+    /// replaced. Only the keys isb sets are written; a failure is logged
+    /// and tried again on the next pass.
     pub(super) fn set_boot_order(
         &mut self,
         def: &StackDef,
@@ -32,7 +43,19 @@ impl Worker {
             crate::plan::boot_config(&s, vm).map_err(Error::invalid)
         });
         let want = match want {
-            Ok(w) => w,
+            // The pinned DNS is the project network's: the template's.
+            Ok(mut w) => {
+                // `raw_config` wins, as it did when the instance was made.
+                w.retain(|k, _| !spec.raw_config.contains_key(k));
+                if let Some((_, d)) = &self.template {
+                    w.extend(
+                        in_place(&d.config)
+                            .into_iter()
+                            .filter(|(k, _)| k.starts_with("oci.")),
+                    );
+                }
+                w
+            }
             Err(e) => {
                 self.log(&format!("boot order for {}: {e}", i.name));
                 return;
@@ -48,7 +71,7 @@ impl Worker {
         let r = crate::sandbox::update_instance(
             self.client(),
             &i.name,
-            &format!("set the boot order of {}", i.name),
+            &format!("set the boot config of {}", i.name),
             &mut |config, _| {
                 for (k, v) in &stale {
                     config.insert(k.clone(), serde_json::Value::String(v.clone()));
@@ -61,7 +84,7 @@ impl Worker {
                 let keys: Vec<String> = stale.iter().map(|(k, v)| format!("{k}={v}")).collect();
                 self.log(&format!("{}: set {}", i.name, keys.join(" ")));
             }
-            Err(e) => self.log(&format!("cannot set the boot order of {}: {e}", i.name)),
+            Err(e) => self.log(&format!("cannot set the boot config of {}: {e}", i.name)),
         }
     }
 

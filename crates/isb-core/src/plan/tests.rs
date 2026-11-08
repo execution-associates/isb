@@ -16,10 +16,8 @@ fn host() -> HostFacts {
         initial_owner: false,
         incus_version: Some("7.5.1".into()),
         invoking_ids: (1000, 1000),
-        shared_root: None,
-        org: None,
-        registry: None,
         project: "default".into(),
+        ..Default::default()
     }
 }
 

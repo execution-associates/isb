@@ -117,6 +117,8 @@ shortest globs (`*`, `deploy.*`, `*.failed`).
 | `deploy.succeeded`, `deploy.failed` | An app deployment finished (build, push and rollout), or failed at any step. Preview deployments too. |
 | `health.unhealthy` | A service that was healthy has had no healthy replica (none in rotation) for 20 s. Not raised during a rollout (a failed rollout is `deploy.failed`), nor before the service was first healthy in this daemon run. |
 | `health.recovered` | A replica of that service is healthy again. |
+| `restart.failed` | A replica keeps exiting: its fourth exit in a row within 10 minutes of a start. The daemon starts it again with a backoff (10 s, doubling to 5 minutes); raised once per crash loop ([What keeps it running](../concepts/stacks.md#what-keeps-it-running)). |
+| `dns.failed` | An OCI replica started with a `/etc/resolv.conf` that names no nameserver, so its DNS lookups fail until it is restarted. |
 | `cert.issued`, `cert.failed` | The ingress got a certificate for a domain, or failed to ([Domains and ingress](domains.md)). |
 | `backup.succeeded`, `backup.failed`, `job.succeeded`, `job.failed` | [Database and volume backups](databases.md#backups) and [scheduled jobs](jobs.md). |
 | `monitor.down`, `monitor.up` | An [uptime monitor](uptime.md) went down (its failure threshold reached), or came back (with the downtime). Once per incident; a flapping monitor is held until it settles. The body's `details` carry the URL, status, latency, error and a link. |

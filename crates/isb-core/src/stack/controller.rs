@@ -36,6 +36,7 @@ mod boot;
 mod dns;
 mod health;
 mod instances;
+mod restarts;
 pub use dns::{DnsScope, DnsScopeFn};
 use health::InstRt;
 pub use instances::{Inst, list_instances};
@@ -181,6 +182,7 @@ pub struct Event {
     /// What happened, for consumers that act on events (notifications):
     /// dotted, `<subject>.<outcome>`. In use: `deploy.succeeded`,
     /// `deploy.failed`, `health.unhealthy`, `health.recovered`,
+    /// `restart.failed` (a crash loop), `dns.failed` (no nameserver),
     /// `backup.succeeded`, `backup.failed`, `restore.succeeded`,
     /// `restore.failed`, `job.succeeded`, `job.failed`, `cert.issued`,
     /// `cert.failed`, `secret.rotated` (a new secret version reached a
@@ -1643,6 +1645,9 @@ impl Worker {
                 self.message = Some(format!("{}: restart limit reached", i.name));
                 return Ok(());
             }
+            if self.crash_backoff(&i.name) {
+                return Ok(());
+            }
             // Held through the setup below: the guest's boot is the load.
             let held = &mut |p: f64| self.held(&i.name, p);
             let Some(p) = inner.gate.acquire(&self.shared.stop, held) else {
@@ -1699,6 +1704,7 @@ impl Worker {
             }
         }
         drop(permit);
+        self.check_dns(&i.name, oci);
         let alive = self.alive(&sb, spec, oci);
         let healthy = match probe {
             None => alive,
@@ -1834,36 +1840,6 @@ impl Worker {
             .is_ok_and(|i| i.status.eq_ignore_ascii_case("running"))
     }
 
-    fn count_restart(&mut self, name: &str) {
-        self.rt
-            .entry(name.to_string())
-            .or_default()
-            .restarts
-            .push_back(Instant::now());
-    }
-
-    fn restart_budget_spent(
-        &mut self,
-        name: &str,
-        policy: Option<&crate::spec::RestartPolicy>,
-    ) -> bool {
-        let Some(p) = policy else { return false };
-        let Some(max) = p.max_attempts else {
-            return false;
-        };
-        let window = p
-            .window
-            .as_deref()
-            .and_then(|w| crate::flex::parse_duration(w).ok());
-        let rt = self.rt.entry(name.to_string()).or_default();
-        if let Some(w) = window {
-            while rt.restarts.front().is_some_and(|t| t.elapsed() > w) {
-                rt.restarts.pop_front();
-            }
-        }
-        rt.restarts.len() as u32 >= max
-    }
-
     /// Replace (or fill) one slot with an instance of the current revision.
     #[expect(clippy::too_many_arguments)]
     fn replace(
@@ -1938,12 +1914,7 @@ impl Worker {
                 rev: rev.to_string(),
                 status: "Running".into(),
                 secrets: Some(live_versions(def, &self.service)),
-                boot: d
-                    .config
-                    .iter()
-                    .filter(|(k, _)| k.starts_with("boot.autostart"))
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect(),
+                boot: boot::in_place(&d.config),
             };
             self.insts.push(inst.clone());
             self.slot_state(def, slot, None, None, Some("probing"));

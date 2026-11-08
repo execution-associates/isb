@@ -80,6 +80,16 @@ export const EVENT_GROUPS: { subject: string; label: string; kinds: { kind: stri
     ],
   },
   {
+    subject: "restart",
+    label: "Restarts",
+    kinds: [{ kind: "restart.failed", label: "Crash loop" }],
+  },
+  {
+    subject: "dns",
+    label: "DNS",
+    kinds: [{ kind: "dns.failed", label: "No nameserver" }],
+  },
+  {
     subject: "backup",
     label: "Backups",
     kinds: [

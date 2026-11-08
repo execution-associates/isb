@@ -20,6 +20,12 @@ pub const BOOT_DELAY_VM: u64 = 10;
 /// anything else is `false`, so a reboot does not bring back every dev
 /// sandbox that happened to be running. Applied in place by the stack
 /// controller too, so a replica is never replaced for these keys.
+///
+/// `boot.autorestart` (incus restarting an instance that exited) is on for a
+/// long-running sandbox and off for a stack replica, whose controller is its
+/// one supervisor: with both reacting to an exit, two starts of one instance
+/// overlapped, and one came up with a `/etc/resolv.conf` that named no
+/// nameserver (2026-11-05 on titan, DNS lost for 75 hours).
 pub fn boot_config(spec: &SandboxSpec, vm: bool) -> Result<Props, String> {
     let b = spec.boot.clone().unwrap_or_default();
     let autostart = b.autostart.or(match spec.restart.unwrap_or_default() {
@@ -28,6 +34,11 @@ pub fn boot_config(spec: &SandboxSpec, vm: bool) -> Result<Props, String> {
         RestartMode::No => Some(false),
     });
     let mut out = Props::new();
+    if is_replica(spec) {
+        out.insert("boot.autorestart".into(), "false".into());
+    } else if spec.restart.is_some_and(|r| r.is_long_running()) {
+        out.insert("boot.autorestart".into(), "true".into());
+    }
     if let Some(a) = autostart {
         out.insert("boot.autostart".into(), a.to_string());
     }
@@ -70,4 +81,30 @@ pub fn dev_disk_limits() -> Props {
         ("limits.read".into(), "128MiB".into()),
         ("limits.write".into(), "64MiB".into()),
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_replica_is_never_restarted_by_incus() {
+        let mut s = SandboxSpec::new("web", "docker:nginx:1.27");
+        s.restart = Some(RestartMode::Always);
+        assert_eq!(boot_config(&s, false).unwrap()["boot.autorestart"], "true");
+        s.labels
+            .insert(crate::stack::LABEL_STACK.into(), "shop".into());
+        let b = boot_config(&s, false).unwrap();
+        // The stack controller restarts it, alone.
+        assert_eq!(b["boot.autorestart"], "false");
+        // It still starts with the host.
+        assert_eq!(b["boot.autostart"], "true");
+        s.labels.clear();
+        s.restart = Some(RestartMode::No);
+        assert!(
+            !boot_config(&s, false)
+                .unwrap()
+                .contains_key("boot.autorestart")
+        );
+    }
 }

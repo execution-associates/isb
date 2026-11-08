@@ -164,9 +164,7 @@ impl Client {
 
     /// Whether the server lists the API extension `name`.
     pub fn has_extension(&self, name: &str) -> Result<bool> {
-        Ok(self.server_info()?["api_extensions"]
-            .as_array()
-            .is_some_and(|a| a.iter().any(|e| e == name)))
+        Ok(lists_extension(&self.server_info()?, name))
     }
 
     /// The server's version (`environment.server_version`), if it says.
@@ -760,6 +758,13 @@ pub(crate) fn encode_query(s: &str) -> String {
 
 /// Percent-encode one path segment.
 #[doc(hidden)]
+/// Whether server info (`GET /1.0`) lists the API extension `name`.
+pub fn lists_extension(info: &Value, name: &str) -> bool {
+    info["api_extensions"]
+        .as_array()
+        .is_some_and(|a| a.iter().any(|e| e == name))
+}
+
 pub fn encode_segment(s: &str) -> String {
     encode_query(s)
 }

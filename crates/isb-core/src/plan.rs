@@ -25,6 +25,7 @@ use crate::sandbox::expiry::Expires;
 use crate::spec::{ExecDefaults, InstanceType, MountType, PortBind, ReadyCheck, SandboxSpec};
 
 mod boot;
+pub mod dns;
 mod names;
 mod owner;
 pub use names::{device_name_for_path, validate_instance_name};
@@ -61,6 +62,8 @@ pub struct HostFacts {
     pub registry: Option<String>,
     /// The incus project the sandbox goes in (its egress network is named from it).
     pub project: String,
+    /// The resolver an OCI instance's DNS is pinned to ([`dns`]), when incus can.
+    pub oci_dns: Option<dns::OciDns>,
 }
 
 impl HostFacts {
@@ -623,9 +626,6 @@ pub fn resolve(
         config.insert(format!("environment.{k}"), v);
     }
     config.extend(boot_config(spec, vm).map_err(|e| Error::invalid(format!("{name}: {e}")))?);
-    if spec.restart.is_some_and(|r| r.is_long_running()) {
-        config.insert("boot.autorestart".into(), "true".into());
-    }
     if oci {
         let mut line: Vec<String> = spec.entrypoint.clone().unwrap_or_default();
         line.extend(spec.command.clone().unwrap_or_default());
@@ -646,6 +646,7 @@ pub fn resolve(
             config.insert("oci.uid".into(), uid.into());
             config.insert("oci.gid".into(), gid.into());
         }
+        config.extend(dns::oci_dns_config(spec, host.oci_dns.as_ref()));
     }
     for (k, v) in &spec.raw_config {
         config.insert(k.clone(), v.clone());
@@ -1221,10 +1222,6 @@ pub fn device_matches(desired: &DesiredDevice, actual: &Props) -> bool {
 /// What plans and reports show for a secret value.
 pub const REDACTED: &str = "(secret)";
 
-fn restart_needed(key: &str) -> bool {
-    key.starts_with("raw.") || key.starts_with("security.") || key.starts_with("oci.")
-}
-
 /// Diff desired against actual (`None`: the instance does not exist).
 /// `volumes_missing` lists named volumes (pool, name) that do not exist yet.
 #[expect(
@@ -1329,7 +1326,7 @@ pub fn diff(
                 key: k.clone(),
                 from: cur.map(hide),
                 to: hide(v),
-                restart: restart_needed(k),
+                restart: dns::restart_needed(k),
                 secret,
             });
         }

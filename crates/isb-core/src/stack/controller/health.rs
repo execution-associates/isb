@@ -27,8 +27,19 @@ pub(super) struct InstRt {
     pub(super) last_probe: String,
     /// App restarts for failing health, since it was last healthy.
     pub(super) unhealthy_restarts: u32,
-    /// Restarts counted against `restart_policy.max_attempts`.
+    /// Restarts counted against `restart_policy.max_attempts`, and for
+    /// the crash-loop backoff.
     pub(super) restarts: VecDeque<Instant>,
+    /// Exits in a row soon after a start ([`super::restarts::next_streak`]).
+    pub(super) crash_streak: u32,
+    /// When the exit now waiting for its start was first seen.
+    pub(super) stopped_at: Option<Instant>,
+    /// When isb last started it.
+    pub(super) last_start: Option<Instant>,
+    /// In a crash loop: `restart.failed` was raised for it.
+    pub(super) crash_loop: bool,
+    /// Its `/etc/resolv.conf` was read since `since`.
+    pub(super) dns_checked: bool,
     pub(super) in_rotation: bool,
     /// The `none` secret versions whose files were last delivered live.
     pub(super) delivered: BTreeMap<String, u64>,
@@ -38,6 +49,9 @@ impl InstRt {
     /// The app (re)started: probing, and its startup grace, start over.
     pub(super) fn started(&mut self, now: Instant) {
         self.since = Some(now);
+        // Running again, whoever started it: its next exit is a new one.
+        self.stopped_at = None;
+        self.dns_checked = false;
         self.failures = 0;
         self.healthy = None;
         self.passed = false;
