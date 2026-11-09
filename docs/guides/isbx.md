@@ -160,8 +160,12 @@ to look it up on the guest's PATH) names them instead. Each becomes a shim:
 $ cat ~/.local/share/isb/x/bin/sume
 #!/bin/sh
 # isbx shim: `sume` runs in the sandbox of isbx tool sume (`isb x rm sume` removes it)
-exec isb x tool sume sume "$@"
+exec isb x tool sume sume -- "$@"
 ```
+
+The `--` hands every argument to the tool, `--help` and `--version` too.
+Shims an older isb wrote lack it; `isb x doctor` (or `isb x update`)
+rewrites them.
 
 **The shim directory must come first on PATH,** before version managers'
 directories, or a host `npm` wins over a shim named `npm`

@@ -41,11 +41,27 @@ pub fn check_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// A shim that runs installed tool `tool`'s program `bin`.
+/// A shim that runs installed tool `tool`'s program `bin`. The `--` keeps
+/// every argument the tool's, even one isb itself reads, such as `--help`.
 pub fn for_tool(tool: &str, bin: &str) -> String {
     format!(
-        "#!/bin/sh\n{MARK}: `{bin}` runs in the sandbox of isbx tool {tool} (`isb x rm {tool}` removes it)\nexec isb x tool {tool} {bin} \"$@\"\n"
+        "#!/bin/sh\n{MARK}: `{bin}` runs in the sandbox of isbx tool {tool} (`isb x rm {tool}` removes it)\nexec isb x tool {tool} {bin} -- \"$@\"\n"
     )
+}
+
+/// Rewrite shim `name` to `body` when it is an isbx shim that says
+/// something else (one an older isb wrote); whether it was rewritten.
+pub fn refresh(name: &str, body: &str) -> Result<bool> {
+    refresh_in(&dir(), name, body)
+}
+
+fn refresh_in(d: &Path, name: &str, body: &str) -> Result<bool> {
+    let p = d.join(name);
+    if !is_shim(&p) || std::fs::read_to_string(&p).is_ok_and(|t| t == body) {
+        return Ok(false);
+    }
+    write_in(d, name, body)?;
+    Ok(true)
 }
 
 /// A shim that runs host command `cmd` as a one-off in the project sandbox.
@@ -62,10 +78,13 @@ pub fn is_shim(p: &Path) -> bool {
 
 /// Write shim `name` with `body`, replacing only an isbx shim.
 pub fn write(name: &str, body: &str) -> Result<PathBuf> {
+    write_in(&dir(), name, body)
+}
+
+fn write_in(d: &Path, name: &str, body: &str) -> Result<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
     check_name(name)?;
-    let d = dir();
-    std::fs::create_dir_all(&d)?;
+    std::fs::create_dir_all(d)?;
     let p = d.join(name);
     if p.symlink_metadata().is_ok() && !is_shim(&p) {
         return Err(Error::invalid(format!(
@@ -141,12 +160,34 @@ mod tests {
     fn shims_are_marked_and_quote_nothing_from_the_caller() {
         let s = for_tool("sume", "sume");
         assert!(s.starts_with("#!/bin/sh\n# isbx shim"));
-        assert!(s.ends_with("exec isb x tool sume sume \"$@\"\n"));
+        assert!(s.ends_with("\nexec isb x tool sume sume -- \"$@\"\n"));
         assert!(for_run("npm").contains("exec isb x run -- npm \"$@\""));
         assert!(check_name("npm").is_ok() && check_name("g++").is_ok());
         for bad in ["", "a/b", ".hidden", "isb", "isbx", "sudo", "a b"] {
             assert!(check_name(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn an_old_tool_shim_is_rewritten_and_nothing_else() {
+        let t = tempfile::tempdir().unwrap();
+        let d = t.path();
+        let old = for_tool("nc", "namecheap").replace(" -- \"$@\"", " \"$@\"");
+        std::fs::write(d.join("namecheap"), &old).unwrap();
+        let new = for_tool("nc", "namecheap");
+        assert!(refresh_in(d, "namecheap", &new).unwrap());
+        assert_eq!(std::fs::read_to_string(d.join("namecheap")).unwrap(), new);
+        // Up to date already: left alone.
+        assert!(!refresh_in(d, "namecheap", &new).unwrap());
+        // Not isbx's, or not there: never written.
+        std::fs::write(d.join("node"), "#!/bin/sh\nexec node\n").unwrap();
+        assert!(!refresh_in(d, "node", &for_tool("n", "node")).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(d.join("node")).unwrap(),
+            "#!/bin/sh\nexec node\n"
+        );
+        assert!(!refresh_in(d, "gone", &for_tool("g", "gone")).unwrap());
+        assert!(!d.join("gone").exists());
     }
 
     #[test]

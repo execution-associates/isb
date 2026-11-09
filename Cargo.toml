@@ -55,20 +55,20 @@ members = ["crates/*"]
 default-members = [".", "crates/*"]
 
 [workspace.package]
-version = "4.0.0"
+version = "4.0.1"
 edition = "2024"
-rust-version = "1.87"
+rust-version = "1.89"
 license = "LicenseRef-EXA-SL-1.0"
 repository = "https://github.com/execution-associates/isb"
 homepage = "https://github.com/execution-associates/isb"
 
 [workspace.dependencies]
-isb-core = { path = "crates/isb-core", version = "=4.0.0" }
-isb-server = { path = "crates/isb-server", version = "=4.0.0" }
-isb-apps = { path = "crates/isb-apps", version = "=4.0.0" }
-isb-daemon = { path = "crates/isb-daemon", version = "=4.0.0" }
-isb-tui = { path = "crates/isb-tui", version = "=4.0.0" }
-isb-egress = { path = "crates/isb-egress", version = "=4.0.0" }
+isb-core = { path = "crates/isb-core", version = "=4.0.1" }
+isb-server = { path = "crates/isb-server", version = "=4.0.1" }
+isb-apps = { path = "crates/isb-apps", version = "=4.0.1" }
+isb-daemon = { path = "crates/isb-daemon", version = "=4.0.1" }
+isb-tui = { path = "crates/isb-tui", version = "=4.0.1" }
+isb-egress = { path = "crates/isb-egress", version = "=4.0.1" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -100,7 +100,7 @@ toml = { version = "1", default-features = false, features = ["parse", "serde", 
 # isb serve's identity store (isb-server auth): SQLite compiled from source,
 # so the static musl build needs no system library; argon2id for passwords,
 # salted from ring's OS randomness, so no getrandom/password-hash features.
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
 
 # The local registry's TLS: an isb CA and the registry's certificate, on ring.
@@ -126,6 +126,9 @@ too_many_lines = "warn"
 excessive_nesting = "warn"
 too_many_arguments = "warn"
 type_complexity = "warn"
+# Off since the MSRV reached let-chains (1.88): the nested `if let`s that
+# predate them are left as they are rather than rewritten all at once.
+collapsible_if = "allow"
 
 # Debug builds keep line tables (backtraces with file:line) but no variable
 # or type info, which halves the debuginfo rustc emits and the linker reads;
