@@ -303,16 +303,6 @@ create is named `isb-test-ts-<pid>-...` and is removed afterwards, pass or fail.
 
 ## License
 
-isb is source-available under the
-[Execution Associates Source License 1.0](https://github.com/execution-associates/isb/blob/main/LICENSE) (EXA-SL-1.0). In short:
+The SDK is MIT.
 
-- **Free to use, change and share** for individuals and for companies under
-  10M USD in annual revenue (gross revenue or ARR, counted with affiliates).
-- **Companies at 10M USD or more need a commercial license** from
-  [Execution Associates](https://executionassociates.com).
-- **No competing products**: you may not use isb to offer a product that
-  substitutes for it.
-- **Every version becomes Apache 2.0** two years after its release, with
-  neither limit.
-
-The [LICENSE](https://github.com/execution-associates/isb/blob/main/LICENSE) is what binds; this summary is not.
+The platform packages it installs (`@execution-associates/isb-linux-x64`, `@execution-associates/isb-linux-arm64`) carry the isb binary, which is under the [Execution Associates Source License 1.0](https://github.com/execution-associates/isb/blob/main/LICENSE) (EXA-SL-1.0).

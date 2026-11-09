@@ -177,4 +177,6 @@ isb is source-available under the
 - **Every version becomes Apache 2.0** two years after its release, with
   neither limit.
 
-The [LICENSE](LICENSE) is what binds; this summary is not.
+The [LICENSE](LICENSE) is what binds; this summary is not. The Python and
+TypeScript SDKs in `sdk/` are MIT; the isb binary their platform packages
+bundle is EXA-SL-1.0.
