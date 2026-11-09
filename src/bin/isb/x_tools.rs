@@ -401,6 +401,11 @@ pub(crate) fn doctor(ctx: &Ctx) -> Result<u8> {
             format!("tool {}: sandbox {}", t.name, t.instance),
         );
         for b in t.bins.keys() {
+            // A shim an older isb wrote is brought up to date here, so
+            // nobody has to reinstall for it.
+            if let Ok(true) = shim::refresh(b, &shim::for_tool(&t.name, b)) {
+                println!("      rewrote shim {b} for this isb");
+            }
             check(
                 shim::is_shim(&shim::dir().join(b)),
                 format!("tool {}: shim {b}", t.name),

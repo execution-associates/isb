@@ -54,10 +54,17 @@ pub(crate) enum XCmd {
     /// Run an installed tool's program (what its shims do), or any command
     /// in its sandbox: `isb x tool sume sume --help`, `isb x tool sume bash`.
     Tool {
-        name: String,
-        bin: String,
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        args: Vec<String>,
+        /// NAME BIN [ARGS]...: everything from NAME on is the tool's, so
+        /// `isb x tool sume sume --help` is sume's help. A `--` right after
+        /// BIN (what shims write) is dropped.
+        #[arg(
+            required = true,
+            num_args = 2..,
+            trailing_var_arg = true,
+            allow_hyphen_values = true,
+            value_names = ["NAME", "BIN", "ARGS"]
+        )]
+        argv: Vec<String>,
     },
     /// Reinstall tools from their recipes into a new sandbox, switching only
     /// once that works.
@@ -187,7 +194,10 @@ pub(crate) fn x(ctx: &Ctx, cmd: XCmd) -> Result<u8> {
         XCmd::Stop { names } => stop(ctx, names),
         XCmd::Gc { idle, missing, yes } => gc(ctx, idle, missing, yes),
         XCmd::Install(a) => super::x_tools::install(ctx, a),
-        XCmd::Tool { name, bin, args } => super::x_tools::tool(ctx, &name, &bin, args),
+        XCmd::Tool { argv } => {
+            let (name, bin, args) = tool_argv(argv);
+            super::x_tools::tool(ctx, &name, &bin, args)
+        }
         XCmd::Update {
             names,
             all,
@@ -200,6 +210,20 @@ pub(crate) fn x(ctx: &Ctx, cmd: XCmd) -> Result<u8> {
         XCmd::UpdateShell { shells, remove } => super::x_shell::update_shell(&shells, remove),
         XCmd::Doctor => super::x_tools::doctor(ctx),
     }
+}
+
+/// `isb x tool`'s NAME, BIN and the tool's own arguments, without the
+/// `--` a shim puts after BIN. Only that one is dropped: a later `--`, or a
+/// second one, is the tool's.
+fn tool_argv(argv: Vec<String>) -> (String, String, Vec<String>) {
+    let mut it = argv.into_iter();
+    let name = it.next().unwrap_or_default();
+    let bin = it.next().unwrap_or_default();
+    let mut args: Vec<String> = it.collect();
+    if args.first().is_some_and(|a| a == "--") {
+        args.remove(0);
+    }
+    (name, bin, args)
 }
 
 pub(crate) fn home() -> Result<PathBuf> {
@@ -523,6 +547,48 @@ mod tests {
         assert_eq!(a.argv, ["npm", "i", "-e", "--egress", "x"]);
         assert_eq!(a.egress, ["example.com"]);
         assert!(a.env.is_empty());
+    }
+
+    fn tool_args(v: &[&str]) -> (String, String, Vec<String>) {
+        use clap::Parser;
+        match super::super::Cli::try_parse_from(os(v)).unwrap().cmd {
+            super::super::Cmd::X(XCmd::Tool { argv }) => tool_argv(argv),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn everything_after_the_tool_is_the_tools() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        // What a shim runs: `isb x tool T BIN -- "$@"`.
+        for flag in [
+            "--help",
+            "-h",
+            "--version",
+            "-V",
+            "-q",
+            "--org",
+            "--project",
+        ] {
+            let (n, b, a) = tool_args(&["isb", "x", "tool", "nc", "namecheap", "--", flag, "x"]);
+            assert_eq!((n.as_str(), b.as_str()), ("nc", "namecheap"));
+            assert_eq!(a, s(&[flag, "x"]), "{flag}");
+            // Typed by hand, without the `--`.
+            let (_, _, a) = tool_args(&["isb", "x", "tool", "nc", "namecheap", flag]);
+            assert_eq!(a, s(&[flag]), "{flag}");
+        }
+        let (_, _, a) = tool_args(&["isb", "x", "tool", "t", "b"]);
+        assert!(a.is_empty());
+        // Only the shim's own `--` goes; the tool's are kept.
+        let (_, _, a) = tool_args(&["isb", "x", "tool", "t", "b", "--", "--", "-x"]);
+        assert_eq!(a, s(&["--", "-x"]));
+        let (_, _, a) = tool_args(&["isb", "x", "tool", "t", "b", "a", "--", "c"]);
+        assert_eq!(a, s(&["a", "--", "c"]));
+        // Before NAME, flags are still isb's.
+        use clap::Parser;
+        let e = super::super::Cli::try_parse_from(os(&["isb", "x", "tool", "--help"]));
+        assert_eq!(e.err().unwrap().kind(), clap::error::ErrorKind::DisplayHelp);
+        assert!(super::super::Cli::try_parse_from(os(&["isb", "x", "tool", "t"])).is_err());
     }
 
     #[test]
