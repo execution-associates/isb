@@ -1,8 +1,8 @@
 {
   "name": "@execution-associates/isb-linux-x64",
-  "version": "3.6.0",
+  "version": "4.0.0",
   "description": "The static isb binary for Linux x64 (x86_64-unknown-linux-musl), used by @execution-associates/isb",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/execution-associates/isb.git",

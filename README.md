@@ -4,7 +4,7 @@
 [![PyPI](https://img.shields.io/pypi/v/isb-sdk.svg)](https://pypi.org/project/isb-sdk/)
 [![npm](https://img.shields.io/npm/v/@execution-associates/isb.svg)](https://www.npmjs.com/package/@execution-associates/isb)
 [![CI](https://github.com/execution-associates/isb/actions/workflows/ci.yml/badge.svg)](https://github.com/execution-associates/isb/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: EXA-SL-1.0](https://img.shields.io/badge/license-EXA--SL--1.0-blue.svg)](LICENSE)
 
 **Sandboxes you can describe, on your own Linux machine.** Write down the
 containers or VMs you want in a small YAML file, or in Python, TypeScript or
@@ -165,4 +165,16 @@ $ isb app create web --project shop --image docker:traefik/whoami -p 127.0.0.1:8
 
 ## License
 
-[MIT](LICENSE)
+isb is source-available under the
+[Execution Associates Source License 1.0](LICENSE) (EXA-SL-1.0). In short:
+
+- **Free to use, change and share** for individuals and for companies under
+  10M USD in annual revenue (gross revenue or ARR, counted with affiliates).
+- **Companies at 10M USD or more need a commercial license** from
+  [Execution Associates](https://executionassociates.com).
+- **No competing products**: you may not use isb to offer a product that
+  substitutes for it.
+- **Every version becomes Apache 2.0** two years after its release, with
+  neither limit.
+
+The [LICENSE](LICENSE) is what binds; this summary is not.
