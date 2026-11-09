@@ -419,6 +419,7 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     let sandboxes = sandboxes::Sandboxes::new(&cfg.state_dir, client.clone(), recorder.clone());
     let org_api = org_api::OrgApi::new(client.clone(), cfg.org_api_port);
     let (egress, stop_egress) = egress::start(&cfg, &client, &secrets)?;
+    crate::ipam::watch(client.clone(), ctl.clone());
     let meta = crate::stack::deployments::StackMeta::new(&cfg.state_dir);
     meta.recover();
     let d = Arc::new(Daemon {

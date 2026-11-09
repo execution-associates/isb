@@ -216,6 +216,22 @@ The org's ACL decides where its instances may go:
 Traffic into an org's instances is not filtered by the ACL: the host, and
 the daemon's load balancer, reach them.
 
+### Addresses
+
+Every instance's address on the org bridge is pinned (its NIC's
+`ipv4.address`), so it is the instance's alone for as long as it exists. A
+DHCP lease alone is not enough: incus' bridges lease for an hour, an OCI
+container never renews, and dnsmasq then gives its address to the next
+instance that asks. isb pins an address no other instance on the bridge
+holds or is pinned to when it creates an instance, and records it in
+`user.isb.ipv4.eth0`. Once a minute `isb serve` pins any instance without a
+pin at the address it has, in place (it keeps running and keeps its
+address), gives a stopped one a free address, and adopts pins set by hand.
+It raises `net.failed` when two instances share an address, when a pinned
+instance has another one, or when it cannot pin one; it moves no instance
+itself. An instance with an [egress policy](../guides/egress.md) has a
+bridge of its own and is left to DHCP.
+
 A host with a default-deny firewall (ufw) needs `sudo isb host setup` once,
 so org bridges get DHCP, DNS and egress while staying apart from each other:
 see [Host firewall](../operations/host-setup.md#host-firewall).

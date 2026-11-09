@@ -9938,7 +9938,7 @@
     },
     "/api/v1/tools/notification_channel_create": {
       "post": {
-        "description": "Add a notification channel to the org: a destination (webhook, Slack, Discord, Telegram, email) and rules choosing which events it hears about. Only the org's own events reach it. Its secrets must exist.",
+        "description": "Add a notification channel to the org: a destination (webhook, Slack, Discord, Mattermost, Telegram, email) and rules choosing which events it hears about. Only the org's own events reach it. Its secrets must exist.",
         "operationId": "notification_channel_create",
         "requestBody": {
           "content": {
@@ -9959,7 +9959,7 @@
                     "type": "string"
                   },
                   "provider": {
-                    "description": "Where messages go, by `type`: {\"type\": \"webhook\", \"url_secret\": NAME, \"signing_secret\": NAME?} (JSON POST; with a signing secret, X-Isb-Signature: sha256=HMAC of the body), {\"type\": \"slack\", \"url_secret\": NAME} (an incoming-webhook URL), {\"type\": \"discord\", \"url_secret\": NAME}, {\"type\": \"telegram\", \"token_secret\": NAME, \"chat_id\": \"-100...\"}, {\"type\": \"email\", \"host\", \"port\"?, \"tls\": \"starttls\"|\"tls\"|\"none\", \"username\"?, \"password_secret\"?, \"from\", \"to\": [..]}. Every URL, token and password is an org secret, named here (secret_create first), never a value.",
+                    "description": "Where messages go, by `type`: {\"type\": \"webhook\", \"url_secret\": NAME, \"signing_secret\": NAME?} (JSON POST; with a signing secret, X-Isb-Signature: sha256=HMAC of the body), {\"type\": \"slack\", \"url_secret\": NAME} (an incoming-webhook URL), {\"type\": \"discord\", \"url_secret\": NAME}, {\"type\": \"mattermost\", \"url_secret\": NAME} (an incoming-webhook URL, https on any server), {\"type\": \"telegram\", \"token_secret\": NAME, \"chat_id\": \"-100...\"}, {\"type\": \"email\", \"host\", \"port\"?, \"tls\": \"starttls\"|\"tls\"|\"none\", \"username\"?, \"password_secret\"?, \"from\", \"to\": [..]}. Every URL, token and password is an org secret, named here (secret_create first), never a value.",
                     "type": "object"
                   },
                   "rules": {
@@ -10217,7 +10217,7 @@
                     "type": "string"
                   },
                   "provider": {
-                    "description": "Where messages go, by `type`: {\"type\": \"webhook\", \"url_secret\": NAME, \"signing_secret\": NAME?} (JSON POST; with a signing secret, X-Isb-Signature: sha256=HMAC of the body), {\"type\": \"slack\", \"url_secret\": NAME} (an incoming-webhook URL), {\"type\": \"discord\", \"url_secret\": NAME}, {\"type\": \"telegram\", \"token_secret\": NAME, \"chat_id\": \"-100...\"}, {\"type\": \"email\", \"host\", \"port\"?, \"tls\": \"starttls\"|\"tls\"|\"none\", \"username\"?, \"password_secret\"?, \"from\", \"to\": [..]}. Every URL, token and password is an org secret, named here (secret_create first), never a value.",
+                    "description": "Where messages go, by `type`: {\"type\": \"webhook\", \"url_secret\": NAME, \"signing_secret\": NAME?} (JSON POST; with a signing secret, X-Isb-Signature: sha256=HMAC of the body), {\"type\": \"slack\", \"url_secret\": NAME} (an incoming-webhook URL), {\"type\": \"discord\", \"url_secret\": NAME}, {\"type\": \"mattermost\", \"url_secret\": NAME} (an incoming-webhook URL, https on any server), {\"type\": \"telegram\", \"token_secret\": NAME, \"chat_id\": \"-100...\"}, {\"type\": \"email\", \"host\", \"port\"?, \"tls\": \"starttls\"|\"tls\"|\"none\", \"username\"?, \"password_secret\"?, \"from\", \"to\": [..]}. Every URL, token and password is an org secret, named here (secret_create first), never a value.",
                     "type": "object"
                   },
                   "rules": {

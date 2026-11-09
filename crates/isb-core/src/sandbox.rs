@@ -505,7 +505,8 @@ fn create_instance(client: &Client, desired: &Desired, report: &mut dyn FnMut(&s
             "devices": devices,
             "profiles": desired.profiles,
         });
-        let body = crate::org::disk::sized_root(client, body);
+        let (body, pin) =
+            crate::ipam::pin_for_create(client, crate::org::disk::sized_root(client, body))?;
         match client.mutate(
             "POST",
             "/1.0/instances",
@@ -513,7 +514,7 @@ fn create_instance(client: &Client, desired: &Desired, report: &mut dyn FnMut(&s
             &step,
             client.timeouts.create,
         ) {
-            Ok(_) => return Ok(()),
+            Ok(_) => return pin.map_or(Ok(()), |p| p.verify(client, &desired.name)),
             Err(e) if e.is_timeout() => {
                 report(&format!("{e}"));
                 if let Error::OperationTimeout { operation, .. } = &e {
@@ -524,7 +525,7 @@ fn create_instance(client: &Client, desired: &Desired, report: &mut dyn FnMut(&s
                         .is_ok()
                     {
                         report(&format!("{step}: finished late; keeping it"));
-                        return Ok(());
+                        return pin.map_or(Ok(()), |p| p.verify(client, &desired.name));
                     }
                 }
                 if let Err(ce) = cleanup_half_created(client, &desired.name, &token, report) {

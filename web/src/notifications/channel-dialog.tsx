@@ -60,6 +60,7 @@ function pfOf(p?: Provider): PF {
       return { ...emptyPF, url_secret: p.url_secret, signing_secret: p.signing_secret ?? "" };
     case "slack":
     case "discord":
+    case "mattermost":
       return { ...emptyPF, url_secret: p.url_secret };
     case "telegram":
       return { ...emptyPF, token_secret: p.token_secret, chat_id: p.chat_id };
@@ -78,7 +79,8 @@ export function providerOf(type: ProviderType, f: PF): { provider: Provider } | 
       return { provider: { type, url_secret: f.url_secret.trim(), ...(f.signing_secret.trim() ? { signing_secret: f.signing_secret.trim() } : {}) } };
     }
     case "slack":
-    case "discord": {
+    case "discord":
+    case "mattermost": {
       const e = need(f.url_secret, "Name the secret holding the webhook URL.");
       return e ? { error: e } : { provider: { type, url_secret: f.url_secret.trim() } };
     }
@@ -236,13 +238,19 @@ export function ChannelDialog({ org, existing, open, onOpenChange }: { org: stri
               <SecretInput label="Signing secret" optional value={pf.signing_secret} onChange={(v) => setP({ signing_secret: v })} names={names} hint="Signs the body: X-Isb-Signature: sha256=HMAC." />
             </div>
           )}
-          {(type === "slack" || type === "discord") && (
+          {(type === "slack" || type === "discord" || type === "mattermost") && (
             <SecretInput
               label="Webhook URL secret"
               value={pf.url_secret}
               onChange={(v) => setP({ url_secret: v })}
               names={names}
-              hint={type === "slack" ? "Holds https://hooks.slack.com/services/…" : "Holds https://discord.com/api/webhooks/…"}
+              hint={
+                type === "slack"
+                  ? "Holds https://hooks.slack.com/services/…"
+                  : type === "discord"
+                    ? "Holds https://discord.com/api/webhooks/…"
+                    : "Holds https://<your server>/hooks/…"
+              }
             />
           )}
           {type === "telegram" && (

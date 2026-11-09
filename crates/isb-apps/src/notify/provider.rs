@@ -22,6 +22,9 @@ pub enum Provider {
     Slack { url_secret: String },
     /// A Discord webhook (`https://discord.com/api/webhooks/...`).
     Discord { url_secret: String },
+    /// A Mattermost incoming webhook (`https://<server>/hooks/...`), or any
+    /// other https endpoint that takes Slack's `{"text": ...}`.
+    Mattermost { url_secret: String },
     /// A Telegram bot message to one chat.
     Telegram {
         token_secret: String,
@@ -49,6 +52,7 @@ impl Provider {
             Provider::Webhook { .. } => "webhook",
             Provider::Slack { .. } => "slack",
             Provider::Discord { .. } => "discord",
+            Provider::Mattermost { .. } => "mattermost",
             Provider::Telegram { .. } => "telegram",
             Provider::Email { .. } => "email",
         }
@@ -63,7 +67,9 @@ impl Provider {
             } => std::iter::once(url_secret.as_str())
                 .chain(signing_secret.as_deref())
                 .collect(),
-            Provider::Slack { url_secret } | Provider::Discord { url_secret } => vec![url_secret],
+            Provider::Slack { url_secret }
+            | Provider::Discord { url_secret }
+            | Provider::Mattermost { url_secret } => vec![url_secret],
             Provider::Telegram { token_secret, .. } => vec![token_secret],
             Provider::Email {
                 password_secret, ..
@@ -187,7 +193,7 @@ impl Message {
     }
 }
 
-/// Validate a Slack, Discord or webhook URL read from a secret.
+/// Validate a Slack, Discord, Mattermost or webhook URL read from a secret.
 fn checked_url(p: &Provider, url: &str) -> Result<Target, SendError> {
     let t = parse_url(url).map_err(|e| SendError::permanent(format!("{} URL: {e}", p.kind())))?;
     let want = |hosts: &[&str], prefix: &str| -> Result<(), SendError> {
@@ -216,6 +222,14 @@ fn checked_url(p: &Provider, url: &str) -> Result<Target, SendError> {
             ],
             "/api/webhooks/",
         )?,
+        // A self-hosted server: any host, but never in the clear (the URL
+        // is the credential).
+        Provider::Mattermost { .. } if !t.https => {
+            return Err(SendError::permanent(format!(
+                "a mattermost URL must be https; this one for {} is not",
+                t.host
+            )));
+        }
         _ => {}
     }
     Ok(t)
@@ -248,6 +262,13 @@ fn check_bot_token(t: &str) -> Result<(), SendError> {
 
 /// Where Telegram's Bot API lives.
 pub const TELEGRAM_API: &str = "https://api.telegram.org";
+
+/// Mattermost notifies whoever an `@name`, `@channel` or `@all` in the text
+/// names; event text must never ping anyone, so each `@` is followed by a
+/// zero-width space.
+fn no_mentions(s: &str) -> String {
+    s.replace('@', "@\u{200b}")
+}
 
 /// Slack's mrkdwn treats &, < and > specially.
 fn slack_escape(s: &str) -> String {
@@ -353,6 +374,19 @@ pub fn request(
                 body: serde_json::to_vec(&body).expect("json"),
             })
         }
+        Provider::Mattermost { url_secret } => {
+            let url = secret(url_secret)?;
+            checked_url(p, &url)?;
+            // Markdown: the title in bold, then the rest of the text.
+            let full = no_mentions(&text(m));
+            let (title, rest) = full.split_once('\n').unwrap_or((&full, ""));
+            let body = json!({"text": cap(&format!("**{title}**\n{rest}"), 16000)});
+            Ok(Request {
+                url,
+                headers: json_headers(vec![]),
+                body: serde_json::to_vec(&body).expect("json"),
+            })
+        }
         Provider::Discord { url_secret } => {
             let url = secret(url_secret)?;
             checked_url(p, &url)?;
@@ -418,6 +452,8 @@ mod tests {
             "SLACK" => "https://hooks.slack.com/services/T0/B0/xyz".into(),
             "DISCORD" => "https://discord.com/api/webhooks/1/abc".into(),
             "TG" => "123456:ABC-def_1".into(),
+            "MM" => "https://chat.example.org/hooks/abc123".into(),
+            "MMPLAIN" => "http://chat.example.org/hooks/abc123".into(),
             "BADSLACK" => "https://evil.example/services/x".into(),
             _ => return Err(SendError::permanent(format!("no secret {name}"))),
         })
@@ -501,6 +537,33 @@ mod tests {
             &secrets,
         );
         assert!(e.is_err());
+    }
+
+    #[test]
+    fn mattermost_takes_slacks_text_on_any_https_server_and_never_pings() {
+        let p = |s: &str| Provider::Mattermost {
+            url_secret: s.into(),
+        };
+        let mut m = msg();
+        m.message = "deployment 3 failed for @channel and @all".into();
+        let r = request(&p("MM"), &m, &secrets).unwrap();
+        assert_eq!(r.url, "https://chat.example.org/hooks/abc123");
+        let b = body(&r);
+        let t = b["text"].as_str().unwrap();
+        assert!(t.starts_with("**"), "{t}");
+        assert!(t.contains("deployment 3 failed"), "{t}");
+        assert!(!t.contains("@channel") && !t.contains("@all"), "{t}");
+        assert_eq!(b.as_object().unwrap().len(), 1, "{b}");
+        let e = request(&p("MMPLAIN"), &m, &secrets).unwrap_err();
+        assert!(e.message.contains("https"), "{}", e.message);
+        assert!(!e.message.contains("abc123"), "the URL is a credential");
+        assert!(check_url_value(&p("MM"), "https://chat.example.org/hooks/x").is_ok());
+        let long = Message {
+            message: "x".repeat(20000),
+            ..msg()
+        };
+        let b = body(&request(&p("MM"), &long, &secrets).unwrap());
+        assert!(b["text"].as_str().unwrap().chars().count() <= 16000);
     }
 
     #[test]

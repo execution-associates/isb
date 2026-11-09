@@ -183,6 +183,7 @@ pub struct Event {
     /// dotted, `<subject>.<outcome>`. In use: `deploy.succeeded`,
     /// `deploy.failed`, `health.unhealthy`, `health.recovered`,
     /// `restart.failed` (a crash loop), `dns.failed` (no nameserver),
+    /// `net.failed` (two instances share an address, or one has no pin),
     /// `backup.succeeded`, `backup.failed`, `restore.succeeded`,
     /// `restore.failed`, `job.succeeded`, `job.failed`, `cert.issued`,
     /// `cert.failed`, `secret.rotated` (a new secret version reached a
@@ -545,6 +546,22 @@ impl Controller {
         eprintln!("isb serve: {stack}: {message}");
         self.inner
             .emit_kind(Some(kind), level, stack, service, None, message);
+    }
+
+    /// Record an event of a known kind about one instance (`stack`
+    /// qualified; `service` empty for an instance no stack owns).
+    pub fn instance_event(
+        &self,
+        kind: &str,
+        level: &str,
+        stack: &str,
+        service: &str,
+        instance: &str,
+        message: String,
+    ) {
+        eprintln!("isb serve: {stack}: {instance}: {message}");
+        self.inner
+            .emit_kind(Some(kind), level, stack, service, Some(instance), message);
     }
 
     pub fn note(&self, level: &str, stack: &str, message: String) {

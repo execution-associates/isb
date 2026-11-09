@@ -7,6 +7,7 @@ export type Provider =
   | { type: "webhook"; url_secret: string; signing_secret?: string }
   | { type: "slack"; url_secret: string }
   | { type: "discord"; url_secret: string }
+  | { type: "mattermost"; url_secret: string }
   | { type: "telegram"; token_secret: string; chat_id: string }
   | {
       type: "email";
@@ -57,6 +58,7 @@ export const PROVIDERS: { id: ProviderType; label: string; hint: string }[] = [
   { id: "webhook", label: "Webhook", hint: "A signed JSON POST to any URL" },
   { id: "slack", label: "Slack", hint: "An incoming webhook" },
   { id: "discord", label: "Discord", hint: "A channel webhook" },
+  { id: "mattermost", label: "Mattermost", hint: "An incoming webhook on any server" },
   { id: "telegram", label: "Telegram", hint: "A bot message to a chat" },
   { id: "email", label: "Email", hint: "Mail through an SMTP server" },
 ];
@@ -88,6 +90,11 @@ export const EVENT_GROUPS: { subject: string; label: string; kinds: { kind: stri
     subject: "dns",
     label: "DNS",
     kinds: [{ kind: "dns.failed", label: "No nameserver" }],
+  },
+  {
+    subject: "net",
+    label: "Addresses",
+    kinds: [{ kind: "net.failed", label: "Shared or unpinned address" }],
   },
   {
     subject: "backup",
@@ -220,6 +227,7 @@ export function providerSecrets(p: Provider): string[] {
       return [p.url_secret, p.signing_secret].filter(Boolean) as string[];
     case "slack":
     case "discord":
+    case "mattermost":
       return [p.url_secret];
     case "telegram":
       return [p.token_secret];
@@ -234,6 +242,7 @@ export function providerSummary(p: Provider): string {
       return `URL in ${p.url_secret}${p.signing_secret ? `, signed with ${p.signing_secret}` : ""}`;
     case "slack":
     case "discord":
+    case "mattermost":
       return `URL in ${p.url_secret}`;
     case "telegram":
       return `chat ${p.chat_id}, token in ${p.token_secret}`;

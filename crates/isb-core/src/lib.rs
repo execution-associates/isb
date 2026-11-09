@@ -19,6 +19,7 @@ pub mod idmap;
 pub mod image_check;
 pub mod ingress;
 pub mod interp;
+pub mod ipam;
 pub mod lock;
 pub mod machine;
 pub mod metrics;

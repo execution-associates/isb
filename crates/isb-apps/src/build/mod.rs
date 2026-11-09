@@ -517,13 +517,15 @@ fn create_sandbox(
         "profiles": ["default"],
     });
     let t = remaining(deadline, "creating the build sandbox")?;
+    let (body, pin) = crate::ipam::pin_for_create(oc, crate::org::disk::sized_root(oc, body))?;
     oc.mutate(
         "POST",
         "/1.0/instances",
-        Some(&crate::org::disk::sized_root(oc, body)),
+        Some(&body),
         &format!("create build sandbox {name}"),
         t.min(oc.get_timeouts().create.max(Duration::from_secs(600))),
     )?;
+    pin.map_or(Ok(()), |p| p.verify(oc, name))?;
     let t = remaining(deadline, "starting the build sandbox")?;
     oc.mutate(
         "PUT",
