@@ -232,6 +232,11 @@ instance has another one, or when it cannot pin one; it moves no instance
 itself. An instance with an [egress policy](../guides/egress.md) has a
 bridge of its own and is left to DHCP.
 
+incus cannot change a running instance's NIC once it has lost the NIC's
+host side name (`volatile.eth0.host_name`), and an org project may not set
+that key. isb reports such an instance (`net.failed`) and pins it after its
+next restart; the message says how to pin it without one.
+
 A host with a default-deny firewall (ufw) needs `sudo isb host setup` once,
 so org bridges get DHCP, DNS and egress while staying apart from each other:
 see [Host firewall](../operations/host-setup.md#host-firewall).

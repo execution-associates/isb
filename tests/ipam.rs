@@ -8,7 +8,8 @@
 //! Gated like the other integration tests (`ISB_INTEGRATION=1`; build in a
 //! sandbox with `cargo test --no-run`, run the binary on the host). Works in
 //! the test org (`common::test_org`), removed afterwards, pass or fail; the
-//! check is held to that org's bridge.
+//! check is held to that org's bridge. An `isb serve` on the host checks
+//! the test org too, so each step asserts what holds whichever ran first.
 
 #[allow(dead_code, reason = "each test binary uses some of the shared helpers")]
 mod common;
@@ -19,12 +20,13 @@ use std::time::{Duration, Instant};
 use isb::Client;
 use serde_json::{Value, json};
 
-const NAMES: [&str; 5] = [
+const NAMES: [&str; 6] = [
     "isb-test-ip-a",
     "isb-test-ip-b",
     "isb-test-ip-raw",
     "isb-test-ip-dup",
     "isb-test-ip-cold",
+    "isb-test-ip-lost",
 ];
 
 struct Rm(Client);
@@ -148,9 +150,8 @@ fn addresses_on_an_org_bridge_are_pinned_and_checked() {
     assert!(plan.is_noop(), "{plan:?}");
 
     // Behind isb's back: pinned in place by the check, same address, same
-    // process.
+    // process. (A daemon running on the host may pin it first.)
     create_raw(&oc, "isb-test-ip-raw", json!({}), true);
-    assert_eq!(pin(&oc, "isb-test-ip-raw"), None);
     let (raw, pid) = address(&oc, "isb-test-ip-raw");
     let found = check(&base, &oc);
     assert!(found.is_empty(), "{found:?}");
@@ -198,4 +199,38 @@ fn addresses_on_an_org_bridge_are_pinned_and_checked() {
     );
     assert_eq!(pin(&oc, "isb-test-ip-b").as_ref(), Some(&b));
     assert_eq!(address(&oc, "isb-test-ip-b").0, b);
+
+    lost_host_name(&base, &oc);
+}
+
+/// incus lost the host side name of a running instance's NIC (as
+/// analytics-capture's on 2026-11-09): reported, not pinned; pinned in
+/// place once a restart gives it back.
+fn lost_host_name(base: &Client, oc: &Client) {
+    create_raw(oc, "isb-test-ip-lost", json!({}), true);
+    isb::sandbox::update_instance(oc, "isb-test-ip-lost", "lose host_name", &mut |c, _| {
+        c.remove("volatile.eth0.host_name");
+        Ok(())
+    })
+    .unwrap();
+    address(oc, "isb-test-ip-lost");
+    let found = check(base, oc);
+    let lost: Vec<_> = found
+        .iter()
+        .filter(|f| f.instance == "isb-test-ip-lost")
+        .collect();
+    assert_eq!(lost.len(), 1, "{found:?}");
+    assert!(lost[0].key.starts_with("veth "), "{lost:?}");
+    assert_eq!(pin(oc, "isb-test-ip-lost"), None);
+    isb::Sandbox::get(oc, "isb-test-ip-lost")
+        .unwrap()
+        .restart()
+        .unwrap();
+    let (ip, _) = address(oc, "isb-test-ip-lost");
+    let found = check(base, oc);
+    assert!(
+        found.iter().all(|f| f.instance != "isb-test-ip-lost"),
+        "{found:?}"
+    );
+    assert_eq!(pin(oc, "isb-test-ip-lost"), Some(ip));
 }
