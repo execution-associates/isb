@@ -117,6 +117,10 @@ pub struct Claim {
     pub recorded: Option<String>,
     /// Its IPv4 addresses on the bridge's subnet (running instances only).
     pub addrs: Vec<Ipv4Addr>,
+    /// Running, but incus has lost the NIC's host side name
+    /// (`volatile.<nic>.host_name`): incus cannot change the NIC until the
+    /// instance restarts, and an org project may not set the name back.
+    pub veth_lost: bool,
     pub running: bool,
     /// The NIC as the instance has it (expanded: from a profile or its own).
     pub props: Props,
@@ -168,6 +172,7 @@ fn claim(i: &Value, project: &str, dev: &str, d: &Value, subnet: &Subnet) -> Cla
             Vec::new()
         },
         running,
+        veth_lost: running && cfg[format!("volatile.{dev}.host_name")].is_null(),
         props: d
             .as_object()
             .map(|m| {
@@ -309,6 +314,10 @@ pub fn plan(
             }
             continue;
         }
+        if c.veth_lost {
+            findings.push(veth_lost(c));
+            continue;
+        }
         let ip = match (c.running, c.addrs.as_slice()) {
             // Its own address, unless another instance holds it too (a
             // conflict, reported above): pinning it would keep it.
@@ -345,6 +354,30 @@ pub fn plan(
         }
     }
     (fixes, findings)
+}
+
+/// An unpinned instance whose NIC incus cannot change while it runs
+/// (2026-11-09, analytics-capture in org exa): what to do about it.
+fn veth_lost(c: &Claim) -> Finding {
+    let (i, d, p) = (&c.instance, &c.device, &c.project);
+    Finding::about(
+        c,
+        format!("veth {p} {i} {d}"),
+        format!(
+            "{i}'s {d} cannot be pinned while it runs: incus lost its host side name \
+             (volatile.{d}.host_name), and an org project may not set it. isb pins it after its \
+             next restart; until then {} can be given to another instance once its lease lapses. \
+             To pin it without a restart: incus project set {p} restricted.containers.lowlevel=allow, \
+             incus config set {i} volatile.{d}.host_name=<the host_name `incus query \
+             /1.0/instances/{i}/state?project={p}` gives {d}>, incus project unset {p} \
+             restricted.containers.lowlevel; the next check pins it",
+            if c.addrs.is_empty() {
+                "its address".to_string()
+            } else {
+                join(&c.addrs)
+            }
+        ),
+    )
 }
 
 fn join(ips: &[Ipv4Addr]) -> String {

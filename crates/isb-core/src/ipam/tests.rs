@@ -30,7 +30,8 @@ fn inst(name: &str, pin: Option<&str>, addr: Option<&str>, created: &str) -> Val
     json!({
         "name": name, "project": "isb-exa", "created_at": created,
         "status": if addr.is_some() { "Running" } else { "Stopped" },
-        "config": {"volatile.eth0.hwaddr": "10:66:6a:00:00:01", "user.isb.stack": "analytics",
+        "config": {"volatile.eth0.hwaddr": "10:66:6a:00:00:01", "volatile.eth0.host_name": "veth1234",
+                   "user.isb.stack": "analytics",
                    "user.isb.service": "postgres"},
         "expanded_devices": {"root": {"type": "disk"}, "eth0": nic},
         "state": state,
@@ -284,4 +285,38 @@ fn the_diff_ignores_and_never_prunes_isbs_pin() {
     assert!(is_pin("eth0", &actual, &config));
     assert!(!is_pin("eth0", &actual, &Props::new()));
     assert!(!is_pin("eth0", &desired, &config));
+}
+
+#[test]
+fn a_nic_incus_lost_the_host_side_of_is_reported_not_retried() {
+    // 2026-11-09: analytics-capture had no volatile.eth0.host_name, and
+    // incus refused to change its NIC ("Unknown or missing host side veth
+    // device") on every pass.
+    let mut v = inst("capture", None, Some("10.83.115.175"), "1");
+    v["config"]
+        .as_object_mut()
+        .unwrap()
+        .remove("volatile.eth0.host_name");
+    let (fixes, found) = plan_of(std::slice::from_ref(&v));
+    assert!(fixes.is_empty(), "{fixes:?}");
+    assert_eq!(found.len(), 1);
+    assert!(found[0].key.starts_with("veth "), "{}", found[0].key);
+    assert!(
+        found[0].message.contains("10.83.115.175"),
+        "{}",
+        found[0].message
+    );
+    assert!(found[0].message.contains("restricted.containers.lowlevel"));
+    // Stopped, it has no host side at all, and is pinned as any other.
+    v["status"] = json!("Stopped");
+    v["state"] = json!(null);
+    let (fixes, found) = plan_of(&[v]);
+    assert!(found.is_empty(), "{found:?}");
+    assert!(matches!(fixes.as_slice(), [Fix::Pin { .. }]), "{fixes:?}");
+    // With the name back, it is pinned in place.
+    let (fixes, _) = plan_of(&[inst("capture", None, Some("10.83.115.175"), "1")]);
+    assert!(
+        matches!(fixes.as_slice(), [Fix::Pin { running: true, .. }]),
+        "{fixes:?}"
+    );
 }
