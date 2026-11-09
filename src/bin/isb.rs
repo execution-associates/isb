@@ -358,7 +358,7 @@ enum Cmd {
     #[command(subcommand)]
     Registry(RegistryCmd),
     /// Notification channels of an org on the `isb serve` daemon: webhook,
-    /// Slack, Discord, Telegram, email (docs/guides/notifications.md).
+    /// Slack, Discord, Mattermost, Telegram, email (docs/guides/notifications.md).
     #[command(subcommand)]
     Notify(notify::NotifyCmd),
     /// An org's sandboxes on the `isb serve` daemon: list them, push one's

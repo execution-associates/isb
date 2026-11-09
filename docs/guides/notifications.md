@@ -1,6 +1,6 @@
 ---
 title: Notifications
-description: Tell an org's people about failed deploys, unhealthy services, certificates, backups and jobs, through webhooks, Slack, Discord, Telegram or email.
+description: Tell an org's people about failed deploys, unhealthy services, certificates, backups and jobs, through webhooks, Slack, Discord, Mattermost, Telegram or email.
 order: 9
 ---
 
@@ -22,6 +22,7 @@ isb notify deliveries ops      # what was sent, retried, failed
 
 ```text
 isb notify create NAME (--webhook URL_SECRET [--signing-secret S] | --slack URL_SECRET | --discord URL_SECRET
+               | --mattermost URL_SECRET
                | --telegram TOKEN_SECRET --chat-id ID | --smtp-host H [--smtp-port P] [--smtp-tls starttls|tls|none]
                [--smtp-user U --smtp-password-secret S] --from ADDR --to ADDR...)
                [--events deploy.*,health.*] [--app-project P]... [--app A]... [--stack S]... [--disabled]
@@ -48,11 +49,12 @@ touching the channel.
 | `webhook` | `url_secret`, optional `signing_secret` | A JSON `POST` ([below](#the-webhook-body)) to any http(s) URL. |
 | `slack` | `url_secret`: an incoming-webhook URL, `https://hooks.slack.com/services/...` | `{"text": ...}`, the title in bold. |
 | `discord` | `url_secret`: `https://discord.com/api/webhooks/...` | `{"content": ..., "allowed_mentions": {"parse": []}}` (never pings). |
+| `mattermost` | `url_secret`: an incoming-webhook URL on any server, `https://<server>/hooks/...` | `{"text": ...}`, the title in bold; every `@` is followed by a zero-width space, so event text never pings anyone. Any https endpoint that takes Slack's `{"text": ...}` works too. |
 | `telegram` | `token_secret` (a bot token), `chat_id` (`-100...` or `@channel`) | `sendMessage` to the Bot API, plain text. |
 | `email` | `host`, `port` (default by `tls`), `tls`: `starttls` (587, default), `tls` (465) or `none` (25); `username` + `password_secret`; `from`; `to` (1 to 20) | A plain-text mail through that SMTP server. A password is never sent without TLS. |
 
 Slack and Discord URLs are checked against their hosts when the channel is
-saved and again at every send; a Telegram token must look like one
+saved and again at every send, and a Mattermost URL must be https; a Telegram token must look like one
 (`123456:ABC...`), so it cannot change the request path.
 
 ### The webhook body
@@ -89,7 +91,7 @@ ok = hmac.compare_digest(sig, "sha256=" + hmac.new(key, body, hashlib.sha256).he
 old replays. Events whose producer adds structure carry it in `details`:
 `monitor.*` events have the URL, HTTP status, latency, error, downtime and a
 link to the monitor ([Uptime monitoring](uptime.md#the-notification)); Slack,
-Discord, Telegram and email show the latency and the link too.
+Discord, Mattermost, Telegram and email show the latency and the link too.
 
 ## Rules
 

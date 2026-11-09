@@ -79,6 +79,9 @@ pub struct DestOne {
     /// A Discord webhook URL held in this secret.
     #[arg(long, value_name = "URL_SECRET")]
     discord: Option<String>,
+    /// A Mattermost incoming webhook URL (https, any server) held in this secret.
+    #[arg(long, value_name = "URL_SECRET")]
+    mattermost: Option<String>,
     /// A Telegram bot token held in this secret (with --chat-id).
     #[arg(long, value_name = "TOKEN_SECRET")]
     telegram: Option<String>,
@@ -163,6 +166,9 @@ fn provider(d: Dest) -> Result<Value> {
     if let Some(s) = o.discord {
         return Ok(json!({"type": "discord", "url_secret": s}));
     }
+    if let Some(s) = o.mattermost {
+        return Ok(json!({"type": "mattermost", "url_secret": s}));
+    }
     if let Some(s) = o.telegram {
         let chat = d
             .chat_id
@@ -200,7 +206,7 @@ fn with_org(org: &Option<String>, mut args: Value) -> Value {
 fn describe(p: &Value) -> String {
     match p["type"].as_str().unwrap_or_default() {
         "webhook" => format!("webhook ${}", p["url_secret"].as_str().unwrap_or_default()),
-        "slack" | "discord" => format!(
+        "slack" | "discord" | "mattermost" => format!(
             "{} ${}",
             p["type"].as_str().unwrap_or_default(),
             p["url_secret"].as_str().unwrap_or_default()

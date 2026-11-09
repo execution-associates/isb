@@ -516,7 +516,7 @@ prints the build id instead. See [Builds](../guides/builds.md).
 
 ```text
 isb notify create NAME (--webhook URL_SECRET [--signing-secret S] | --slack URL_SECRET
-               | --discord URL_SECRET | --telegram TOKEN_SECRET --chat-id ID
+               | --discord URL_SECRET | --mattermost URL_SECRET | --telegram TOKEN_SECRET --chat-id ID
                | --smtp-host H [--smtp-port P] [--smtp-tls starttls|tls|none]
                  [--smtp-user U --smtp-password-secret S] --from ADDR --to ADDR...)
                [--events deploy.*,health.*] [--app-project P]... [--app A]... [--stack S]...

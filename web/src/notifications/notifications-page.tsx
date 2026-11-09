@@ -1,4 +1,4 @@
-// /orgs/:org/notifications: the org's channels (webhook, Slack, Discord,
+// /orgs/:org/notifications: the org's channels (webhook, Slack, Discord, Mattermost,
 // Telegram, email), the events each hears about, Test, and each one's
 // delivery log. Platform admins also see the server-wide private-target
 // switch.
@@ -96,7 +96,7 @@ export function NotificationsPage() {
                 )
               }
             >
-              A channel is a destination (a webhook, Slack, Discord, Telegram or email) and the events it hears about. URLs and tokens stay in the org's secrets.
+              A channel is a destination (a webhook, Slack, Discord, Mattermost, Telegram or email) and the events it hears about. URLs and tokens stay in the org's secrets.
             </EmptyState>
           </Card>
         ) : (

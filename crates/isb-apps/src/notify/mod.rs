@@ -1,4 +1,4 @@
-//! Notifications: per-org channels (webhook, Slack, Discord, Telegram,
+//! Notifications: per-org channels (webhook, Slack, Discord, Mattermost, Telegram,
 //! email) told about events of chosen kinds (`deploy.*`, `health.*`,
 //! `backup.*`, `job.*`, `cert.*`, `monitor.*`; see
 //! [`crate::stack::controller::Event`]).
@@ -428,7 +428,8 @@ impl Notifier {
         }
         if let Provider::Webhook { url_secret, .. }
         | Provider::Slack { url_secret }
-        | Provider::Discord { url_secret } = &c.provider
+        | Provider::Discord { url_secret }
+        | Provider::Mattermost { url_secret } = &c.provider
         {
             let v = self
                 .secret_value(org, url_secret)

@@ -2583,7 +2583,7 @@ export interface paths {
         put?: never;
         /**
          * Create a notification channel
-         * @description Add a notification channel to the org: a destination (webhook, Slack, Discord, Telegram, email) and rules choosing which events it hears about. Only the org's own events reach it. Its secrets must exist.
+         * @description Add a notification channel to the org: a destination (webhook, Slack, Discord, Mattermost, Telegram, email) and rules choosing which events it hears about. Only the org's own events reach it. Its secrets must exist.
          */
         post: operations["notification_channel_create"];
         delete?: never;
@@ -10457,7 +10457,7 @@ export interface operations {
                     name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
-                    /** @description Where messages go, by `type`: {"type": "webhook", "url_secret": NAME, "signing_secret": NAME?} (JSON POST; with a signing secret, X-Isb-Signature: sha256=HMAC of the body), {"type": "slack", "url_secret": NAME} (an incoming-webhook URL), {"type": "discord", "url_secret": NAME}, {"type": "telegram", "token_secret": NAME, "chat_id": "-100..."}, {"type": "email", "host", "port"?, "tls": "starttls"|"tls"|"none", "username"?, "password_secret"?, "from", "to": [..]}. Every URL, token and password is an org secret, named here (secret_create first), never a value. */
+                    /** @description Where messages go, by `type`: {"type": "webhook", "url_secret": NAME, "signing_secret": NAME?} (JSON POST; with a signing secret, X-Isb-Signature: sha256=HMAC of the body), {"type": "slack", "url_secret": NAME} (an incoming-webhook URL), {"type": "discord", "url_secret": NAME}, {"type": "mattermost", "url_secret": NAME} (an incoming-webhook URL, https on any server), {"type": "telegram", "token_secret": NAME, "chat_id": "-100..."}, {"type": "email", "host", "port"?, "tls": "starttls"|"tls"|"none", "username"?, "password_secret"?, "from", "to": [..]}. Every URL, token and password is an org secret, named here (secret_create first), never a value. */
                     provider: Record<string, never>;
                     /** @description Which events: a list of {"events": [glob, ...] (deploy.*, health.*, backup.*, job.*, cert.*, *.failed, *), "projects"?: [..], "apps"?: [..], "stacks"?: [..]}; any rule matching sends. Default: [{"events": ["*"]}]. */
                     rules?: Record<string, never>[];
@@ -10617,7 +10617,7 @@ export interface operations {
                     name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
-                    /** @description Where messages go, by `type`: {"type": "webhook", "url_secret": NAME, "signing_secret": NAME?} (JSON POST; with a signing secret, X-Isb-Signature: sha256=HMAC of the body), {"type": "slack", "url_secret": NAME} (an incoming-webhook URL), {"type": "discord", "url_secret": NAME}, {"type": "telegram", "token_secret": NAME, "chat_id": "-100..."}, {"type": "email", "host", "port"?, "tls": "starttls"|"tls"|"none", "username"?, "password_secret"?, "from", "to": [..]}. Every URL, token and password is an org secret, named here (secret_create first), never a value. */
+                    /** @description Where messages go, by `type`: {"type": "webhook", "url_secret": NAME, "signing_secret": NAME?} (JSON POST; with a signing secret, X-Isb-Signature: sha256=HMAC of the body), {"type": "slack", "url_secret": NAME} (an incoming-webhook URL), {"type": "discord", "url_secret": NAME}, {"type": "mattermost", "url_secret": NAME} (an incoming-webhook URL, https on any server), {"type": "telegram", "token_secret": NAME, "chat_id": "-100..."}, {"type": "email", "host", "port"?, "tls": "starttls"|"tls"|"none", "username"?, "password_secret"?, "from", "to": [..]}. Every URL, token and password is an org secret, named here (secret_create first), never a value. */
                     provider?: Record<string, never>;
                     /** @description Which events: a list of {"events": [glob, ...] (deploy.*, health.*, backup.*, job.*, cert.*, *.failed, *), "projects"?: [..], "apps"?: [..], "stacks"?: [..]}; any rule matching sends. Default: [{"events": ["*"]}]. */
                     rules?: Record<string, never>[];

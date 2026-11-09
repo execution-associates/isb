@@ -293,7 +293,7 @@ and owners.
 
 | Tool | Who | Does |
 |---|---|---|
-| `notification_channel_create` | member | `name`, `provider` (webhook, Slack, Discord, Telegram, email; secrets named, never values), `rules`, `enabled`. |
+| `notification_channel_create` | member | `name`, `provider` (webhook, Slack, Discord, Mattermost, Telegram, email; secrets named, never values), `rules`, `enabled`. |
 | `notification_channel_list`, `notification_channel_get` | viewer | Channels with their last delivery. |
 | `notification_channel_update` | member | Replace `provider`, `rules` or `enabled`; fields left out are kept. |
 | `notification_channel_delete` | member | The channel and its delivery log (its secrets stay). |
