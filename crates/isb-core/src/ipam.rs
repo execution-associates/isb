@@ -635,24 +635,35 @@ pub fn check(
     only: Option<&str>,
     report: &mut dyn FnMut(&str),
 ) -> Result<Vec<Finding>> {
-    let mut nets: BTreeMap<String, Subnet> = client
-        .get("/1.0/networks?recursion=1")?
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|n| Some((n["name"].as_str()?.to_string(), Subnet::from_network(n)?)))
-        .collect();
     let instances = list(client)?;
-    if let Some(p) = only {
-        let mine = |i: &Value| i["project"].as_str() == Some(p);
-        let used: BTreeSet<&str> = instances
-            .iter()
-            .filter(|i| mine(i))
-            .filter_map(|i| i["expanded_devices"].as_object())
-            .flat_map(|d| d.values().filter_map(|n| n["network"].as_str()))
-            .collect();
-        let used: BTreeSet<String> = used.into_iter().map(String::from).collect();
-        nets.retain(|n, _| used.contains(n));
+    // Only the bridges isb's instances are on, one by one: listing every
+    // network with `recursion=1` takes incusd seconds per call (each one's
+    // state from the host), and a host has an egress bridge per sandbox.
+    let mut used: BTreeSet<&str> = BTreeSet::new();
+    for i in &instances {
+        let project = i["project"].as_str().unwrap_or("default");
+        if OrgId::from_incus_project(project).is_none() || only.is_some_and(|p| p != project) {
+            continue;
+        }
+        let devs = i["expanded_devices"].as_object().into_iter().flatten();
+        used.extend(
+            devs.filter(|(_, d)| d["type"] == "nic")
+                .filter_map(|(_, d)| d["network"].as_str()),
+        );
+    }
+    let mut nets: BTreeMap<String, Subnet> = BTreeMap::new();
+    for n in used
+        .into_iter()
+        .filter(|n| !n.starts_with(crate::egress::plumb::NET_PREFIX))
+    {
+        let path = format!("/1.0/networks/{}", encode_segment(n));
+        if let Some(s) = client
+            .get_opt(&path)?
+            .as_ref()
+            .and_then(Subnet::from_network)
+        {
+            nets.insert(n.to_string(), s);
+        }
     }
     let mut findings = Vec::new();
     for (network, subnet) in &nets {
