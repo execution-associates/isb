@@ -321,4 +321,6 @@ uv build --wheel                              # platform wheel with the binary
 
 ## License
 
-MIT
+The SDK is MIT.
+
+The platform wheels bundle the isb binary (`isb/_bin/isb`), which is under the [Execution Associates Source License 1.0](https://github.com/execution-associates/isb/blob/main/LICENSE) (EXA-SL-1.0), in `LICENSE-isb-binary`.

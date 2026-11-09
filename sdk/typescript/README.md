@@ -303,4 +303,6 @@ create is named `isb-test-ts-<pid>-...` and is removed afterwards, pass or fail.
 
 ## License
 
-MIT
+The SDK is MIT.
+
+The platform packages it installs (`@execution-associates/isb-linux-x64`, `@execution-associates/isb-linux-arm64`) carry the isb binary, which is under the [Execution Associates Source License 1.0](https://github.com/execution-associates/isb/blob/main/LICENSE) (EXA-SL-1.0).

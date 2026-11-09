@@ -139,7 +139,9 @@ jobs:
         run: |
           dir=npm/${{ matrix.npm }}
           install -m 0755 "$RUNNER_TEMP/isb/isb" "$dir/bin/isb"
-          cp LICENSE "$dir/"
+          # The platform package carries the isb binary, which is under
+          # EXA-SL-1.0 (the repo root LICENSE), not the SDK's MIT.
+          cp "$GITHUB_WORKSPACE/LICENSE" "$dir/"
           mkdir -p "$RUNNER_TEMP/npm"
           (cd "$dir" && bun pm pack --destination "$RUNNER_TEMP/npm")
           tar -tvzf "$RUNNER_TEMP"/npm/*.tgz

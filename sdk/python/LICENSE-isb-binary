@@ -1,0 +1,232 @@
+# Execution Associates Source License, Version 1.0
+
+## Abbreviation
+
+EXA-SL-1.0, Apache 2.0 Future License
+
+## Notice
+
+Required Notice: Copyright 2026 Execution Associates (https://executionassociates.com)
+
+## Summary
+
+This summary is not part of the terms below and does not change them.
+
+You may use, copy, change and share the software for free, for any purpose,
+unless your company had 10,000,000 USD or more in Annual Revenue, or you use the
+software to offer a product that competes with it. A company at or over that
+line needs a commercial license from us. Two years after we release each
+version, that version also becomes available to everyone under the Apache
+License, Version 2.0, with neither limit.
+
+## Acceptance
+
+In order to get any license under these terms, you must agree to them as both
+strict obligations and conditions to all your licenses.
+
+## Copyright License
+
+The licensor grants you a copyright license for the software to do everything
+you might do with the software that would otherwise infringe the licensor's
+copyright in it for any permitted purpose. However, you may only distribute the
+software according to [Distribution License](#distribution-license) and make
+changes or new works based on the software according to
+[Changes and New Works License](#changes-and-new-works-license).
+
+## Distribution License
+
+The licensor grants you an additional copyright license to distribute copies of
+the software. Your license to distribute covers distributing the software with
+changes and new works permitted by
+[Changes and New Works License](#changes-and-new-works-license).
+
+## Notices
+
+You must ensure that anyone who gets a copy of any part of the software from
+you also gets a copy of these terms or the URL for them below, as well as
+copies of any plain-text lines beginning with `Required Notice:` that the
+licensor provided with the software.
+
+These terms apply to all copies, changes and new works based on the software,
+until the date in [Future License](#future-license) for the version they are
+based on.
+
+<https://github.com/execution-associates/isb/blob/main/LICENSE>
+
+## Changes and New Works License
+
+The licensor grants you an additional copyright license to make changes and new
+works based on the software for any permitted purpose.
+
+## Patent License
+
+The licensor grants you a patent license for the software that covers patent
+claims the licensor can license, or becomes able to license, that you would
+infringe by using the software for a permitted purpose.
+
+## Permitted Purpose
+
+Any purpose is a permitted purpose, except the two below. The purposes listed
+in [Always Permitted](#always-permitted) are permitted even when the second
+applies.
+
+1. providing to others any product that competes with the software (see
+   [Noncompete](#noncompete)); and
+
+2. any use for the benefit of a Large Company (see
+   [Revenue Limit](#revenue-limit)), unless that company holds a commercial
+   license for the software from the licensor.
+
+## Noncompete
+
+Providing to others any product that competes with the software is never a
+permitted purpose under these terms, whatever the size of your company.
+
+## Competition
+
+If you use this software to market a product as a substitute for the
+functionality or value of the software, it competes with the software. A
+product also competes with the software if it substitutes for any other product
+or service the licensor offers using the software that exists on the date the
+licensor makes this version of the software available. A product may compete
+regardless how it is designed or deployed. For example, a product may compete
+even if it provides its functionality via any kind of interface (including
+services, libraries or plug-ins), even if it is ported to a different platform
+or programming language, and even if it is provided free of charge.
+
+## Revenue Limit
+
+Use of the software for the benefit of your company is a permitted purpose only
+if your company is not a Large Company.
+
+Your company is a **Large Company** if its Annual Revenue was 10,000,000 USD or
+more, or the equivalent in other currencies, at any time in the prior twelve
+months.
+
+**Annual Revenue** is the greater of:
+
+1. your company's total gross revenue, from all sources, in its most recently
+   completed fiscal year; and
+
+2. your company's annual recurring revenue at that time, being its monthly
+   recurring revenue from subscriptions, contracts and other recurring
+   arrangements, multiplied by twelve.
+
+Annual Revenue is counted across your company as a whole, including every
+organization in it under the definition of **your company** below.
+
+A Large Company may get a commercial license by contacting the licensor at
+https://executionassociates.com. Use by a Large Company without one is not
+covered by your licenses, and the licensor may treat it as a violation under
+[Violations](#violations).
+
+If your company becomes a Large Company, your use of the software for its
+benefit may continue for 32 days after it first does so while you seek a
+commercial license.
+
+## Always Permitted
+
+Whatever the size of your company, these are always permitted purposes, so long
+as they do not compete with the software:
+
+1. use by an individual for personal, non-commercial purposes;
+
+2. non-commercial education;
+
+3. non-commercial research;
+
+4. evaluating the software, for up to 32 consecutive days; and
+
+5. professional services you provide to a licensee who is using the software
+   for a permitted purpose.
+
+## Fair Use
+
+You may have "fair use" rights for the software under the law. These terms do
+not limit them.
+
+## No Other Rights
+
+These terms do not allow you to sublicense or transfer any of your licenses to
+anyone else, or prevent the licensor from granting licenses to anyone else.
+These terms do not imply any other licenses.
+
+## Patent Defense
+
+If you make any written claim that the software infringes or contributes to
+infringement of any patent, your patent license for the software granted under
+these terms ends immediately. If your company makes such a claim, your patent
+license ends immediately for work on behalf of your company.
+
+## Violations
+
+The first time you are notified in writing that you have violated any of these
+terms, or done anything with the software not covered by your licenses, your
+licenses can nonetheless continue if you come into full compliance with these
+terms, and take practical steps to correct past violations, within 32 days of
+receiving notice. Otherwise, all your licenses end immediately.
+
+## No Liability
+
+***As far as the law allows, the software comes as is, without any warranty or
+condition, and the licensor will not be liable to you for any damages arising
+out of these terms or the use or nature of the software, under any kind of
+legal claim.***
+
+## Trademarks
+
+Except for displaying the notices required above and identifying the licensor
+as the origin of the software, these terms give you no right to use the
+licensor's trademarks, trade names, service marks or product names, including
+"isb" and "Execution Associates".
+
+## Definitions
+
+The **licensor** is Execution Associates, the entity offering these terms, and
+the **software** is each version of the software the licensor makes available
+under these terms, as indicated by its inclusion of these terms with the
+software.
+
+A **product** can be a good or service, or a combination of them.
+
+**You** refers to the individual or entity agreeing to these terms.
+
+**Your company** is any legal entity, sole proprietorship, or other kind of
+organization that you work for, plus all organizations that have control over,
+are under the control of, or are under common control with that organization.
+**Control** means ownership of substantially all the assets of an entity, or
+the power to direct its management and policies by vote, contract, or
+otherwise. Control can be direct or indirect.
+
+**Your licenses** are all the licenses granted to you for the software under
+these terms.
+
+**Use** means anything you do with the software requiring one of your licenses.
+
+## Future License
+
+The licensor hereby irrevocably grants you an additional license to use each
+version of the software under the Apache License, Version 2.0, effective on the
+second anniversary of the date the licensor makes that version available. On or
+after that date, you may use that version under the Apache License, Version
+2.0, in which case the Noncompete and the Revenue Limit above do not apply to
+that use, and the following will apply:
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this file except in compliance with the License.
+
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed
+under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
+
+## Attribution
+
+These terms are adapted from the PolyForm Perimeter License 1.0.1
+(https://polyformproject.org/licenses/perimeter/1.0.1), the PolyForm Small
+Business License 1.0.0 and the Functional Source License, Version 1.1, ALv2
+Future License (https://fsl.software).
