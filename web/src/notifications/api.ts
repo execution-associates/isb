@@ -90,6 +90,11 @@ export const EVENT_GROUPS: { subject: string; label: string; kinds: { kind: stri
     kinds: [{ kind: "dns.failed", label: "No nameserver" }],
   },
   {
+    subject: "net",
+    label: "Addresses",
+    kinds: [{ kind: "net.failed", label: "Shared or unpinned address" }],
+  },
+  {
     subject: "backup",
     label: "Backups",
     kinds: [

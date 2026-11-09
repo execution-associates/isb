@@ -1189,6 +1189,7 @@ fn normalize(p: &Props) -> Props {
 pub fn device_matches(desired: &DesiredDevice, actual: &Props) -> bool {
     let mut d = normalize(&desired.props);
     let mut a = normalize(actual);
+    crate::ipam::ignore_pin(&d, &mut a);
     // initial.copy only acts the first time a volume is used, so a disk that
     // differs in nothing else is correct, and replacing it would remount it.
     if d.get("type").map(String::as_str) == Some("disk") {
@@ -1420,7 +1421,7 @@ pub fn diff(
     }
 
     if opts.prune_devices {
-        for (name, props) in &actual.devices {
+        for (name, props) in crate::ipam::unpinned(&actual.devices, &actual.config) {
             if name != "root" && !desired.devices.contains_key(name) && !claimed.contains(name) {
                 actions.push(Action::RemoveDevice {
                     device: name.clone(),
