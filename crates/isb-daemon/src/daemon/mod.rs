@@ -879,6 +879,7 @@ fn sandbox_create(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     }
     let opts = EnsureOptions {
         wait_ready: a.wait_ready.unwrap_or(true),
+        own_volumes: true,
         ..Default::default()
     };
     let mut log: Vec<String> = Vec::new();

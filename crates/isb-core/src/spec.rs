@@ -22,6 +22,8 @@ pub use mount::{MountType, VolumeOptions, VolumeSpec};
 pub use restart::{BootSpec, RestartMode};
 mod ready;
 pub use ready::ReadyCheck;
+mod volume;
+pub use volume::NamedVolumeSpec;
 
 /// A compose file: named volumes plus any number of services, each one
 /// sandbox. Mirrors docker compose wherever incus allows.
@@ -51,39 +53,6 @@ pub struct ComposeFile {
     /// read when the file is deployed and never stored in instance config.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub secrets: BTreeMap<String, SecretDef>,
-}
-
-/// A named custom storage volume.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct NamedVolumeSpec {
-    /// The incus volume name. Default: `<project>_<key>`, or the key itself
-    /// for an `external` volume.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-
-    /// Storage pool. `auto` (default) means the same pool the sandbox uses
-    /// (`storage`), resolved the same way.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pool: Option<String>,
-
-    /// Volume config keys (e.g. `size: 10GiB`), applied only at creation.
-    #[serde(
-        default,
-        deserialize_with = "flex::string_map",
-        skip_serializing_if = "BTreeMap::is_empty"
-    )]
-    #[schemars(with = "BTreeMap<String, flex::Scalar>")]
-    pub config: BTreeMap<String, String>,
-
-    /// The volume must already exist; isb never creates it.
-    #[serde(
-        default,
-        deserialize_with = "flex::bool",
-        skip_serializing_if = "std::ops::Not::not"
-    )]
-    #[schemars(with = "flex::BoolOrString")]
-    pub external: bool,
 }
 
 /// Instance type.

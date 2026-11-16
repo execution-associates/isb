@@ -209,6 +209,7 @@ isb volume create NAME [--pool P] [-c KEY=VALUE]...   no-op if it exists
 isb volume ls [--pool P] [--json]
 isb volume inspect NAME [--pool P] [--json]       JSON either way
 isb volume rm NAME [--pool P]                          refused while in use
+isb volume prune [NAME...] [--unattached] [--pool P] [-y] [--json]
 
 isb port add NAME SPEC [--name DEV] [--search N]       prints the listen address in use
 isb port get NAME DEV [KEY] [--json]                   one property (default listen); --json: every property
@@ -218,6 +219,16 @@ isb port ls NAME [--json]
 isb device ls NAME [--json]                            instance-local devices
 isb device rm NAME DEV...                              (root cannot be removed)
 ```
+
+`volume prune` lists the volumes that sandboxes created and left behind (the
+sandbox is gone and nothing has the volume attached), and deletes them with
+`-y`; `isb serve` does the same by itself after the org's
+`sandbox_volume_ttl` ([volume lifetime](../concepts/sandboxes.md#what-happens-to-a-sandboxs-volumes)).
+`NAME` narrows it, with `*` as a wildcard. `--unattached` lists every volume
+nothing has attached, whoever made it. That includes data left unattached on
+purpose, such as a stack scaled to zero, so with `-y` it needs names:
+`isb volume prune --unattached -y '*-dev-modules'`.
+
 
 These talk to incus directly. `port add` leaves a correct device alone;
 `--search N` steps past up to N taken host ports. Through `isb serve` (MCP and the
@@ -316,7 +327,7 @@ apps, stacks and sandboxes first. See [Orgs](../concepts/orgs.md) and
 ```text
 isb sandbox ls [--json]
 isb sandbox extend NAME [--by 24h] [--idle-timeout 4h|none]
-isb sandbox settings [--expiry 24h] [--idle 2h|none]
+isb sandbox settings [--expiry 24h] [--idle 2h|none] [--volume-ttl 7d|none]
 ```
 
 The org's sandboxes made through `isb serve` (`sandbox_create`, the web UI),

@@ -33,6 +33,11 @@ pub struct Settings {
     /// `none`.
     #[serde(default = "default_idle")]
     pub sandbox_idle: String,
+    /// How long a volume a sandbox created is kept once that sandbox is
+    /// gone and nothing has it attached (`7d`), or `none` to keep it for
+    /// good. Never applies to a stack's, an app's or a `keep` volume.
+    #[serde(default = "default_volume_ttl")]
+    pub sandbox_volume_ttl: String,
 }
 
 fn default_expiry() -> String {
@@ -43,11 +48,16 @@ fn default_idle() -> String {
     "2h".into()
 }
 
+fn default_volume_ttl() -> String {
+    "7d".into()
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Settings {
             sandbox_expiry: default_expiry(),
             sandbox_idle: default_idle(),
+            sandbox_volume_ttl: default_volume_ttl(),
         }
     }
 }
@@ -57,6 +67,7 @@ impl Settings {
     pub fn validate(&self) -> Result<()> {
         lifetime(&self.sandbox_expiry)?;
         idle(&self.sandbox_idle)?;
+        volume_ttl(&self.sandbox_volume_ttl)?;
         Ok(())
     }
 }
@@ -119,6 +130,23 @@ pub fn lifetime(s: &str) -> Result<Duration> {
         )));
     }
     Ok(d)
+}
+
+/// How long a gone sandbox's volume is kept: a duration of at least a
+/// minute, or `none` (never deleted).
+pub fn volume_ttl(s: &str) -> Result<Option<Duration>> {
+    let s = s.trim();
+    if matches!(s, "none" | "never" | "off") {
+        return Ok(None);
+    }
+    let d = crate::flex::parse_duration(s)
+        .map_err(|e| Error::invalid(format!("volume ttl {s:?}: {e}")))?;
+    if d < Duration::from_secs(60) {
+        return Err(Error::invalid(format!(
+            "volume ttl {s:?}: at least a minute, or none"
+        )));
+    }
+    Ok(Some(d))
 }
 
 /// An idle timeout: a duration of at least a minute, or `none`.
@@ -240,6 +268,13 @@ mod tests {
         assert!(b.validate().is_err());
         b.sandbox_expiry = "7d".into();
         b.sandbox_idle = "none".into();
+        b.validate().unwrap();
+        assert_eq!(s.sandbox_volume_ttl, "7d");
+        assert_eq!(volume_ttl("24h").unwrap(), Some(Duration::from_secs(86400)));
+        assert_eq!(volume_ttl("none").unwrap(), None);
+        b.sandbox_volume_ttl = "10s".into();
+        assert!(b.validate().is_err());
+        b.sandbox_volume_ttl = "none".into();
         b.validate().unwrap();
         let empty: Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(empty, Settings::default());

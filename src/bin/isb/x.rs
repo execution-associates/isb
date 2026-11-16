@@ -311,6 +311,9 @@ fn run(ctx: &Ctx, a: RunArgs) -> Result<u8> {
         if let Err(e) = Sandbox::remove(&client, sb.name(), true) {
             eprintln!("isbx: could not delete {}: {e}", sb.name());
         }
+        if a.vm {
+            let _ = x::sweep_caches(&client, false, &mut |_| {});
+        }
     } else {
         x::touch_used(sb.name());
     }
@@ -500,6 +503,8 @@ fn gc(ctx: &Ctx, idle: Option<Duration>, missing: bool, yes: bool) -> Result<u8>
     }
     if missing {
         prune_missing_path(&client, x::LABEL_ROOT, !yes, &mut ctx.report())?;
+        // The cache volumes of VM sandboxes that are gone, these included.
+        x::sweep_caches(&client, !yes, &mut ctx.report())?;
     }
     Ok(0)
 }

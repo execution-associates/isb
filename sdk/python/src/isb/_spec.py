@@ -186,6 +186,10 @@ class NamedVolumeSpec(TypedDict, total=False):
     config: Mapping[str, Scalar]
     #: The volume must already exist; isb never creates it.
     external: BoolOrString
+    #: Never deleted by isb's cleanup of volumes whose sandbox is gone
+    #: (`isb volume prune`, `isb serve`): for a cache shared between
+    #: sandboxes, or data that must outlive them.
+    keep: BoolOrString
     #: The incus volume name. Default: `<project>_<key>`, or the key itself
     #: for an `external` volume.
     name: Optional[str]

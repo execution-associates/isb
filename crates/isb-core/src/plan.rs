@@ -131,13 +131,14 @@ impl HostFacts {
     }
 }
 
-/// A named volume that must exist before the instance.
+/// A named volume that must exist before the instance. `keep` is its definition's: never marked as a sandbox's.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct EnsureVolume {
     pub pool: String,
     pub name: String,
     pub config: Props,
     pub external: bool,
+    pub keep: bool,
 }
 
 /// chown (and root-owned parents in the owner's home) and/or chmod a mount point.
@@ -751,6 +752,7 @@ pub fn resolve(
                     name: n.clone(),
                     config,
                     external: v.external || def.is_some_and(|d| d.external),
+                    keep: def.is_some_and(|d| d.keep),
                 };
                 if !volumes
                     .iter()

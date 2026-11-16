@@ -129,6 +129,7 @@ isb ps                   # status of the file's sandboxes
 isb port get NAME DEV    # the port a published range picked
 isb config               # the file with every ${VAR} filled in
 isb down                 # delete them (--volumes also deletes named volumes)
+isb volume prune         # list volumes whose sandbox is gone (-y deletes)
 ```
 
 `isb up` blocks until every `command` exits (forever if none has one), Ctrl-C,
@@ -195,7 +196,10 @@ cannot exec or read secrets.
   `sandbox_remove`. Remote callers' specs are refused privileged mode, raw
   config, host bind mounts outside the bind roots and non-loopback ports.
   `sandbox_settings` reads the org's defaults (`sandbox_expiry`,
-  `sandbox_idle`); org admins change them.
+  `sandbox_idle`, `sandbox_volume_ttl`); org admins change them. A volume a
+  sandbox created is deleted once that sandbox has been gone, with nothing
+  using the volume, for `sandbox_volume_ttl` (7d); `keep: true` on the
+  volume's definition exempts it.
 - **Apps:** `project_create`, `app_create` (an image, or a git repository and
   a builder), `app_env_set` (`.env` text; `KEY=${{secret.NAME}}` for
   secrets), `app_deploy` (`wait: true`), `app_deployment_log`,

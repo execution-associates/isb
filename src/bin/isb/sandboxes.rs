@@ -37,6 +37,10 @@ pub enum SandboxCmd {
         /// or none.
         #[arg(long)]
         idle: Option<String>,
+        /// How long a volume a sandbox created is kept once the sandbox is
+        /// gone and nothing uses it, e.g. 7d, or none.
+        #[arg(long)]
+        volume_ttl: Option<String>,
     },
 }
 
@@ -96,13 +100,20 @@ pub fn sandbox(org: &Option<String>, cmd: SandboxCmd) -> Result<u8> {
             println!("{}", v["message"].as_str().unwrap_or("extended"));
             Ok(0)
         }
-        SandboxCmd::Settings { expiry, idle } => {
+        SandboxCmd::Settings {
+            expiry,
+            idle,
+            volume_ttl,
+        } => {
             let mut a = json!({});
             if let Some(e) = expiry {
                 a["sandbox_expiry"] = json!(e);
             }
             if let Some(i) = idle {
                 a["sandbox_idle"] = json!(i);
+            }
+            if let Some(t) = volume_ttl {
+                a["sandbox_volume_ttl"] = json!(t);
             }
             print_json(&c("sandbox_settings", a)?["settings"]);
             Ok(0)

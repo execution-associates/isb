@@ -16,8 +16,13 @@ Linux machine, starts in seconds) or a VM.
 - `sandbox_list`, `sandbox_extend` (push out the expiry before it passes, or
   the sandbox is deleted), `sandbox_remove`.
 - `sandbox_settings`: the org's defaults for new sandboxes (`sandbox_expiry`,
-  e.g. `24h`, at most `30d`; `sandbox_idle`, e.g. `2h`, or `none`). Without
-  changes it reads; org admins and above change them.
+  e.g. `24h`, at most `30d`; `sandbox_idle`, e.g. `2h`, or `none`;
+  `sandbox_volume_ttl`, e.g. `7d`, or `none`). Without changes it reads; org
+  admins and above change them.
+- A named volume a sandbox creates is that sandbox's: once the sandbox is
+  gone and nothing mounts the volume, it is deleted after
+  `sandbox_volume_ttl`. Keep data that must outlive a sandbox in a volume
+  made with `volume_create`, or in a stack or an app.
 - `sandbox_start`, `sandbox_stop`, `instance_restart`: a stopped sandbox keeps
   its state.
 - `sandbox_logs`: output of a long-running `restart: always` service, or an

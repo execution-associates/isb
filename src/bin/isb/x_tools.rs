@@ -288,6 +288,10 @@ pub(crate) fn rm(ctx: &Ctx, names: Vec<String>) -> Result<u8> {
             }
             Sandbox::remove(&client, &n, true)?;
             report(&format!("deleted {n}"));
+            // A VM run's own cache volume goes with it.
+            if let Err(e) = x::sweep_caches(&client, false, &mut report) {
+                report(&format!("cache volumes not checked: {e}"));
+            }
         } else {
             return Err(Error::Invalid(format!(
                 "{n}: no such tool, and not an x-… sandbox (`isb x ls`)"
@@ -382,6 +386,17 @@ pub(crate) fn doctor(ctx: &Ctx) -> Result<u8> {
                 "unprivileged ports start at {p}: 80 or lower lets isb serve's proxy listen on 443 and 80 (`sudo isb host setup --sandbox-egress`)"
             ),
         );
+    }
+    // Not a failure, but the reason a host fills up: without copy-on-write
+    // every sandbox holds a whole copy of its image.
+    if let Ok(pool) = isb::sandbox::host_facts(&client).and_then(|h| h.pick_pool(None)) {
+        if let Ok(Some(driver)) = isb::volume::pool_driver(&client, &pool) {
+            if driver == "dir" {
+                println!(
+                    "note storage pool {pool} uses the `dir` driver: every sandbox is a full copy of its image. A zfs or btrfs pool shares the image between them (a pool named incus-zfs is preferred when it exists)"
+                );
+            }
+        }
     }
     let tools = Tool::all();
     let mut names: Vec<String> = tools.iter().flat_map(|t| t.bins.keys().cloned()).collect();

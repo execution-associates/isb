@@ -23,6 +23,9 @@ use crate::server::{Caller, Registry, Tool};
 
 /// How often the reaper runs.
 const REAP_EVERY: Duration = Duration::from_secs(60);
+/// Volumes left behind are looked for on every this-many-th reaper pass:
+/// listing them costs incusd more than the sandboxes' own check does.
+const SWEEP_EVERY: u32 = 15;
 /// A sandbox using this much of a core is active.
 const ACTIVE_CPU_PCT: f32 = 2.0;
 /// How long an isbx sandbox stays running after its last run, unless its
@@ -163,11 +166,16 @@ impl Sandboxes {
             .name("isb-sandboxes".into())
             .spawn(move || {
                 let mut warned = HashSet::new();
+                let mut pass = 0u32;
                 loop {
                     std::thread::sleep(REAP_EVERY);
                     me.warn_unmanaged(&ctl, &mut warned);
                     me.reap(&ctl);
                     me.stop_idle_isbx(&ctl);
+                    pass = pass.wrapping_add(1);
+                    if pass % SWEEP_EVERY == 1 {
+                        me.sweep_volumes();
+                    }
                 }
             });
     }
@@ -233,6 +241,76 @@ impl Sandboxes {
                 ),
                 Err(e) if e.is_not_found() => {}
                 Err(e) => eprintln!("isb serve: could not stop idle {}: {e}", i.name),
+            }
+        }
+    }
+
+    /// Delete the volumes sandboxes created and left behind
+    /// ([`crate::volume::sweep`]), in every org's project and in incus'
+    /// `default` (plain sandboxes, outside every org: the default org's
+    /// `sandbox_volume_ttl` governs those too).
+    fn sweep_volumes(&self) {
+        let mut places: Vec<(Option<OrgId>, String)> = vec![(None, "default".into())];
+        match crate::org::list(&self.client) {
+            Ok(orgs) => places.extend(
+                orgs.into_iter()
+                    .map(|o| (Some(o.name.clone()), o.name.incus_project())),
+            ),
+            Err(e) => eprintln!("isb serve: volume sweep: could not list orgs: {e}"),
+        }
+        let pools = match crate::volume::pools(&self.client) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("isb serve: volume sweep: could not list pools: {e}");
+                return;
+            }
+        };
+        for (org, project) in places {
+            let settings_of = org.clone().unwrap_or_else(OrgId::default_org);
+            let ttl = match self
+                .settings(&settings_of)
+                .and_then(|s| life::volume_ttl(&s.sandbox_volume_ttl))
+            {
+                Ok(Some(t)) => t,
+                Ok(None) => continue,
+                Err(e) => {
+                    eprintln!("isb serve: volume sweep in {project}: {e}");
+                    continue;
+                }
+            };
+            let c = self.client.clone().project(&project);
+            for pool in &pools {
+                let mut say = |m: &str| eprintln!("isb serve: volume sweep in {project}: {m}");
+                let deleted = match crate::volume::sweep(&c, pool, now(), ttl, &mut say) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        eprintln!("isb serve: volume sweep in {project} ({pool}): {e}");
+                        continue;
+                    }
+                };
+                for v in deleted {
+                    eprintln!(
+                        "isb serve: deleted volume {project}/{v}: its sandbox is gone and nothing used it for {}",
+                        life::human(ttl.as_secs())
+                    );
+                    self.recorder.record(crate::history::NewRecord {
+                        source: "controller".into(),
+                        org: org.as_ref().map(|o| o.as_str().to_string()),
+                        project: Some(project.clone()),
+                        kind: "volume.swept".into(),
+                        object_type: Some("volume".into()),
+                        object: Some(v.clone()),
+                        objects: vec![v.clone()],
+                        actor: Some("isb".into()),
+                        level: Some("info".into()),
+                        message: Some(format!(
+                            "volume {v} deleted: its sandbox is gone and nothing used it for {}",
+                            life::human(ttl.as_secs())
+                        )),
+                        details: json!({"pool": pool, "ttl_seconds": ttl.as_secs()}),
+                        ..Default::default()
+                    });
+                }
             }
         }
     }
@@ -427,19 +505,24 @@ struct SettingsArgs {
     sandbox_expiry: Option<String>,
     #[serde(default)]
     sandbox_idle: Option<String>,
+    #[serde(default)]
+    sandbox_volume_ttl: Option<String>,
 }
 
 fn sandbox_settings(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
     let org = super::arg_org(&a)?;
     let a: SettingsArgs = args(a)?;
     let mut s = d.sandboxes.settings(&org)?;
-    if a.sandbox_expiry.is_some() || a.sandbox_idle.is_some() {
+    if a.sandbox_expiry.is_some() || a.sandbox_idle.is_some() || a.sandbox_volume_ttl.is_some() {
         super::volumes::require_admin(c, &org, "changing the sandbox defaults")?;
         if let Some(e) = a.sandbox_expiry {
             s.sandbox_expiry = e.trim().to_string();
         }
         if let Some(i) = a.sandbox_idle {
             s.sandbox_idle = i.trim().to_string();
+        }
+        if let Some(t) = a.sandbox_volume_ttl {
+            s.sandbox_volume_ttl = t.trim().to_string();
         }
         life::put_settings(&d.state_dir, &org, &s)?;
     }
@@ -450,11 +533,12 @@ pub(super) fn register(r: &mut Registry, d: Arc<Daemon>) -> Result<()> {
     r.register(
         Tool::new(
             "sandbox_settings",
-            "The org's defaults for new sandboxes: sandbox_expiry (24h, at most 30d), how long one lives, and sandbox_idle (2h, or none), how long it may sit idle before the reaper deletes it. sandbox_create's expires and idle_timeout override them per sandbox. Without changes it reads them; org admins and above change them.",
+            "The org's defaults for new sandboxes: sandbox_expiry (24h, at most 30d), how long one lives, and sandbox_idle (2h, or none), how long it may sit idle before the reaper deletes it. sandbox_create's expires and idle_timeout override them per sandbox. sandbox_volume_ttl (7d, or none) is how long a volume a sandbox created is kept after that sandbox is gone with nothing using it; a stack's, an app's or a `keep: true` volume is never deleted this way. Without changes it reads them; org admins and above change them.",
             obj(
                 json!({
                     "sandbox_expiry": {"type": "string", "description": "e.g. 24h, 7d; at most 30d."},
-                    "sandbox_idle": {"type": "string", "description": "e.g. 2h, or none."}
+                    "sandbox_idle": {"type": "string", "description": "e.g. 2h, or none."},
+                    "sandbox_volume_ttl": {"type": "string", "description": "e.g. 7d, 24h, or none."}
                 }),
                 &[],
             ),

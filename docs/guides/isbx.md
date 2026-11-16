@@ -314,7 +314,8 @@ Container sandboxes share one cache volume, `x-cache-ct`, at
 `/var/cache/isbx`, and point npm, pip, uv, go and bun at it
 (`npm_config_cache`, `PIP_CACHE_DIR`, `UV_CACHE_DIR`, `GOMODCACHE`,
 `BUN_INSTALL_CACHE_DIR`), so the second project's install is fast. A VM,
-which is for code not trusted to share, gets a cache of its own.
+which is for code not trusted to share, gets a cache of its own, deleted
+with that sandbox (`isb x rm`, `isb x gc --missing -y`).
 `--no-cache` uses none.
 
 ## Finding and cleaning up
@@ -325,7 +326,7 @@ isb x stop                     # stop them all (the next command starts one in ~
 isb x gc --idle 30m            # stop those unused for 30 minutes
 isb x gc --missing -y          # delete those whose project directory is gone
 isb x rm x-run-1a2b3c4d5e      # delete one (its list starts closed again)
-isb x doctor                   # isb serve, incus, the shims' place on PATH, every tool
+isb x doctor                   # isb serve, incus, the shims' place on PATH, every tool, the storage driver
 isb x update-shell             # put the shims first on PATH in your shell's startup file
 ```
 
@@ -333,6 +334,11 @@ isb x update-shell             # put the shims first on PATH in your shell's sta
 (an `isbx.idle` label, such as `user.isbx.idle=2h` in incus, sets another
 time), and never one a command is running in; it never deletes one. The
 next command starts it again in about a second.
+
+Each sandbox and each tool is an instance of its own. On a copy-on-write
+storage pool (zfs, btrfs) they share the image they were made from and cost
+only what they add to it; on a `dir` pool each is a full copy, which
+`isb x doctor` points out.
 
 Everything isbx makes is named `x-…` and labelled `isbx.kind` (`run` or
 `tool`), with `isbx.root` (the project) or `isbx.tool` (the tool), so
