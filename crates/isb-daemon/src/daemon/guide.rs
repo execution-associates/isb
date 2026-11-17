@@ -107,7 +107,12 @@ mod tests {
         let families: std::collections::BTreeSet<&str> =
             tools.iter().filter_map(|t| t.split('_').next()).collect();
         // Arguments and readiness checks that share a family's prefix.
-        let not_tools = ["user_exists", "sandbox_expiry", "sandbox_idle"];
+        let not_tools = [
+            "user_exists",
+            "sandbox_expiry",
+            "sandbox_idle",
+            "sandbox_volume_ttl",
+        ];
         let texts = TOPICS.iter().map(|(_, t)| *t).chain([INSTRUCTIONS]);
         for text in texts {
             for word in text.split(|c: char| !(c.is_ascii_lowercase() || c == '_' || c == '*')) {

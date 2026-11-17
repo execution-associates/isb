@@ -14,6 +14,7 @@ use crate::idmap::SubIds;
 use crate::lock::NameLock;
 pub mod expiry;
 pub mod images;
+mod options;
 mod prune;
 mod update;
 
@@ -22,6 +23,7 @@ use crate::plan::{
     VolumeDefs, split_addr,
 };
 use crate::spec::{ExecDefaults, PortSpec, ReadyCheck, SandboxSpec};
+pub use options::{EnsureOptions, own_volumes};
 pub use prune::{PruneItem, prune_missing_path};
 #[doc(hidden)]
 pub use update::update_instance;
@@ -125,30 +127,6 @@ pub struct ApplyReport {
     pub ports: BTreeMap<String, String>,
     /// Config keys changed that only take effect after a restart.
     pub restart_needed: Vec<String>,
-}
-
-/// Options for ensure / up.
-#[derive(Debug, Clone, Copy)]
-pub struct EnsureOptions {
-    pub diff: DiffOptions,
-    /// Run readiness checks after applying.
-    pub wait_ready: bool,
-    /// How long to wait for another isb holding this sandbox's lock.
-    pub lock_wait: Duration,
-    /// The lifetime of a sandbox whose spec gives no `expires` ([`expiry`]):
-    /// set by the CLI and `isb rpc`; `None` gives it no deadline.
-    pub default_expiry: Option<Duration>,
-}
-
-impl Default for EnsureOptions {
-    fn default() -> Self {
-        EnsureOptions {
-            diff: DiffOptions::default(),
-            wait_ready: true,
-            lock_wait: Duration::from_secs(900),
-            default_expiry: None,
-        }
-    }
 }
 
 fn inst_path(name: &str) -> String {
@@ -861,6 +839,7 @@ pub fn ensure(
         },
     )?;
     let plan = plan_desired(client, desired, opts.diff)?;
+    let plan = own_volumes(client, desired, plan, opts.own_volumes);
     let stamped = expiry::stamped(desired, &plan, opts.default_expiry);
     let mut out = apply(client, &stamped, &plan, report)?;
     if out.created {
@@ -969,6 +948,7 @@ impl Sandbox {
             return Err(Error::AlreadyExists(d.name.clone()));
         }
         let plan = plan_desired(client, &d, opts.diff)?;
+        let plan = own_volumes(client, &d, plan, opts.own_volumes);
         let stamped = expiry::stamped(&d, &plan, opts.default_expiry);
         apply(client, &stamped, &plan, report)?;
         expiry::report_created(&stamped, report);

@@ -187,6 +187,7 @@ service mounts is never created.
 | `pool` | string | `auto` | Storage pool. `auto` means the root pool of the sandbox that mounts it. A named pool must exist. |
 | `config` | map of string | `{}` | Volume config keys (`size: 10GiB`). Applied only when isb creates the volume; never compared or changed later. |
 | `external` | bool | `false` | The volume must already exist. isb never creates it; `plan` and `up` fail if it is missing. |
+| `keep` | bool | `false` | Never deleted by the cleanup of volumes whose sandbox is gone ([volume lifetime](../concepts/sandboxes.md#what-happens-to-a-sandboxs-volumes)). For a cache shared between sandboxes, or data that must outlive them. |
 
 A volume is created before the sandbox that mounts it. If two sandboxes resolve
 the same volume to different pools, each pool gets its own volume.

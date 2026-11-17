@@ -79,6 +79,7 @@ pub(crate) fn up(ctx: &Ctx, services: Vec<String>, flags: UpFlags) -> Result<u8>
         },
         wait_ready: !flags.no_ready,
         default_expiry: super::expiry::default_expiry(&compose::client_for(&c, &p)),
+        own_volumes: true,
         ..Default::default()
     };
     let mut rep = ctx.report();

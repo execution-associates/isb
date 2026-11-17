@@ -22,6 +22,7 @@ name: "shop-${BRANCH:-main}"
 volumes:
   bun-cache:
     name: bun-cache                  # pinned: shared by every worktree
+    keep: true                       # never cleaned up with a sandbox
 services:
   web:
     image: dev-base                  # or images:ubuntu/24.04
@@ -123,6 +124,17 @@ isb prune --label worktree --missing-path -y    # deletes them
 
 `prune` never touches a sandbox without the label, or one whose path still
 exists.
+
+A volume named after its sandbox (`name: "${BRANCH}-modules"`) is that
+sandbox's: `isb down` keeps it, so the next `isb up` is fast, and once the
+sandbox has been gone for a week with nothing using the volume, `isb serve`
+deletes it ([volume lifetime](../concepts/sandboxes.md#what-happens-to-a-sandboxs-volumes)).
+A cache every worktree shares takes `keep: true`. To clear the leftovers now:
+
+```sh
+isb volume prune       # lists the volumes whose sandbox is gone
+isb volume prune -y    # deletes them
+```
 
 ## Safety rules
 

@@ -153,6 +153,25 @@ pub(crate) enum VolumeCmd {
         #[arg(long)]
         pool: Option<String>,
     },
+    /// Delete volumes that sandboxes created and left behind: the sandbox
+    /// is gone and nothing has the volume attached. A dry run unless -y.
+    Prune {
+        /// Only volumes whose name matches (`*` is a wildcard), e.g.
+        /// '*-dev-modules'.
+        names: Vec<String>,
+        /// Consider every volume nothing has attached, whoever made it.
+        /// This includes data left unattached on purpose (a stack scaled
+        /// to zero), so -y then needs NAMES.
+        #[arg(long)]
+        unattached: bool,
+        #[arg(long)]
+        pool: Option<String>,
+        /// Actually delete (default is a dry run).
+        #[arg(short = 'y', long)]
+        yes: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Snapshots of a named volume in an org, now or on a schedule (isb serve).
     #[command(subcommand)]
     Snapshot(volumes::SnapshotCmd),
@@ -277,6 +296,7 @@ pub(crate) fn create(ctx: &Ctx, a: CreateArgs) -> Result<u8> {
     let opts = EnsureOptions {
         wait_ready: !a.no_ready,
         default_expiry: super::expiry::default_expiry(&c),
+        own_volumes: true,
         ..Default::default()
     };
     if a.ensure {

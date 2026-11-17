@@ -289,6 +289,7 @@ mod tests {
                 "/1.0/instances/ws".into(),
                 "/1.0/profiles/default".into(),
             ],
+            created_at: String::new(),
         };
         assert_eq!(instances_using(&v), ["web-1", "ws"]);
     }

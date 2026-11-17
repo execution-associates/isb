@@ -1,8 +1,11 @@
 //! A named volume's owner and mode on shell-less OCI images, and a
 //! multi-line `sh -c` script as an OCI command line, against a real incusd.
 //!
+//! Also: the volumes a plain sandbox creates are its own, and are swept once
+//! it is gone, where a `keep` volume and one nobody owns stay.
+//!
 //! Gated by `ISB_INTEGRATION=1`. Everything happens in a throwaway incus
-//! project of its own (`isbtest-own-<pid>`; not `isb-*`, which a running
+//! project of its own (`isbtest-<tag>-<pid>`; not `isb-*`, which a running
 //! daemon would take for an org), deleted afterwards with all it holds; no
 //! org's project is touched.
 
@@ -45,8 +48,13 @@ impl Drop for Project {
 }
 
 fn project() -> Project {
+    project_named("own")
+}
+
+/// A throwaway project of its own per test: the tests run side by side.
+fn project_named(tag: &str) -> Project {
     let base = Client::new();
-    let name = format!("isbtest-own-{}", std::process::id());
+    let name = format!("isbtest-{tag}-{}", std::process::id());
     let body = serde_json::json!({
         "name": name,
         "description": "isb volume_owner integration test (throwaway)",
@@ -200,4 +208,111 @@ fn owner_and_mode_without_a_shell_and_multi_line_commands() {
         assert_eq!(stat(&c, sb.name(), path).uid, 1000, "{path}");
     }
     assert_eq!(stat(&c, sb.name(), "/srv").uid, 0);
+}
+
+#[test]
+fn a_gone_sandboxs_volume_is_swept_and_nothing_else_is() {
+    if !enabled() {
+        return;
+    }
+    use isb::volume::{KEY_SANDBOX, KEY_UNUSED_SINCE};
+    let mut p = project_named("sweep");
+    let c = p.client.clone();
+    let pid = std::process::id();
+    let (plain, stack) = (
+        format!("isb-test-{pid}-plain"),
+        format!("isb-test-{pid}-stack"),
+    );
+    p.instances.extend([plain.clone(), stack.clone()]);
+    let (own, kept, data) = (
+        format!("isb-test-{pid}-own"),
+        format!("isb-test-{pid}-kept"),
+        format!("isb-test-{pid}-data"),
+    );
+    p.volumes.extend([own.clone(), kept.clone(), data.clone()]);
+    let idle = |name: &str, mounts| {
+        let mut s = spec(name, "docker:busybox", mounts);
+        s.command = Some(["sleep", "600"].map(String::from).to_vec());
+        s
+    };
+    // A plain sandbox (`isb up`, `isb create`): one volume of its own, one
+    // the file says to keep.
+    let mut defs = isb::plan::VolumeDefs::new();
+    defs.insert(
+        kept.clone(),
+        isb::spec::NamedVolumeSpec {
+            keep: true,
+            ..Default::default()
+        },
+    );
+    let opts = isb::EnsureOptions {
+        own_volumes: true,
+        ..Default::default()
+    };
+    Sandbox::connect_or_create_with(
+        &c,
+        &idle(
+            &plain,
+            vec![
+                ("/own", Volume::named(&own).device("own")),
+                ("/kept", Volume::named(&kept).device("kept")),
+            ],
+        ),
+        &defs,
+        opts,
+        &mut |_| {},
+    )
+    .expect("create the plain sandbox");
+    // What a stack or an app does: no owner, so its data is never swept.
+    Sandbox::connect_or_create(
+        &c,
+        &idle(&stack, vec![("/data", Volume::named(&data).device("data"))]),
+    )
+    .expect("create the unowned one");
+    let get = |v: &str| isb::volume::get(&c, "default", v).unwrap();
+    assert_eq!(
+        get(&own).unwrap().config.get(KEY_SANDBOX),
+        Some(&format!("{}/{plain}", p.name))
+    );
+    assert!(!get(&kept).unwrap().config.contains_key(KEY_SANDBOX));
+    assert!(!get(&data).unwrap().config.contains_key(KEY_SANDBOX));
+
+    let sweep = |now: u64| {
+        isb::volume::sweep(&c, "default", now, Duration::from_secs(3600), &mut |m| {
+            panic!("sweep: {m}")
+        })
+        .unwrap()
+    };
+    // In use: untouched, and no clock started.
+    assert!(sweep(1_000).is_empty());
+    assert!(!get(&own).unwrap().config.contains_key(KEY_UNUSED_SINCE));
+    // Both sandboxes go. The first pass only starts the clock.
+    Sandbox::remove(&c, &plain, true).unwrap();
+    Sandbox::remove(&c, &stack, true).unwrap();
+    assert_eq!(
+        isb::volume::orphans(&c, "default", false)
+            .unwrap()
+            .iter()
+            .map(|v| v.name.clone())
+            .collect::<Vec<_>>(),
+        std::slice::from_ref(&own)
+    );
+    assert!(sweep(1_000).is_empty());
+    assert_eq!(get(&own).unwrap().unused_since(), Some(1_000));
+    // Still inside the hour.
+    assert!(sweep(1_000 + 3_599).is_empty());
+    // Past it: the sandbox's own volume goes, and only that one.
+    assert_eq!(sweep(1_000 + 3_600), std::slice::from_ref(&own));
+    assert!(get(&own).is_none());
+    assert!(get(&kept).is_some() && get(&data).is_some());
+    // Every unattached volume is listed only on request.
+    let mut all: Vec<String> = isb::volume::orphans(&c, "default", true)
+        .unwrap()
+        .into_iter()
+        .map(|v| v.name)
+        .collect();
+    all.sort();
+    let mut want = vec![kept.clone(), data.clone()];
+    want.sort();
+    assert_eq!(all, want);
 }

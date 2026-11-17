@@ -203,9 +203,10 @@ in an org, or a plain sandbox in incus' `default` project.
   `never`, or `-` for none). `isb expiry NAME --in 24h` sets it from now,
   `--by 24h` pushes it out, `--never` clears it. Through the daemon,
   `sandbox_list` and `sandbox_extend`.
-- **What goes.** The instance and its root disk. Named volumes stay, as they
-  do after `isb rm` and `isb down`: they are shared by name and outlive their
-  sandboxes by design. `isb down --volumes` or `isb volume rm` removes them.
+- **What goes.** The instance and its root disk. Named volumes stay at
+  first, as they do after `isb rm` and `isb down`, so the next sandbox finds
+  its caches; [the ones the sandbox created go later](#what-happens-to-a-sandboxs-volumes).
+  `isb down --volumes` or `isb volume rm` removes them at once.
 - **Sandboxes without a deadline keep none.** The default applies when isb
   creates a sandbox. One made before isb had expiries, or by hand, has no
   `user.isb.expires_at`, is never reaped, and an `isb up` does not give it
@@ -215,6 +216,30 @@ in an org, or a plain sandbox in incus' `default` project.
   without an `expires` ([isb from code](../guides/sdk.md)).
 - Nothing is reaped while `isb serve` is not running; the reaper takes what
   has expired when it starts.
+
+## What happens to a sandbox's volumes
+
+A named volume that a plain sandbox creates (`isb up`, `isb create`,
+`sandbox_create`, the SDKs) is marked as that sandbox's, with
+`user.isb.sandbox: <incus project>/<name>` on the volume. Once the sandbox
+is gone and nothing has the volume attached, `isb serve` deletes it after
+the `sandbox_volume_ttl` (default 7 days; `isb sandbox settings
+--volume-ttl 24h`, or `none` to keep such volumes for good). The clock
+starts when isb first sees the volume unused (`user.isb.unused_since`), and
+stops if the sandbox comes back or anything mounts the volume again. Each
+deletion is in the history as `volume.swept`.
+
+A volume is never deleted this way when:
+
+- its definition says `keep: true`;
+- it is `external`, or it existed before the sandbox that mounts it;
+- a stack, an app, a database, a job or `isb volume create` made it: those
+  hold data, and a stack scaled to zero leaves its volumes unattached on
+  purpose.
+
+Plain sandboxes outside every org (incus' `default` project) follow the
+default org's setting. `isb volume prune` lists the volumes whose sandbox is
+gone, and with `-y` deletes them without waiting.
 
 ## Sandboxes are short-lived
 

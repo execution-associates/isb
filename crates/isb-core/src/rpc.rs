@@ -184,6 +184,7 @@ impl Server {
                 let a: SpecParams = params(p)?;
                 let c = self.client(&a.project);
                 let opts = EnsureOptions {
+                    own_volumes: true,
                     wait_ready: a.wait_ready,
                     default_expiry: self.default_expiry(&c),
                     ..Default::default()
@@ -196,6 +197,7 @@ impl Server {
                 let a: SpecParams = params(p)?;
                 let c = self.client(&a.project);
                 let opts = EnsureOptions {
+                    own_volumes: true,
                     wait_ready: a.wait_ready,
                     diff: DiffOptions {
                         prune_devices: a.prune_devices,
@@ -370,6 +372,7 @@ impl Server {
                 let proj = compose::load(&a.load())?;
                 let c = self.client(&a.project);
                 let opts = EnsureOptions {
+                    own_volumes: true,
                     wait_ready: a.wait_ready,
                     diff: DiffOptions {
                         prune_devices: a.prune_devices,
@@ -552,6 +555,7 @@ fn create_desired(
         return Err(Error::AlreadyExists(d.name.clone()));
     }
     let plan = sandbox::plan_desired(c, d, opts.diff)?;
+    let plan = sandbox::own_volumes(c, d, plan, opts.own_volumes);
     let stamped = sandbox::expiry::stamped(d, &plan, opts.default_expiry);
     sandbox::apply(c, &stamped, &plan, report)?;
     sandbox::expiry::report_created(&stamped, report);

@@ -149,7 +149,7 @@ There is no `port-forward` tool: run `curl` with `app_exec`, or reach an instanc
 | `sandbox_list` | viewer | Instances, filtered by labels and `kind` (`sandbox`, `replica`, `build`): creator, age, expiry, idle timeout, last activity, limits and use, and `mine`. Remote callers see only instances isb manages. |
 | `sandbox_exec` | member | Run argv in a sandbox: exit code, stdout, stderr (each capped at 256 KiB, keeping the end), optional `stdin` text, `user`, `cwd`, `env`, `timeout` (default 10m). |
 | `sandbox_extend` | the sandbox's creator, or admin | Push the expiry out (`by`, default 24h, at most 30 days from now) or change `idle_timeout`. |
-| `sandbox_settings` | member reads, admin changes | The org's defaults for new sandboxes: `sandbox_expiry` (e.g. `24h`, `7d`; at most `30d`) and `sandbox_idle` (e.g. `2h`, or `none`). Without changes it reads; returns `{org, settings: {sandbox_expiry, sandbox_idle}}`. Sandboxes that exist keep their deadlines. |
+| `sandbox_settings` | member reads, admin changes | The org's defaults for new sandboxes: `sandbox_expiry` (e.g. `24h`, `7d`; at most `30d`) and `sandbox_idle` (e.g. `2h`, or `none`), and `sandbox_volume_ttl` (e.g. `7d`, or `none`): how long a volume a sandbox created is kept once that sandbox is gone and nothing uses it. Without changes it reads; returns `{org, settings: {sandbox_expiry, sandbox_idle, sandbox_volume_ttl}}`. Sandboxes that exist keep their deadlines. |
 | `sandbox_remove` | member | Delete a sandbox (not a stack replica). |
 | `sandbox_start` | member | Start a stopped sandbox and wait until it runs. Not a stack replica. |
 | `sandbox_stop` | member | Stop a sandbox and keep it: a clean shutdown within `timeout` (default 30s, at most 10m), or `force`. Not a stack replica. |

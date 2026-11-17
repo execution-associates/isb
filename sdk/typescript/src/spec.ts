@@ -897,6 +897,7 @@ export interface NamedVolumeSpec {
     [k: string]: Scalar;
   };
   external?: BoolOrString;
+  keep?: BoolOrString;
   /**
    * The incus volume name. Default: `<project>_<key>`, or the key itself
    * for an `external` volume.

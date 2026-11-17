@@ -156,6 +156,45 @@ pub fn last_used(instance: &str) -> Option<std::time::SystemTime> {
         .ok()
 }
 
+/// The sandbox a VM run's own cache volume (`x-run-<hash>-cache`,
+/// [`project::RunSpec::cache_volume`]) belongs to, if `volume` is one.
+fn cache_owner(volume: &str) -> Option<&str> {
+    volume
+        .strip_suffix("-cache")
+        .filter(|i| i.starts_with(&format!("{PREFIX}run-")))
+}
+
+/// Delete the cache volumes of VM run sandboxes that are gone: nothing
+/// else ever would. The containers' shared cache stays. Returns the names
+/// (with `dry_run`, those it would delete).
+pub fn sweep_caches(
+    client: &crate::Client,
+    dry_run: bool,
+    report: &mut dyn FnMut(&str),
+) -> crate::Result<Vec<String>> {
+    let mut out = Vec::new();
+    for pool in crate::volume::pools(client)? {
+        for v in crate::volume::list(client, &pool)? {
+            let Some(owner) = cache_owner(&v.name) else {
+                continue;
+            };
+            if !v.used_by.is_empty() || crate::Sandbox::get(client, owner).is_ok() {
+                continue;
+            }
+            if dry_run {
+                report(&format!("would delete volume {}", v.name));
+            } else if let Err(e) = crate::volume::remove(client, &pool, &v.name) {
+                report(&format!("volume {}: {e}", v.name));
+                continue;
+            } else {
+                report(&format!("deleted volume {}", v.name));
+            }
+            out.push(v.name);
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

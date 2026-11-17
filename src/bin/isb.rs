@@ -749,9 +749,105 @@ fn volume_local(ctx: &Ctx, v: VolumeCmd) -> Result<u8> {
             let pool = pool(p)?;
             isb::volume::remove(&c, &pool, &name)?;
         }
+        VolumeCmd::Prune {
+            names,
+            unattached,
+            pool: p,
+            yes,
+            json,
+        } => return volume_prune(&c, &names, unattached, p, yes, json),
         _ => unreachable!("isb serve's volume commands are handled in volume()"),
     }
     Ok(0)
+}
+
+/// `isb volume prune`.
+fn volume_prune(
+    c: &isb::Client,
+    names: &[String],
+    unattached: bool,
+    pool: Option<String>,
+    yes: bool,
+    json: bool,
+) -> Result<u8> {
+    if unattached && yes && names.is_empty() {
+        return Err(Error::Invalid(
+            "--unattached lists volumes isb cannot tell from data kept on purpose: with -y, name what to delete (`*` is a wildcard), e.g. isb volume prune --unattached -y '*-dev-modules'".into(),
+        ));
+    }
+    let pools = match pool {
+        Some(p) => vec![p],
+        None => isb::volume::pools(c)?,
+    };
+    let mut found = Vec::new();
+    for p in pools {
+        found.extend(isb::volume::orphans(c, &p, unattached)?);
+    }
+    found.retain(|v| {
+        names.is_empty() || names.iter().any(|n| isb::volume::name_matches(n, &v.name))
+    });
+    let mut failed = false;
+    let mut rows = Vec::new();
+    for v in &found {
+        let state = if !yes {
+            "would delete".to_string()
+        } else {
+            match isb::volume::remove(c, &v.pool, &v.name) {
+                Ok(()) => "deleted".into(),
+                Err(e) => {
+                    failed = true;
+                    format!("failed: {e}")
+                }
+            }
+        };
+        rows.push((v, state));
+    }
+    if json {
+        print_json(
+            &rows
+                .iter()
+                .map(|(v, state)| {
+                    serde_json::json!({
+                        "name": v.name,
+                        "pool": v.pool,
+                        "sandbox": v.config.get(isb::volume::KEY_SANDBOX),
+                        "created_at": v.created_at,
+                        "result": state,
+                    })
+                })
+                .collect::<Vec<_>>(),
+        );
+    } else if rows.is_empty() {
+        println!("nothing to prune");
+    } else {
+        let mut t = vec![vec![
+            "NAME".into(),
+            "POOL".into(),
+            "SANDBOX".into(),
+            "CREATED".into(),
+            "RESULT".into(),
+        ]];
+        for (v, state) in &rows {
+            t.push(vec![
+                v.name.clone(),
+                v.pool.clone(),
+                v.config
+                    .get(isb::volume::KEY_SANDBOX)
+                    .cloned()
+                    .unwrap_or_else(|| "-".into()),
+                v.created_at.chars().take(10).collect(),
+                state.clone(),
+            ]);
+        }
+        table(t);
+        if !yes {
+            println!(
+                "dry run; re-run with -y to delete ({} volume(s))",
+                rows.len()
+            );
+        }
+    }
+    Ok(u8::from(failed))
 }
 
 /// isb serve where there is no daemon socket (an org's instance, another
