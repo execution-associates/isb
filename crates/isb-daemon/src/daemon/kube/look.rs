@@ -437,7 +437,50 @@ fn app_logs(d: &Daemon, a: Value, _c: &Caller) -> Result<Value> {
     if !since_applied {
         out["note"] = json!(SINCE_NOTE);
     }
+    let replicas = logs_of(&out);
+    add_console_note(&mut out, &org.incus_project(), &replicas);
     Ok(out)
+}
+
+/// The replica names of a logs answer.
+fn logs_of(out: &Value) -> Vec<String> {
+    out["logs"]
+        .as_object()
+        .map(|m| m.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+/// Say in a logs answer's `note` which replicas' console logs are missing
+/// output: lxc failed to hand it out and isb could not read lxc's file of
+/// it either (`client::console`), so their lines stop short rather than
+/// being all there is.
+pub(in crate::daemon) fn add_console_note(out: &mut Value, project: &str, replicas: &[String]) {
+    let failing: Vec<(String, i64)> = replicas
+        .iter()
+        .filter_map(|r| crate::client::console::failing_since(project, r).map(|t| (r.clone(), t)))
+        .collect();
+    if let Some(note) = console_note(&failing) {
+        out["note"] = json!(match out["note"].as_str() {
+            Some(n) => format!("{n}; {note}"),
+            None => note,
+        });
+    }
+}
+
+/// The note for replicas whose console drain is failing, each with since
+/// when (unix seconds).
+fn console_note(failing: &[(String, i64)]) -> Option<String> {
+    if failing.is_empty() {
+        return None;
+    }
+    let each: Vec<String> = failing
+        .iter()
+        .map(|(r, t)| format!("{r} up to {}", crate::history::fmt_ms(t * 1000)))
+        .collect();
+    Some(format!(
+        "console drain failing: showing output {} (incus could not hand out the console, and lxc's console file could not be read)",
+        each.join(", ")
+    ))
 }
 
 /// What a logs call says when `since` met lines without timestamps.
@@ -659,4 +702,19 @@ pub(super) fn register(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -> Result<(
         app_events
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod console_note_tests {
+    use super::*;
+
+    #[test]
+    fn names_each_failing_replica_and_when() {
+        assert_eq!(console_note(&[]), None);
+        let n = console_note(&[("web-1-ab12".into(), 1_762_646_400)]).unwrap();
+        assert!(
+            n.starts_with("console drain failing: showing output web-1-ab12 up to 2025-11-09"),
+            "{n}"
+        );
+    }
 }
