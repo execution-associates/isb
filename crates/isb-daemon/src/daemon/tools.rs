@@ -320,6 +320,9 @@ fn stack_logs(d: &Daemon, a: Value, _c: &Caller) -> Result<Value> {
             out["note"] = json!(kube::SINCE_NOTE);
         }
         quiet = logs.values().all(|t| t.trim().is_empty());
+        let org = crate::org::OrgId::new(a.org.as_deref().unwrap_or(crate::org::DEFAULT_ORG))?;
+        let replicas: Vec<String> = logs.keys().cloned().collect();
+        kube::add_console_note(&mut out, &org.incus_project(), &replicas);
         out["logs"] = json!(logs);
     } else {
         // An unknown stack or service is an error, not "no failure".

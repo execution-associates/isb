@@ -31,6 +31,7 @@ pub mod apps;
 pub mod audit;
 mod authorize;
 pub mod builds;
+mod console_drain;
 pub mod data;
 mod default_org;
 mod dns;
@@ -420,6 +421,9 @@ pub fn serve(client: Client, cfg: ServeConfig) -> Result<()> {
     let org_api = org_api::OrgApi::new(client.clone(), cfg.org_api_port);
     let (egress, stop_egress) = egress::start(&cfg, &client, &secrets)?;
     crate::ipam::watch(client.clone(), ctl.clone());
+    // OCI consoles are drained while nobody reads them, before lxc's
+    // buffer grows past what it can hand out.
+    console_drain::start(client.clone(), ctl.clone());
     let meta = crate::stack::deployments::StackMeta::new(&cfg.state_dir);
     meta.recover();
     let d = Arc::new(Daemon {

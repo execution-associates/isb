@@ -253,6 +253,18 @@ dropped when isb deletes the instance or after 30 days nobody read it.
   different users take lines from each other again.
 - `ISB_CONSOLE_DIR` moves the directory.
 - It is a cache of output, not worth backing up.
+- `isb serve` drains every running OCI instance it manages every 15
+  seconds, whether or not anyone reads its logs. lxc keeps a running
+  console in a 128 KiB buffer and fails to hand out a large one (incus
+  then answers with nothing, and lxc drops what it held), so a console
+  left undrained for long would stop showing new output.
+- When a drain fails anyway, the missing output is read from lxc's own
+  copy, `/var/log/incus/<project>_<instance>/console.log` (root only, so
+  the daemon reads it; `ISB_INCUS_LOG_DIR` moves `/var/log/incus`). That
+  file and the buffer hold the same bytes, so the log keeps a mark of how
+  far into the file it accounts for and takes each byte once. Where the
+  file cannot be read either, `stack_logs`, `app_logs` and `sandbox_logs`
+  say in their `note` up to when each replica's output is shown.
 
 ## The local registry
 
