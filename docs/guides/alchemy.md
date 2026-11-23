@@ -23,7 +23,8 @@ isb token create ci --org acme         # or the web UI: the token is shown once
 export ISB_URL=https://isb.example.com ISB_ORG=acme ISB_TOKEN=isb_tok_...
 ```
 
-The provider needs alchemy 2 (`2.0.0-beta.87` or later) and reads
+The provider needs alchemy 2 (`2.0.0-beta.87` or later) and an isb server
+at 4.3 or later, and reads
 `ISB_URL`, `ISB_TOKEN` and `ISB_ORG` (default `default`). The token's user
 must be a member of the org. The `deploy` scope is too narrow (it has no
 `app_apply`): leave the token unscoped, or scope it by tool to what the

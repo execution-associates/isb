@@ -9,7 +9,7 @@ bun add @execution-associates/isb-alchemy alchemy effect
 ```
 
 It needs alchemy 2 (the Effect-based releases, `2.0.0-beta.87` or later), an
-isb server and an API token (`isb token create`, or the web UI) of a member
+isb server at 4.3 or later and an API token (`isb token create`, or the web UI) of a member
 of the org.
 
 ```ts
@@ -77,8 +77,8 @@ object: `name`, `project`, `environment`, `source`, `env`, `domains`,
   rendered settings and the image's digest with what runs, and leaves the
   instances alone when both match. A tag that moved on its registry
   (`docker:nginx:latest`) is a change, and rolls out. `redeploy: "always"`
-  on an app replaces its instances on every deploy instead. This needs an
-  isb that has `if_changed` on `app_apply`; an older one refuses the call.
+  on an app replaces its instances on every deploy instead. This needs
+  isb 4.3 or later; an older one refuses the call.
 - **A changed secret value** is a new version in isb, and the services
   that use the secret roll. The value is compared by a hash kept in
   alchemy's state; the same value writes nothing.
