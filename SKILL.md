@@ -176,10 +176,12 @@ isb rm -f task1
 
 Running commands: argv is a list, never a shell string (`isb exec web -- sh
 -c 'cd app && npm ci'` for pipes and `&&`). `isb exec` exits with the
-command's status; **125 means isb itself failed**. stdin reaches the command
-only from a terminal or with `-i`/`-T`: **piping data in needs `-i`**
-(`secret X | isb exec -i web -- sh -c 'read -r T; ...'`), otherwise it sees
-EOF. `-u USER`, `-w DIR`, `-e K=V`, `--timeout 5m`.
+command's status; **125 means isb itself failed**. A pipe or file on stdin
+reaches the command, as with ssh (`isb exec web -- bash -s < setup.sh`,
+`secret X | isb exec web -- sh -c 'read -r T; ...'`); a terminal's stdin
+only with a TTY or `-i`. **`-n` drops stdin**: use it for `isb exec` inside a
+`while read` loop, which would otherwise eat the loop's input. `-u USER`,
+`-w DIR`, `-e K=V`, `--timeout 5m`.
 
 ## The MCP tools: orgs, apps, sandboxes
 

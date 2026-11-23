@@ -136,6 +136,7 @@ web | Serving HTTP on 0.0.0.0 port 8000 (http://0.0.0.0:8000/) ...
 ^C                        # stops the sandbox; the next `isb up` starts it again
 $ isb up -d               # or: create, wait until ready, return
 $ isb exec web -- python3 -m unittest
+$ isb exec web -- sh -s < check.sh      # a pipe or file on stdin reaches the command, as with ssh
 $ isb down                # delete it, host untouched
 ```
 

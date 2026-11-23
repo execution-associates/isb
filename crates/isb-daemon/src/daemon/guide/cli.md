@@ -43,8 +43,11 @@ services:
 - `isb plan` (what would change), `isb ps`, `isb exec SVC -- argv`,
   `isb logs SVC`, `isb port get NAME DEV`, `isb config`, `isb down`
   (`--volumes` also deletes named volumes).
-- `isb exec` exits with the command's status; **125 means isb failed**. Piping
-  stdin in needs `-i`. `-u USER`, `-w DIR`, `-e K=V`, `--timeout 5m`.
+- `isb exec` exits with the command's status; **125 means isb failed**. A pipe
+  or file on stdin is forwarded, as ssh does (`isb exec SVC -- bash -s <
+  script.sh`); a terminal's stdin only with a TTY or `-i`. `-n` drops stdin
+  (inside a `while read` loop, which it would otherwise eat). `-u USER`,
+  `-w DIR`, `-e K=V`, `--timeout 5m`.
 - `${VAR}` comes from the environment, then `.env`; unset is an error (use
   `${VAR:-default}`). `isb.override.yaml` merges over `isb.yaml`.
 - Ports need the host port and listen on 127.0.0.1 unless you write an
