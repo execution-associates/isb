@@ -154,6 +154,23 @@ fn ports_serialize_back_to_what_parses() {
 }
 
 #[test]
+fn port_options_serialize_back() {
+    // What `isb stack config` shows for a port with the balancer's PROXY option.
+    let f = parse(
+        "services:\n  mail:\n    image: x\n    ports:\n      - {target: 993, published: 993, host_ip: 203.0.113.7, options: {proxy_protocol: true}}\n",
+    )
+    .unwrap();
+    assert_eq!(
+        f.services["mail"].ports[0].options["proxy_protocol"],
+        "true"
+    );
+    let y = serde_yaml_ng::to_string(&f).unwrap();
+    assert!(y.contains("proxy_protocol: 'true'"), "{y}");
+    let back: ComposeFile = serde_yaml_ng::from_str(&y).unwrap();
+    assert_eq!(back, f);
+}
+
+#[test]
 fn volumes_serialize_back_to_what_parses() {
     let f = parse(
         "services:\n  web:\n    image: x\n    volumes: [./a:/a:ro, 'c:/c:owner=dev,device=d']\n",

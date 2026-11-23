@@ -92,6 +92,10 @@ pub struct PortStatus {
     pub accepted: u64,
     pub active: usize,
     pub rate_history: Vec<f32>,
+    /// The balancer sends the replica a PROXY v2 header with the client's
+    /// address (the port's `proxy_protocol` option).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub proxy_protocol: bool,
 }
 
 /// One service of a stack, as `stack_status` reports it.
@@ -2107,9 +2111,9 @@ impl Worker {
             self.routes.remove(&k);
             self.route_errors.remove(&k);
         }
-        for (k, p) in want {
-            self.routes.entry(k).or_insert(p);
-        }
+        // Replace, not keep: the same listen address can come with a new
+        // target or options, which the balancer must hear about.
+        self.routes.extend(want);
         self.sync_routes();
     }
 
@@ -2124,7 +2128,14 @@ impl Worker {
                 .filter_map(|r| r.ip)
                 .map(|ip| SocketAddr::new(ip, p.target))
                 .collect();
-            if let Err(e) = self.inner.balancer.set_route(k, p.listen, backends) {
+            let opts = crate::balance::RouteOptions {
+                proxy_protocol: p.proxy_protocol,
+            };
+            if let Err(e) = self
+                .inner
+                .balancer
+                .set_route_with(k, p.listen, backends, opts)
+            {
                 errors.insert(k.clone(), e.to_string());
             }
         }
@@ -2255,6 +2266,7 @@ impl Worker {
                     })
                     .unwrap_or(0),
                 rate_history: e.2.iter().copied().collect(),
+                proxy_protocol: p.proxy_protocol,
             });
         }
         self.rates.retain(|k, _| self.routes.contains_key(k));
