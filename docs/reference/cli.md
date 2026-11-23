@@ -124,13 +124,18 @@ isb prune --label KEY --missing-path [-y] [--json]
   in its `working_dir` unless `-u`/`-w` say otherwise; an instance that is
   not in the compose file in the current directory runs as the instance's
   default user (root) in its default directory. A terminal is allocated when
-  stdin is one (`-t` forces it, `-T` never). Stdin is forwarded when it is a
-  terminal, with `-T` (the pipe form, for a server that speaks on stdin and
-  stdout), or with `-i`; otherwise the command sees EOF, so a script that
-  calls `isb exec` keeps its own stdin, and `isb exec web -i -- cat < f`
-  feeds a file. Piped input left unread is said on stderr (`stdin is not
-  forwarded without -i`). `-n` gives the command an empty stdin even from a
-  terminal, and keeps that line quiet;
+  stdin and stdout are (`-t` forces it, `-T` never). Stdin is forwarded the
+  way ssh forwards it: a pipe or a file on stdin always reaches the command
+  (`isb exec web -- bash -s < setup.sh`, `gen | isb exec web -- tool`), and
+  so does a terminal when one is allocated. A terminal on stdin with no
+  terminal allocated (stdout piped, as in `isb exec web -- ls | less`) is not
+  forwarded unless `-i` or `-T` (the pipe form, for a server that speaks on
+  stdin and stdout): the command sees EOF rather than taking the shell's
+  keystrokes. `-i` is accepted for a pipe, where it changes nothing. A
+  command that never reads stdin still exits when it is done, even if stdin
+  is a pipe that never closes. Like ssh, a forwarded pipe is consumed, so an
+  `isb exec` inside `while read line; do ...; done < list` takes the rest of
+  the list: `-n` gives the command an empty stdin (and from a terminal too);
   `-l` runs it through the user's login shell; `--timeout` kills it (no
   limit by default). `-e KEY` without a value passes the caller's own
   `$KEY` (left out when unset), so a secret given that way never appears in

@@ -102,12 +102,13 @@ pub(crate) struct ExecArgs {
     /// Never allocate a pseudo-terminal.
     #[arg(short = 'T', long)]
     pub(crate) no_tty: bool,
-    /// Forward stdin even when it is not a terminal (a terminal's stdin, and
-    /// `-T`'s, is always forwarded). Without one of those the command sees
-    /// EOF, so `isb exec` inside a script never reads the script.
+    /// Forward stdin even when it is a terminal and no pseudo-terminal is
+    /// allocated. A pipe or file on stdin is always forwarded, as are `-t`'s
+    /// and `-T`'s stdin, so this is only needed for a terminal's.
     #[arg(short = 'i', long, conflicts_with = "no_stdin")]
     pub(crate) interactive: bool,
-    /// Never forward stdin (the command sees EOF), even from a terminal.
+    /// Never forward stdin (the command sees EOF): for `isb exec` inside a
+    /// `while read` loop, whose input it would otherwise consume, as `ssh -n`.
     #[arg(short = 'n', long)]
     pub(crate) no_stdin: bool,
     /// Kill the command after this long (default: no limit).
@@ -452,11 +453,15 @@ pub(crate) fn ps(ctx: &Ctx, services: Vec<String>, json: bool) -> Result<u8> {
     Ok(0)
 }
 
-/// Stdin is forwarded for a terminal, for `-i`, and for `-T` (the pipe form,
-/// `isb exec -T NAME -- server`, whose stdin is the protocol); otherwise the
-/// command sees EOF and the caller's stdin stays the caller's.
-fn stdin_for(a: &ExecArgs, tty: bool) -> Stdin {
-    if !a.no_stdin && (tty || a.interactive || a.no_tty) {
+/// Which stdin the command gets, as ssh decides it: a pipe or file on
+/// stdin is forwarded (`isb exec dev -- bash -s < script.sh`), and so is
+/// stdin whenever a pseudo-terminal is allocated, `-i` is given, or `-T`
+/// asks for the pipe form (a server speaking on stdin). A terminal on stdin
+/// with no pseudo-terminal (`isb exec dev -- ls | less`) is not, unless
+/// `-i`: the command sees EOF instead of competing with the shell for keys.
+/// `-n` drops stdin always.
+fn stdin_for(a: &ExecArgs, tty: bool, stdin_is_terminal: bool) -> Stdin {
+    if !a.no_stdin && (tty || a.interactive || a.no_tty || !stdin_is_terminal) {
         Stdin::Inherit
     } else {
         Stdin::Null
@@ -464,7 +469,8 @@ fn stdin_for(a: &ExecArgs, tty: bool) -> Stdin {
 }
 
 /// Piped input the command will not see is said once on stderr, instead of
-/// vanishing: `-i` feeds it, `-n` says the caller meant it.
+/// vanishing: `-i` feeds it, `-n` says the caller meant it. For the exec
+/// tools that take stdin only with `-i` (`isb app exec`, `isb instance exec`).
 pub(crate) fn hint_unforwarded_stdin() {
     if isb::exec::stdin_has_input() {
         eprintln!(
@@ -547,10 +553,7 @@ pub(crate) fn exec(ctx: &Ctx, a: ExecArgs) -> Result<u8> {
         }
     }
     let (width, height) = isb::exec::terminal_size().unzip();
-    let stdin = stdin_for(&a, tty);
-    if matches!(stdin, Stdin::Null) && !a.no_stdin {
-        hint_unforwarded_stdin();
-    }
+    let stdin = stdin_for(&a, tty, rustix::termios::isatty(std::io::stdin()));
     let opts = ExecOptions {
         cwd: a.cwd,
         user: a.user,
@@ -706,20 +709,38 @@ mod tests {
         }
     }
 
-    fn forwards(a: &[&str], tty: bool) -> bool {
-        matches!(stdin_for(&exec_args(a), tty), Stdin::Inherit)
+    /// Whether stdin is forwarded, given whether a pseudo-terminal is
+    /// allocated and whether stdin is a terminal.
+    fn forwards(a: &[&str], tty: bool, stdin_is_terminal: bool) -> bool {
+        matches!(
+            stdin_for(&exec_args(a), tty, stdin_is_terminal),
+            Stdin::Inherit
+        )
     }
 
     #[test]
-    fn stdin_is_forwarded_for_a_terminal_dash_i_and_dash_t_only() {
-        // A script's own stdin stays the script's.
-        assert!(!forwards(&["web", "--", "ls"], false));
-        // A terminal, `-i`, and the pipe form `-T` (a server speaking on stdin).
-        assert!(forwards(&["web", "--", "sh"], true));
-        assert!(forwards(&["-i", "web", "--", "cat"], false));
-        assert!(forwards(&["-T", "web", "--", "server"], false));
-        // `-n` wins, even over a terminal.
-        assert!(!forwards(&["-n", "web", "--", "sh"], true));
+    fn piped_stdin_is_forwarded_by_default() {
+        // A pipe or file on stdin: `bash -s < script.sh`, `cmd | isb exec`.
+        assert!(forwards(&["web", "--", "bash", "-s"], false, false));
+        // `-i` is still accepted there, and changes nothing.
+        assert!(forwards(&["-i", "web", "--", "cat"], false, false));
+        assert!(forwards(&["-T", "web", "--", "server"], false, false));
+        // `-n` drops it.
+        assert!(!forwards(&["-n", "web", "--", "cat"], false, false));
+    }
+
+    #[test]
+    fn a_terminals_stdin_needs_a_tty_or_dash_i() {
+        // A pseudo-terminal (stdin and stdout both terminals, or -t).
+        assert!(forwards(&["web", "--", "sh"], true, true));
+        // A terminal on stdin with stdout piped: not read, so the command
+        // sees EOF instead of taking the shell's keys.
+        assert!(!forwards(&["web", "--", "ls"], false, true));
+        // Unless asked: -i, or -T's pipe form.
+        assert!(forwards(&["-i", "web", "--", "cat"], false, true));
+        assert!(forwards(&["-T", "web", "--", "server"], false, true));
+        // `-n` wins, even over a pseudo-terminal.
+        assert!(!forwards(&["-n", "web", "--", "sh"], true, true));
         assert!(Cli::try_parse_from(["isb", "exec", "-i", "-n", "web", "--", "ls"]).is_err());
     }
 }
