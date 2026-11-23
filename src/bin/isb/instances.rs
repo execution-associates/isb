@@ -17,7 +17,7 @@ pub(crate) struct CreateArgs {
     /// Memory limit: 512m, 8g, 8GiB.
     #[arg(short, long)]
     pub(crate) memory: Option<String>,
-    /// Storage pool (`auto`: incus-zfs, else default, else first).
+    /// Storage pool (`auto`: isb-sandboxes, else incus-zfs, else default, else first).
     #[arg(short, long)]
     pub(crate) storage: Option<String>,
     /// `auto`, `none`, `always`, or a raw.idmap value.
@@ -297,6 +297,7 @@ pub(crate) fn create(ctx: &Ctx, a: CreateArgs) -> Result<u8> {
         wait_ready: !a.no_ready,
         default_expiry: super::expiry::default_expiry(&c),
         own_volumes: true,
+        sandbox_pool: true,
         ..Default::default()
     };
     if a.ensure {

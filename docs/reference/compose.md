@@ -364,7 +364,9 @@ type: vm
 
 String, default `auto`. The pool for the root disk. `auto` (or empty) picks
 `incus-zfs` if it exists, else `default`, else the first pool; no pools at all is
-an error. A named pool must exist. Becomes the `root` device
+an error. A new sandbox from `isb up`, `isb create`, the SDK, MCP or isbx picks
+`isb-sandboxes` first when that pool exists (stacks, apps and builds never do),
+and a volume it mounts that already exists on another pool is used where it is. A named pool must exist. Becomes the `root` device
 `{type: disk, path: /, pool: <pool>}` in the create request. Fixed at creation; a
 root disk on another pool is reported as a note. This resolved pool is also the
 `auto` pool for named volumes the sandbox mounts.
@@ -1385,7 +1387,7 @@ incus_project: default
 
 x-base: &base                     # dropped after anchors are resolved
   image: images:debian/12
-  storage: auto                   # incus-zfs, else default, else first pool
+  storage: auto                   # isb-sandboxes (new sandboxes), incus-zfs, default, first pool
   incus_profiles: [default]
   idmap: auto                     # raw.idmap only where /etc/subuid needs it
 

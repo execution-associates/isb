@@ -338,7 +338,8 @@ next command starts it again in about a second.
 Each sandbox and each tool is an instance of its own. On a copy-on-write
 storage pool (zfs, btrfs) they share the image they were made from and cost
 only what they add to it; on a `dir` pool each is a full copy, which
-`isb x doctor` points out.
+`isb x doctor` points out. A pool named `isb-sandboxes` gets every new tool
+and run sandbox ([where a sandbox's disk lives](../concepts/sandboxes.md#where-a-sandboxs-disk-lives)).
 
 Everything isbx makes is named `x-…` and labelled `isbx.kind` (`run` or
 `tool`), with `isbx.root` (the project) or `isbx.tool` (the tool), so

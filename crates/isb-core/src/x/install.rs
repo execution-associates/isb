@@ -228,7 +228,10 @@ pub fn build(
         client,
         &spec,
         &Default::default(),
-        EnsureOptions::default(),
+        EnsureOptions {
+            sandbox_pool: true,
+            ..EnsureOptions::default()
+        },
         report,
     )?
     .with_exec_defaults(spec.exec_defaults());
@@ -253,7 +256,10 @@ pub fn build(
             &spec,
             &Default::default(),
             Path::new("/"),
-            EnsureOptions::default(),
+            EnsureOptions {
+                sandbox_pool: true,
+                ..EnsureOptions::default()
+            },
             report,
         )?;
         super::project::wait_proxy(&network, &spec, report)?;

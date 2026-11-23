@@ -1,6 +1,6 @@
 {
   "name": "@execution-associates/isb-alchemy",
-  "version": "4.4.0",
+  "version": "4.5.0",
   "description": "Alchemy provider for isb: deploy apps, stacks and secrets to an isb host as infrastructure-as-code",
   "license": "MIT",
   "type": "module",

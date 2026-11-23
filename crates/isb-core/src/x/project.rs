@@ -184,7 +184,10 @@ pub fn ensure(client: &Client, rs: &RunSpec, report: Reporter<'_>) -> Result<San
                 &spec,
                 &Default::default(),
                 Path::new("/"),
-                EnsureOptions::default(),
+                EnsureOptions {
+                    sandbox_pool: true,
+                    ..EnsureOptions::default()
+                },
                 report,
             )?;
             wait_proxy(&network, &spec, report)?;
@@ -200,7 +203,10 @@ pub fn ensure(client: &Client, rs: &RunSpec, report: Reporter<'_>) -> Result<San
                 &spec,
                 &Default::default(),
                 Path::new("/"),
-                EnsureOptions::default(),
+                EnsureOptions {
+                    sandbox_pool: true,
+                    ..EnsureOptions::default()
+                },
                 report,
             )?;
             if rs.vm {
@@ -303,7 +309,10 @@ pub fn create_fresh(client: &Client, rs: &RunSpec, report: Reporter<'_>) -> Resu
         client,
         &spec,
         &Default::default(),
-        EnsureOptions::default(),
+        EnsureOptions {
+            sandbox_pool: true,
+            ..EnsureOptions::default()
+        },
         report,
     )
 }

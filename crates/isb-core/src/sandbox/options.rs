@@ -22,6 +22,9 @@ pub struct EnsureOptions {
     /// gone. For plain sandboxes only: a stack's or an app's volumes hold
     /// data that outlives every instance.
     pub own_volumes: bool,
+    /// Put a new sandbox on [`crate::plan::SANDBOX_POOL`] when it exists
+    /// ([`super::resolve_for`]). For plain sandboxes and isbx tools.
+    pub sandbox_pool: bool,
 }
 
 impl Default for EnsureOptions {
@@ -32,6 +35,7 @@ impl Default for EnsureOptions {
             lock_wait: Duration::from_secs(900),
             default_expiry: None,
             own_volumes: false,
+            sandbox_pool: false,
         }
     }
 }

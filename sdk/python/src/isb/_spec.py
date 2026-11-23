@@ -382,7 +382,8 @@ class SandboxSpec(TypedDict, total=False):
     #: guest: names, or `{source, target, uid, gid, mode}`.
     secrets: Sequence[SecretRef]
     #: Storage pool for the root disk. `auto` (default): `incus-zfs` if it exists,
-    #: else `default`, else the first pool. Fixed at creation.
+    #: else `default`, else the first pool; a new plain sandbox tries
+    #: `isb-sandboxes` first. Fixed at creation.
     storage: Optional[str]
     #: `container` (default) or `virtual-machine` (`vm`). Fixed at creation.
     type: InstanceType
@@ -623,7 +624,8 @@ class SandboxSpecFields(TypedDict, total=False):
     #: guest: names, or `{source, target, uid, gid, mode}`.
     secrets: Sequence[SecretRef]
     #: Storage pool for the root disk. `auto` (default): `incus-zfs` if it exists,
-    #: else `default`, else the first pool. Fixed at creation.
+    #: else `default`, else the first pool; a new plain sandbox tries
+    #: `isb-sandboxes` first. Fixed at creation.
     storage: Optional[str]
     #: `container` (default) or `virtual-machine` (`vm`). Fixed at creation.
     type: InstanceType

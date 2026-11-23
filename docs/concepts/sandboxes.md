@@ -241,6 +241,21 @@ Plain sandboxes outside every org (incus' `default` project) follow the
 default org's setting. `isb volume prune` lists the volumes whose sandbox is
 gone, and with `-y` deletes them without waiting.
 
+## Where a sandbox's disk lives
+
+On a `dir` storage pool every sandbox is a full copy of its image, which on a
+busy host adds up to more than everything else. A copy-on-write pool (zfs or
+btrfs) stores the image once, and each sandbox costs only what it changes.
+
+Name that pool `isb-sandboxes` and new plain sandboxes go on it: `isb up`,
+`isb create`, `sandbox_create`, the SDKs and isbx tools, when their spec
+leaves `storage` at `auto`. Their new named volumes go there too. A volume
+that already exists on another pool, such as a shared cache, is used where
+it is, and a sandbox that already exists keeps its pools. Stacks, apps,
+builds and databases never pick `isb-sandboxes` on their own, so their data
+stays where it is. `isb x doctor` notes when new sandboxes would land on a
+`dir` pool.
+
 ## Sandboxes are short-lived
 
 Every sandbox made through `isb serve` (`sandbox_create`) gets deadlines,
