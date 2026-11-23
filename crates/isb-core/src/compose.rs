@@ -563,8 +563,13 @@ pub fn up_handles(
         } else {
             with_env.exec.env.extend(secret_env.clone());
         }
-        let mut d =
-            crate::sandbox::resolve(&c, &with_env, &project.file.volumes, &project.base_dir)?;
+        let mut d = crate::sandbox::resolve_for(
+            &c,
+            &with_env,
+            &project.file.volumes,
+            &project.base_dir,
+            opts.sandbox_pool,
+        )?;
         if oci && spec.has_secret_files() {
             // A new OCI instance gets its files before its first start.
             let (spec, values) = (spec.clone(), secret_values.clone());
@@ -647,11 +652,12 @@ pub fn plan(
     let c = client_for(client, project);
     let mut plans = Vec::new();
     for s in project.select(services)? {
-        let d = crate::sandbox::resolve(
+        let d = crate::sandbox::resolve_for(
             &c,
             project.service(&s)?,
             &project.file.volumes,
             &project.base_dir,
+            true,
         )?;
         plans.push(crate::sandbox::plan_desired(&c, &d, diff)?);
     }
@@ -685,47 +691,7 @@ pub fn down(
         report("volumes kept: they are shared by the file; remove them with a full down");
         return Ok(());
     }
-    let facts = crate::sandbox::host_facts(&c)?;
-    let mut seen = std::collections::BTreeSet::new();
-    let vol_name = |key: &str| {
-        project
-            .file
-            .volumes
-            .get(key)
-            .and_then(|d| d.name.clone())
-            .unwrap_or_else(|| key.to_string())
-    };
-    for spec in project.file.services.values() {
-        let pool = facts.pick_pool(spec.storage.as_deref())?;
-        for v in &spec.volumes {
-            if v.mount_type != MountType::Volume {
-                continue;
-            }
-            let def = project.file.volumes.get(&v.source);
-            if v.external || def.is_some_and(|d| d.external) {
-                continue;
-            }
-            let vpool = match v.pool.as_deref().or(def.and_then(|d| d.pool.as_deref())) {
-                Some(x) if x != "auto" => x.to_string(),
-                _ => pool.clone(),
-            };
-            seen.insert((vpool, vol_name(&v.source)));
-        }
-    }
-    for (key, def) in &project.file.volumes {
-        let vname = vol_name(key);
-        if !def.external && !seen.iter().any(|(_, n)| *n == vname) {
-            seen.insert((facts.pick_pool(def.pool.as_deref())?, vname));
-        }
-    }
-    for (pool, vname) in seen {
-        match crate::volume::remove(&c, &pool, &vname) {
-            Ok(()) => report(&format!("volume {vname}: deleted")),
-            Err(e) if e.is_not_found() => {}
-            Err(e) => report(&format!("volume {vname}: kept ({e})")),
-        }
-    }
-    Ok(())
+    volumes::remove(&c, project, report)
 }
 
 /// Lowercase, `[a-z0-9-]`, squeezed, trimmed; starts with a letter.
@@ -981,6 +947,8 @@ fn deep_merge(a: &mut Value, b: Value) {
         (a, b) => *a = b,
     }
 }
+
+mod volumes;
 
 #[cfg(test)]
 mod tests;

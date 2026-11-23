@@ -389,11 +389,16 @@ pub(crate) fn doctor(ctx: &Ctx) -> Result<u8> {
     }
     // Not a failure, but the reason a host fills up: without copy-on-write
     // every sandbox holds a whole copy of its image.
-    if let Ok(pool) = isb::sandbox::host_facts(&client).and_then(|h| h.pick_pool(None)) {
+    let sandbox_pool = isb::sandbox::host_facts(&client).and_then(|mut h| {
+        h.prefer = Some(isb::plan::SANDBOX_POOL.into());
+        h.pick_pool(None)
+    });
+    if let Ok(pool) = sandbox_pool {
         if let Ok(Some(driver)) = isb::volume::pool_driver(&client, &pool) {
             if driver == "dir" {
                 println!(
-                    "note storage pool {pool} uses the `dir` driver: every sandbox is a full copy of its image. A zfs or btrfs pool shares the image between them (a pool named incus-zfs is preferred when it exists)"
+                    "note storage pool {pool} uses the `dir` driver: every sandbox is a full copy of its image. New sandboxes and tools share it on a zfs or btrfs pool named {}",
+                    isb::plan::SANDBOX_POOL
                 );
             }
         }

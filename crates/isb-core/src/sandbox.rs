@@ -15,6 +15,7 @@ use crate::lock::NameLock;
 pub mod expiry;
 pub mod images;
 mod options;
+mod pool;
 mod prune;
 mod update;
 
@@ -24,6 +25,7 @@ use crate::plan::{
 };
 use crate::spec::{ExecDefaults, PortSpec, ReadyCheck, SandboxSpec};
 pub use options::{EnsureOptions, own_volumes};
+pub use pool::resolve_for;
 pub use prune::{PruneItem, prune_missing_path};
 #[doc(hidden)]
 pub use update::update_instance;
@@ -151,6 +153,7 @@ pub fn host_facts(client: &Client) -> Result<HostFacts> {
     Ok(HostFacts {
         subids: SubIds::read_host(),
         pools,
+        prefer: None,
         path_map: HostFacts::detect_path_map(),
         initial_copy: ext("disk_initial_copy"),
         initial_owner: ext("storage_initial_owner"),
@@ -937,7 +940,13 @@ impl Sandbox {
         opts: EnsureOptions,
         report: Reporter<'_>,
     ) -> Result<Sandbox> {
-        let d = resolve(client, spec, defs, &std::env::current_dir()?)?;
+        let d = resolve_for(
+            client,
+            spec,
+            defs,
+            &std::env::current_dir()?,
+            opts.sandbox_pool,
+        )?;
         let _lock = NameLock::acquire(
             client.project_name(),
             &d.name,
@@ -981,7 +990,13 @@ impl Sandbox {
         opts: EnsureOptions,
         report: Reporter<'_>,
     ) -> Result<(Sandbox, ApplyReport)> {
-        let d = resolve(client, spec, defs, &std::env::current_dir()?)?;
+        let d = resolve_for(
+            client,
+            spec,
+            defs,
+            &std::env::current_dir()?,
+            opts.sandbox_pool,
+        )?;
         let r = ensure(client, &d, opts, report)?;
         Ok((Self::from_desired(client, &d), r))
     }
@@ -996,7 +1011,7 @@ impl Sandbox {
         opts: EnsureOptions,
         report: Reporter<'_>,
     ) -> Result<(Sandbox, ApplyReport)> {
-        let d = resolve(client, spec, defs, base)?;
+        let d = resolve_for(client, spec, defs, base, opts.sandbox_pool)?;
         let r = ensure(client, &d, opts, report)?;
         Ok((Self::from_desired(client, &d), r))
     }

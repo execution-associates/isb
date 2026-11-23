@@ -185,6 +185,7 @@ impl Server {
                 let c = self.client(&a.project);
                 let opts = EnsureOptions {
                     own_volumes: true,
+                    sandbox_pool: true,
                     wait_ready: a.wait_ready,
                     default_expiry: self.default_expiry(&c),
                     ..Default::default()
@@ -198,6 +199,7 @@ impl Server {
                 let c = self.client(&a.project);
                 let opts = EnsureOptions {
                     own_volumes: true,
+                    sandbox_pool: true,
                     wait_ready: a.wait_ready,
                     diff: DiffOptions {
                         prune_devices: a.prune_devices,
@@ -373,6 +375,7 @@ impl Server {
                 let c = self.client(&a.project);
                 let opts = EnsureOptions {
                     own_volumes: true,
+                    sandbox_pool: true,
                     wait_ready: a.wait_ready,
                     diff: DiffOptions {
                         prune_devices: a.prune_devices,
@@ -540,7 +543,7 @@ fn resolve_spec(c: &Client, a: &SpecParams) -> Result<crate::plan::Desired> {
         Some(b) => PathBuf::from(b),
         None => std::env::current_dir()?,
     };
-    sandbox::resolve(c, &a.spec, &a.volumes, Path::new(&base))
+    sandbox::resolve_for(c, &a.spec, &a.volumes, Path::new(&base), true)
 }
 
 fn create_desired(

@@ -142,7 +142,8 @@ pub struct SandboxSpec {
     pub instance_type: InstanceType,
 
     /// Storage pool for the root disk. `auto` (default): `incus-zfs` if it exists,
-    /// else `default`, else the first pool. Fixed at creation.
+    /// else `default`, else the first pool; a new plain sandbox tries
+    /// `isb-sandboxes` first. Fixed at creation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub storage: Option<String>,
 

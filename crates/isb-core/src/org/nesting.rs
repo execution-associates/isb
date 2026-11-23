@@ -68,6 +68,7 @@ mod tests {
                 caller_owned: false,
             },
             pools: vec!["default".into()],
+            prefer: None,
             path_map: None,
             initial_copy: false,
             initial_owner: false,

@@ -28,7 +28,9 @@ mod boot;
 pub mod dns;
 mod names;
 mod owner;
+mod pool;
 pub use names::{device_name_for_path, validate_instance_name};
+pub use pool::SANDBOX_POOL;
 
 pub use boot::{BOOT_DELAY_CONTAINER, BOOT_DELAY_VM, boot_config, dev_disk_limits};
 
@@ -40,6 +42,8 @@ pub struct HostFacts {
     pub subids: SubIds,
     /// Storage pools that exist, in server order.
     pub pools: Vec<String>,
+    /// The pool `auto` tries first ([`SANDBOX_POOL`] for a plain sandbox).
+    pub prefer: Option<String>,
     /// Rewrite bind sources starting with `.0` to start with `.1` instead: the
     /// path incusd resolves can differ from the one this process sees (see
     /// [`HostFacts::detect_path_map`]).
@@ -106,28 +110,6 @@ impl HostFacts {
             }
         }
         path.to_string()
-    }
-
-    /// `auto`: `incus-zfs`, else `default`, else the first pool.
-    pub fn pick_pool(&self, requested: Option<&str>) -> Result<String> {
-        match requested {
-            Some(p) if p != "auto" && !p.is_empty() => {
-                if self.pools.is_empty() || self.pools.iter().any(|x| x == p) {
-                    Ok(p.to_string())
-                } else {
-                    Err(Error::invalid(format!(
-                        "storage pool {p:?} does not exist (have: {})",
-                        self.pools.join(", ")
-                    )))
-                }
-            }
-            _ => ["incus-zfs", "default"]
-                .iter()
-                .find(|c| self.pools.iter().any(|p| p == *c))
-                .map(|s| s.to_string())
-                .or_else(|| self.pools.first().cloned())
-                .ok_or_else(|| Error::invalid("no storage pools exist")),
-        }
     }
 }
 

@@ -492,7 +492,8 @@ export interface SandboxSpec {
   secrets?: SecretRef[];
   /**
    * Storage pool for the root disk. `auto` (default): `incus-zfs` if it exists,
-   * else `default`, else the first pool. Fixed at creation.
+   * else `default`, else the first pool; a new plain sandbox tries
+   * `isb-sandboxes` first. Fixed at creation.
    */
   storage?: string | null;
   type?: InstanceType;
