@@ -59,8 +59,14 @@ pub fn wait_applied(network: &str, policy: &super::Policy, within: std::time::Du
 }
 
 /// Append one line. Best effort: a full disk must not break a connection.
+/// Many connections record at once, so the line goes out in one `write`:
+/// O_APPEND keeps a single write whole, but `writeln!` issues one per piece
+/// and pieces from two connections interleave into lines `read` skips.
 pub fn record(network: &str, allowed: bool, host: &str, port: u16) {
-    let p = path(network);
+    append(&path(network), allowed, host, port);
+}
+
+fn append(p: &std::path::Path, allowed: bool, host: &str, port: u16) {
     if let Some(d) = p.parent() {
         let _ = super::ca::make_private_dir(d);
     }
@@ -68,9 +74,9 @@ pub fn record(network: &str, allowed: bool, host: &str, port: u16) {
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&p)
+        .open(p)
     {
-        let _ = writeln!(f, "{word} {host}:{port}");
+        let _ = f.write_all(format!("{word} {host}:{port}\n").as_bytes());
     }
 }
 
@@ -125,5 +131,31 @@ mod tests {
         assert_eq!(parse("allowed -:22").map(|s| s.port), Some(22));
         assert_eq!(parse("maybe x:1"), None);
         assert_eq!(parse("denied nope"), None);
+    }
+
+    #[test]
+    fn lines_from_many_connections_at_once_stay_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("names").join("net");
+        let (threads, each) = (16, 200);
+        std::thread::scope(|s| {
+            for t in 0..threads {
+                let p = &p;
+                s.spawn(move || {
+                    for i in 0..each {
+                        append(p, t % 2 == 0, &format!("host-{t}.example.test"), i);
+                    }
+                });
+            }
+        });
+        let text = std::fs::read_to_string(&p).unwrap();
+        let bad: Vec<&str> = text.lines().filter(|l| parse(l).is_none()).collect();
+        assert!(
+            bad.is_empty(),
+            "{} torn lines, e.g. {:?}",
+            bad.len(),
+            &bad[..bad.len().min(3)]
+        );
+        assert_eq!(text.lines().count(), threads * each as usize);
     }
 }

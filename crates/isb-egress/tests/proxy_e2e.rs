@@ -54,6 +54,22 @@ fn free_port() -> u16 {
         .port()
 }
 
+/// Open the proxy's listeners: false when a port from [`free_port`] was
+/// taken again before the proxy bound it (other tests and processes bind
+/// and connect meanwhile), so the caller picks new ports. Any other error
+/// fails the test.
+fn listens(proxy: &Proxy) -> bool {
+    let errors = proxy.sync_ports();
+    if errors.is_empty() {
+        return true;
+    }
+    assert!(
+        errors.iter().all(|e| e.contains("Address already in use")),
+        "{errors:?}"
+    );
+    false
+}
+
 fn provider() -> Arc<rustls::crypto::CryptoProvider> {
     Arc::new(rustls::crypto::ring::default_provider())
 }
@@ -168,6 +184,14 @@ struct Rig {
 }
 
 fn rig() -> Rig {
+    loop {
+        if let Some(r) = try_rig() {
+            return r;
+        }
+    }
+}
+
+fn try_rig() -> Option<Rig> {
     state();
     let tls_port = free_port();
     let plain_port = free_port();
@@ -216,9 +240,10 @@ fn rig() -> Rig {
         },
     );
     proxy.set_policy(policy, Some(sandbox_ca.clone()));
-    let errors = proxy.sync_ports();
-    assert!(errors.is_empty(), "{errors:?}");
-    Rig {
+    if !listens(&proxy) {
+        return None;
+    }
+    Some(Rig {
         proxy,
         sandbox_ca,
         placeholder,
@@ -228,7 +253,7 @@ fn rig() -> Rig {
         other_ca,
         tls_port,
         plain_port,
-    }
+    })
 }
 
 #[test]
@@ -399,36 +424,45 @@ fn a_port_that_is_not_allowed_is_not_listened_on() {
     );
 }
 
+/// A proxy for `network` whose one secret binding is `secret`
+/// (`name@host`), listening on a free port: the proxy, its CA and the port.
+fn secret_proxy(secret: &str, network: &str, guests_only: bool) -> (Proxy, Ca, u16) {
+    state();
+    let ca = Ca::ensure(network).unwrap();
+    loop {
+        let port = free_port();
+        let spec = EgressSpec {
+            secrets: vec![EgressSecretSpec::parse(&format!("T={secret}:{port}")).unwrap()],
+            ..Default::default()
+        };
+        let policy = Policy::from_spec(&spec, network).unwrap();
+        let env = Arc::new(Env {
+            settings: Arc::new(Settings::default()),
+            secrets: Arc::new(Store),
+            log: Arc::new(|_| {}),
+        });
+        let proxy = Proxy::new(
+            env,
+            Config {
+                project: "default".into(),
+                instance: "p".into(),
+                network: network.into(),
+                ip: "127.0.0.1".parse().unwrap(),
+                policy: policy.clone(),
+                guests_only,
+            },
+        );
+        proxy.set_policy(policy, Some(ca.clone()));
+        if listens(&proxy) {
+            return (proxy, ca, port);
+        }
+    }
+}
+
 #[test]
 fn a_missing_secret_is_a_clear_error_to_the_guest_not_a_leak() {
-    state();
-    let port = free_port();
-    let spec = EgressSpec {
-        secrets: vec![
-            EgressSecretSpec::parse(&format!("T=missing-secret@gone.example.test:{port}")).unwrap(),
-        ],
-        ..Default::default()
-    };
-    let policy = Policy::from_spec(&spec, "isbbrxe2e00003").unwrap();
-    let ca = Ca::ensure("isbbrxe2e00003").unwrap();
-    let env = Arc::new(Env {
-        settings: Arc::new(Settings::default()),
-        secrets: Arc::new(Store),
-        log: Arc::new(|_| {}),
-    });
-    let proxy = Proxy::new(
-        env,
-        Config {
-            project: "default".into(),
-            instance: "p".into(),
-            network: "isbbrxe2e00003".into(),
-            ip: "127.0.0.1".parse().unwrap(),
-            policy: policy.clone(),
-            guests_only: false,
-        },
-    );
-    proxy.set_policy(policy, Some(ca.clone()));
-    assert!(proxy.sync_ports().is_empty());
+    let (_proxy, ca, port) =
+        secret_proxy("missing-secret@gone.example.test", "isbbrxe2e00003", false);
     let resp = https_get(
         SocketAddr::from(([127, 0, 0, 1], port)),
         "gone.example.test",
@@ -451,34 +485,7 @@ fn updating_the_policy_changes_the_listeners() {
 
 #[test]
 fn the_host_itself_cannot_borrow_the_proxy() {
-    state();
-    let port = free_port();
-    let spec = EgressSpec {
-        secrets: vec![
-            EgressSecretSpec::parse(&format!("T=api-token@api.example.test:{port}")).unwrap(),
-        ],
-        ..Default::default()
-    };
-    let policy = Policy::from_spec(&spec, "isbbrxe2e00004").unwrap();
-    let ca = Ca::ensure("isbbrxe2e00004").unwrap();
-    let env = Arc::new(Env {
-        settings: Arc::new(Settings::default()),
-        secrets: Arc::new(Store),
-        log: Arc::new(|_| {}),
-    });
-    let proxy = Proxy::new(
-        env,
-        Config {
-            project: "default".into(),
-            instance: "p".into(),
-            network: "isbbrxe2e00004".into(),
-            ip: "127.0.0.1".parse().unwrap(),
-            policy: policy.clone(),
-            guests_only: true,
-        },
-    );
-    proxy.set_policy(policy, Some(ca.clone()));
-    assert!(proxy.sync_ports().is_empty());
+    let (_proxy, ca, port) = secret_proxy("api-token@api.example.test", "isbbrxe2e00004", true);
     // A connection from loopback (the host's own address) is dropped
     // before the handshake.
     let e = https_get(
