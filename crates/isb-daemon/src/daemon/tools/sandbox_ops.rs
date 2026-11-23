@@ -126,6 +126,9 @@ fn sandbox_logs(d: &Daemon, a: Value, c: &Caller) -> Result<Value> {
             "since was not applied: an OCI image's console log has no timestamps, so all of its tail is shown"
         );
     }
+    if oci {
+        kube::add_console_note(&mut out, oc.project_name(), std::slice::from_ref(&a.name));
+    }
     Ok(out)
 }
 

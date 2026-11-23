@@ -174,6 +174,7 @@ Everything else isb reads from its environment.
 | `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR`, `HOME` | everything | the default state directory, `~/.config/isb`, the daemon socket and `isb up`'s locks |
 | `ISB_DNS_DIR` | `isb org`, `isb host setup`, the daemon | the service-name hosts directory (default `/var/lib/isb/dns`) |
 | `ISB_CONSOLE_DIR` | every isb process that reads a console, `isb host setup` | the host's console log directory (default `/var/lib/isb/console`; [Console logs](../operations/host-setup.md#console-logs)) |
+| `ISB_INCUS_LOG_DIR` | every isb process that reads a console | where incus keeps its instances' logs, lxc's `console.log` among them (default `/var/log/incus`; [Console logs](../operations/host-setup.md#console-logs)) |
 | `ISB_HOST_PATH_MAP` | `isb up`, `create` | `FROM=TO`: rewrite bind sources for incusd's mount view ([Bind source resolution](compose.md#volumes)) |
 | `ISB_BIND_CALLER_OWNED` | `isb up`, the daemon | `1`: `idmap: auto` never maps, because every guest uid can write bind sources (set inside the macOS machine) |
 | `SUDO_USER` | `isb host setup` | the default `--user` |
