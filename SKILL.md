@@ -202,7 +202,8 @@ cannot exec or read secrets.
   volume's definition exempts it.
 - **Apps:** `project_create`, `app_create` (an image, or a git repository and
   a builder), `app_env_set` (`.env` text; `KEY=${{secret.NAME}}` for
-  secrets), `app_deploy` (`wait: true`), `app_deployment_log`,
+  secrets), `app_deploy` (`wait: true`; `if_changed: true` leaves the
+  instances running when nothing changed), `app_deployment_log`,
   `app_rollback`, `app_get`, `app_list`.
 - **Stacks:** `stack_deploy` (compose YAML; `dry_run: true` first),
   `stack_status`, `stack_logs`, `stack_scale`, `stack_rollback` (`to`: a

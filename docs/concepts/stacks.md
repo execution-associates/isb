@@ -155,9 +155,21 @@ restarts](#health-and-restarts)); then it must stay healthy for
 as it is until the next deploy, `rollback` redeploys the previous version of
 the whole stack, `continue` carries on.
 
+An image given by tag is part of the revision as the digest the tag names
+when the stack is deployed: a `registry:` image in the org's registry, and
+an image on a remote registry (`docker:`, `ghcr:`, `quay:`, `oci:`), which
+is asked for it. The instances run that digest, so a tag that moved since
+(`docker:nginx:latest`) is a change the next deploy rolls out, a tag that
+did not move is none, and a rollback runs exactly what ran before. A
+registry that gives no answer (unreachable, or wanting credentials isb does
+not have) leaves a service on the digest it runs; a service with none yet
+goes out by tag. An image written with a digest, an `images:` image and a
+local alias are taken as written.
+
 Changing only `replicas` scales without replacing anything. `isb stack
-redeploy STACK SERVICE` replaces a service's instances anyway, to pick up a
-moved tag (`docker:nginx:latest`) or changed bind-mounted files. `isb stack
+redeploy STACK SERVICE` replaces a service's instances anyway, for a
+restart the file does not show, such as changed bind-mounted files; it
+asks the registry again too. `isb stack
 rollback STACK` goes back to the previous deployment; a second rollback
 undoes the first.
 

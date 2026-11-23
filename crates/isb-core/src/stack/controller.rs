@@ -35,6 +35,7 @@ use crate::supervise;
 mod boot;
 mod dns;
 mod health;
+mod images;
 mod instances;
 mod restarts;
 pub use dns::{DnsScope, DnsScopeFn};
@@ -595,16 +596,9 @@ impl Controller {
     pub fn plan(&self, def: &StackDef) -> Result<Vec<DeployChange>> {
         self.validate(def)?;
         let mut def = def.clone();
-        self.pin_images(&mut def)?;
-        let def = &def;
-        let old = self
-            .inner
-            .stacks
-            .lock()
-            .unwrap()
-            .get(&def.qualified())
-            .cloned();
-        diff(old.as_deref(), def)
+        let old = self.get_def(&def.qualified()).ok();
+        self.pin_images(&mut def, old.as_deref())?;
+        diff(old.as_deref(), &def)
     }
 
     pub fn client(&self) -> &Client {
@@ -632,7 +626,9 @@ impl Controller {
     /// itself happens in the background.
     pub fn deploy(&self, mut def: StackDef) -> Result<Vec<DeployChange>> {
         self.validate(&def)?;
-        self.pin_images(&mut def)?;
+        // Before the edit lock: a registry can take its time to answer.
+        let running = self.get_def(&def.qualified()).ok();
+        self.pin_images(&mut def, running.as_deref())?;
         let _g = self.inner.edit.lock().unwrap();
         let old = self
             .inner
@@ -832,36 +828,21 @@ impl Controller {
     /// (`docker service update --force`): picks up a moved image tag or a
     /// changed bind-mounted file.
     pub fn redeploy(&self, name: &str, service: &str) -> Result<()> {
+        // A moved tag is what a redeploy is usually for. Asked before the
+        // edit lock: a registry can take its time to answer.
+        let seen = self.get_def(name)?;
+        let mut pinned = (*seen).clone();
+        self.pin_images(&mut pinned, Some(&seen))?;
         let _g = self.inner.edit.lock().unwrap();
         let cur = self.get_def(name)?;
         cur.service(service)?;
         let mut def = (*cur).clone();
         *def.force.entry(service.to_string()).or_insert(0) += 1;
-        // A moved tag is what a redeploy is usually for.
-        self.pin_images(&mut def)?;
+        if images::same_images(&cur, &seen) {
+            def.images = pinned.images;
+        }
         self.inner.store.save(&def)?;
         self.apply(Arc::new(def));
-        Ok(())
-    }
-
-    /// Resolve every `registry:` image given by tag to the digest the tag
-    /// names now, in the stack's org (a digest in the file only has to
-    /// exist there).
-    fn pin_images(&self, def: &mut StackDef) -> Result<()> {
-        def.images.clear();
-        for (svc, spec) in &def.file.services {
-            let Some(r) = spec.image.strip_prefix("registry:") else {
-                continue;
-            };
-            let r = crate::registry::ImageRef::parse(r)?;
-            let reg = crate::registry::Registry::shared(&self.inner.client)?;
-            // A digest is checked too, so a typo (or another org's digest)
-            // fails the deploy rather than the rollout.
-            let d = reg.resolve(&def.org, &r)?;
-            if r.digest.is_none() {
-                def.images.insert(svc.clone(), d);
-            }
-        }
         Ok(())
     }
 

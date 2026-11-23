@@ -186,6 +186,7 @@ app_apply {definition: "<yaml>", dry_run: true}
       changes: ["env", "replicas"], removals: ["env: TOKEN"],
       diff: "--- current\n+++ proposed\n..."}
 app_apply {definition: "<yaml>", deploy: true}     # apply, then deploy
+app_apply {definition: "<yaml>", deploy: true, if_changed: true}   # ...keeping the instances when nothing changed
 app_apply {definition: "<yaml>", allow_removals: true}   # remove on purpose
 ```
 
@@ -245,10 +246,25 @@ environment at creation.
 ## Deployments
 
 ```text
-isb app deploy NAME [-d]                   follows the deployment's log; exit 0 when done
+isb app deploy NAME [-d] [--if-changed]    follows the deployment's log; exit 0 when done
 isb app rollback NAME [ID] [-d]            a previous deployment's image and settings, no build
 isb app deployments NAME [--json] | logs NAME [ID] [-f]
 ```
+
+A deploy replaces the app's instances even when nothing changed: that is
+how a restart the settings do not show is asked for. `--if-changed`
+(`if_changed: true` on `app_deploy`, and on `app_apply` with `deploy`) is
+for a caller that deploys the same definition again and again, such as an
+infrastructure-as-code tool: when the settings render to the service that
+already runs and the image still resolves to the digest it runs, the
+instances stay, the log says so, and the deployment record carries
+`unchanged: true`. A tag that moved on its registry is a change, since each
+deploy pins the image to its digest. Where the registry gave no digest (it
+could not be reached, or wants credentials isb does not have), a moved tag
+would not show, so the instances are replaced as usual. An `images:` image
+or a local alias has no registry to ask and is compared by name. A git
+source is fetched and built before the comparison, and its instances stay
+when the build gives the image that already runs.
 
 Every deploy is a record: an id (1, 2, ... per app), what triggered it
 (`manual` from the local CLI, `api` from a tool call, `webhook`), who, the
@@ -390,7 +406,7 @@ See [Reach isb serve remotely](remote-access.md).
 | `app_update` | A merge patch of settings (`deploy: true` deploys after). |
 | `app_export`, `app_apply` | The app as a YAML document, and declarative create-or-update from one (`dry_run`, `deploy`); see [An app as YAML](#an-app-as-yaml). |
 | `app_delete` | Its service leaves the stack (the stack goes with its last app); its records, checkout, webhook secret, deploy key and the monitors that follow it go (`keep_monitors` keeps those). Named volumes are kept. |
-| `app_deploy`, `app_rollback` | Queue a deployment; `wait: true` returns when it finishes. |
+| `app_deploy`, `app_rollback` | Queue a deployment; `wait: true` returns when it finishes. `app_deploy` with `if_changed: true` leaves the instances running when nothing changed. |
 | `app_deployments`, `app_deployment_log` | History, and one deployment's log from an offset. |
 | `app_env_get`, `app_env_set` | The environment as `.env` text. |
 | `app_webhook`, `app_deploy_key` | The webhook path and secret (rotate); a new SSH deploy key. |

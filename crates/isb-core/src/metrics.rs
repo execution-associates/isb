@@ -124,8 +124,10 @@ pub struct InstanceSample {
     pub net_rx_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub net_tx_bytes: Option<u64>,
-    /// Bytes read from and written to disks (counters), from incus'
-    /// `/1.0/metrics`, taken every [`DISK_EVERY`]th sample only.
+    /// Bytes read from and written to disks (counters): from the instance's
+    /// state where it carries them (virtual machines, incus 7.6 or later),
+    /// with every sample; otherwise from incus' `/1.0/metrics`, taken every
+    /// [`DISK_EVERY`]th sample only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disk_read_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -185,6 +187,23 @@ struct Io {
     disk_rate: (Option<f64>, Option<f64>),
 }
 
+/// Bytes read from and written to an instance's disks, summed, from the
+/// counters its state carries: incus 7.6 reports them for virtual machines
+/// (`instance_state_disk_counters`), straight from QEMU, so they need no
+/// agent in the guest and come with every sample. `None` where the state
+/// has none (a container, an older incus): `/1.0/metrics` answers there.
+fn state_disk_counters(state: &Value) -> Option<(u64, u64)> {
+    let mut total = None;
+    for disk in state["disk"].as_object()?.values() {
+        let c = &disk["counters"];
+        if let (Some(r), Some(w)) = (c["bytes_read"].as_u64(), c["bytes_written"].as_u64()) {
+            let (tr, tw) = total.unwrap_or((0u64, 0u64));
+            total = Some((tr.saturating_add(r), tw.saturating_add(w)));
+        }
+    }
+    total
+}
+
 /// Bytes per second between two counter readings; none across a reset.
 fn per_sec(
     prev: Option<(Instant, u64, u64)>,
@@ -234,7 +253,9 @@ impl Sampler {
             // Disk I/O is optional: the rest of the sample stands without it.
             if let Ok(text) = client.get_raw("/1.0/metrics") {
                 let io = parse_disk_metrics(&String::from_utf8_lossy(&text));
-                for i in out.iter_mut().filter(|i| i.running()) {
+                // Not the ones whose state carried counters of its own.
+                let unread = |i: &&mut InstanceSample| i.running() && i.disk_read_bytes.is_none();
+                for i in out.iter_mut().filter(unread) {
                     let (r, w) = io
                         .get(&(i.project.clone(), i.name.clone()))
                         .copied()
@@ -354,11 +375,17 @@ impl Sampler {
                 (None, None)
             }
         };
+        let disk = state_disk_counters(state).filter(|_| running);
+        if let Some((r, w)) = disk {
+            let e = self.io.entry(key.clone()).or_default();
+            e.disk_rate = per_sec(e.disk, now, r, w);
+            e.disk = Some((now, r, w));
+        }
         InstanceSample {
             net_rx_bytes: rx.filter(|_| running),
             net_tx_bytes: tx.filter(|_| running),
-            disk_read_bytes: None,
-            disk_write_bytes: None,
+            disk_read_bytes: disk.map(|d| d.0),
+            disk_write_bytes: disk.map(|d| d.1),
             net_rx_rate,
             net_tx_rate,
             disk_read_rate: None,
@@ -682,6 +709,23 @@ fn first_ip(state: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_state_with_disk_counters_gives_the_disk_io() {
+        let vm = serde_json::json!({"disk": {
+            "root": {"usage": -1, "total": 64, "counters":
+                {"bytes_read": 100, "bytes_written": 7, "reads_completed": 3, "writes_completed": 1}},
+            "data": {"usage": 5, "counters": {"bytes_read": 11, "bytes_written": 2}},
+        }});
+        assert_eq!(state_disk_counters(&vm), Some((111, 9)));
+        // A container, or an incus before 7.6: usage only.
+        let ct = serde_json::json!({"disk": {"root": {"usage": 5, "total": 0}}});
+        assert_eq!(state_disk_counters(&ct), None);
+        assert_eq!(
+            state_disk_counters(&serde_json::json!({"disk": null})),
+            None
+        );
+    }
 
     #[test]
     fn the_address_is_eth0s_even_with_docker_inside() {

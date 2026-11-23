@@ -1,0 +1,117 @@
+name: SDK (Alchemy)
+
+# The Alchemy provider in sdk/alchemy: typecheck, lint, its tests (the
+# provider run by alchemy's own engine against an in-memory stand-in for
+# isb's REST tools) and a pack dry run, on every PR and push to main. On v*
+# tags, also publish the package to npm by trusted publishing, which records
+# provenance (a version already on npm is skipped, so a failed run can be
+# re-run). A tag push promotes what main checked: the gate refuses a commit
+# that has not passed main's CI. A workflow_dispatch with `tag` publishes an
+# existing tag again.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Publish this existing v* tag (re-publish a release)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: sdk/alchemy
+
+jobs:
+  gate:
+    name: main CI passed
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/main-run.sh
+          sparse-checkout-cone-mode: false
+      - name: CI passed on main for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/main-run.sh ci.yml "$GITHUB_SHA"
+
+  check:
+    name: typecheck, lint, tests
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.result != 'failure' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun test
+      - name: build and pack
+        run: |
+          bun run build
+          bun pm pack --destination "$RUNNER_TEMP/npm"
+          ls -l "$RUNNER_TEMP/npm"
+      - name: the package is the tag's version
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          ver=$(bun -e 'console.log(require("./package.json").version)')
+          [ "v$ver" = "$TAG" ] || { echo "package.json is $ver, the tag is $TAG"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
+        with:
+          name: npm-isb-alchemy
+          path: ${{ runner.temp }}/npm/*.tgz
+          if-no-files-found: error
+
+  publish:
+    name: publish to npm
+    needs: check
+    if: >-
+      ${{ !cancelled() && (startsWith(github.ref, 'refs/tags/v') || inputs.tag != '')
+      && needs.check.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-isb-alchemy
+          path: npm
+      # Trusted publishing needs npm 11.5.1 or later and no registry token.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: publish
+        run: |
+          npm --version
+          ls -l npm
+          for t in npm/*.tgz; do
+            [ -f "$t" ] || { echo "missing $t"; exit 1; }
+            name=$(tar -xzOf "$t" package/package.json | node -p 'JSON.parse(require("fs").readFileSync(0)).name')
+            ver=$(tar -xzOf "$t" package/package.json | node -p 'JSON.parse(require("fs").readFileSync(0)).version')
+            if npm view "$name@$ver" version >/dev/null 2>&1; then echo "$name@$ver is already on npm"; continue; fi
+            npm publish "./$t" --access public
+          done

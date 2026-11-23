@@ -32,6 +32,9 @@ use crate::stack::{Controller, StackDef};
 
 #[path = "db_secrets.rs"]
 mod db_secrets;
+#[path = "if_changed.rs"]
+mod if_changed;
+use if_changed::Request;
 
 /// Turns a checkout into an image: [`crate::build::run`], or a stand-in.
 pub type BuildFn =
@@ -133,6 +136,13 @@ pub struct Deployment {
     /// The service as deployed: what a rollback puts back.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rendered: Option<Rendered>,
+    /// Asked to leave the instances running when the deploy changes
+    /// nothing ([`Apps::deploy_if_changed`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub if_changed: bool,
+    /// It did change nothing, and the instances were left running.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unchanged: bool,
 }
 
 impl Deployment {
@@ -611,7 +621,11 @@ impl Apps {
         by: &str,
         requested: Option<String>,
     ) -> Result<Deployment> {
-        self.enqueue(org, name, trigger, by, requested, None)
+        let req = Request {
+            requested,
+            ..Default::default()
+        };
+        self.enqueue(org, name, trigger, by, req)
     }
 
     /// Queue a rollback to deployment `to` (default: the one before the
@@ -643,7 +657,11 @@ impl Apps {
                 target.id
             )));
         }
-        self.enqueue(org, name, trigger, by, None, Some(target.id))
+        let req = Request {
+            rollback_of: Some(target.id),
+            ..Default::default()
+        };
+        self.enqueue(org, name, trigger, by, req)
     }
 
     fn enqueue(
@@ -652,8 +670,7 @@ impl Apps {
         name: &str,
         trigger: Trigger,
         by: &str,
-        requested: Option<String>,
-        rollback_of: Option<u64>,
+        req: Request,
     ) -> Result<Deployment> {
         let dep = {
             let _g = self.inner.edit.lock().unwrap();
@@ -661,23 +678,9 @@ impl Apps {
             let id = app.next_deployment;
             app.next_deployment += 1;
             self.save(org, &app)?;
-            let d = Deployment {
-                id,
-                app: name.into(),
-                trigger,
-                by: by.into(),
-                status: Status::Queued,
-                requested,
-                rollback_of,
-                commit: None,
-                image: None,
-                digest: None,
-                error: None,
-                created_at: crate::stack::controller::now_ms(),
-                started_at: None,
-                finished_at: None,
-                rendered: None,
-            };
+            let mut d = Deployment::queued(id, name, trigger, by);
+            (d.requested, d.rollback_of, d.if_changed) =
+                (req.requested, req.rollback_of, req.if_changed);
             self.save_dep(org, &d)?;
             self.prune(org, &app);
             d
@@ -873,12 +876,7 @@ impl Apps {
             let changes = self.inner.ctl.deploy(def)?;
             let mine = changes.iter().find(|c| c.service == name);
             match mine {
-                Some(c) if c.change == "unchanged" => {
-                    // Deploy means fresh instances, as in Dokploy: a moved
-                    // tag or a restart the settings do not show.
-                    log.line("settings unchanged: replacing the instances anyway");
-                    self.inner.ctl.redeploy(&q, name)?;
-                }
+                Some(c) if c.change == "unchanged" => self.unchanged(&q, name, dep, log)?,
                 Some(c) => log.line(&format!(
                     "stack {stack}: {} {} (rev {}, {} replicas)",
                     c.service, c.change, c.rev, c.replicas
@@ -1228,23 +1226,7 @@ pub(super) mod tests {
     #[test]
     fn state_machine() {
         use Status::*;
-        let mut d = Deployment {
-            id: 1,
-            app: "web".into(),
-            trigger: Trigger::Api,
-            by: "t".into(),
-            status: Queued,
-            requested: None,
-            rollback_of: None,
-            commit: None,
-            image: None,
-            digest: None,
-            error: None,
-            created_at: 0,
-            started_at: None,
-            finished_at: None,
-            rendered: None,
-        };
+        let mut d = Deployment::queued(1, "web", Trigger::Api, "t");
         assert!(d.advance(Done).is_err(), "queued cannot jump to done");
         d.advance(Building).unwrap();
         assert!(d.started_at.is_some());

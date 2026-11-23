@@ -112,6 +112,7 @@ curl -fsSL https://github.com/execution-associates/isb/releases/latest/download/
 pip install isb-sdk                           # Python SDK (imported as `isb`)
 bun add @execution-associates/isb             # TypeScript SDK
 cargo add isb                                 # Rust library
+bun add @execution-associates/isb-alchemy     # Alchemy provider
 ```
 
 ## Quick start
@@ -145,6 +146,55 @@ $ isb serve install                     # the daemon, as a systemd user service 
 $ isb project create shop               # in the default org, which the daemon creates
 $ isb app create web --project shop --image docker:traefik/whoami -p 127.0.0.1:8080:80 --deploy
 ```
+
+## Deploy with Alchemy
+
+[Alchemy](https://alchemy.run) declares infrastructure in TypeScript. The
+isb provider makes a project, its secrets and its apps resources of an
+alchemy stack, deployed over isb's API with a token:
+
+```ts
+// alchemy.run.ts
+import * as Isb from "@execution-associates/isb-alchemy";
+import * as Alchemy from "alchemy";
+import * as Effect from "effect/Effect";
+import * as Redacted from "effect/Redacted";
+
+export default Alchemy.Stack(
+  "shop",
+  { providers: Isb.providers(), state: Alchemy.localState() },
+  Effect.gen(function* () {
+    const shop = yield* Isb.Project("shop", { name: "shop" });
+    const dbUrl = yield* Isb.Secret("db-url", {
+      name: "shop-db-url",
+      value: Redacted.make(process.env.DATABASE_URL!),
+    });
+    const web = yield* Isb.App("web", {
+      name: "web",
+      project: shop.name,
+      source: { image: "ghcr:acme/shop:1.4.0" },
+      port: 8080,
+      replicas: 2,
+      domains: [{ host: "shop.example.com" }],
+      env: { DATABASE_URL: dbUrl.ref },
+    });
+    return { urls: web.urls };
+  }),
+);
+```
+
+```console
+$ bun add @execution-associates/isb-alchemy alchemy effect
+$ export ISB_URL=https://isb.example.com ISB_ORG=acme ISB_TOKEN=isb_tok_...
+$ bun alchemy deploy       # creates the project, the secret and the app, and waits for it to converge
+$ bun alchemy deploy       # the same stack again: nothing restarts
+$ bun alchemy destroy
+```
+
+A deploy applies each app's whole definition and leaves its instances
+running when the settings and the image digest are unchanged; a tag that
+moved on its registry rolls out. [Deploy with
+Alchemy](docs/guides/alchemy.md) covers stacks, stages and secrets.
 
 ## Documentation
 

@@ -52,6 +52,7 @@ use crate::error::{Error, Result};
 use crate::org::OrgId;
 use crate::spec::{NamedVolumeSpec, SandboxSpec, SecretDef};
 
+pub use crate::image_check::pin;
 pub use compose::ComposeOwner;
 pub use database::{DatabaseSource, Engine};
 pub use deploy::{Apps, BuildFn, ImageProbe};
@@ -660,26 +661,6 @@ pub fn merge_patch(base: &mut Value, patch: &Value) {
         }
         (b, p) => *b = p.clone(),
     }
-}
-
-/// The OCI reference `image` pinned to `digest`
-/// (`docker:traefik/whoami:v1` -> `docker:traefik/whoami@sha256:...`), or
-/// `None` for an image that is not from an OCI registry.
-pub fn pin(image: &str, digest: &str) -> Option<String> {
-    let (prefix, rest) = image.split_once(':')?;
-    if !matches!(prefix, "docker" | "ghcr" | "quay" | "oci") || !digest.starts_with("sha256:") {
-        return None;
-    }
-    let rest = rest.split('@').next().unwrap_or(rest);
-    let (dir, last) = match rest.rsplit_once('/') {
-        Some((d, l)) => (Some(d), l),
-        None => (None, rest),
-    };
-    let last = last.split(':').next().unwrap_or(last);
-    Some(match dir {
-        Some(d) => format!("{prefix}:{d}/{last}@{digest}"),
-        None => format!("{prefix}:{last}@{digest}"),
-    })
 }
 
 /// Atomic write (temp file, fsync, rename), 0600.

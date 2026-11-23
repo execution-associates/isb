@@ -963,7 +963,7 @@ export interface paths {
         put?: never;
         /**
          * Apply an app definition
-         * @description Replaces the app's whole definition: anything the document leaves out is reset to its default. To change a few fields use app_update (merge). To edit fully: app_export, edit that YAML, dry_run, then apply. `definition` (YAML or JSON text, or an object; what app_export returns) creates the app if its name is new (its project and environment must exist), else replaces it. Name, project, environment and a database's engine/database/user cannot change. Applying to an existing app is refused when it would remove domains, env vars, volumes, ports or files, or reset a port, healthcheck, resources, command, previews, user or working_dir to the default, unless `allow_removals: true`; the error lists them, and `dry_run` reports them as `removals`. `dry_run` writes nothing and answers {valid, errors: [{line, column, message}], action, changes, removals, diff}. `deploy` queues a deploy after. Takes effect at the next deploy. The response carries the app as stored and its definition as app_export shows it; a created app's carries its webhook secret.
+         * @description Replaces the app's whole definition: anything the document leaves out is reset to its default. To change a few fields use app_update (merge). To edit fully: app_export, edit that YAML, dry_run, then apply. `definition` (YAML or JSON text, or an object; what app_export returns) creates the app if its name is new (its project and environment must exist), else replaces it. Name, project, environment and a database's engine/database/user cannot change. Applying to an existing app is refused when it would remove domains, env vars, volumes, ports or files, or reset a port, healthcheck, resources, command, previews, user or working_dir to the default, unless `allow_removals: true`; the error lists them, and `dry_run` reports them as `removals`. `dry_run` writes nothing and answers {valid, errors: [{line, column, message}], action, changes, removals, diff}. `deploy` queues a deploy after, which replaces the instances even when nothing changed; with `if_changed: true` such a deploy leaves them running (see app_deploy). Takes effect at the next deploy. The response carries the app as stored and its definition as app_export shows it; a created app's carries its webhook secret.
          */
         post: operations["app_apply"];
         delete?: never;
@@ -1023,7 +1023,7 @@ export interface paths {
         put?: never;
         /**
          * Deploy an app
-         * @description Deploy an app's current settings: pull (an image source, pinned to its digest) or fetch and build (a git source), then roll its service in its environment's stack; other apps there are untouched. One deploy runs at a time per app; a new one waits behind it and replaces any other waiting one. Returns the deployment record; follow it with app_deployment_log or the events feed.
+         * @description Deploy an app's current settings: pull (an image source, pinned to its digest) or fetch and build (a git source), then roll its service in its environment's stack; other apps there are untouched. The instances are replaced even when nothing changed, unless `if_changed: true`: then a deploy whose settings and image digest are what already runs leaves them running, and its record carries `unchanged: true` (an image whose registry gave no digest is replaced all the same, since a moved tag would not show). One deploy runs at a time per app; a new one waits behind it and replaces any other waiting one. Returns the deployment record; follow it with app_deployment_log or the events feed.
          */
         post: operations["app_deploy"];
         delete?: never;
@@ -3683,7 +3683,7 @@ export interface paths {
         put?: never;
         /**
          * Deploy a stack
-         * @description Deploy or update a stack from a docker-compose-style file (isb's format: docs/reference/compose.md). Each service runs `deploy.replicas` incus instances, supervised inside their guests so they survive restarts of this server and of the host. Published ports are load-balanced over healthy replicas. A changed service is rolled out per `deploy.update_config` (stop-first by default; `order: start-first` for no downtime). Every stack belongs to one project environment (`project`, `environment`; a new stack's default is the project named like it, made if needed), and its services are also named `<service>.<project>-<env>` there; a service name the environment already gives an app or another stack's service is refused. The stack's managed domains (stack_domains_set) are merged into its services. A new or changed registry image (docker:nginx:1.27, docker:traefik/whoami, ghcr:OWNER/NAME:TAG) is looked up first: a deploy naming one its registry does not have is refused, and one that cannot be checked (offline, private) is listed in `warnings`. Returns the change per service, the `owner`, the `deployment` it recorded (stack_deployments), and `reused_secrets` (only when there are some): the `file:`/`environment:` secrets given no value that deployed the value an earlier deploy stored, also logged as a warn event; pass wait=true to block until the rollout settles.
+         * @description Deploy or update a stack from a docker-compose-style file (isb's format: docs/reference/compose.md). Each service runs `deploy.replicas` incus instances, supervised inside their guests so they survive restarts of this server and of the host. Published ports are load-balanced over healthy replicas. A changed service is rolled out per `deploy.update_config` (stop-first by default; `order: start-first` for no downtime). Every stack belongs to one project environment (`project`, `environment`; a new stack's default is the project named like it, made if needed), and its services are also named `<service>.<project>-<env>` there; a service name the environment already gives an app or another stack's service is refused. The stack's managed domains (stack_domains_set) are merged into its services. An image given by tag runs pinned to the digest the tag names at deploy time, so a tag that moved since the last deploy rolls that service and one that did not rolls nothing. A new or changed registry image (docker:nginx:1.27, docker:traefik/whoami, ghcr:OWNER/NAME:TAG) is looked up first: a deploy naming one its registry does not have is refused, and one that cannot be checked (offline, private) is listed in `warnings`. Returns the change per service, the `owner`, the `deployment` it recorded (stack_deployments), and `reused_secrets` (only when there are some): the `file:`/`environment:` secrets given no value that deployed the value an earlier deploy stored, also logged as a warn event; pass wait=true to block until the rollout settles.
          */
         post: operations["stack_deploy"];
         delete?: never;
@@ -6757,6 +6757,8 @@ export interface operations {
                     deploy?: boolean;
                     /** @description Validate and diff only; change nothing. */
                     dry_run?: boolean;
+                    /** @description With deploy: leave the instances running when the deploy changes nothing (the same settings and image digest). */
+                    if_changed?: boolean;
                     /** @description The org to act in (default: default). */
                     org?: string;
                 };
@@ -6918,6 +6920,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description Leave the instances running when the deploy changes nothing: the same settings and the same image digest (default false: replace them anyway). */
+                    if_changed?: boolean;
                     name: string;
                     /** @description The org to act in (default: default). */
                     org?: string;
