@@ -204,12 +204,14 @@ fn published_ports() {
             Published {
                 listen: "127.0.0.1:8080".parse().unwrap(),
                 target: 80,
-                udp: false
+                udp: false,
+                proxy_protocol: false,
             },
             Published {
                 listen: "0.0.0.0:9000".parse().unwrap(),
                 target: 9000,
-                udp: false
+                udp: false,
+                proxy_protocol: false,
             },
         ]
     );

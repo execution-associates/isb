@@ -20,6 +20,12 @@
 //! - **Half-close** is forwarded: EOF on one side becomes `shutdown(Write)` on
 //!   the other, and the opposite direction keeps flowing.
 //!
+//! - **PROXY protocol** (opt in per route, [`RouteOptions::proxy_protocol`]):
+//!   a v2 header with the client's address goes to the backend before the
+//!   first relayed byte, since every connection otherwise reaches it from the
+//!   host. Changing the option never rebinds; connections opened afterwards
+//!   follow it.
+//!
 //! Only TCP is balanced. UDP published ports are not handled here.
 //!
 //! Logging is one stderr line per route change and per backend going down or
@@ -35,6 +41,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::error::{Error, Result};
+
+pub mod proxy;
 
 /// Connections a route proxies at once; more are accepted and closed at once.
 pub const MAX_CONNS_PER_ROUTE: usize = 4096;
@@ -52,6 +60,15 @@ const KEEPALIVE_IDLE: Duration = Duration::from_secs(60);
 const COPY_BUF: usize = 32 * 1024;
 const CONN_STACK: usize = 128 * 1024;
 
+/// How a route treats its connections, beyond where it listens and connects.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RouteOptions {
+    /// Send a PROXY protocol v2 header ([`proxy::header`]) to the backend
+    /// first. The backend must expect it: one that does not reads the header
+    /// as the client's first bytes.
+    pub proxy_protocol: bool,
+}
+
 /// What [`Balancer::routes`] reports for one route.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouteStatus {
@@ -67,6 +84,7 @@ pub struct RouteStatus {
     pub failures: u64,
     /// Clients closed because the route was at [`MAX_CONNS_PER_ROUTE`].
     pub rejected: u64,
+    pub proxy_protocol: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,6 +145,8 @@ struct RouteShared {
     accepted: AtomicU64,
     failures: AtomicU64,
     rejected: AtomicU64,
+    /// Read once per connection, when its backend is connected.
+    proxy_protocol: AtomicBool,
 }
 
 struct Backend {
@@ -177,6 +197,16 @@ impl Balancer {
         Balancer::default()
     }
 
+    /// [`Balancer::set_route_with`] with the default options.
+    pub fn set_route(
+        &self,
+        key: &str,
+        listen: SocketAddr,
+        backends: Vec<SocketAddr>,
+    ) -> Result<SocketAddr> {
+        self.set_route_with(key, listen, backends, RouteOptions::default())
+    }
+
     /// Create or update the route `key`, returning the bound address.
     ///
     /// A new route (or a changed `listen`) binds here, and a bind failure (the
@@ -184,11 +214,13 @@ impl Balancer {
     /// first and only then closes the old one, so a failure leaves the old route
     /// serving. The same `listen` never rebinds: only the backend list changes,
     /// and backends that left keep their connections until those end.
-    pub fn set_route(
+    /// Changed `opts` apply to connections accepted from then on.
+    pub fn set_route_with(
         &self,
         key: &str,
         listen: SocketAddr,
         backends: Vec<SocketAddr>,
+        opts: RouteOptions,
     ) -> Result<SocketAddr> {
         let mut routes = lock(&self.inner.routes);
         let existing = routes.get(key).filter(|r| r.requested == listen);
@@ -208,6 +240,7 @@ impl Balancer {
                     accepted: AtomicU64::new(0),
                     failures: AtomicU64::new(0),
                     rejected: AtomicU64::new(0),
+                    proxy_protocol: AtomicBool::new(false),
                 }),
             };
             let acceptor = spawn_acceptor(listener, shared.clone())?;
@@ -227,6 +260,7 @@ impl Balancer {
                 ),
                 None => eprintln!("balance: route {key}: listening on {bound}"),
             }
+            set_options(&shared, opts);
             self.update_backends(&shared, backends);
             drop(routes);
             if let Some(o) = old {
@@ -237,6 +271,7 @@ impl Balancer {
         let bound = route.acceptor.bound;
         let shared = route.shared.clone();
         drop(routes);
+        set_options(&shared, opts);
         self.update_backends(&shared, backends);
         Ok(bound)
     }
@@ -333,6 +368,7 @@ impl Balancer {
                     accepted: shared.accepted.load(Ordering::SeqCst),
                     failures: shared.failures.load(Ordering::SeqCst),
                     rejected: shared.rejected.load(Ordering::SeqCst),
+                    proxy_protocol: shared.proxy_protocol.load(Ordering::SeqCst),
                 }
             })
             .collect();
@@ -376,6 +412,16 @@ impl Balancer {
             }
             std::thread::sleep((deadline - now).min(Duration::from_millis(20)));
         }
+    }
+}
+
+fn set_options(shared: &RouteShared, opts: RouteOptions) {
+    let was = shared
+        .proxy_protocol
+        .swap(opts.proxy_protocol, Ordering::SeqCst);
+    if was != opts.proxy_protocol {
+        let state = if opts.proxy_protocol { "on" } else { "off" };
+        eprintln!("balance: route {}: PROXY protocol {state}", shared.key);
     }
 }
 
@@ -489,10 +535,20 @@ fn handle(client: TcpStream, shared: &Arc<RouteShared>) {
 
 fn serve(client: TcpStream, slot: ConnSlot) {
     let shared = slot.0.clone();
-    let Some((upstream, backend)) = connect_any(&shared) else {
+    let Some((mut upstream, backend)) = connect_any(&shared) else {
         shared.failures.fetch_add(1, Ordering::SeqCst);
         return;
     };
+    if shared.proxy_protocol.load(Ordering::SeqCst) {
+        // Both addresses are the accepted socket's: the client, and the host
+        // address it reached (the real one, also under a wildcard listen).
+        let (Ok(src), Ok(dst)) = (client.peer_addr(), client.local_addr()) else {
+            return;
+        };
+        if upstream.write_all(&proxy::header(src, dst)).is_err() {
+            return;
+        }
+    }
     // An accepted socket does not inherit O_NONBLOCK on Linux; make sure anyway.
     let _ = client.set_nonblocking(false);
     for s in [&client, &upstream] {
@@ -870,6 +926,130 @@ mod tests {
         // Connections made through the old listener are untouched.
         assert_eq!(roundtrip(&mut s, "y"), "y");
         assert_eq!(status(&lb, "web").accepted, 3);
+        lb.clear();
+    }
+
+    /// A backend that reads each connection to EOF and hands over what it got.
+    fn recorder() -> (SocketAddr, std::sync::mpsc::Receiver<Vec<u8>>) {
+        let l = TcpListener::bind(any()).unwrap();
+        let addr = l.local_addr().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for s in l.incoming() {
+                let Ok(mut s) = s else { continue };
+                let mut got = Vec::new();
+                let _ = s.read_to_end(&mut got);
+                if tx.send(got).is_err() {
+                    return;
+                }
+            }
+        });
+        (addr, rx)
+    }
+
+    /// Send `hello\n` through the balancer at `at` and return the client's own
+    /// address and what the backend received.
+    fn send(at: SocketAddr, rx: &std::sync::mpsc::Receiver<Vec<u8>>) -> (SocketAddr, Vec<u8>) {
+        let mut s = TcpStream::connect(at).unwrap();
+        let me = s.local_addr().unwrap();
+        s.write_all(b"hello\n").unwrap();
+        s.shutdown(Shutdown::Write).unwrap();
+        (me, rx.recv_timeout(Duration::from_secs(10)).unwrap())
+    }
+
+    fn on() -> RouteOptions {
+        RouteOptions {
+            proxy_protocol: true,
+        }
+    }
+
+    #[test]
+    fn proxy_protocol_sends_the_client_address_first() {
+        let (backend, rx) = recorder();
+        let lb = Balancer::new();
+        let at = lb
+            .set_route_with("mail", any(), vec![backend], on())
+            .unwrap();
+        assert!(status(&lb, "mail").proxy_protocol);
+        let (me, got) = send(at, &rx);
+        // Decoded by hand rather than compared against proxy::header, so a
+        // wrong encoder cannot agree with itself.
+        assert_eq!(&got[..12], &proxy::SIGNATURE);
+        assert_eq!(
+            &got[12..16],
+            &[0x21, 0x11, 0, 12],
+            "v2 PROXY TCP4, 12 bytes"
+        );
+        assert_eq!(&got[16..20], &[127, 0, 0, 1], "source address");
+        assert_eq!(&got[20..24], &[127, 0, 0, 1], "destination address");
+        assert_eq!(
+            u16::from_be_bytes([got[24], got[25]]),
+            me.port(),
+            "source port"
+        );
+        assert_eq!(
+            u16::from_be_bytes([got[26], got[27]]),
+            at.port(),
+            "destination port"
+        );
+        assert_eq!(&got[28..], b"hello\n");
+        lb.clear();
+    }
+
+    #[test]
+    fn proxy_protocol_is_off_by_default() {
+        let (backend, rx) = recorder();
+        let lb = Balancer::new();
+        let at = lb.set_route("web", any(), vec![backend]).unwrap();
+        assert!(!status(&lb, "web").proxy_protocol);
+        assert_eq!(send(at, &rx).1, b"hello\n");
+        lb.clear();
+    }
+
+    #[test]
+    fn proxy_protocol_toggles_without_rebinding() {
+        let (backend, rx) = recorder();
+        let lb = Balancer::new();
+        let at = lb.set_route("mail", any(), vec![backend]).unwrap();
+        assert_eq!(send(at, &rx).1, b"hello\n");
+
+        let again = lb
+            .set_route_with("mail", any(), vec![backend], on())
+            .unwrap();
+        assert_eq!(again, at, "the option must not rebind");
+        let (me, got) = send(at, &rx);
+        assert_eq!(got, [proxy::header(me, at), b"hello\n".to_vec()].concat());
+
+        lb.set_route("mail", any(), vec![backend]).unwrap();
+        assert_eq!(send(at, &rx).1, b"hello\n");
+        assert_eq!(status(&lb, "mail").accepted, 3);
+        lb.clear();
+    }
+
+    #[test]
+    fn proxy_protocol_carries_an_ipv6_client() {
+        let Ok(probe) = TcpListener::bind("[::1]:0") else {
+            eprintln!("no IPv6 loopback here; skipping");
+            return;
+        };
+        drop(probe);
+        let (backend, rx) = recorder();
+        let lb = Balancer::new();
+        let at = lb
+            .set_route_with("mail6", "[::1]:0".parse().unwrap(), vec![backend], on())
+            .unwrap();
+        let (me, got) = send(at, &rx);
+        assert!(me.is_ipv6());
+        assert_eq!(
+            &got[12..16],
+            &[0x21, 0x21, 0, 36],
+            "v2 PROXY TCP6, 36 bytes"
+        );
+        let loopback = std::net::Ipv6Addr::LOCALHOST.octets();
+        assert_eq!(&got[16..32], &loopback);
+        assert_eq!(&got[32..48], &loopback);
+        assert_eq!(u16::from_be_bytes([got[48], got[49]]), me.port());
+        assert_eq!(&got[52..], b"hello\n");
         lb.clear();
     }
 }

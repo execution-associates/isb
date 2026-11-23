@@ -9,6 +9,10 @@
 //! with every replacement. Each `IP:PORT` must be one a platform admin
 //! allowed the org ([`crate::org::allowed_udp`]), and the org's project
 //! admits these devices only ([`crate::org::check_proxies`]).
+//!
+//! A TCP port's `options` are the balancer's, not incus': `proxy_protocol:
+//! "true"` makes it send a PROXY v2 header with the client's address, and
+//! the rest are ignored, as they always were.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, SocketAddr};
@@ -27,6 +31,8 @@ pub(super) struct Published {
     pub listen: SocketAddr,
     pub target: u16,
     pub udp: bool,
+    /// TCP only: send the backend a PROXY v2 header first.
+    pub proxy_protocol: bool,
 }
 
 impl Published {
@@ -74,6 +80,7 @@ pub(super) fn published(spec: &SandboxSpec) -> Result<Vec<Published>> {
                 Error::invalid(format!("port {listen}: the host must be an IP address"))
             })?;
         let udp = lp == "udp";
+        let proxy_protocol = proxy_protocol(&listen, p, udp)?;
         if udp && (host.is_unspecified() || host.is_loopback()) {
             return Err(Error::invalid(format!(
                 "port {listen}: a stack publishes UDP on a host address of its own, not {host} (a wildcard would take the port on every host address, the tailnet's included, and loopback sees nothing from outside)"
@@ -83,9 +90,30 @@ pub(super) fn published(spec: &SandboxSpec) -> Result<Vec<Published>> {
             listen: SocketAddr::new(host, lport),
             target: cport,
             udp,
+            proxy_protocol,
         });
     }
     Ok(out)
+}
+
+/// A published port's `proxy_protocol` option: `"true"` or `"false"`
+/// (absent is false), and only on TCP.
+fn proxy_protocol(listen: &str, p: &PortSpec, udp: bool) -> Result<bool> {
+    let on = match p.options.get("proxy_protocol").map(String::as_str) {
+        None | Some("false") => false,
+        Some("true") => true,
+        Some(other) => {
+            return Err(Error::invalid(format!(
+                "port {listen}: proxy_protocol is \"true\" or \"false\", not {other:?}"
+            )));
+        }
+    };
+    if on && udp {
+        return Err(Error::invalid(format!(
+            "port {listen}: proxy_protocol is for TCP ports (a UDP port already reaches the service with the client's own address)"
+        )));
+    }
+    Ok(on)
 }
 
 /// A service that publishes UDP runs at most one replica: a forward port
@@ -224,12 +252,14 @@ mod tests {
                 Published {
                     listen: "203.0.113.7:10000".parse().unwrap(),
                     target: 10000,
-                    udp: true
+                    udp: true,
+                    proxy_protocol: false,
                 },
                 Published {
                     listen: "127.0.0.1:8080".parse().unwrap(),
                     target: 80,
-                    udp: false
+                    udp: false,
+                    proxy_protocol: false,
                 },
             ]
         );
@@ -247,6 +277,33 @@ mod tests {
                 "{bad}"
             );
         }
+    }
+
+    #[test]
+    fn proxy_protocol_is_a_tcp_option() {
+        let pp = |y: &str| {
+            published(&spec(&format!("image: x\nports: [{y}]\n"))).map(|p| p[0].proxy_protocol)
+        };
+        let tcp = "{target: 993, published: 993, host_ip: 203.0.113.7, options:";
+        assert!(!pp("'203.0.113.7:993:993'").unwrap());
+        assert!(pp(&format!("{tcp} {{proxy_protocol: 'true'}}}}")).unwrap());
+        // A YAML boolean is the same string.
+        assert!(pp(&format!("{tcp} {{proxy_protocol: true}}}}")).unwrap());
+        assert!(!pp(&format!("{tcp} {{proxy_protocol: false}}}}")).unwrap());
+        // Other options on a TCP port stay ignored, as before.
+        assert!(!pp(&format!("{tcp} {{uid: '1000'}}}}")).unwrap());
+        assert!(
+            pp("{listen: 'tcp:0.0.0.0:2993', connect: 993, options: {proxy_protocol: 'true'}}")
+                .unwrap()
+        );
+        for bad in [
+            format!("{tcp} {{proxy_protocol: 'yes'}}}}"),
+            "{target: 53, published: 53, host_ip: 203.0.113.7, protocol: udp, options: {proxy_protocol: 'true'}}".to_string(),
+        ] {
+            assert!(pp(&bad).is_err(), "{bad}");
+        }
+        // UDP with it off is fine.
+        assert!(!pp("{target: 53, published: 53, host_ip: 203.0.113.7, protocol: udp, options: {proxy_protocol: 'false'}}").unwrap());
     }
 
     #[test]

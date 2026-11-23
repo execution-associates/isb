@@ -604,11 +604,16 @@ pub(crate) fn print_stack(st: &serde_json::Value) {
         }
         for p in s["ports"].as_array().into_iter().flatten() {
             eprintln!(
-                "{}: {} -> :{} ({} backends){}",
+                "{}: {} -> :{} ({} backends{}){}",
                 s["service"].as_str().unwrap_or(""),
                 p["listen"].as_str().unwrap_or(""),
                 p["target"],
                 p["backends"].as_array().map(|a| a.len()).unwrap_or(0),
+                if p["proxy_protocol"] == true {
+                    ", PROXY v2"
+                } else {
+                    ""
+                },
                 p["error"]
                     .as_str()
                     .map(|e| format!(": {e}"))
