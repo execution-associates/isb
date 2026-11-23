@@ -96,6 +96,10 @@ export interface Deployment {
   status: DeploymentStatus;
   requested?: string;
   rollback_of?: number;
+  /** Asked to leave the instances running when nothing changed. */
+  if_changed?: boolean;
+  /** Nothing changed, and the instances were left running. */
+  unchanged?: boolean;
   commit?: { sha: string; message: string };
   image?: string;
   digest?: string;

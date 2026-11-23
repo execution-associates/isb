@@ -194,6 +194,13 @@ fn wait_props() -> Value {
     })
 }
 
+/// app_deploy's properties.
+fn deploy_props() -> Value {
+    let mut p = wait_props();
+    p["if_changed"] = json!({"type": "boolean", "description": "Leave the instances running when the deploy changes nothing: the same settings and the same image digest (default false: replace them anyway)."});
+    p
+}
+
 /// app_rollback's properties.
 fn rb_props() -> Value {
     let mut rb_props = wait_props();
@@ -234,12 +241,30 @@ struct DeployArgs {
     #[serde(default)]
     deployment: Option<u64>,
     #[serde(default)]
+    if_changed: bool,
+    #[serde(default)]
     wait: bool,
     #[serde(default)]
     timeout: Option<String>,
     #[serde(default)]
     #[allow(dead_code)]
     org: Option<String>,
+}
+
+/// Queue a deploy of the app's settings: one that leaves the instances
+/// running when it changes nothing, when `if_changed`.
+pub(super) fn queue_deploy(
+    ap: &Apps,
+    org: &OrgId,
+    name: &str,
+    if_changed: bool,
+    c: &Caller,
+) -> Result<crate::app::deploy::Deployment> {
+    if if_changed {
+        ap.deploy_if_changed(org, name, trigger(c), &caller_name(c))
+    } else {
+        ap.deploy(org, name, trigger(c), &caller_name(c), None)
+    }
 }
 
 fn finish(ap: &Apps, org: &OrgId, a: &DeployArgs, id: u64) -> Result<Value> {
@@ -571,13 +596,13 @@ fn app_deploy_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
         apps,
         "app_deploy",
         "Deploy an app",
-        "Deploy an app's current settings: pull (an image source, pinned to its digest) or fetch and build (a git source), then roll its service in its environment's stack; other apps there are untouched. One deploy runs at a time per app; a new one waits behind it and replaces any other waiting one. Returns the deployment record; follow it with app_deployment_log or the events feed.",
-        obj(wait_props(), &["name"]),
+        "Deploy an app's current settings: pull (an image source, pinned to its digest) or fetch and build (a git source), then roll its service in its environment's stack; other apps there are untouched. The instances are replaced even when nothing changed, unless `if_changed: true`: then a deploy whose settings and image digest are what already runs leaves them running, and its record carries `unchanged: true` (an image whose registry gave no digest is replaced all the same, since a moved tag would not show). One deploy runs at a time per app; a new one waits behind it and replaces any other waiting one. Returns the deployment record; follow it with app_deployment_log or the events feed.",
+        obj(deploy_props(), &["name"]),
         ann.write,
         |ap: &Apps, a: Value, c: &Caller| -> Result<Value> {
             let org = org_of(&a)?;
             let a: DeployArgs = args(a)?;
-            let d = ap.deploy(&org, &a.name, trigger(c), &caller_name(c), None)?;
+            let d = queue_deploy(ap, &org, &a.name, a.if_changed, c)?;
             finish(ap, &org, &a, d.id)
         }
     );
@@ -596,6 +621,9 @@ fn app_rollback_tool(r: &mut Registry, apps: &Apps, ann: &Ann) -> Result<()> {
         |ap: &Apps, a: Value, c: &Caller| -> Result<Value> {
             let org = org_of(&a)?;
             let a: DeployArgs = args(a)?;
+            if a.if_changed {
+                return Err(Error::invalid("if_changed belongs to app_deploy"));
+            }
             let d = ap.rollback(&org, &a.name, a.deployment, trigger(c), &caller_name(c))?;
             finish(ap, &org, &a, d.id)
         }

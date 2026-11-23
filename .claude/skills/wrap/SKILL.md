@@ -157,7 +157,7 @@ SHA=$(gh pr view --json mergeCommit -q .mergeCommit.oid)
 gh run list --branch main --commit "$SHA" --json name,status,conclusion
 ```
 
-Wait for every run (CI, Build health, Python SDK, SDK (TypeScript), Release
+Wait for every run (CI, Build health, Python SDK, SDK (TypeScript), SDK (Alchemy), Release
 binaries) to complete green. Release binaries builds the four release
 tarballs (Linux and macOS, x86_64 and aarch64) for this commit and keeps them
 as artifacts for 30 days; it is the long pole, about 10 minutes (the macOS
@@ -186,11 +186,11 @@ about 10 minutes.
 ## 7. Wait for the release and the registries
 
 ```bash
-gh run list --commit "$SHA" --json name,status,conclusion   # Release, Python SDK, SDK (TypeScript)
+gh run list --commit "$SHA" --json name,status,conclusion   # Release, Python SDK, SDK (TypeScript), SDK (Alchemy)
 gh release view "v$VER" --json assets -q '.assets[].name'   # tarballs, SHA256SUMS, SHA256SUMS.sig, install.sh
 ```
 
-All three workflows must be green, usually within about 6 minutes of the
+All four workflows must be green, usually within about 6 minutes of the
 tag. Release signs SHA256SUMS (an unsigned
 release can't be installed by `isb update`) and its `install` job runs the
 published install.sh on Linux and macOS. Each publish step skips a version

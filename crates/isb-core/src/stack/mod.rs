@@ -64,9 +64,9 @@ pub struct StackDef {
     /// did not change (a moved image tag, say).
     #[serde(default)]
     pub force: BTreeMap<String, u64>,
-    /// The digest each `registry:` image resolved to at deploy time, by
-    /// service: a moved tag is a new revision, and a rollback runs exactly
-    /// what ran before.
+    /// The digest each image given by tag resolved to at deploy time, by
+    /// service (a `registry:` image, or one on a remote registry): a moved
+    /// tag is a new revision, and a rollback runs exactly what ran before.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub images: BTreeMap<String, String>,
     /// Unix seconds.
@@ -224,8 +224,8 @@ impl StackDef {
             }
         }
         h.write(&self.force.get(service).copied().unwrap_or(0).to_le_bytes());
-        // Only when there is one, so stacks without registry images keep
-        // their revisions.
+        // Only when there is one, so stacks whose images have no digest to
+        // pin keep their revisions.
         if let Some(d) = self.images.get(service) {
             h.write(b"image");
             h.write(d.as_bytes());
@@ -252,11 +252,14 @@ impl StackDef {
             .collect()
     }
 
-    /// A service's image as its instances get it: a `registry:` tag pinned
-    /// to the digest it named at deploy time ([`StackDef::images`]).
+    /// A service's image as its instances get it: a tag pinned to the
+    /// digest it named at deploy time ([`StackDef::images`]).
     pub fn instance_image(&self, service: &str, image: &str) -> String {
-        let (Some(r), Some(d)) = (image.strip_prefix("registry:"), self.images.get(service)) else {
+        let Some(d) = self.images.get(service) else {
             return image.to_string();
+        };
+        let Some(r) = image.strip_prefix("registry:") else {
+            return crate::image_check::pin(image, d).unwrap_or_else(|| image.to_string());
         };
         match crate::registry::ImageRef::parse(r) {
             Ok(r) if r.digest.is_none() => format!("registry:{}", r.pinned(d).render()),

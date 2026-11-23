@@ -10,7 +10,10 @@ as one stack, `<project>-<env>`.
   `app_deployment_log`, `app_rollback`, `app_get`, `app_list`, `app_update`.
 - `app_apply`: a YAML definition that creates or updates; `dry_run: true`
   first shows the diff. `app_export` gives an app's YAML back.
-- A redeploy always replaces the instances, even with unchanged settings.
+- A redeploy replaces the instances, even with unchanged settings.
+  `if_changed: true` (on `app_deploy`, and on `app_apply` with `deploy`)
+  leaves them running when the settings and the image digest are what
+  already runs; the deployment record then carries `unchanged: true`.
 
 **Stacks**: long-running services from a compose file, with
 `deploy.replicas`, health-checked replicas, a load balancer on published
