@@ -688,7 +688,14 @@ random host port, and isb needs to know it.
 | `host_ip` | string | `127.0.0.1` | Host address to listen on. |
 | `protocol` | `tcp` or `udp` | `tcp` | |
 | `name` | string | derived | incus device name. |
-| `options` | map of string | `{}` | Extra proxy properties (`proxy_protocol`, ...), verbatim. |
+| `options` | map of string | `{}` | Extra proxy properties (`proxy_protocol`, ...), verbatim. In a stack, see below. |
+
+**In a stack,** a TCP published port is served by the daemon's load balancer,
+not a proxy device, and of its `options` only `proxy_protocol` means anything:
+`"true"` sends the replica a PROXY protocol v2 header with the client's
+address before the first byte ([The client's address](../concepts/stacks.md#the-clients-address-proxy-protocol)).
+Other values than `"true"` and `"false"` are refused, as is the option on a
+UDP port.
 
 **Ranges.** A `published` range with a single `target` (`5173-5223:5173`) takes
 the first free host port in the range, as docker does; see "Searched ports"

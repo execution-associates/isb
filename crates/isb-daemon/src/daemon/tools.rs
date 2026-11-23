@@ -776,6 +776,7 @@ pub(super) fn server_status_tool(r: &mut Registry, d: &Arc<Daemon>, ann: &Ann) -
                         "route": r.key, "listen": r.listen.to_string(),
                         "backends": r.backends.iter().map(|b| json!({"addr": b.addr.to_string(), "active": b.active, "down": b.down})).collect::<Vec<_>>(),
                         "accepted": r.accepted, "failures": r.failures, "rejected": r.rejected,
+                        "proxy_protocol": r.proxy_protocol,
                     })
                 })
                 .collect();

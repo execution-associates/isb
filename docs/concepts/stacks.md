@@ -184,8 +184,44 @@ client is tried on the next one, and a replica taken out of rotation keeps
 its open connections until they end.
 
 Limits: TCP (UDP is below), single ports (no ranges), and backends see the
-daemon's address, not the client's. Guest-bound ports (`bind: guest`) stay
+daemon's address (the org bridge's gateway), not the client's, unless the
+port sends a PROXY header (below). Guest-bound ports (`bind: guest`) stay
 per-instance proxy devices.
+
+### The client's address (PROXY protocol)
+
+A TCP published port with `proxy_protocol: "true"` in its `options` sends
+each connection's replica a [PROXY protocol](https://www.haproxy.org/download/3.0/doc/proxy-protocol.txt)
+version 2 header before the client's first byte. It carries the client's
+address and port and the host address it connected to, IPv4 or IPv6 (an IPv4
+client of a dual-stack listener is sent as IPv4). A service that rate-limits,
+bans or logs per client needs it, since without it every connection comes
+from the gateway.
+
+```yaml
+services:
+  mail:
+    image: docker:stalwartlabs/stalwart:latest
+    ports:
+      - target: 993
+        published: 993
+        host_ip: 203.0.113.7
+        options: {proxy_protocol: "true"}
+```
+
+- **Off by default.** Only `"true"` turns it on (`"false"` or no option is
+  off; anything else is refused at deploy). It is for TCP: a UDP port already
+  reaches the service with the client's address, and is refused with it.
+- **The service must expect it.** One that does not reads the header as the
+  client's first bytes and drops the connection. Trust it only from the
+  gateway (the replica's default route): a client inside the org reaches the
+  replica directly and could send a header of its own. Anything on the host
+  that connects to a replica's address directly, rather than through the
+  published port, also comes from the gateway and must send one too.
+- **Changing it is live.** Turning it on or off neither rebinds the port nor
+  replaces a replica; connections opened from then on follow it, and open
+  ones keep what they started with. `isb stack status` shows `PROXY v2` on
+  such a port.
 
 ### UDP ports
 
