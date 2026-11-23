@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Set isb's version everywhere it is written down: the workspace crates,
-# Cargo.lock's entries for them, both SDKs (and their lockfiles and tests)
-# and the RPC reference. Usage: scripts/bump.sh major|minor|patch|X.Y.Z
+# Cargo.lock's entries for them, both SDKs (and their lockfiles and tests),
+# the Alchemy provider and the RPC reference. Usage: scripts/bump.sh major|minor|patch|X.Y.Z
 #
 # The release workflow refuses a tag that differs from Cargo.toml, and the
 # SDK tests and docs quote the version the daemon reports, so a bump that
@@ -33,13 +33,13 @@ sed -i -E "/^name = \"isb-sdk\"$/{n;s/^version = \"$o\"$/version = \"$new\"/}" s
 sed -i -E "s/\{\"isb\":\"$o\",/{\"isb\":\"$new\",/" sdk/python/tests/test_unit.py docs/reference/rpc.md
 sed -i -E "s/\{\"isb\": \"$o\",/{\"isb\": \"$new\",/" docs/reference/rpc.md
 sed -i -E "s/^  \"version\": \"$o\",$/  \"version\": \"$new\",/" \
-  sdk/typescript/package.json sdk/typescript/npm/*/package.json
+  sdk/typescript/package.json sdk/typescript/npm/*/package.json sdk/alchemy/package.json
 sed -i -E "s/(\"@execution-associates\/isb-linux-[a-z0-9]+\": )\"$o\"/\1\"$new\"/" \
   sdk/typescript/package.json sdk/typescript/bun.lock
 
 files=(Cargo.toml sdk/python/pyproject.toml sdk/python/src/isb/__init__.py
   sdk/python/tests/test_unit.py docs/reference/rpc.md sdk/typescript/package.json
-  sdk/typescript/npm/*/package.json)
+  sdk/typescript/npm/*/package.json sdk/alchemy/package.json)
 # Not inside a longer version or a dependency range: 2.0.0 must not match
 # "^22.0.0" or "^2.0.0".
 left=$(grep -n -E "(^|[^0-9.^~<>])${old//./\\.}([^0-9]|\$)" "${files[@]}" || true)

@@ -234,6 +234,26 @@ pub fn check(image: &str, probe: &dyn Fn(&str) -> Probe) -> Result<Option<String
     }
 }
 
+/// The OCI reference `image` pinned to `digest`
+/// (`docker:traefik/whoami:v1` -> `docker:traefik/whoami@sha256:...`), or
+/// `None` for an image that is not from an OCI registry.
+pub fn pin(image: &str, digest: &str) -> Option<String> {
+    let (prefix, rest) = image.split_once(':')?;
+    if !matches!(prefix, "docker" | "ghcr" | "quay" | "oci") || !digest.starts_with("sha256:") {
+        return None;
+    }
+    let rest = rest.split('@').next().unwrap_or(rest);
+    let (dir, last) = match rest.rsplit_once('/') {
+        Some((d, l)) => (Some(d), l),
+        None => (None, rest),
+    };
+    let last = last.split(':').next().unwrap_or(last);
+    Some(match dir {
+        Some(d) => format!("{prefix}:{d}/{last}@{digest}"),
+        None => format!("{prefix}:{last}@{digest}"),
+    })
+}
+
 /// The refusal for an image its registry does not have.
 pub fn not_found(image: &str, registry: &str, why: &str, better: Option<String>) -> String {
     let mut m = format!("image {image} not found on {registry} ({why})");

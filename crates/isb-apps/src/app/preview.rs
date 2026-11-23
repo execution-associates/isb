@@ -870,23 +870,8 @@ impl super::Apps {
             let id = p.next_deployment;
             p.next_deployment += 1;
             self.preview_save(org, &p)?;
-            let d = Deployment {
-                id,
-                app: name.into(),
-                trigger,
-                by: by.into(),
-                status: Status::Queued,
-                requested,
-                rollback_of: None,
-                commit: None,
-                image: None,
-                digest: None,
-                error: None,
-                created_at: crate::stack::controller::now_ms(),
-                started_at: None,
-                finished_at: None,
-                rendered: None,
-            };
+            let mut d = Deployment::queued(id, name, trigger, by);
+            d.requested = requested;
             self.pdep_save(org, n, &d)?;
             self.preview_prune(org, &p);
             (p, d)

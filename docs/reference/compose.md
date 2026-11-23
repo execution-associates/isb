@@ -446,7 +446,7 @@ that has a host bind mount, whether or not the spec says `idmap`. incus (7.5 or
 later) then starts that mount's virtiofsd on the host with
 `--translate-uid`/`--translate-gid`, a map the guest cannot remount or change.
 
-**Guarantee** (checked against incus 7.5.1 by `tests/integration.rs`
+**Guarantee** (checked against incus 7.6 by `tests/integration.rs`
 `virtual_machine`): through a bind mount, exactly one guest uid and one guest gid
 can read or write host files, and they appear on the host as the user (and
 group) running isb. Every other guest id, root included, gets an error when it

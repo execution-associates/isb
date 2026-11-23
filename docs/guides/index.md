@@ -65,5 +65,7 @@ every flag and field is in the [Reference](../reference/index.md).
   vendor CLIs installed once into sandboxes of their own, run from host
   shims, with a closed network and the project at its own path.
 - [isb from code](sdk.md): the Python, TypeScript and Rust SDKs.
+- [Deploy with Alchemy](alchemy.md): projects, apps, stacks and secrets
+  declared in TypeScript and deployed with `alchemy deploy`.
 - [Sandbox egress and secrets](egress.md): confine an untrusted sandbox to a
   list of hostnames, and give it secrets it can use but never read.

@@ -381,7 +381,8 @@ isb app show NAME [--json]              alias get; --json prints app_get's answe
 isb app update NAME [-f PATCH|-] [--image REF] [--ref R] [--replicas N] [--port N]
                [--cpus N] [--memory M] [--deploy]
 isb app rm NAME [--keep-monitors]       named volumes are kept; its monitors go unless --keep-monitors
-isb app deploy NAME [-d]                follows the deployment's log; exit 0 when done
+isb app deploy NAME [-d] [--if-changed] follows the deployment's log; exit 0 when done;
+                                        --if-changed keeps the instances when nothing changed
 isb app rollback NAME [ID] [-d]         a previous deployment's image and settings, no build
 isb app deployments NAME [--json]
 isb app deploy-log NAME [ID] [-f]      a deployment's build and rollout log

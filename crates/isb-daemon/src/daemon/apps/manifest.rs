@@ -5,7 +5,7 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::{args, caller_name, note_ingress, obj, org_of, trigger};
+use super::{args, note_ingress, obj, org_of};
 use crate::app::{Apps, manifest};
 use crate::error::{Error, Result};
 use crate::server::{Caller, Registry, Tool};
@@ -85,12 +85,13 @@ fn app_apply_tool(r: &mut Registry, apps: &Apps, ingress: bool) -> Result<()> {
         apps,
         "app_apply",
         "Apply an app definition",
-        "Replaces the app's whole definition: anything the document leaves out is reset to its default. To change a few fields use app_update (merge). To edit fully: app_export, edit that YAML, dry_run, then apply. `definition` (YAML or JSON text, or an object; what app_export returns) creates the app if its name is new (its project and environment must exist), else replaces it. Name, project, environment and a database's engine/database/user cannot change. Applying to an existing app is refused when it would remove domains, env vars, volumes, ports or files, or reset a port, healthcheck, resources, command, previews, user or working_dir to the default, unless `allow_removals: true`; the error lists them, and `dry_run` reports them as `removals`. `dry_run` writes nothing and answers {valid, errors: [{line, column, message}], action, changes, removals, diff}. `deploy` queues a deploy after. Takes effect at the next deploy. The response carries the app as stored and its definition as app_export shows it; a created app's carries its webhook secret.",
+        "Replaces the app's whole definition: anything the document leaves out is reset to its default. To change a few fields use app_update (merge). To edit fully: app_export, edit that YAML, dry_run, then apply. `definition` (YAML or JSON text, or an object; what app_export returns) creates the app if its name is new (its project and environment must exist), else replaces it. Name, project, environment and a database's engine/database/user cannot change. Applying to an existing app is refused when it would remove domains, env vars, volumes, ports or files, or reset a port, healthcheck, resources, command, previews, user or working_dir to the default, unless `allow_removals: true`; the error lists them, and `dry_run` reports them as `removals`. `dry_run` writes nothing and answers {valid, errors: [{line, column, message}], action, changes, removals, diff}. `deploy` queues a deploy after, which replaces the instances even when nothing changed; with `if_changed: true` such a deploy leaves them running (see app_deploy). Takes effect at the next deploy. The response carries the app as stored and its definition as app_export shows it; a created app's carries its webhook secret.",
         obj(
             json!({
                 "definition": {"description": "The app as YAML or JSON text, or as an object."},
                 "dry_run": {"type": "boolean", "description": "Validate and diff only; change nothing."},
                 "deploy": {"type": "boolean", "description": "Queue a deploy after applying."},
+                "if_changed": {"type": "boolean", "description": "With deploy: leave the instances running when the deploy changes nothing (the same settings and image digest)."},
                 "allow_removals": {"type": "boolean", "description": "Allow the document to remove domains, env vars, volumes, ports, files or settings the app has now. Without it such an apply is refused."}
             }),
             &["definition"]
@@ -105,6 +106,8 @@ fn app_apply_tool(r: &mut Registry, apps: &Apps, ingress: bool) -> Result<()> {
                 dry_run: bool,
                 #[serde(default)]
                 deploy: bool,
+                #[serde(default)]
+                if_changed: bool,
                 #[serde(default)]
                 allow_removals: bool,
                 #[serde(default)]
@@ -158,7 +161,7 @@ fn app_apply_tool(r: &mut Registry, apps: &Apps, ingress: bool) -> Result<()> {
                 out["webhook_secret"] = json!(s);
             }
             if a.deploy {
-                let d = ap.deploy(&org, &app.spec.name, trigger(c), &caller_name(c), None)?;
+                let d = super::queue_deploy(ap, &org, &app.spec.name, a.if_changed, c)?;
                 out["deployment"] = d.summary();
             }
             Ok(out)

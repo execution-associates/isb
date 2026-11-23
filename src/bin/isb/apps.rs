@@ -192,6 +192,9 @@ pub enum AppCmd {
         /// Return once queued.
         #[arg(short, long)]
         detach: bool,
+        /// Leave the instances running when settings and image are unchanged.
+        #[arg(long = "if-changed")]
+        keep: bool,
     },
     /// Go back to a previous deployment (default: the last good one before
     /// the current) without building.
@@ -710,8 +713,8 @@ pub fn app(org: &Option<String>, cmd: AppCmd) -> Result<u8> {
                 json!({"name": name, "keep_monitors": keep_monitors}),
             )?;
         }
-        AppCmd::Deploy { name, detach } => {
-            let d = call("app_deploy", json!({"name": name}))?;
+        AppCmd::Deploy { name, detach, keep } => {
+            let d = call("app_deploy", json!({"name": name, "if_changed": keep}))?;
             let id = d["deployment"]["id"].as_u64().unwrap_or(0);
             eprintln!("deployment {id} queued");
             if !detach {

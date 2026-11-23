@@ -20,7 +20,7 @@ Per instance of an isb org (instances in other incus projects are not kept):
 | `cpu` | percent of one core (four busy cores read 400) | incus instance state |
 | `memory` | bytes in use | incus instance state |
 | `net_rx`, `net_tx` | bytes per second, every interface but loopback | the interface counters |
-| `disk_read`, `disk_write` | bytes per second, every disk | incus `/1.0/metrics`, read every 10 s |
+| `disk_read`, `disk_write` | bytes per second, every disk | incus `/1.0/metrics`, read every 10 s; a virtual machine on incus 7.6 or later reports them in its state, read with every sample and without an agent in the guest |
 
 Rates come from counters; a counter that goes backwards (a restart) gives no
 rate for that sample rather than a negative one. Stopped instances are not
