@@ -107,8 +107,10 @@ Say it exactly, because it is a security boundary:
    listed names with the proxy's address and returns NXDOMAIN for everything
    else (with `dns: all`, it answers every name with the proxy's address,
    and point 3 refuses the unlisted ones). It never asks anyone else, so it
-   cannot be used to leak data through queries. With `egress: none` the
-   bridge has no address at all.
+   cannot be used to leak data through queries. A name it answers has an
+   address record only: asked for any other type (AAAA, HTTPS, TXT) it
+   says the name has none, rather than refusing the query. With
+   `egress: none` the bridge has no address at all.
 3. **The proxy lets a connection through only if the name the client says is
    on the list, on the port it connected to.** The name is the TLS server
    name (SNI) of a TLS connection, or the `Host` of a plain HTTP request. The

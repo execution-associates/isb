@@ -106,6 +106,14 @@ impl Plumbing {
     /// dnsmasq's extra configuration: no upstream, no hosts file, and an
     /// answer (the bridge address) only for the allowed names. Everything
     /// else is NXDOMAIN, and nothing is ever forwarded.
+    ///
+    /// Each answered name is also `local=`, which makes dnsmasq the authority
+    /// for it: a query it holds no record for (AAAA, HTTPS, TXT) is then
+    /// "no such record" (NOERROR, no answers). Without it dnsmasq has nowhere
+    /// to forward such a query and answers REFUSED, or NXDOMAIN under the
+    /// catch-all, for a name whose A record it has just served. A resolver
+    /// that asks A and AAAA together and wants both to succeed (musl's, so
+    /// every static Rust or Alpine binary) then fails the whole lookup.
     pub fn dnsmasq(&self, ip: &str) -> String {
         if self.policy.is_none() {
             return String::new();
@@ -115,15 +123,14 @@ impl Plumbing {
         // name but the listed ones is NXDOMAIN.
         if self.policy.dns_all {
             lines.push(format!("address=/#/{ip}"));
+            lines.push("local=/#/".into());
             return lines.join("\n");
         }
         lines.push("address=/#/".into());
-        lines.extend(
-            self.policy
-                .dns_names()
-                .into_iter()
-                .map(|n| format!("address=/{n}/{ip}")),
-        );
+        for n in self.policy.dns_names() {
+            lines.push(format!("address=/{n}/{ip}"));
+            lines.push(format!("local=/{n}/"));
+        }
         lines.join("\n")
     }
 
@@ -510,7 +517,7 @@ mod tests {
         let p = plumbing(&EgressSpec::allow(["api.example.com", "*.cdn.net:8443"]));
         assert_eq!(
             p.dnsmasq("10.9.8.1"),
-            "no-resolv\nno-hosts\naddress=/#/\naddress=/api.example.com/10.9.8.1\naddress=/cdn.net/10.9.8.1"
+            "no-resolv\nno-hosts\naddress=/#/\naddress=/api.example.com/10.9.8.1\nlocal=/api.example.com/\naddress=/cdn.net/10.9.8.1\nlocal=/cdn.net/"
         );
         assert_eq!(plumbing(&EgressSpec::none()).dnsmasq("10.9.8.1"), "");
     }
@@ -524,7 +531,7 @@ mod tests {
         });
         assert_eq!(
             p.dnsmasq("10.9.8.1"),
-            "no-resolv\nno-hosts\naddress=/#/10.9.8.1"
+            "no-resolv\nno-hosts\naddress=/#/10.9.8.1\nlocal=/#/"
         );
     }
 
