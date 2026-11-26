@@ -31,6 +31,13 @@ must be a member of the org. The `deploy` scope is too narrow (it has no
 stack's resources call, `--scope 'tool:app_*' --scope 'tool:project_*'
 --scope 'tool:environment_*' --scope 'tool:secret_*' --scope 'tool:stack_*'`.
 
+When the server is [behind Cloudflare Access](remote-access.md), a deploy
+has no browser to sign in with. Give it an Access service token that the
+Access application admits (a Service Auth policy), as
+`CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`: the provider sends it
+with every request, beside the isb token, which still decides what the
+deploy may do.
+
 ## A stack
 
 ```ts

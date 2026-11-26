@@ -5,11 +5,14 @@ import * as Redacted from "effect/Redacted";
 import * as Isb from "../src/index.ts";
 import { startFakeIsb } from "./fake.ts";
 
-const fake = startFakeIsb("isb_tok_test");
+// The fake sits behind Access, so every call in this file also proves the
+// provider sends the service token's headers.
+const access = { clientId: "deploy.access", clientSecret: "access-secret" };
+const fake = startFakeIsb("isb_tok_test", access);
 afterAll(() => fake.stop());
 
 const { test } = Test.make({
-  providers: Isb.providers({ url: fake.url, org: "acme", token: "isb_tok_test" }),
+  providers: Isb.providers({ url: fake.url, org: "acme", token: "isb_tok_test", access }),
 });
 
 const called = (tool: string) => fake.calls.filter(([t]) => t === tool).length;
