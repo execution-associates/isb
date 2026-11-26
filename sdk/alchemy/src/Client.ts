@@ -16,6 +16,17 @@ export interface IsbConfig {
   readonly org: string;
   /** An API token (`isb token create`), a member of `org` or above. */
   readonly token: Redacted.Redacted<string>;
+  /**
+   * A Cloudflare Access service token, for a server behind Access: every
+   * request carries it as `CF-Access-Client-Id` and `CF-Access-Client-Secret`,
+   * which is what gets a caller with no browser past Access to isb.
+   */
+  readonly access?: AccessServiceToken;
+}
+
+export interface AccessServiceToken {
+  readonly clientId: string;
+  readonly clientSecret: Redacted.Redacted<string>;
 }
 
 /** A tool call isb refused or that never reached it. */
@@ -43,7 +54,15 @@ export interface CredentialsInput {
   readonly token: string | Redacted.Redacted<string>;
   /** Default: `default`. */
   readonly org?: string;
+  /** A Cloudflare Access service token, when the server is behind Access. */
+  readonly access?: {
+    readonly clientId: string;
+    readonly clientSecret: string | Redacted.Redacted<string>;
+  };
 }
+
+const redacted = (value: string | Redacted.Redacted<string>) =>
+  typeof value === "string" ? Redacted.make(value) : value;
 
 /** A connection given in code. */
 export const fromConfig = (input: CredentialsInput): Layer.Layer<Credentials> =>
@@ -52,19 +71,31 @@ export const fromConfig = (input: CredentialsInput): Layer.Layer<Credentials> =>
     Effect.succeed({
       url: input.url,
       org: input.org ?? "default",
-      token: typeof input.token === "string" ? Redacted.make(input.token) : input.token,
+      token: redacted(input.token),
+      access: input.access && {
+        clientId: input.access.clientId,
+        clientSecret: redacted(input.access.clientSecret),
+      },
     }),
   );
 
 /**
  * A connection from the environment the isb CLI reads: `ISB_URL`,
- * `ISB_TOKEN` and, optionally, `ISB_ORG` (default `default`).
+ * `ISB_TOKEN` and, optionally, `ISB_ORG` (default `default`). For a server
+ * behind Cloudflare Access, `CF_ACCESS_CLIENT_ID` and
+ * `CF_ACCESS_CLIENT_SECRET` name the Access service token to send.
  */
 export const fromEnv = (): Layer.Layer<Credentials> =>
   Layer.succeed(
     Credentials,
     Effect.suspend(() => {
-      const { ISB_URL: url, ISB_TOKEN: token, ISB_ORG: org } = process.env;
+      const {
+        ISB_URL: url,
+        ISB_TOKEN: token,
+        ISB_ORG: org,
+        CF_ACCESS_CLIENT_ID: clientId,
+        CF_ACCESS_CLIENT_SECRET: clientSecret,
+      } = process.env;
       if (!url || !token) {
         return Effect.fail(
           new IsbError({
@@ -76,7 +107,28 @@ export const fromEnv = (): Layer.Layer<Credentials> =>
           }),
         );
       }
-      return Effect.succeed({ url, org: org || "default", token: Redacted.make(token) });
+      // Half a service token would be sent as none at all, and Access would
+      // answer with its sign-in page instead of saying what is missing.
+      if (!clientId !== !clientSecret) {
+        return Effect.fail(
+          new IsbError({
+            tool: "",
+            code: "unauthorized",
+            status: 0,
+            message:
+              "isb: set both CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET (an Access service token), or neither",
+          }),
+        );
+      }
+      return Effect.succeed({
+        url,
+        org: org || "default",
+        token: Redacted.make(token),
+        access:
+          clientId && clientSecret
+            ? { clientId, clientSecret: Redacted.make(clientSecret) }
+            : undefined,
+      });
     }),
   );
 
@@ -96,6 +148,10 @@ export const call = <T = unknown>(
           headers: {
             authorization: `Bearer ${Redacted.value(config.token)}`,
             "content-type": "application/json",
+            ...(config.access && {
+              "cf-access-client-id": config.access.clientId,
+              "cf-access-client-secret": Redacted.value(config.access.clientSecret),
+            }),
           },
           body: JSON.stringify(args),
           signal,

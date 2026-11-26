@@ -52,6 +52,11 @@ bun alchemy destroy
 `ISB_ORG` (default `default`), the variables the isb CLI reads. Pass it in
 code instead with `Isb.providers({ url, token, org })`.
 
+For a server behind Cloudflare Access, also give an Access service token:
+`CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`, or
+`Isb.providers({ ..., access: { clientId, clientSecret } })`. The provider
+sends it with every request, which is what gets a deploy past Access.
+
 ## Resources
 
 | Resource | What it is | Destroyed |

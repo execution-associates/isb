@@ -29,7 +29,14 @@ class Refusal extends Error {
   }
 }
 
-export const startFakeIsb = (token: string): FakeIsb => {
+/**
+ * `access`, when given, puts the fake behind Cloudflare Access: a request
+ * without that service token's headers is refused before isb sees its token.
+ */
+export const startFakeIsb = (
+  token: string,
+  access?: { clientId: string; clientSecret: string },
+): FakeIsb => {
   const deployments = new Map<string, Args[]>();
   const fake: FakeIsb = {
     url: "",
@@ -156,6 +163,16 @@ export const startFakeIsb = (token: string): FakeIsb => {
     async fetch(req) {
       const m = new URL(req.url).pathname.match(/^\/orgs\/acme\/api\/v1\/tools\/([a-z_]+)$/);
       const json = (status: number, body: unknown) => Response.json(body, { status });
+      if (
+        access &&
+        (req.headers.get("cf-access-client-id") !== access.clientId ||
+          req.headers.get("cf-access-client-secret") !== access.clientSecret)
+      ) {
+        return json(401, {
+          error: "unauthorized",
+          message: "missing Cloudflare Access assertion",
+        });
+      }
       if (req.headers.get("authorization") !== `Bearer ${token}`) {
         return json(401, { error: "unauthorized", message: "bad token" });
       }
